@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug vevc-enc",
+            "target": "vevc-enc",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vevc-enc"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release vevc-enc",
+            "target": "vevc-enc",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vevc-enc"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug vevc-dec",
+            "target": "vevc-dec",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vevc-dec"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release vevc-dec",
+            "target": "vevc-dec",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vevc-dec"
+        }
+    ]
+}

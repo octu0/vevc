@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "lineLength": 160,
+  "indentation": {
+    "spaces": 4
+  },
+  "tabWidth": 4,
+  "respectsExistingLineBreaks": true,
+  "lineBreakBeforeControlFlowKeywords": false,
+  "lineBreakBeforeEachArgument": false,
+  "maximumBlankLines": 1,
+  "rules": {
+    "indent": {
+      "indentSwitchCaseLabels": false,
+      "DoNotUseSemicolons": true,
+      "OmitExplicitReturns": true,
+      "NoParensAroundConditions": true,
+      "UseSingleLinePropertyGetter": true,
+      "UseEarlyExits": true
+    }
+  }
+}
