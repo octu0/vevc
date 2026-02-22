@@ -1,4 +1,4 @@
-# vevc (Velocity Video Codec)
+# vevc
 
 
 > [!IMPORTANT]
@@ -13,7 +13,7 @@
 
 1. **3D-Discrete Wavelet Transform (3D-DWT)**
    - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
-   - **Temporal**: SIMD-optimized 1D Haar Transform. It leverages the temporal correlation (similarities between consecutive frames) to increase compression efficiency.
+   - **Temporal**: 1D Haar Transform. It leverages the temporal correlation (similarities between consecutive frames) to increase compression efficiency.
 
 2. **Multi-Resolution & Multi-Framerate Design**
    - At decode time, you can extract specific spatial resolutions and framerates from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -37,7 +37,7 @@
 
 ## Data Layout
 
-`vevc` performs encoding in units of GOPs (Group of Pictures), which bundle multiple frames together. The current default implementation uses **GOP=4** (4-frame units).
+`vevc` performs encoding in units of GOPs (Group of Pictures), which bundle multiple frames together. The current default implementation uses GOP=4 (4-frame units).
 
 **Infrastructure Efficiency:** By leveraging this file structure, servers can generate streams for different quality levels simply by skipping (demuxing) unnecessary chunks without any re-encoding overhead.
 
@@ -114,9 +114,8 @@ $ swift run -c release vevc-dec -i output.vevc -o .out/
 
 The core components of the implementation consist of the following files:
 
-- **`TemporalDWT.swift`**: 1D Haar Transform and inverse transform logic across the temporal axis, fully utilizing SIMD.
-- **`Encode.swift` / `EncodePlane.swift`**: The encoding flow that uses plane data (`PlaneData`) to split and zero-pad the input images into GOP sizes, performing a two-stage encode: Temporal DWT -> Spatial DWT.
-- **`DecodeHelpers.swift`**: The decoding process integrating the parsing of compressed binaries, extracting layers based on spatial size, and applying inverse Temporal DWT.
+- `TemporalDWT`: 1D Haar Transform and inverse transform logic across the temporal axis, fully utilizing SIMD.
+- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to split and zero-pad the input images into GOP sizes, performing a two-stage encode: Temporal DWT -> Spatial DWT.
 
 ## License
 
