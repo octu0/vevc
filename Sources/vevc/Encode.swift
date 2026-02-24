@@ -1,6 +1,6 @@
 // MARK: - Encode
 
-private let k: UInt8 = 1
+private let k: UInt8 = 4
 
 @inline(__always)
 func toUint16(_ n: Int16) -> UInt16 {
@@ -49,8 +49,6 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 }
 
 // MARK: - Transform Functions
-
-// (RowFunc is defined elsewhere)
 
 @inline(__always)
 func transformLayer(bw: inout BitWriter, block: inout Block2D, size: Int, qt: QuantizationTable) throws -> Block2D {

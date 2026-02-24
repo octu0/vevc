@@ -77,7 +77,7 @@ func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, 
 
 // MARK: - Decode Logic
 
-private let k: UInt8 = 1
+private let k: UInt8 = 4
 
 @inline(__always)
 func toInt16(_ u: UInt16) -> Int16 {

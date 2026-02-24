@@ -13,7 +13,7 @@
 
 1. **3D-Discrete Wavelet Transform (3D-DWT)**
    - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
-   - **Temporal**: 1D Haar Transform. It leverages the temporal correlation (similarities between consecutive frames) to increase compression efficiency.
+   - **Temporal**: 1D LeGall 5/3 Transform. It leverages the temporal correlation (similarities between consecutive frames) to increase compression efficiency.
 
 2. **Multi-Resolution & Multi-Framerate Design**
    - At decode time, you can extract specific spatial resolutions and framerates from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -30,7 +30,7 @@
    | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | `1` (LL only)           | 270p / 15fps             | Extract minimum data only      |
 
 3. **Acceleration via SIMD & Concurrency**
-   - The temporal Haar Transform is vectorized for high performance using SIMD (SIMD8).
+   - The temporal Lift53 Transform is vectorized for high performance using SIMD (SIMD8).
    - Spatial layer processing of frequencies and blocks is executed in parallel using Swift Concurrency (`async/await`, `TaskGroup`).
 
 ---
@@ -114,7 +114,7 @@ $ swift run -c release vevc-dec -i output.vevc -o .out/
 
 The core components of the implementation consist of the following files:
 
-- `TemporalDWT`: 1D Haar Transform and inverse transform logic across the temporal axis, fully utilizing SIMD.
+- `TemporalDWT`: 1D Lift53 Transform and inverse transform logic across the temporal axis, fully utilizing SIMD.
 - `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to split and zero-pad the input images into GOP sizes, performing a two-stage encode: Temporal DWT -> Spatial DWT.
 
 ## License
