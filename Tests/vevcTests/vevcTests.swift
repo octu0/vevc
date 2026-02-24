@@ -1,5 +1,4 @@
 import XCTest
-@testable import veif
 @testable import vevc
 
 final class VevcTests: XCTestCase {
@@ -28,10 +27,10 @@ final class VevcTests: XCTestCase {
         
         let images = [img1, img2]
         
-        let encoded = try await vevc.encode(images: images, gop: 5, maxbitrate: 1000 * 1024)
+        let encoded = try await vevc.encode(images: images, maxbitrate: 1000 * 1024)
         XCTAssertFalse(encoded.isEmpty)
         
-        let decoded = try await vevc.decode(r: encoded)
+        let decoded = try await vevc.decode(data: encoded)
         XCTAssertEqual(decoded.count, 2)
         XCTAssertEqual(decoded[0].width, 64)
         XCTAssertEqual(decoded[0].height, 64)
