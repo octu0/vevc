@@ -336,7 +336,7 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
     }
 }
 
-func applyTemporal(planes: [PlaneData420]) -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
+func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let pd0 = planes[0], pd1 = planes[1], pd2 = planes[2], pd3 = planes[3]
     let dx = pd0.width, dy = pd0.height
     
@@ -363,9 +363,12 @@ func applyTemporal(planes: [PlaneData420]) -> (PlaneData420, PlaneData420, Plane
         return (ll, lh, h0, h1)
     }
     
-    let y = transform(p0: pd0.y, p1: pd1.y, p2: pd2.y, p3: pd3.y)
-    let cb = transform(p0: pd0.cb, p1: pd1.cb, p2: pd2.cb, p3: pd3.cb)
-    let cr = transform(p0: pd0.cr, p1: pd1.cr, p2: pd2.cr, p3: pd3.cr)
+    // Y, Cb, Cr planes in parallel
+    async let yResult = { transform(p0: pd0.y, p1: pd1.y, p2: pd2.y, p3: pd3.y) }()
+    async let cbResult = { transform(p0: pd0.cb, p1: pd1.cb, p2: pd2.cb, p3: pd3.cb) }()
+    async let crResult = { transform(p0: pd0.cr, p1: pd1.cr, p2: pd2.cr, p3: pd3.cr) }()
+    
+    let (y, cb, cr) = await (yResult, cbResult, crResult)
     
     return (
         PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
@@ -393,17 +396,20 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         }
         
         let planes = toPlaneData420(images: chunk4)
-        let (ll, lh, h0, h1) = applyTemporal(planes: planes)
+        let (ll, lh, h0, h1) = await applyTemporal(planes: planes)
         
         let qtLL = QuantizationTable(baseStep: max(1, Int(qt.step)))
         let qtLH = QuantizationTable(baseStep: Int(qt.step) * 2)
         let qtH0 = QuantizationTable(baseStep: Int(qt.step) * 4)
         let qtH1 = QuantizationTable(baseStep: Int(qt.step) * 4)
         
-        let llBytes = try await encodeSpatialLayers(pd: ll, maxbitrate: maxbitrate, qt: qtLL)
-        let lhBytes = try await encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: qtLH)
-        let h0Bytes = try await encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: qtH0)
-        let h1Bytes = try await encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: qtH1)
+        // Encode 4 temporal bands in parallel
+        async let llBytesTask = encodeSpatialLayers(pd: ll, maxbitrate: maxbitrate, qt: qtLL)
+        async let lhBytesTask = encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: qtLH)
+        async let h0BytesTask = encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: qtH0)
+        async let h1BytesTask = encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: qtH1)
+        
+        let (llBytes, lhBytes, h0Bytes, h1Bytes) = try await (llBytesTask, lhBytesTask, h0BytesTask, h1BytesTask)
         
         out.append(contentsOf: [0x56, 0x45, 0x4C, UInt8(gopSize)]) // 'VEL' + GOP size
         appendUInt32BE(&out, UInt32(llBytes.count))
