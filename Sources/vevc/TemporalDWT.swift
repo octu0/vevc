@@ -1,3 +1,4 @@
+@inline(__always)
 private func lift53TemporalLevel1(
     f0: UnsafePointer<Int16>,
     f1: UnsafePointer<Int16>,
@@ -42,6 +43,7 @@ private func lift53TemporalLevel1(
     }
 }
 
+@inline(__always)
 private func lift53TemporalLevel2(
     l0: UnsafePointer<Int16>,
     l1: UnsafePointer<Int16>,
@@ -72,6 +74,7 @@ private func lift53TemporalLevel2(
     }
 }
 
+@inline(__always)
 private func invLift53TemporalLevel1(
     inL0: UnsafePointer<Int16>,
     inL1: UnsafePointer<Int16>,
@@ -116,6 +119,7 @@ private func invLift53TemporalLevel1(
     }
 }
 
+@inline(__always)
 private func invLift53TemporalLevel2(
     inLL: UnsafePointer<Int16>,
     inLH: UnsafePointer<Int16>,
@@ -146,6 +150,7 @@ private func invLift53TemporalLevel2(
     }
 }
 
+@inline(__always)
 func temporalDWT(
     f0: UnsafePointer<Int16>,
     f1: UnsafePointer<Int16>,
@@ -184,6 +189,7 @@ func temporalDWT(
     )
 }
 
+@inline(__always)
 func invTemporalDWT(
     inLL: UnsafePointer<Int16>,
     inLH: UnsafePointer<Int16>,
