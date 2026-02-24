@@ -397,11 +397,15 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         let planes = toPlaneData420(images: chunk4)
         let (ll, lh, h0, h1) = applyTemporal(planes: planes)
         
-        let hQt = QuantizationTable(baseStep: max(1, Int(qt.step) / 8))
-        let llBytes = try await encodeSpatialLayers(pd: ll, maxbitrate: maxbitrate, qt: qt)
-        let lhBytes = try await encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: hQt)
-        let h0Bytes = try await encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: hQt)
-        let h1Bytes = try await encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: hQt)
+        let qtLL = QuantizationTable(baseStep: max(1, Int(qt.step)))
+        let qtLH = QuantizationTable(baseStep: Int(qt.step) * 2)
+        let qtH0 = QuantizationTable(baseStep: Int(qt.step) * 4)
+        let qtH1 = QuantizationTable(baseStep: Int(qt.step) * 4)
+        
+        let llBytes = try await encodeSpatialLayers(pd: ll, maxbitrate: maxbitrate, qt: qtLL)
+        let lhBytes = try await encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: qtLH)
+        let h0Bytes = try await encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: qtH0)
+        let h1Bytes = try await encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: qtH1)
         
         out.append(contentsOf: [0x56, 0x45, 0x4C, UInt8(gopSize)]) // 'VEL' + GOP size
         appendUInt32BE(&out, UInt32(llBytes.count))

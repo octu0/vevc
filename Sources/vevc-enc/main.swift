@@ -3,7 +3,7 @@ import PNG
 import vevc
 
 let args = CommandLine.arguments
-var bitrate = 200
+var bitrate = 500
 var positionalArgs: [String] = []
 var outPath = "a.vevc"
 
@@ -63,7 +63,8 @@ do {
     let dataSize = images.reduce(0) { $0 + ($1.width * $1.height * 3) }
     
     print(String(
-        format:"elapse=%.4fms/frame %3.2fKB -> %3.2fKB compressed %3.2f%%",
+        format:"elapse= %.4fms (%.4fms/frame) %3.2fKB -> %3.2fKB compressed %3.2f%%",
+        elapsed * 1000,
         elapsed * 1000 / Double(images.count),
         Double(dataSize) / 1024.0,
         Double(out.count) / 1024.0,

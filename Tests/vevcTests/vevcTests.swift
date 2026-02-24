@@ -31,7 +31,7 @@ final class VevcTests: XCTestCase {
         XCTAssertFalse(encoded.isEmpty)
         
         let decoded = try await vevc.decode(data: encoded)
-        XCTAssertEqual(decoded.count, 2)
+        XCTAssertEqual(decoded.count, 4)
         XCTAssertEqual(decoded[0].width, 64)
         XCTAssertEqual(decoded[0].height, 64)
         XCTAssertEqual(decoded[1].width, 64)
