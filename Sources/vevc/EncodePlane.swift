@@ -1,18 +1,24 @@
 // MARK: - Encode Plane Arrays
 
-struct PlaneData {
+struct PlaneData420 {
     let width: Int
     let height: Int
     var y: [Int16]
     var cb: [Int16]
     var cr: [Int16]
     
-    var rY: Int16Reader { Int16Reader(data: y, width: width, height: height) }
-    var rCb: Int16Reader { Int16Reader(data: cb, width: (width + 1) / 2, height: (height + 1) / 2) }
-    var rCr: Int16Reader { Int16Reader(data: cr, width: (width + 1) / 2, height: (height + 1) / 2) }
+    var rY: Int16Reader {
+        Int16Reader(data: y, width: width, height: height)
+    }
+    var rCb: Int16Reader {
+        Int16Reader(data: cb, width: (width + 1) / 2, height: (height + 1) / 2)
+    }
+    var rCr: Int16Reader {
+        Int16Reader(data: cr, width: (width + 1) / 2, height: (height + 1) / 2)
+    }
 }
 
-extension PlaneData {
+extension PlaneData420 {
     init(img16: Image16) {
         self.width = img16.width
         self.height = img16.height
@@ -46,9 +52,7 @@ extension PlaneData {
     }
 }
 
-func encodePlaneLayer(
-    pd: PlaneData, layer: UInt8, size: Int, qt: QuantizationTable
-) async throws -> ([UInt8], PlaneData) {
+func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable) async throws -> ([UInt8], PlaneData420) {
     let dx = pd.width
     let dy = pd.height
     
@@ -77,7 +81,9 @@ func encodePlaneLayer(
             }
         }
         var results: [(Int, [([UInt8], Block2D, Int, Int)])] = []
-        for try await res in group { results.append(res) }
+        for try await res in group {
+            results.append(res)
+        }
         results.sort { $0.0 < $1.0 }
         
         for i in results.indices {
@@ -92,10 +98,12 @@ func encodePlaneLayer(
                 llBlock.withView { view in
                     for blockY in 0..<subSize {
                         let dstY = destStartY + blockY
-                        if dstY >= subDy { continue }
+                        if subDy <= dstY {
+                            continue
+                        }
                         let srcPtr = view.rowPointer(y: blockY)
                         let limit = min(subSize, subDx - destStartX)
-                        if limit > 0 {
+                        if 0 < limit {
                             let dstIdx = dstY * subDx + destStartX
                             subY.withUnsafeMutableBufferPointer { dstPtr in
                                 dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
@@ -140,7 +148,7 @@ func encodePlaneLayer(
                         if dstY >= subCbDy { continue }
                         let srcPtr = view.rowPointer(y: blockY)
                         let limit = min(subSize, subCbDx - destStartX)
-                        if limit > 0 {
+                        if 0 < limit {
                             let dstIdx = dstY * subCbDx + destStartX
                             subCb.withUnsafeMutableBufferPointer { dstPtr in
                                 dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
@@ -178,10 +186,12 @@ func encodePlaneLayer(
                 llBlock.withView { view in
                     for blockY in 0..<subSize {
                         let dstY = destStartY + blockY
-                        if dstY >= subCbDy { continue }
+                        if subCbDy <= dstY {
+                            continue
+                        }
                         let srcPtr = view.rowPointer(y: blockY)
                         let limit = min(subSize, subCbDx - destStartX)
-                        if limit > 0 {
+                        if 0 < limit {
                             let dstIdx = dstY * subCbDx + destStartX
                             subCr.withUnsafeMutableBufferPointer { dstPtr in
                                 dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
@@ -208,13 +218,11 @@ func encodePlaneLayer(
     appendUInt16BE(&out, UInt16(bufCr.count))
     for b in bufCr { appendUInt16BE(&out, UInt16(b.count)); out.append(contentsOf: b) }
     
-    let subPlane = PlaneData(width: subDx, height: subDy, y: subY, cb: subCb, cr: subCr)
+    let subPlane = PlaneData420(width: subDx, height: subDy, y: subY, cb: subCb, cr: subCr)
     return (out, subPlane)
 }
 
-func encodePlaneBase(
-    pd: PlaneData, layer: UInt8, size: Int, qt: QuantizationTable
-) async throws -> [UInt8] {
+func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable) async throws -> [UInt8] {
     let dx = pd.width
     let dy = pd.height
     
@@ -235,7 +243,9 @@ func encodePlaneBase(
             }
         }
         var results: [(Int, [([UInt8], Int, Int)])] = []
-        for try await res in group { results.append(res) }
+        for try await res in group {
+            results.append(res)
+        }
         results.sort { $0.0 < $1.0 }
         for (_, rowBlocks) in results {
             for (data, _, _) in rowBlocks { bufY.append(data) }
@@ -257,10 +267,14 @@ func encodePlaneBase(
             }
         }
         var results: [(Int, [([UInt8], Int, Int)])] = []
-        for try await res in group { results.append(res) }
+        for try await res in group {
+            results.append(res)
+        }
         results.sort { $0.0 < $1.0 }
         for (_, rowBlocks) in results {
-            for (data, _, _) in rowBlocks { bufCb.append(data) }
+            for (data, _, _) in rowBlocks {
+                bufCb.append(data)
+            }
         }
     }
     
@@ -277,10 +291,14 @@ func encodePlaneBase(
             }
         }
         var results: [(Int, [([UInt8], Int, Int)])] = []
-        for try await res in group { results.append(res) }
+        for try await res in group {
+            results.append(res)
+        }
         results.sort { $0.0 < $1.0 }
         for (_, rowBlocks) in results {
-            for (data, _, _) in rowBlocks { bufCr.append(data) }
+            for (data, _, _) in rowBlocks {
+                bufCr.append(data)
+            }
         }
     }
     
@@ -302,7 +320,7 @@ func encodePlaneBase(
     return out
 }
 
-func encodeSpatialLayers(pd: PlaneData, maxbitrate: Int, qt: QuantizationTable) async throws -> [UInt8] {
+func encodeSpatialLayers(pd: PlaneData420, maxbitrate: Int, qt: QuantizationTable) async throws -> [UInt8] {
     let (layer2, sub2) = try await encodePlaneLayer(pd: pd, layer: 2, size: 32, qt: qt)
     let (layer1, sub1) = try await encodePlaneLayer(pd: sub2, layer: 1, size: 16, qt: qt)
     let layer0 = try await encodePlaneBase(pd: sub1, layer: 0, size: 8, qt: qt)

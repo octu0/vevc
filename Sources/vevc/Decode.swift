@@ -31,7 +31,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
     return current
 }
 
-func applyInverseTemporal(ll: PlaneData, lh: PlaneData, h0: PlaneData, h1: PlaneData, countY: Int, countC: Int) -> (PlaneData, PlaneData, PlaneData, PlaneData) {
+func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, h1: PlaneData420, countY: Int, countC: Int) -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let dx = ll.width, dy = ll.height
     
     func transform(l: [Int16], h: [Int16], hh0: [Int16], hh1: [Int16], count: Int) -> ([Int16], [Int16], [Int16], [Int16]) {
@@ -68,10 +68,10 @@ func applyInverseTemporal(ll: PlaneData, lh: PlaneData, h0: PlaneData, h1: Plane
     let cr = transform(l: ll.cr, h: lh.cr, hh0: h0.cr, hh1: h1.cr, count: countC)
     
     return (
-        PlaneData(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
-        PlaneData(width: dx, height: dy, y: y.1, cb: cb.1, cr: cr.1),
-        PlaneData(width: dx, height: dy, y: y.2, cb: cb.2, cr: cr.2),
-        PlaneData(width: dx, height: dy, y: y.3, cb: cb.3, cr: cr.3)
+        PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
+        PlaneData420(width: dx, height: dy, y: y.1, cb: cb.1, cr: cr.1),
+        PlaneData420(width: dx, height: dy, y: y.2, cb: cb.2, cr: cr.2),
+        PlaneData420(width: dx, height: dy, y: y.3, cb: cb.3, cr: cr.3)
     )
 }
 
@@ -546,12 +546,12 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let _ = Int(data[offset]) // GOP size (not used yet)
         offset += 1
         
-        func readPlane() async throws -> PlaneData {
+        func readPlane() async throws -> PlaneData420 {
             let len = try readUInt32BEFromBytes(data, offset: &offset)
             let chunk = Array(data[offset..<(offset + Int(len))])
             offset += Int(len)
             let img = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
-            return PlaneData(img16: img)
+            return PlaneData420(img16: img)
         }
         
         let ll = try await readPlane()
@@ -562,12 +562,12 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let countY = ll.y.count
         let countC = ll.cb.count
         
-        let emptyPlane = PlaneData(width: ll.width, height: ll.height, y: [Int16](repeating: 0, count: countY), cb: [Int16](repeating: 0, count: countC), cr: [Int16](repeating: 0, count: countC))
+        let emptyPlane = PlaneData420(width: ll.width, height: ll.height, y: [Int16](repeating: 0, count: countY), cb: [Int16](repeating: 0, count: countC), cr: [Int16](repeating: 0, count: countC))
         
         let actualLH = opts.maxFrames >= 2 ? lh : emptyPlane
         let actualH0 = opts.maxFrames >= 4 ? h0 : emptyPlane
         let actualH1 = opts.maxFrames >= 4 ? h1 : emptyPlane
-        
+
         // temporal inverse
         let (f0, f1, f2, f3) = applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
         

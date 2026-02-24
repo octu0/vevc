@@ -280,8 +280,9 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
         
     let ratio = estimatedTotalBits / Double(targetBits)
     let predictedStep = Double(probeStep) * ratio
+    let q = Int(max(1, predictedStep))
     
-    return QuantizationTable(baseStep: Int(predictedStep))
+    return QuantizationTable(baseStep: q)
 }
 
 struct Int16Reader {
@@ -307,16 +308,37 @@ struct Int16Reader {
     }
 }
 
-func toPlaneData(images: [YCbCrImage]) -> [PlaneData] {
+func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
     return images.map { img in
         let y = img.yPlane.map { Int16($0) - 128 }
-        let cb = img.cbPlane.map { Int16($0) - 128 }
-        let cr = img.crPlane.map { Int16($0) - 128 }
-        return PlaneData(width: img.width, height: img.height, y: y, cb: cb, cr: cr)
+        let cWidth = (img.width + 1) / 2
+        let cHeight = (img.height + 1) / 2
+        var cb = [Int16](repeating: 0, count: cWidth * cHeight)
+        var cr = [Int16](repeating: 0, count: cWidth * cHeight)
+        
+        if img.ratio == .ratio444 {
+            for cy in 0..<cHeight {
+                let py = cy * 2
+                for cx in 0..<cWidth {
+                    let px = cx * 2
+                    let srcOffset = py * img.width + px
+                    let dstOffset = cy * cWidth + cx
+                    if srcOffset < img.cbPlane.count {
+                        cb[dstOffset] = Int16(img.cbPlane[srcOffset]) - 128
+                        cr[dstOffset] = Int16(img.crPlane[srcOffset]) - 128
+                    }
+                }
+            }
+        } else {
+            cb = img.cbPlane.map { Int16($0) - 128 }
+            cr = img.crPlane.map { Int16($0) - 128 }
+        }
+        
+        return PlaneData420(width: img.width, height: img.height, y: y, cb: cb, cr: cr)
     }
 }
 
-func applyTemporal(planes: [PlaneData]) -> (PlaneData, PlaneData, PlaneData, PlaneData) {
+func applyTemporal(planes: [PlaneData420]) -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let pd0 = planes[0], pd1 = planes[1], pd2 = planes[2], pd3 = planes[3]
     let dx = pd0.width, dy = pd0.height
     
@@ -348,10 +370,10 @@ func applyTemporal(planes: [PlaneData]) -> (PlaneData, PlaneData, PlaneData, Pla
     let cr = transform(p0: pd0.cr, p1: pd1.cr, p2: pd2.cr, p3: pd3.cr)
     
     return (
-        PlaneData(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
-        PlaneData(width: dx, height: dy, y: y.1, cb: cb.1, cr: cr.1),
-        PlaneData(width: dx, height: dy, y: y.2, cb: cb.2, cr: cr.2),
-        PlaneData(width: dx, height: dy, y: y.3, cb: cb.3, cr: cr.3)
+        PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
+        PlaneData420(width: dx, height: dy, y: y.1, cb: cb.1, cr: cr.1),
+        PlaneData420(width: dx, height: dy, y: y.2, cb: cb.2, cr: cr.2),
+        PlaneData420(width: dx, height: dy, y: y.3, cb: cb.3, cr: cr.3)
     )
 }
 
@@ -372,13 +394,14 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
             chunk4.append(chunkImages.last!)
         }
         
-        let planes = toPlaneData(images: chunk4)
+        let planes = toPlaneData420(images: chunk4)
         let (ll, lh, h0, h1) = applyTemporal(planes: planes)
         
+        let hQt = QuantizationTable(baseStep: max(1, Int(qt.step) / 8))
         let llBytes = try await encodeSpatialLayers(pd: ll, maxbitrate: maxbitrate, qt: qt)
-        let lhBytes = try await encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: qt)
-        let h0Bytes = try await encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: qt)
-        let h1Bytes = try await encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: qt)
+        let lhBytes = try await encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: hQt)
+        let h0Bytes = try await encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: hQt)
+        let h1Bytes = try await encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: hQt)
         
         out.append(contentsOf: [0x56, 0x45, 0x4C, UInt8(gopSize)]) // 'VEL' + GOP size
         appendUInt32BE(&out, UInt32(llBytes.count))

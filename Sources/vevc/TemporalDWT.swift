@@ -5,9 +5,10 @@ private func haar(
     outL: UnsafeMutablePointer<Int16>,
     outH: UnsafeMutablePointer<Int16>
 ) {
+    assert(count % 8 == 0, "count must be a multiple of 8")
     var i = 0
     
-    while i <= count - 8 {
+    while i < count {
         let v0 = SIMD8<Int16>(
             f0[i], f0[i+1], f0[i+2], f0[i+3],
             f0[i+4], f0[i+5], f0[i+6], f0[i+7]
@@ -17,22 +18,17 @@ private func haar(
             f1[i+4], f1[i+5], f1[i+6], f1[i+7]
         )
         
-        // L (Low): (f0 + f1) / 2
-        let l = (v0 &+ v1) &>> 1
-        
         // H (High): f0 - f1
         let h = v0 &- v1
+        
+        // L (Low): f0 - (h / 2)
+        // using lifting step to ensure perfect reconstruction
+        let l = v0 &- (h &>> 1)
         
         UnsafeMutableRawPointer(outL.advanced(by: i)).storeBytes(of: l, as: SIMD8<Int16>.self)
         UnsafeMutableRawPointer(outH.advanced(by: i)).storeBytes(of: h, as: SIMD8<Int16>.self)
         
         i += 8
-    }
-    
-    while i < count {
-        outL[i] = (f0[i] &+ f1[i]) &>> 1
-        outH[i] = f0[i] &- f1[i]
-        i += 1
     }
 }
 
@@ -43,8 +39,9 @@ func invHaar(
     outF0: UnsafeMutablePointer<Int16>,
     outF1: UnsafeMutablePointer<Int16>
 ) {
+    assert(count % 8 == 0, "count must be a multiple of 8")
     var i = 0
-    while i <= count - 8 {
+    while i < count {
         let l = SIMD8<Int16>(
             inL[i], inL[i+1], inL[i+2], inL[i+3],
             inL[i+4], inL[i+5], inL[i+6], inL[i+7]
@@ -54,8 +51,10 @@ func invHaar(
             inH[i+4], inH[i+5], inH[i+6], inH[i+7]
         )
         
-        // f0 = l + (h >> 1)
+        // f0 = l + (h / 2)
+        // using lifting step to ensure perfect reconstruction
         let f0 = l &+ (h &>> 1)
+        
         // f1 = f0 - h
         let f1 = f0 &- h
         
@@ -63,19 +62,6 @@ func invHaar(
         UnsafeMutableRawPointer(outF1.advanced(by: i)).storeBytes(of: f1, as: SIMD8<Int16>.self)
         
         i += 8
-    }
-    
-    // 端数処理
-    while i < count {
-        let l = inL[i]
-        let h = inH[i]
-        
-        let f0 = l &+ (h &>> 1)
-        let f1 = f0 &- h
-        
-        outF0[i] = f0
-        outF1[i] = f1
-        i += 1
     }
 }
 
