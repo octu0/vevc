@@ -14,9 +14,6 @@ final class TemporalDWTTests: XCTestCase {
             f1[i] = Int16(i * 15 - 100)
         }
         
-        let originalF0 = f0
-        let originalF1 = f1
-        
         var l = [Int16](repeating: 0, count: count)
         var h = [Int16](repeating: 0, count: count)
         
