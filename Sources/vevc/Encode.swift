@@ -468,9 +468,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         async let gmv3_t = Task { estimateGMV(curr: planes[3], prev: planes[0]) }
         let (gmv1, gmv2, gmv3) = await (gmv1_t.value, gmv2_t.value, gmv3_t.value)
         
-        async let p1 = shiftPlane(planes[1], ref: planes[0], dx: -gmv1.dx, dy: -gmv1.dy)
-        async let p2 = shiftPlane(planes[2], ref: planes[0], dx: -gmv2.dx, dy: -gmv2.dy)
-        async let p3 = shiftPlane(planes[3], ref: planes[0], dx: -gmv3.dx, dy: -gmv3.dy)
+        async let p1 = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
+        async let p2 = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
+        async let p3 = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
         let (p1_v, p2_v, p3_v) = await (p1, p2, p3)
         
         let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])

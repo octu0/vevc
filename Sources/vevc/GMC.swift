@@ -102,9 +102,11 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
                         
                         if safeStartX < safeEndX {
                             let count = safeEndX - safeStartX
-                            sad &+= calculateSAD(p1: pCurr.advanced(by: dstRow + safeStartX), 
-                                                 p2: pPrev.advanced(by: srcRow + safeStartX - dx), 
-                                                 count: count)
+                            sad &+= calculateSAD(
+                                p1: pCurr.advanced(by: dstRow + safeStartX), 
+                                p2: pPrev.advanced(by: srcRow + safeStartX - dx), 
+                                count: count
+                            )
                         }
                     }
                     
@@ -156,9 +158,11 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
                             let dstRow = y * curr.width
                             let srcRow = (y - dy) * prev.width
                             
-                            sad &+= calculateSAD(p1: pCurrY.advanced(by: dstRow + startX),
-                                                 p2: pPrevY.advanced(by: srcRow + startX - dx),
-                                                 count: countX)
+                            sad &+= calculateSAD(
+                                p1: pCurrY.advanced(by: dstRow + startX),
+                                p2: pPrevY.advanced(by: srcRow + startX - dx),
+                                count: countX
+                            )
                         }
                     }
                     
@@ -178,46 +182,35 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
 }
 
 @inline(__always)
-func shiftPlane(_ plane: PlaneData420, ref: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
+func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
-    func shift(data: [Int16], refData: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
+    func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
+        if w == 0 || h == 0 { return data }
+        
         var out = [Int16](repeating: 0, count: w * h)
         
         data.withUnsafeBufferPointer { dPtr in
             guard let pData = dPtr.baseAddress else { return }
-            refData.withUnsafeBufferPointer { rPtr in
-                guard let pRef = rPtr.baseAddress else { return }
-                out.withUnsafeMutableBufferPointer { oPtr in
-                    guard let pOut = oPtr.baseAddress else { return }
+            out.withUnsafeMutableBufferPointer { oPtr in
+                guard let pOut = oPtr.baseAddress else { return }
+                
+                let eX = ((sX % w) + w) % w
+                let eY = ((sY % h) + h) % h
+                
+                for dstY in 0..<h {
+                    let dstRow = dstY * w
+                    let srcY = (dstY - eY + h) % h
+                    let srcRow = srcY * w
                     
-                    for y in 0..<h {
-                        let dstRow = y * w
-                        let srcY = y - sY
+                    if eX == 0 {
+                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow), count: w)
+                    } else {
+                        let part1Len = eX
+                        let part2Len = w - eX
                         
-                        if srcY < 0 || srcY >= h {
-                            pOut.advanced(by: dstRow).update(from: pRef.advanced(by: dstRow), count: w)
-                        } else {
-                            let srcRow = srcY * w
-                            
-                            let safeStartX = max(0, sX)
-                            let safeEndX = min(w, w + sX)
-                            
-                            if sX > 0 {
-                                let len = min(sX, w)
-                                pOut.advanced(by: dstRow).update(from: pRef.advanced(by: dstRow), count: len)
-                            }
-                            
-                            if safeStartX < safeEndX {
-                                let len = safeEndX - safeStartX
-                                pOut.advanced(by: dstRow + safeStartX).update(from: pData.advanced(by: srcRow + safeStartX - sX), count: len)
-                            }
-                            
-                            if safeEndX < w {
-                                let len = w - safeEndX
-                                pOut.advanced(by: dstRow + safeEndX).update(from: pRef.advanced(by: dstRow + safeEndX), count: len)
-                            }
-                        }
+                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow + w - eX), count: part1Len)
+                        pOut.advanced(by: dstRow + eX).update(from: pData.advanced(by: srcRow), count: part2Len)
                     }
                 }
             }
@@ -227,9 +220,9 @@ func shiftPlane(_ plane: PlaneData420, ref: PlaneData420, dx: Int, dy: Int) asyn
     }
     
     return await withTaskGroup(of: (Int, [Int16]).self) { group in
-        group.addTask { (0, shift(data: plane.y, refData: ref.y, w: plane.width, h: plane.height, sX: dx, sY: dy)) }
-        group.addTask { (1, shift(data: plane.cb, refData: ref.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
-        group.addTask { (2, shift(data: plane.cr, refData: ref.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
+        group.addTask { (0, shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)) }
+        group.addTask { (1, shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
+        group.addTask { (2, shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
         
         var yOut = [Int16]()
         var cbOut = [Int16]()
