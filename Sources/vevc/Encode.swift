@@ -391,6 +391,23 @@ func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420,
     
     func transform(p0: [Int16], p1: [Int16], p2: [Int16], p3: [Int16]) -> ([Int16], [Int16], [Int16], [Int16]) {
         let count = p0.count
+
+        // Temporal Dead-zone / Noise reduction
+        var mp1 = p1
+        var mp2 = p2
+        var mp3 = p3
+        for i in 0..<count {
+            if abs(mp1[i] - p0[i]) <= 5 {
+                mp1[i] = p0[i]
+            }
+            if abs(mp2[i] - mp1[i]) <= 5 {
+                mp2[i] = mp1[i]
+            }
+            if abs(mp3[i] - mp2[i]) <= 5 {
+                mp3[i] = mp2[i]
+            }
+        }
+
         var ll = [Int16](repeating: 0, count: count)
         var lh = [Int16](repeating: 0, count: count)
         var h0 = [Int16](repeating: 0, count: count)
@@ -399,9 +416,9 @@ func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420,
         var t1 = [Int16](repeating: 0, count: count)
         
         p0.withUnsafeBufferPointer { ptr0 in
-        p1.withUnsafeBufferPointer { ptr1 in
-        p2.withUnsafeBufferPointer { ptr2 in
-        p3.withUnsafeBufferPointer { ptr3 in
+        mp1.withUnsafeBufferPointer { ptr1 in
+        mp2.withUnsafeBufferPointer { ptr2 in
+        mp3.withUnsafeBufferPointer { ptr3 in
             temporalDWT(
                 f0: ptr0.baseAddress!, f1: ptr1.baseAddress!, f2: ptr2.baseAddress!, f3: ptr3.baseAddress!,
                 count: count,
