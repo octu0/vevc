@@ -462,7 +462,18 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         }
         
         let planes = toPlaneData420(images: chunk4)
-        let (ll, lh, h0, h1) = await applyTemporal(planes: planes)
+        
+        async let gmv1_t = Task { estimateGMV(curr: planes[1], prev: planes[0]) }
+        async let gmv2_t = Task { estimateGMV(curr: planes[2], prev: planes[0]) }
+        async let gmv3_t = Task { estimateGMV(curr: planes[3], prev: planes[0]) }
+        let (gmv1, gmv2, gmv3) = await (gmv1_t.value, gmv2_t.value, gmv3_t.value)
+        
+        async let p1 = shiftPlane(planes[1], ref: planes[0], dx: -gmv1.dx, dy: -gmv1.dy)
+        async let p2 = shiftPlane(planes[2], ref: planes[0], dx: -gmv2.dx, dy: -gmv2.dy)
+        async let p3 = shiftPlane(planes[3], ref: planes[0], dx: -gmv3.dx, dy: -gmv3.dy)
+        let (p1_v, p2_v, p3_v) = await (p1, p2, p3)
+        
+        let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
         
         let qtLL = QuantizationTable(baseStep: max(1, Int(qt.step)))
         let qtLH = QuantizationTable(baseStep: Int(qt.step) * 2)
@@ -478,6 +489,15 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         let (llBytes, lhBytes, h0Bytes, h1Bytes) = try await (llBytesTask, lhBytesTask, h0BytesTask, h1BytesTask)
         
         out.append(contentsOf: [0x56, 0x45, 0x4C, UInt8(gopSize)]) // 'VEL' + GOP size
+        
+        // Write GMVs as Int16 (12 bytes total)
+        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dx)))
+        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dy)))
+        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dx)))
+        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dy)))
+        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dx)))
+        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dy)))
+        
         appendUInt32BE(&out, UInt32(llBytes.count))
         out.append(contentsOf: llBytes)
         

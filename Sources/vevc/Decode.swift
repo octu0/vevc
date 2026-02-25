@@ -563,6 +563,13 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let _ = Int(data[offset]) // GOP size (not used yet)
         offset += 1
         
+        let gmv1_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        let gmv1_dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        let gmv2_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        let gmv2_dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        let gmv3_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        let gmv3_dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        
         func readPlane() async throws -> PlaneData420 {
             let len = try readUInt32BEFromBytes(data, offset: &offset)
             let chunk = Array(data[offset..<(offset + Int(len))])
@@ -586,7 +593,13 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let actualH1 = opts.maxFrames >= 4 ? h1 : emptyPlane
 
         // temporal inverse
-        let (f0, f1, f2, f3) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
+        let (f0_s, f1_s, f2_s, f3_s) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
+        
+        let f0 = f0_s
+        async let f1_t = shiftPlane(f1_s, ref: f0_s, dx: gmv1_dx, dy: gmv1_dy)
+        async let f2_t = shiftPlane(f2_s, ref: f0_s, dx: gmv2_dx, dy: gmv2_dy)
+        async let f3_t = shiftPlane(f3_s, ref: f0_s, dx: gmv3_dx, dy: gmv3_dy)
+        let (f1, f2, f3) = await (f1_t, f2_t, f3_t)
         
         out.append(f0.toYCbCr())
         if opts.maxFrames >= 2 {
