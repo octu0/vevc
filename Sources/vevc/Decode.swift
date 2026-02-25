@@ -9,6 +9,7 @@ public enum DecodeError: Error {
     case noDataProvided
 }
 
+@inline(__always)
 func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
     var offset = 0
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
@@ -31,6 +32,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
     return current
 }
 
+@inline(__always)
 func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, h1: PlaneData420, countY: Int, countC: Int) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let dx = ll.width, dy = ll.height
     
@@ -132,20 +134,25 @@ func invertLayer(br: BitReader, ll: Block2D, size: Int, qt: QuantizationTable) t
         }
     }
     
+    var br = br
+    let isZero = try br.readBit() == 1
+    
     try block.withView { view in
         let base = view.base
         var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
         var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
         var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
         
-        var rr = RiceReader(br: br)
-        try blockDecode(rr: &rr, block: &hlView, size: half)
-        try blockDecode(rr: &rr, block: &lhView, size: half)
-        try blockDecode(rr: &rr, block: &hhView, size: half)
-        
-        dequantizeMidSignedMapping(&hlView, qt: qt)
-        dequantizeMidSignedMapping(&lhView, qt: qt)
-        dequantizeHighSignedMapping(&hhView, qt: qt)
+        if isZero != true {
+            var rr = RiceReader(br: br)
+            try blockDecode(rr: &rr, block: &hlView, size: half)
+            try blockDecode(rr: &rr, block: &lhView, size: half)
+            try blockDecode(rr: &rr, block: &hhView, size: half)
+            
+            dequantizeMidSignedMapping(&hlView, qt: qt)
+            dequantizeMidSignedMapping(&lhView, qt: qt)
+            dequantizeHighSignedMapping(&hhView, qt: qt)
+        }
         
         invDwt2d(&view, size: size)
     }
@@ -158,6 +165,9 @@ func invertBase(br: BitReader, size: Int, qt: QuantizationTable) throws -> Block
     var block = Block2D(width: size, height: size)
     let half = size / 2
     
+    var br = br
+    let isZero = try br.readBit() == 1
+    
     try block.withView { view in
         let base = view.base
         var llView = BlockView(base: base, width: half, height: half, stride: size)
@@ -165,16 +175,18 @@ func invertBase(br: BitReader, size: Int, qt: QuantizationTable) throws -> Block
         var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
         var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
         
-        var rr = RiceReader(br: br)
-        try blockDecodeDPCM(rr: &rr, block: &llView, size: half)
-        try blockDecode(rr: &rr, block: &hlView, size: half)
-        try blockDecode(rr: &rr, block: &lhView, size: half)
-        try blockDecode(rr: &rr, block: &hhView, size: half)
-        
-        dequantizeLow(&llView, qt: qt)
-        dequantizeMidSignedMapping(&hlView, qt: qt)
-        dequantizeMidSignedMapping(&lhView, qt: qt)
-        dequantizeHighSignedMapping(&hhView, qt: qt)
+        if !isZero {
+            var rr = RiceReader(br: br)
+            try blockDecodeDPCM(rr: &rr, block: &llView, size: half)
+            try blockDecode(rr: &rr, block: &hlView, size: half)
+            try blockDecode(rr: &rr, block: &lhView, size: half)
+            try blockDecode(rr: &rr, block: &hhView, size: half)
+            
+            dequantizeLow(&llView, qt: qt)
+            dequantizeMidSignedMapping(&hlView, qt: qt)
+            dequantizeMidSignedMapping(&lhView, qt: qt)
+            dequantizeHighSignedMapping(&hhView, qt: qt)
+        }
         
         invDwt2d(&view, size: size)
     }
@@ -233,6 +245,7 @@ func readBlockFromBytes(_ r: [UInt8], offset: inout Int) throws -> [UInt8] {
 
 // MARK: - Internal Decode Functions
 
+@inline(__always)
 func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throws -> Image16 {
     var offset = 0
     
@@ -379,6 +392,7 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
     return sub
 }
 
+@inline(__always)
 func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
     var offset = 0
     

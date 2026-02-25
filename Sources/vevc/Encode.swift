@@ -51,6 +51,37 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 // MARK: - Transform Functions
 
 @inline(__always)
+func isAllZero(hl: BlockView, lh: BlockView, hh: BlockView, size: Int) -> Bool {
+    for y in 0..<size {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<size {
+            if ptrHL[x] != 0 || ptrLH[x] != 0 || ptrHH[x] != 0 {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+@inline(__always)
+func isAllZeroBase(ll: BlockView, hl: BlockView, lh: BlockView, hh: BlockView, size: Int) -> Bool {
+    for y in 0..<size {
+        let ptrLL = ll.rowPointer(y: y)
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<size {
+            if ptrLL[x] != 0 || ptrHL[x] != 0 || ptrLH[x] != 0 || ptrHH[x] != 0 {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+@inline(__always)
 func transformLayer(bw: inout BitWriter, block: inout Block2D, size: Int, qt: QuantizationTable) throws -> Block2D {
     var sub = block.withView { view in
         return dwt2d(&view, size: size)
@@ -60,10 +91,15 @@ func transformLayer(bw: inout BitWriter, block: inout Block2D, size: Int, qt: Qu
     quantizeMidSignedMapping(&sub.lh, qt: qt)
     quantizeHighSignedMapping(&sub.hh, qt: qt)
     
-    RiceWriter.withWriter(&bw) { rw in
-        blockEncode(rw: &rw, block: sub.hl, size: sub.size)
-        blockEncode(rw: &rw, block: sub.lh, size: sub.size)
-        blockEncode(rw: &rw, block: sub.hh, size: sub.size)
+    if isAllZero(hl: sub.hl, lh: sub.lh, hh: sub.hh, size: sub.size) {
+        bw.writeBit(1)
+    } else {
+        bw.writeBit(0)
+        RiceWriter.withWriter(&bw) { rw in
+            blockEncode(rw: &rw, block: sub.hl, size: sub.size)
+            blockEncode(rw: &rw, block: sub.lh, size: sub.size)
+            blockEncode(rw: &rw, block: sub.hh, size: sub.size)
+        }
     }
     
     var llBlock = Block2D(width: sub.size, height: sub.size)
@@ -89,11 +125,16 @@ func transformBase(bw: inout BitWriter, block: inout Block2D, size: Int, qt: Qua
     quantizeMidSignedMapping(&sub.lh, qt: qt)
     quantizeHighSignedMapping(&sub.hh, qt: qt)
     
-    RiceWriter.withWriter(&bw) { rw in
-        blockEncodeDPCM(rw: &rw, block: sub.ll, size: sub.size)
-        blockEncode(rw: &rw, block: sub.hl, size: sub.size)
-        blockEncode(rw: &rw, block: sub.lh, size: sub.size)
-        blockEncode(rw: &rw, block: sub.hh, size: sub.size)
+    if isAllZeroBase(ll: sub.ll, hl: sub.hl, lh: sub.lh, hh: sub.hh, size: sub.size) {
+        bw.writeBit(1)
+    } else {
+        bw.writeBit(0)
+        RiceWriter.withWriter(&bw) { rw in
+            blockEncodeDPCM(rw: &rw, block: sub.ll, size: sub.size)
+            blockEncode(rw: &rw, block: sub.hl, size: sub.size)
+            blockEncode(rw: &rw, block: sub.lh, size: sub.size)
+            blockEncode(rw: &rw, block: sub.hh, size: sub.size)
+        }
     }
 }
 
@@ -109,6 +150,7 @@ func transformLayerFunc(rows: RowFunc, w: Int, h: Int, size: Int, qt: Quantizati
     
     var bw = BitWriter()
     let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+    bw.flush()
     return (bw.data, ll)
 }
 
@@ -124,6 +166,7 @@ func transformBaseFunc(rows: RowFunc, w: Int, h: Int, size: Int, qt: Quantizatio
     
     var bw = BitWriter()
     try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+    bw.flush()
     return bw.data
 }
 
@@ -183,7 +226,11 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     quantizeMid(&sub.lh, qt: qt)
     quantizeHigh(&sub.hh, qt: qt)
     
-    var bits = 0
+    if isAllZeroBase(ll: sub.ll, hl: sub.hl, lh: sub.lh, hh: sub.hh, size: sub.size) {
+        return 1
+    }
+    
+    var bits = 1
     bits += estimateRiceBitsDPCM(block: sub.ll, size: sub.size)
     bits += estimateRiceBits(block: sub.hl, size: sub.size)
     bits += estimateRiceBits(block: sub.lh, size: sub.size)
@@ -306,6 +353,7 @@ struct Int16Reader {
     }
 }
 
+@inline(__always)
 func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
     return images.map { img in
         let y = img.yPlane.map { Int16($0) - 128 }
@@ -336,6 +384,7 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
     }
 }
 
+@inline(__always)
 func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let pd0 = planes[0], pd1 = planes[1], pd2 = planes[2], pd3 = planes[3]
     let dx = pd0.width, dy = pd0.height
@@ -427,5 +476,3 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
     
     return out
 }
-
-
