@@ -33,7 +33,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
 }
 
 @inline(__always)
-func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, h1: PlaneData420, countY: Int, countC: Int) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
+func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, h1: PlaneData420, countY: Int, countC: Int) -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let dx = ll.width, dy = ll.height
     
     func transform(l: [Int16], h: [Int16], hh0: [Int16], hh1: [Int16], count: Int) -> ([Int16], [Int16], [Int16], [Int16]) {
@@ -65,12 +65,9 @@ func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, 
         return (f0, f1, f2, f3)
     }
     
-    // Y, Cb, Cr planes in parallel
-    async let yResult = { transform(l: ll.y, h: lh.y, hh0: h0.y, hh1: h1.y, count: countY) }()
-    async let cbResult = { transform(l: ll.cb, h: lh.cb, hh0: h0.cb, hh1: h1.cb, count: countC) }()
-    async let crResult = { transform(l: ll.cr, h: lh.cr, hh0: h0.cr, hh1: h1.cr, count: countC) }()
-    
-    let (y, cb, cr) = await (yResult, cbResult, crResult)
+    let y = transform(l: ll.y, h: lh.y, hh0: h0.y, hh1: h1.y, count: countY)
+    let cb = transform(l: ll.cb, h: lh.cb, hh0: h0.cb, hh1: h1.cb, count: countC)
+    let cr = transform(l: ll.cr, h: lh.cr, hh0: h0.cr, hh1: h1.cr, count: countC)
     
     return (
         PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
@@ -593,13 +590,12 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let actualH1 = opts.maxFrames >= 4 ? h1 : emptyPlane
 
         // temporal inverse
-        let (f0_s, f1_s, f2_s, f3_s) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
+        let (f0_s, f1_s, f2_s, f3_s) = applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
         
         let f0 = f0_s
-        async let f1_t = shiftPlane(f1_s, dx: gmv1_dx, dy: gmv1_dy)
-        async let f2_t = shiftPlane(f2_s, dx: gmv2_dx, dy: gmv2_dy)
-        async let f3_t = shiftPlane(f3_s, dx: gmv3_dx, dy: gmv3_dy)
-        let (f1, f2, f3) = await (f1_t, f2_t, f3_t)
+        let f1 = shiftPlane(f1_s, dx: gmv1_dx, dy: gmv1_dy)
+        let f2 = shiftPlane(f2_s, dx: gmv2_dx, dy: gmv2_dy)
+        let f3 = shiftPlane(f3_s, dx: gmv3_dx, dy: gmv3_dy)
         
         out.append(f0.toYCbCr())
         if opts.maxFrames >= 2 {

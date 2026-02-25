@@ -385,7 +385,7 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
 }
 
 @inline(__always)
-func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
+func applyTemporal(planes: [PlaneData420]) -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
     let pd0 = planes[0], pd1 = planes[1], pd2 = planes[2], pd3 = planes[3]
     let dx = pd0.width, dy = pd0.height
     
@@ -430,11 +430,9 @@ func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420,
     }
     
     // Y, Cb, Cr planes in parallel
-    async let yResult = { transform(p0: pd0.y, p1: pd1.y, p2: pd2.y, p3: pd3.y) }()
-    async let cbResult = { transform(p0: pd0.cb, p1: pd1.cb, p2: pd2.cb, p3: pd3.cb) }()
-    async let crResult = { transform(p0: pd0.cr, p1: pd1.cr, p2: pd2.cr, p3: pd3.cr) }()
-    
-    let (y, cb, cr) = await (yResult, cbResult, crResult)
+    let y = transform(p0: pd0.y, p1: pd1.y, p2: pd2.y, p3: pd3.y)
+    let cb = transform(p0: pd0.cb, p1: pd1.cb, p2: pd2.cb, p3: pd3.cb)
+    let cr = transform(p0: pd0.cr, p1: pd1.cr, p2: pd2.cr, p3: pd3.cr)
     
     return (
         PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
@@ -463,17 +461,15 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         
         let planes = toPlaneData420(images: chunk4)
         
-        async let gmv1_t = Task { estimateGMV(curr: planes[1], prev: planes[0]) }
-        async let gmv2_t = Task { estimateGMV(curr: planes[2], prev: planes[0]) }
-        async let gmv3_t = Task { estimateGMV(curr: planes[3], prev: planes[0]) }
-        let (gmv1, gmv2, gmv3) = await (gmv1_t.value, gmv2_t.value, gmv3_t.value)
+        let gmv1 = estimateGMV(curr: planes[1], prev: planes[0])
+        let gmv2 = estimateGMV(curr: planes[2], prev: planes[0])
+        let gmv3 = estimateGMV(curr: planes[3], prev: planes[0])
         
-        async let p1 = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
-        async let p2 = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
-        async let p3 = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
-        let (p1_v, p2_v, p3_v) = await (p1, p2, p3)
+        let p1_v = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
+        let p2_v = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
+        let p3_v = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
         
-        let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
+        let (ll, lh, h0, h1) = applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
         
         let qtLL = QuantizationTable(baseStep: max(1, Int(qt.step)))
         let qtLH = QuantizationTable(baseStep: Int(qt.step) * 2)
