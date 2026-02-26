@@ -200,22 +200,6 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
 
 private enum PlaneType { case y, cb, cr }
 
-private func fetchBlock(reader: ImageReader, plane: PlaneType, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-    var block = Block2D(width: w, height: h)
-    block.withView { view in
-        for i in 0..<h {
-            let row: [Int16]
-            switch plane {
-            case .y:  row = reader.rowY(x: x, y: y + i, size: w)
-            case .cb: row = reader.rowCb(x: x, y: y + i, size: w)
-            case .cr: row = reader.rowCr(x: x, y: y + i, size: w)
-            }
-            view.setRow(offsetY: i, row: row)
-        }
-    }
-    return block
-}
-
 private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
         return dwt2d(&view, size: size)
@@ -468,9 +452,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         let gmv2 = estimateGMV(curr: planes[2], prev: planes[0])
         let gmv3 = estimateGMV(curr: planes[3], prev: planes[0])
         
-        let p1_v = await shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
-        let p2_v = await shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
-        let p3_v = await shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
+        let p1_v = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
+        let p2_v = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
+        let p3_v = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
         
         let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
         

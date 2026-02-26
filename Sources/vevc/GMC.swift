@@ -1,3 +1,5 @@
+import Foundation
+
 @inline(__always)
 func calculateSAD(p1: UnsafePointer<Int16>, p2: UnsafePointer<Int16>, count: Int) -> Int {
     var sad: UInt = 0
@@ -184,9 +186,10 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
 }
 
 @inline(__always)
-func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
+func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
+    @Sendable @inline(__always)
     func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
         if w == 0 || h == 0 { return data }
         
@@ -221,24 +224,17 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
         return out
     }
     
-    return await withTaskGroup(of: (Int, [Int16]).self) { group in
-        group.addTask { (0, shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)) }
-        group.addTask { (1, shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
-        group.addTask { (2, shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
-        
-        var yOut = [Int16]()
-        var cbOut = [Int16]()
-        var crOut = [Int16]()
-        
-        for await (index, out) in group {
+    var results = [[Int16]](repeating: [], count: 3)
+    results.withUnsafeMutableBufferPointer { resPtr in
+        let rBase = UnsafePointerWrapper(resPtr.baseAddress!)
+        DispatchQueue.concurrentPerform(iterations: 3) { index in
             switch index {
-            case 0: yOut = out
-            case 1: cbOut = out
-            case 2: crOut = out
+            case 0: rBase.pointer[0] = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
+            case 1: rBase.pointer[1] = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+            case 2: rBase.pointer[2] = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
             default: break
             }
         }
-        
-        return PlaneData420(width: plane.width, height: plane.height, y: yOut, cb: cbOut, cr: crOut)
     }
+    return PlaneData420(width: plane.width, height: plane.height, y: results[0], cb: results[1], cr: results[2])
 }

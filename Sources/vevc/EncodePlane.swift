@@ -2,6 +2,11 @@
 
 import Foundation
 
+struct UnsafePointerWrapper<T>: @unchecked Sendable {
+    let pointer: UnsafeMutablePointer<T>
+    init(_ pointer: UnsafeMutablePointer<T>) { self.pointer = pointer }
+}
+
 struct PlaneData420 {
     let width: Int
     let height: Int
@@ -73,39 +78,44 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     let rY = pd.rY
     let rowCountY = (dy + size - 1) / size
     var resultsY = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountY)
-    var errorY: Error?
-
     let chunkSize = 4 // Process 4 rows per task to reduce Fork-Join overhead
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
     
-    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountY)
-        
-        var block = Block2D(width: size, height: size)
-        for i in startRow..<endRow {
-            let h = i * size
-            do {
-                var rowResults: [([UInt8], Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: dx, by: size) {
-                    block.withView { view in
-                        for line in 0..<size {
-                            let row = rY.row(x: w, y: (h + line), size: size)
-                            view.setRow(offsetY: line, row: row)
+    try resultsY.withUnsafeMutableBufferPointer { resultsYPtr in
+        let rYBase = UnsafePointerWrapper(resultsYPtr.baseAddress!)
+        var errorsY = [Error?](repeating: nil, count: taskCountY)
+        try errorsY.withUnsafeMutableBufferPointer { errorsYPtr in
+            let eYBase = UnsafePointerWrapper(errorsYPtr.baseAddress!)
+            DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountY)
+                
+                var block = Block2D(width: size, height: size)
+                for i in startRow..<endRow {
+                    let h = i * size
+                    do {
+                        var rowResults: [([UInt8], Block2D, Int, Int)] = []
+                        for w in stride(from: 0, to: dx, by: size) {
+                            block.withView { view in
+                                for line in 0..<size {
+                                    let row = rY.row(x: w, y: (h + line), size: size)
+                                    view.setRow(offsetY: line, row: row)
+                                }
+                            }
+                            var bw = BitWriter()
+                            let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+                            bw.flush()
+                            rowResults.append((bw.data, ll, w, h))
                         }
+                        rYBase.pointer[i] = (h, rowResults)
+                    } catch {
+                        eYBase.pointer[taskIdx] = error
                     }
-                    var bw = BitWriter()
-                    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
-                    bw.flush()
-                    rowResults.append((bw.data, ll, w, h))
                 }
-                resultsY[i] = (h, rowResults)
-            } catch {
-                errorY = error
             }
+            if let err = errorsYPtr.first(where: { $0 != nil }) { throw err! }
         }
     }
-    if let err = errorY { throw err }
 
     for i in 0..<rowCountY {
         guard let res = resultsY[i] else { continue }
@@ -136,107 +146,118 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
         }
     }
     
-    let rCb = pd.rCb
-    let cbDx = (dx + 1) / 2
-    let cbDy = (dy + 1) / 2
-    let subCbDx = cbDx / 2
-    let subCbDy = cbDy / 2
-    let rowCountCb = (cbDy + size - 1) / size
-    var resultsCb = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountCb)
-    var errorCb: Error?
-
-    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountCb)
+        let rCb = pd.rCb
+        let cbDx = (dx + 1) / 2
+        let cbDy = (dy + 1) / 2
+        let subCbDx = cbDx / 2
+        let subCbDy = cbDy / 2
+        let rowCountCb = (cbDy + size - 1) / size
+        var resultsCb = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountCb)
+        let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
         
-        var block = Block2D(width: size, height: size)
-        for i in startRow..<endRow {
-            let h = i * size
-            do {
-                var rowResults: [([UInt8], Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: cbDx, by: size) {
-                    block.withView { view in
-                        for line in 0..<size {
-                            let row = rCb.row(x: w, y: (h + line), size: size)
-                            view.setRow(offsetY: line, row: row)
+                try resultsCb.withUnsafeMutableBufferPointer { resultsCbPtr in
+                    let rCbBase = UnsafePointerWrapper(resultsCbPtr.baseAddress!)
+                    var errorsCb = [Error?](repeating: nil, count: taskCountCb)
+                    try errorsCb.withUnsafeMutableBufferPointer { errorsCbPtr in
+                        let eCbBase = UnsafePointerWrapper(errorsCbPtr.baseAddress!)
+                        DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
+                            let startRow = taskIdx * chunkSize
+                            let endRow = min(startRow + chunkSize, rowCountCb)
+                            
+                            var block = Block2D(width: size, height: size)
+                            for i in startRow..<endRow {
+                                let h = i * size
+                                do {
+                                    var rowResults: [([UInt8], Block2D, Int, Int)] = []
+                                    for w in stride(from: 0, to: cbDx, by: size) {
+                                        block.withView { view in
+                                            for line in 0..<size {
+                                                let row = rCb.row(x: w, y: (h + line), size: size)
+                                                view.setRow(offsetY: line, row: row)
+                                            }
+                                        }
+                                        var bw = BitWriter()
+                                        let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+                                        bw.flush()
+                                        rowResults.append((bw.data, ll, w, h))
+                                    }
+                                    rCbBase.pointer[i] = (h, rowResults)
+                                } catch {
+                                    eCbBase.pointer[taskIdx] = error
+                                }
+                            }
                         }
-                    }
-                    var bw = BitWriter()
-                    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
-                    bw.flush()
-                    rowResults.append((bw.data, ll, w, h))
-                }
-                resultsCb[i] = (h, rowResults)
-            } catch {
-                errorCb = error
-            }
-        }
-    }
-    if let err = errorCb { throw err }
-
-    for i in 0..<rowCountCb {
-        guard let res = resultsCb[i] else { continue }
-        for j in res.1.indices {
-            var (data, llBlock, w, h) = res.1[j]
-            bufCb.append(data)
-            let destStartX = w / 2
-            let destStartY = h / 2
-            let subSize = size / 2
-            llBlock.withView { view in
-                for blockY in 0..<subSize {
-                    let dstY = destStartY + blockY
-                    if dstY >= subCbDy { continue }
-                    let srcPtr = view.rowPointer(y: blockY)
-                    let limit = min(subSize, subCbDx - destStartX)
-                    if 0 < limit {
-                        let dstIdx = dstY * subCbDx + destStartX
-                        subCb.withUnsafeMutableBufferPointer { dstPtr in
-                            dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
+                        if let err = errorsCbPtr.first(where: { $0 != nil }) { throw err! }
                     }
                 }
-            }
-        }
-    }
-    
-    let rCr = pd.rCr
-    let rowCountCr = (cbDy + size - 1) / size
-    var resultsCr = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountCr)
-    var errorCr: Error?
-
-    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountCr)
-        
-        var block = Block2D(width: size, height: size)
-        for i in startRow..<endRow {
-            let h = i * size
-            do {
-                var rowResults: [([UInt8], Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: cbDx, by: size) {
-                    block.withView { view in
-                        for line in 0..<size {
-                            let row = rCr.row(x: w, y: (h + line), size: size)
-                            view.setRow(offsetY: line, row: row)
+            
+                for i in 0..<rowCountCb {
+                    guard let res = resultsCb[i] else { continue }
+                    for j in res.1.indices {
+                        var (data, llBlock, w, h) = res.1[j]
+                        bufCb.append(data)
+                        let destStartX = w / 2
+                        let destStartY = h / 2
+                        let subSize = size / 2
+                        llBlock.withView { view in
+                            for blockY in 0..<subSize {
+                                let dstY = destStartY + blockY
+                                if dstY >= subCbDy { continue }
+                                let srcPtr = view.rowPointer(y: blockY)
+                                let limit = min(subSize, subCbDx - destStartX)
+                                if 0 < limit {
+                                    let dstIdx = dstY * subCbDx + destStartX
+                                    subCb.withUnsafeMutableBufferPointer { dstPtr in
+                                        dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                                    }
+                                }
+                            }
                         }
                     }
-                    var bw = BitWriter()
-                    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
-                    bw.flush()
-                    rowResults.append((bw.data, ll, w, h))
                 }
-                resultsCr[i] = (h, rowResults)
-            } catch {
-                errorCr = error
-            }
-        }
-    }
-    if let err = errorCr { throw err }
-
-    for i in 0..<rowCountCr {
-        guard let res = resultsCr[i] else { continue }
+                
+                let rCr = pd.rCr
+                let rowCountCr = (cbDy + size - 1) / size
+                var resultsCr = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountCr)
+                let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+                
+                try resultsCr.withUnsafeMutableBufferPointer { resultsCrPtr in
+                    let rCrBase = UnsafePointerWrapper(resultsCrPtr.baseAddress!)
+                    var errorsCr = [Error?](repeating: nil, count: taskCountCr)
+                    try errorsCr.withUnsafeMutableBufferPointer { errorsCrPtr in
+                        let eCrBase = UnsafePointerWrapper(errorsCrPtr.baseAddress!)
+                        DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
+                            let startRow = taskIdx * chunkSize
+                            let endRow = min(startRow + chunkSize, rowCountCr)
+                            
+                            var block = Block2D(width: size, height: size)
+                            for i in startRow..<endRow {
+                                let h = i * size
+                                do {
+                                    var rowResults: [([UInt8], Block2D, Int, Int)] = []
+                                    for w in stride(from: 0, to: cbDx, by: size) {
+                                        block.withView { view in
+                                            for line in 0..<size {
+                                                let row = rCr.row(x: w, y: (h + line), size: size)
+                                                view.setRow(offsetY: line, row: row)
+                                            }
+                                        }
+                                        var bw = BitWriter()
+                                        let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+                                        bw.flush()
+                                        rowResults.append((bw.data, ll, w, h))
+                                    }
+                                    rCrBase.pointer[i] = (h, rowResults)
+                                } catch {
+                                    eCrBase.pointer[taskIdx] = error
+                                }
+                            }
+                        }
+                                    if let err = errorsCrPtr.first(where: { $0 != nil }) { throw err! }
+                                }
+                            }
+                        
+                            for i in 0..<rowCountCr {        guard let res = resultsCr[i] else { continue }
         for j in res.1.indices {
             var (data, llBlock, w, h) = res.1[j]
             bufCr.append(data)
@@ -293,36 +314,44 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
     let rY = pd.rY
     let rowCountY = (dy + size - 1) / size
     var resultsY = [(Int, [([UInt8], Int, Int)])?](repeating: nil, count: rowCountY)
-    var errorY: Error?
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountY)
-        
-        var block = Block2D(width: size, height: size)
-        for i in startRow..<endRow {
-            let h = i * size
-            do {
-                var rowResults: [([UInt8], Int, Int)] = []
-                for w in stride(from: 0, to: dx, by: size) {
-                    block.withView { view in
-                        for line in 0..<size {
-                            let row = rY.row(x: w, y: (h + line), size: size)
-                            view.setRow(offsetY: line, row: row)
+    
+    try resultsY.withUnsafeMutableBufferPointer { resultsYPtr in
+        let rYBase = UnsafePointerWrapper(resultsYPtr.baseAddress!)
+        var errorsY = [Error?](repeating: nil, count: taskCountY)
+        try errorsY.withUnsafeMutableBufferPointer { errorsYPtr in
+            let eYBase = UnsafePointerWrapper(errorsYPtr.baseAddress!)
+            DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountY)
+                
+                var block = Block2D(width: size, height: size)
+                for i in startRow..<endRow {
+                    let h = i * size
+                    do {
+                        var rowResults: [([UInt8], Int, Int)] = []
+                        for w in stride(from: 0, to: dx, by: size) {
+                            block.withView { view in
+                                for line in 0..<size {
+                                    let row = rY.row(x: w, y: (h + line), size: size)
+                                    view.setRow(offsetY: line, row: row)
+                                }
+                            }
+                            var bw = BitWriter()
+                            try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+                            bw.flush()
+                            rowResults.append((bw.data, w, h))
                         }
+                        rYBase.pointer[i] = (h, rowResults)
+                    } catch {
+                        eYBase.pointer[taskIdx] = error
                     }
-                    var bw = BitWriter()
-                    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
-                    bw.flush()
-                    rowResults.append((bw.data, w, h))
                 }
-                resultsY[i] = (h, rowResults)
-            } catch {
-                errorY = error
             }
+            if let err = errorsYPtr.first(where: { $0 != nil }) { throw err! }
         }
     }
-    if let err = errorY { throw err }
+
     for i in 0..<rowCountY {
         guard let res = resultsY[i] else { continue }
         for (data, _, _) in res.1 { bufY.append(data) }
@@ -333,36 +362,44 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + size - 1) / size
     var resultsCb = [(Int, [([UInt8], Int, Int)])?](repeating: nil, count: rowCountCb)
-    var errorCb: Error?
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountCb)
-        
-        var block = Block2D(width: size, height: size)
-        for i in startRow..<endRow {
-            let h = i * size
-            do {
-                var rowResults: [([UInt8], Int, Int)] = []
-                for w in stride(from: 0, to: cbDx, by: size) {
-                    block.withView { view in
-                        for line in 0..<size {
-                            let row = rCb.row(x: w, y: (h + line), size: size)
-                            view.setRow(offsetY: line, row: row)
+    
+    try resultsCb.withUnsafeMutableBufferPointer { resultsCbPtr in
+        let rCbBase = UnsafePointerWrapper(resultsCbPtr.baseAddress!)
+        var errorsCb = [Error?](repeating: nil, count: taskCountCb)
+        try errorsCb.withUnsafeMutableBufferPointer { errorsCbPtr in
+            let eCbBase = UnsafePointerWrapper(errorsCbPtr.baseAddress!)
+            DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCb)
+                
+                var block = Block2D(width: size, height: size)
+                for i in startRow..<endRow {
+                    let h = i * size
+                    do {
+                        var rowResults: [([UInt8], Int, Int)] = []
+                        for w in stride(from: 0, to: cbDx, by: size) {
+                            block.withView { view in
+                                for line in 0..<size {
+                                    let row = rCb.row(x: w, y: (h + line), size: size)
+                                    view.setRow(offsetY: line, row: row)
+                                }
+                            }
+                            var bw = BitWriter()
+                            try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+                            bw.flush()
+                            rowResults.append((bw.data, w, h))
                         }
+                        rCbBase.pointer[i] = (h, rowResults)
+                    } catch {
+                        eCbBase.pointer[taskIdx] = error
                     }
-                    var bw = BitWriter()
-                    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
-                    bw.flush()
-                    rowResults.append((bw.data, w, h))
                 }
-                resultsCb[i] = (h, rowResults)
-            } catch {
-                errorCb = error
             }
+            if let err = errorsCbPtr.first(where: { $0 != nil }) { throw err! }
         }
     }
-    if let err = errorCb { throw err }
+
     for i in 0..<rowCountCb {
         guard let res = resultsCb[i] else { continue }
         for (data, _, _) in res.1 { bufCb.append(data) }
@@ -371,36 +408,44 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
     let rCr = pd.rCr
     let rowCountCr = (cbDy + size - 1) / size
     var resultsCr = [(Int, [([UInt8], Int, Int)])?](repeating: nil, count: rowCountCr)
-    var errorCr: Error?
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountCr)
-        
-        var block = Block2D(width: size, height: size)
-        for i in startRow..<endRow {
-            let h = i * size
-            do {
-                var rowResults: [([UInt8], Int, Int)] = []
-                for w in stride(from: 0, to: cbDx, by: size) {
-                    block.withView { view in
-                        for line in 0..<size {
-                            let row = rCr.row(x: w, y: (h + line), size: size)
-                            view.setRow(offsetY: line, row: row)
+    
+    try resultsCr.withUnsafeMutableBufferPointer { resultsCrPtr in
+        let rCrBase = UnsafePointerWrapper(resultsCrPtr.baseAddress!)
+        var errorsCr = [Error?](repeating: nil, count: taskCountCr)
+        try errorsCr.withUnsafeMutableBufferPointer { errorsCrPtr in
+            let eCrBase = UnsafePointerWrapper(errorsCrPtr.baseAddress!)
+            DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCr)
+                
+                var block = Block2D(width: size, height: size)
+                for i in startRow..<endRow {
+                    let h = i * size
+                    do {
+                        var rowResults: [([UInt8], Int, Int)] = []
+                        for w in stride(from: 0, to: cbDx, by: size) {
+                            block.withView { view in
+                                for line in 0..<size {
+                                    let row = rCr.row(x: w, y: (h + line), size: size)
+                                    view.setRow(offsetY: line, row: row)
+                                }
+                            }
+                            var bw = BitWriter()
+                            try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+                            bw.flush()
+                            rowResults.append((bw.data, w, h))
                         }
+                        rCrBase.pointer[i] = (h, rowResults)
+                    } catch {
+                        eCrBase.pointer[taskIdx] = error
                     }
-                    var bw = BitWriter()
-                    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
-                    bw.flush()
-                    rowResults.append((bw.data, w, h))
                 }
-                resultsCr[i] = (h, rowResults)
-            } catch {
-                errorCr = error
             }
+            if let err = errorsCrPtr.first(where: { $0 != nil }) { throw err! }
         }
     }
-    if let err = errorCr { throw err }
+
     for i in 0..<rowCountCr {
         guard let res = resultsCr[i] else { continue }
         for (data, _, _) in res.1 { bufCr.append(data) }
