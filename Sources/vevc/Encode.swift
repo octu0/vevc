@@ -200,6 +200,22 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
 
 private enum PlaneType { case y, cb, cr }
 
+private func fetchBlock(reader: ImageReader, plane: PlaneType, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+    var block = Block2D(width: w, height: h)
+    block.withView { view in
+        for i in 0..<h {
+            let row: [Int16]
+            switch plane {
+            case .y:  row = reader.rowY(x: x, y: y + i, size: w)
+            case .cb: row = reader.rowCb(x: x, y: y + i, size: w)
+            case .cr: row = reader.rowCr(x: x, y: y + i, size: w)
+            }
+            view.setRow(offsetY: i, row: row)
+        }
+    }
+    return block
+}
+
 private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
         return dwt2d(&view, size: size)

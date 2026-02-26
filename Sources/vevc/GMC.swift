@@ -189,7 +189,7 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
 func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
-    @Sendable @inline(__always)
+    @Sendable
     func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
         if w == 0 || h == 0 { return data }
         
@@ -224,17 +224,16 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
         return out
     }
     
-    var results = [[Int16]](repeating: [], count: 3)
-    results.withUnsafeMutableBufferPointer { resPtr in
-        let rBase = UnsafePointerWrapper(resPtr.baseAddress!)
-        DispatchQueue.concurrentPerform(iterations: 3) { index in
-            switch index {
-            case 0: rBase.pointer[0] = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
-            case 1: rBase.pointer[1] = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-            case 2: rBase.pointer[2] = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-            default: break
-            }
+    let results = ConcurrentBox([[Int16]](repeating: [], count: 3))
+    
+    DispatchQueue.concurrentPerform(iterations: 3) { index in
+        switch index {
+        case 0: results.value[0] = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
+        case 1: results.value[1] = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+        case 2: results.value[2] = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+        default: break
         }
     }
-    return PlaneData420(width: plane.width, height: plane.height, y: results[0], cb: results[1], cr: results[2])
+    
+    return PlaneData420(width: plane.width, height: plane.height, y: results.value[0], cb: results.value[1], cr: results.value[2])
 }
