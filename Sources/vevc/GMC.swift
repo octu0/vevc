@@ -1,33 +1,36 @@
 @inline(__always)
 func calculateSAD(p1: UnsafePointer<Int16>, p2: UnsafePointer<Int16>, count: Int) -> Int {
-    var sad: Int32 = 0
-    var i = 0
-    let step = 16
+    var sad: UInt = 0
+    let step = 8
     let end = count - (count % step)
+    var i = 0
     
-    var sum16 = SIMD16<Int32>(repeating: 0)
-    let zero = SIMD16<Int16>(repeating: 0)
-    
+    // Explicit unrolling to help auto-vectorizer
     while i < end {
-        let v1 = UnsafeRawPointer(p1.advanced(by: i)).loadUnaligned(as: SIMD16<Int16>.self)
-        let v2 = UnsafeRawPointer(p2.advanced(by: i)).loadUnaligned(as: SIMD16<Int16>.self)
-        
-        let d = v1 &- v2
-        let absD = d.replacing(with: zero &- d, where: d .< 0)
-        
-        sum16 &+= SIMD16<Int32>(clamping: absD)
-        
+        let diff0 = Int(p1[i]) - Int(p2[i])
+        let diff1 = Int(p1[i+1]) - Int(p2[i+1])
+        let diff2 = Int(p1[i+2]) - Int(p2[i+2])
+        let diff3 = Int(p1[i+3]) - Int(p2[i+3])
+        let diff4 = Int(p1[i+4]) - Int(p2[i+4])
+        let diff5 = Int(p1[i+5]) - Int(p2[i+5])
+        let diff6 = Int(p1[i+6]) - Int(p2[i+6])
+        let diff7 = Int(p1[i+7]) - Int(p2[i+7])
+
+        sad &+= UInt(diff0 > 0 ? diff0 : -diff0)
+        sad &+= UInt(diff1 > 0 ? diff1 : -diff1)
+        sad &+= UInt(diff2 > 0 ? diff2 : -diff2)
+        sad &+= UInt(diff3 > 0 ? diff3 : -diff3)
+        sad &+= UInt(diff4 > 0 ? diff4 : -diff4)
+        sad &+= UInt(diff5 > 0 ? diff5 : -diff5)
+        sad &+= UInt(diff6 > 0 ? diff6 : -diff6)
+        sad &+= UInt(diff7 > 0 ? diff7 : -diff7)
+
         i += step
     }
     
-    sad &+= sum16[0] &+ sum16[1] &+ sum16[2] &+ sum16[3]
-    sad &+= sum16[4] &+ sum16[5] &+ sum16[6] &+ sum16[7]
-    sad &+= sum16[8] &+ sum16[9] &+ sum16[10] &+ sum16[11]
-    sad &+= sum16[12] &+ sum16[13] &+ sum16[14] &+ sum16[15]
-    
     while i < count {
-        let d = Int32(p1[i]) - Int32(p2[i])
-        sad &+= abs(d)
+        let diff = Int(p1[i]) - Int(p2[i])
+        sad &+= UInt(diff > 0 ? diff : -diff)
         i += 1
     }
     
@@ -51,14 +54,13 @@ func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
                 let outRow = y * w
                 for x in 0..<w {
                     let px = x * 8
-                    var sum: Int32 = 0
+                    var sum: Int = 0
                     
-                    // Simple average of 8x8 block using SIMD
+                    // Simple average of 8x8 block using auto-vectorized loop
                     for dy in 0..<8 {
                         let off = (py + dy) * pdWidth + px
-                        let v = UnsafeRawPointer(pY.advanced(by: off)).loadUnaligned(as: SIMD8<Int16>.self)
-                        let v32 = SIMD8<Int32>(clamping: v)
-                        sum &+= v32[0] &+ v32[1] &+ v32[2] &+ v32[3] &+ v32[4] &+ v32[5] &+ v32[6] &+ v32[7]
+                        sum &+= Int(pY[off]) &+ Int(pY[off+1]) &+ Int(pY[off+2]) &+ Int(pY[off+3]) &+
+                                Int(pY[off+4]) &+ Int(pY[off+5]) &+ Int(pY[off+6]) &+ Int(pY[off+7])
                     }
                     pOut[outRow + x] = Int16(sum / 64)
                 }
