@@ -1,5 +1,7 @@
 // MARK: - Encode Plane Arrays
 
+import Foundation
+
 struct PlaneData420 {
     let width: Int
     let height: Int
@@ -69,45 +71,64 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     var bufCr: [[UInt8]] = []
     
     let rY = pd.rY
-    try await withThrowingTaskGroup(of: (Int, [([UInt8], Block2D, Int, Int)]).self) { group in
-        for h in stride(from: 0, to: dy, by: size) {
-            group.addTask {
+    let rowCountY = (dy + size - 1) / size
+    var resultsY = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountY)
+    var errorY: Error?
+
+    let chunkSize = 4 // Process 4 rows per task to reduce Fork-Join overhead
+    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
+    
+    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
+        let startRow = taskIdx * chunkSize
+        let endRow = min(startRow + chunkSize, rowCountY)
+        
+        var block = Block2D(width: size, height: size)
+        for i in startRow..<endRow {
+            let h = i * size
+            do {
                 var rowResults: [([UInt8], Block2D, Int, Int)] = []
                 for w in stride(from: 0, to: dx, by: size) {
-                    let (data, ll) = try transformLayerFunc(rows: rY.row, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((data, ll, w, h))
+                    block.withView { view in
+                        for line in 0..<size {
+                            let row = rY.row(x: w, y: (h + line), size: size)
+                            view.setRow(offsetY: line, row: row)
+                        }
+                    }
+                    var bw = BitWriter()
+                    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+                    bw.flush()
+                    rowResults.append((bw.data, ll, w, h))
                 }
-                return (h, rowResults)
+                resultsY[i] = (h, rowResults)
+            } catch {
+                errorY = error
             }
         }
-        var results: [(Int, [([UInt8], Block2D, Int, Int)])] = []
-        for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                var (data, llBlock, w, h) = results[i].1[j]
-                bufY.append(data)
-                
-                // Copy LL block to subY
-                let destStartX = w / 2
-                let destStartY = h / 2
-                let subSize = size / 2
-                llBlock.withView { view in
-                    for blockY in 0..<subSize {
-                        let dstY = destStartY + blockY
-                        if subDy <= dstY {
-                            continue
-                        }
-                        let srcPtr = view.rowPointer(y: blockY)
-                        let limit = min(subSize, subDx - destStartX)
-                        if 0 < limit {
-                            let dstIdx = dstY * subDx + destStartX
-                            subY.withUnsafeMutableBufferPointer { dstPtr in
-                                dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                            }
+    }
+    if let err = errorY { throw err }
+
+    for i in 0..<rowCountY {
+        guard let res = resultsY[i] else { continue }
+        for j in res.1.indices {
+            var (data, llBlock, w, h) = res.1[j]
+            bufY.append(data)
+            
+            // Copy LL block to subY
+            let destStartX = w / 2
+            let destStartY = h / 2
+            let subSize = size / 2
+            llBlock.withView { view in
+                for blockY in 0..<subSize {
+                    let dstY = destStartY + blockY
+                    if subDy <= dstY {
+                        continue
+                    }
+                    let srcPtr = view.rowPointer(y: blockY)
+                    let limit = min(subSize, subDx - destStartX)
+                    if 0 < limit {
+                        let dstIdx = dstY * subDx + destStartX
+                        subY.withUnsafeMutableBufferPointer { dstPtr in
+                            dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                         }
                     }
                 }
@@ -120,39 +141,58 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     let cbDy = (dy + 1) / 2
     let subCbDx = cbDx / 2
     let subCbDy = cbDy / 2
-    try await withThrowingTaskGroup(of: (Int, [([UInt8], Block2D, Int, Int)]).self) { group in
-        for h in stride(from: 0, to: cbDy, by: size) {
-            group.addTask {
+    let rowCountCb = (cbDy + size - 1) / size
+    var resultsCb = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountCb)
+    var errorCb: Error?
+
+    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
+    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
+        let startRow = taskIdx * chunkSize
+        let endRow = min(startRow + chunkSize, rowCountCb)
+        
+        var block = Block2D(width: size, height: size)
+        for i in startRow..<endRow {
+            let h = i * size
+            do {
                 var rowResults: [([UInt8], Block2D, Int, Int)] = []
                 for w in stride(from: 0, to: cbDx, by: size) {
-                    let (data, ll) = try transformLayerFunc(rows: rCb.row, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((data, ll, w, h))
+                    block.withView { view in
+                        for line in 0..<size {
+                            let row = rCb.row(x: w, y: (h + line), size: size)
+                            view.setRow(offsetY: line, row: row)
+                        }
+                    }
+                    var bw = BitWriter()
+                    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+                    bw.flush()
+                    rowResults.append((bw.data, ll, w, h))
                 }
-                return (h, rowResults)
+                resultsCb[i] = (h, rowResults)
+            } catch {
+                errorCb = error
             }
         }
-        var results: [(Int, [([UInt8], Block2D, Int, Int)])] = []
-        for try await res in group { results.append(res) }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                var (data, llBlock, w, h) = results[i].1[j]
-                bufCb.append(data)
-                let destStartX = w / 2
-                let destStartY = h / 2
-                let subSize = size / 2
-                llBlock.withView { view in
-                    for blockY in 0..<subSize {
-                        let dstY = destStartY + blockY
-                        if dstY >= subCbDy { continue }
-                        let srcPtr = view.rowPointer(y: blockY)
-                        let limit = min(subSize, subCbDx - destStartX)
-                        if 0 < limit {
-                            let dstIdx = dstY * subCbDx + destStartX
-                            subCb.withUnsafeMutableBufferPointer { dstPtr in
-                                dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                            }
+    }
+    if let err = errorCb { throw err }
+
+    for i in 0..<rowCountCb {
+        guard let res = resultsCb[i] else { continue }
+        for j in res.1.indices {
+            var (data, llBlock, w, h) = res.1[j]
+            bufCb.append(data)
+            let destStartX = w / 2
+            let destStartY = h / 2
+            let subSize = size / 2
+            llBlock.withView { view in
+                for blockY in 0..<subSize {
+                    let dstY = destStartY + blockY
+                    if dstY >= subCbDy { continue }
+                    let srcPtr = view.rowPointer(y: blockY)
+                    let limit = min(subSize, subCbDx - destStartX)
+                    if 0 < limit {
+                        let dstIdx = dstY * subCbDx + destStartX
+                        subCb.withUnsafeMutableBufferPointer { dstPtr in
+                            dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                         }
                     }
                 }
@@ -161,41 +201,60 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     }
     
     let rCr = pd.rCr
-    try await withThrowingTaskGroup(of: (Int, [([UInt8], Block2D, Int, Int)]).self) { group in
-        for h in stride(from: 0, to: cbDy, by: size) {
-            group.addTask {
+    let rowCountCr = (cbDy + size - 1) / size
+    var resultsCr = [(Int, [([UInt8], Block2D, Int, Int)])?](repeating: nil, count: rowCountCr)
+    var errorCr: Error?
+
+    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
+        let startRow = taskIdx * chunkSize
+        let endRow = min(startRow + chunkSize, rowCountCr)
+        
+        var block = Block2D(width: size, height: size)
+        for i in startRow..<endRow {
+            let h = i * size
+            do {
                 var rowResults: [([UInt8], Block2D, Int, Int)] = []
                 for w in stride(from: 0, to: cbDx, by: size) {
-                    let (data, ll) = try transformLayerFunc(rows: rCr.row, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((data, ll, w, h))
+                    block.withView { view in
+                        for line in 0..<size {
+                            let row = rCr.row(x: w, y: (h + line), size: size)
+                            view.setRow(offsetY: line, row: row)
+                        }
+                    }
+                    var bw = BitWriter()
+                    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
+                    bw.flush()
+                    rowResults.append((bw.data, ll, w, h))
                 }
-                return (h, rowResults)
+                resultsCr[i] = (h, rowResults)
+            } catch {
+                errorCr = error
             }
         }
-        var results: [(Int, [([UInt8], Block2D, Int, Int)])] = []
-        for try await res in group { results.append(res) }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                var (data, llBlock, w, h) = results[i].1[j]
-                bufCr.append(data)
-                let destStartX = w / 2
-                let destStartY = h / 2
-                let subSize = size / 2
-                llBlock.withView { view in
-                    for blockY in 0..<subSize {
-                        let dstY = destStartY + blockY
-                        if subCbDy <= dstY {
-                            continue
-                        }
-                        let srcPtr = view.rowPointer(y: blockY)
-                        let limit = min(subSize, subCbDx - destStartX)
-                        if 0 < limit {
-                            let dstIdx = dstY * subCbDx + destStartX
-                            subCr.withUnsafeMutableBufferPointer { dstPtr in
-                                dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                            }
+    }
+    if let err = errorCr { throw err }
+
+    for i in 0..<rowCountCr {
+        guard let res = resultsCr[i] else { continue }
+        for j in res.1.indices {
+            var (data, llBlock, w, h) = res.1[j]
+            bufCr.append(data)
+            let destStartX = w / 2
+            let destStartY = h / 2
+            let subSize = size / 2
+            llBlock.withView { view in
+                for blockY in 0..<subSize {
+                    let dstY = destStartY + blockY
+                    if subCbDy <= dstY {
+                        continue
+                    }
+                    let srcPtr = view.rowPointer(y: blockY)
+                    let limit = min(subSize, subCbDx - destStartX)
+                    if 0 < limit {
+                        let dstIdx = dstY * subCbDx + destStartX
+                        subCr.withUnsafeMutableBufferPointer { dstPtr in
+                            dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                         }
                     }
                 }
@@ -225,81 +284,126 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
 func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable) async throws -> [UInt8] {
     let dx = pd.width
     let dy = pd.height
+    let chunkSize = 4
     
     var bufY: [[UInt8]] = []
     var bufCb: [[UInt8]] = []
     var bufCr: [[UInt8]] = []
     
     let rY = pd.rY
-    try await withThrowingTaskGroup(of: (Int, [([UInt8], Int, Int)]).self) { group in
-        for h in stride(from: 0, to: dy, by: size) {
-            group.addTask {
+    let rowCountY = (dy + size - 1) / size
+    var resultsY = [(Int, [([UInt8], Int, Int)])?](repeating: nil, count: rowCountY)
+    var errorY: Error?
+    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
+    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
+        let startRow = taskIdx * chunkSize
+        let endRow = min(startRow + chunkSize, rowCountY)
+        
+        var block = Block2D(width: size, height: size)
+        for i in startRow..<endRow {
+            let h = i * size
+            do {
                 var rowResults: [([UInt8], Int, Int)] = []
                 for w in stride(from: 0, to: dx, by: size) {
-                    let data = try transformBaseFunc(rows: rY.row, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((data, w, h))
+                    block.withView { view in
+                        for line in 0..<size {
+                            let row = rY.row(x: w, y: (h + line), size: size)
+                            view.setRow(offsetY: line, row: row)
+                        }
+                    }
+                    var bw = BitWriter()
+                    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+                    bw.flush()
+                    rowResults.append((bw.data, w, h))
                 }
-                return (h, rowResults)
+                resultsY[i] = (h, rowResults)
+            } catch {
+                errorY = error
             }
         }
-        var results: [(Int, [([UInt8], Int, Int)])] = []
-        for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        for (_, rowBlocks) in results {
-            for (data, _, _) in rowBlocks { bufY.append(data) }
-        }
+    }
+    if let err = errorY { throw err }
+    for i in 0..<rowCountY {
+        guard let res = resultsY[i] else { continue }
+        for (data, _, _) in res.1 { bufY.append(data) }
     }
     
     let rCb = pd.rCb
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
-    try await withThrowingTaskGroup(of: (Int, [([UInt8], Int, Int)]).self) { group in
-        for h in stride(from: 0, to: cbDy, by: size) {
-            group.addTask {
+    let rowCountCb = (cbDy + size - 1) / size
+    var resultsCb = [(Int, [([UInt8], Int, Int)])?](repeating: nil, count: rowCountCb)
+    var errorCb: Error?
+    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
+    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
+        let startRow = taskIdx * chunkSize
+        let endRow = min(startRow + chunkSize, rowCountCb)
+        
+        var block = Block2D(width: size, height: size)
+        for i in startRow..<endRow {
+            let h = i * size
+            do {
                 var rowResults: [([UInt8], Int, Int)] = []
                 for w in stride(from: 0, to: cbDx, by: size) {
-                    let data = try transformBaseFunc(rows: rCb.row, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((data, w, h))
+                    block.withView { view in
+                        for line in 0..<size {
+                            let row = rCb.row(x: w, y: (h + line), size: size)
+                            view.setRow(offsetY: line, row: row)
+                        }
+                    }
+                    var bw = BitWriter()
+                    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+                    bw.flush()
+                    rowResults.append((bw.data, w, h))
                 }
-                return (h, rowResults)
-            }
-        }
-        var results: [(Int, [([UInt8], Int, Int)])] = []
-        for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        for (_, rowBlocks) in results {
-            for (data, _, _) in rowBlocks {
-                bufCb.append(data)
+                resultsCb[i] = (h, rowResults)
+            } catch {
+                errorCb = error
             }
         }
     }
+    if let err = errorCb { throw err }
+    for i in 0..<rowCountCb {
+        guard let res = resultsCb[i] else { continue }
+        for (data, _, _) in res.1 { bufCb.append(data) }
+    }
     
     let rCr = pd.rCr
-    try await withThrowingTaskGroup(of: (Int, [([UInt8], Int, Int)]).self) { group in
-        for h in stride(from: 0, to: cbDy, by: size) {
-            group.addTask {
+    let rowCountCr = (cbDy + size - 1) / size
+    var resultsCr = [(Int, [([UInt8], Int, Int)])?](repeating: nil, count: rowCountCr)
+    var errorCr: Error?
+    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
+        let startRow = taskIdx * chunkSize
+        let endRow = min(startRow + chunkSize, rowCountCr)
+        
+        var block = Block2D(width: size, height: size)
+        for i in startRow..<endRow {
+            let h = i * size
+            do {
                 var rowResults: [([UInt8], Int, Int)] = []
                 for w in stride(from: 0, to: cbDx, by: size) {
-                    let data = try transformBaseFunc(rows: rCr.row, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((data, w, h))
+                    block.withView { view in
+                        for line in 0..<size {
+                            let row = rCr.row(x: w, y: (h + line), size: size)
+                            view.setRow(offsetY: line, row: row)
+                        }
+                    }
+                    var bw = BitWriter()
+                    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
+                    bw.flush()
+                    rowResults.append((bw.data, w, h))
                 }
-                return (h, rowResults)
+                resultsCr[i] = (h, rowResults)
+            } catch {
+                errorCr = error
             }
         }
-        var results: [(Int, [([UInt8], Int, Int)])] = []
-        for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        for (_, rowBlocks) in results {
-            for (data, _, _) in rowBlocks {
-                bufCr.append(data)
-            }
-        }
+    }
+    if let err = errorCr { throw err }
+    for i in 0..<rowCountCr {
+        guard let res = resultsCr[i] else { continue }
+        for (data, _, _) in res.1 { bufCr.append(data) }
     }
     
     var out: [UInt8] = []
