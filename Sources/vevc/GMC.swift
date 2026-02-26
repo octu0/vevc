@@ -182,7 +182,7 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
 }
 
 @inline(__always)
-func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
+func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
     func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
@@ -219,9 +219,24 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
         return out
     }
     
-    let yOut = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
-    let cbOut = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-    let crOut = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-    
-    return PlaneData420(width: plane.width, height: plane.height, y: yOut, cb: cbOut, cr: crOut)
+    return await withTaskGroup(of: (Int, [Int16]).self) { group in
+        group.addTask { (0, shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)) }
+        group.addTask { (1, shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
+        group.addTask { (2, shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)) }
+        
+        var yOut = [Int16]()
+        var cbOut = [Int16]()
+        var crOut = [Int16]()
+        
+        for await (index, out) in group {
+            switch index {
+            case 0: yOut = out
+            case 1: cbOut = out
+            case 2: crOut = out
+            default: break
+            }
+        }
+        
+        return PlaneData420(width: plane.width, height: plane.height, y: yOut, cb: cbOut, cr: crOut)
+    }
 }
