@@ -6,15 +6,11 @@ public struct BitWriter {
     public var data: [UInt8]
     private var cache: UInt8
     private var bits: UInt8
-    private var buffer: [UInt8]
-    private let bufferSize = 4096
     
     public init() {
         self.data = []
         self.cache = 0
         self.bits = 0
-        self.buffer = []
-        self.buffer.reserveCapacity(bufferSize)
     }
     
     @inline(__always)
@@ -24,11 +20,7 @@ public struct BitWriter {
         }
         bits += 1
         if bits == 8 {
-            buffer.append(cache)
-            if buffer.count >= bufferSize {
-                data.append(contentsOf: buffer)
-                buffer.removeAll(keepingCapacity: true)
-            }
+            data.append(cache)
             bits = 0
             cache = 0
         }
@@ -45,13 +37,9 @@ public struct BitWriter {
     @inline(__always)
     public mutating func flush() {
         if 0 < bits {
-            buffer.append(cache)
+            data.append(cache)
             bits = 0
             cache = 0
-        }
-        if buffer.isEmpty != true {
-            data.append(contentsOf: buffer)
-            buffer.removeAll(keepingCapacity: true)
         }
     }
 }
@@ -66,7 +54,7 @@ public struct RiceWriter {
     
     public init(bw: BitWriter) {
         self.bw = bw
-        self.maxVal = 256
+        self.maxVal = UInt16.max
         self.zeroCount = 0
         self.lastK = 0
     }
