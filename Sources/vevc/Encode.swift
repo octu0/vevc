@@ -449,6 +449,141 @@ func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420,
     )
 }
 
+@inline(__always)
+func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
+    if dx == 0 && dy == 0 { return plane }
+    
+    @Sendable
+    func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
+        if w == 0 || h == 0 { return data }
+        
+        var out = [Int16](repeating: 0, count: w * h)
+        
+        data.withUnsafeBufferPointer { dPtr in
+            guard let pData = dPtr.baseAddress else { return }
+            out.withUnsafeMutableBufferPointer { oPtr in
+                guard let pOut = oPtr.baseAddress else { return }
+                
+                let eX = ((sX % w) + w) % w
+                let eY = ((sY % h) + h) % h
+                
+                for dstY in 0..<h {
+                    let dstRow = dstY * w
+                    let srcY = (dstY - eY + h) % h
+                    let srcRow = srcY * w
+                    
+                    if eX == 0 {
+                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow), count: w)
+                    } else {
+                        let part1Len = eX
+                        let part2Len = w - eX
+                        
+                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow + w - eX), count: part1Len)
+                        pOut.advanced(by: dstRow + eX).update(from: pData.advanced(by: srcRow), count: part2Len)
+                    }
+                }
+            }
+        }
+        
+        return out
+    }
+    
+    let yTask = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
+    let cbTask = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+    let crTask = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+    
+    return PlaneData420(width: plane.width, height: plane.height, y: yTask, cb: cbTask, cr: crTask)
+}
+
+@inline(__always)
+func buildPredictedPlane(plane: PlaneData420, mvs: [MotionVector], blockSize: Int) -> PlaneData420 {
+    let width = plane.width
+    let height = plane.height
+    let blocksX = (width + blockSize - 1) / blockSize
+    let blocksY = (height + blockSize - 1) / blockSize
+    
+    var sy = [Int16](repeating: 0, count: width * height)
+    var scb = [Int16](repeating: 0, count: (width / 2) * (height / 2))
+    var scr = [Int16](repeating: 0, count: (width / 2) * (height / 2))
+    
+    plane.y.withUnsafeBufferPointer { srcPtr in
+    sy.withUnsafeMutableBufferPointer { dstPtr in
+        guard let pSrc = srcPtr.baseAddress, let pDst = dstPtr.baseAddress else { return }
+        
+        for by in 0..<blocksY {
+            for bx in 0..<blocksX {
+                let blockId = by * blocksX + bx
+                let mv = mvs[blockId]
+                let dx = -mv.dx // Invert because we fetch from previous frame
+                let dy = -mv.dy
+                
+                let startY = by * blockSize
+                let endY = min(startY + blockSize, height)
+                let startX = bx * blockSize
+                let endX = min(startX + blockSize, width)
+                
+                for y in startY..<endY {
+                    let dstRow = y * width
+                    let srcY = ((y - dy) % height + height) % height
+                    let srcRow = srcY * width
+                    
+                    for x in startX..<endX {
+                        let srcX = ((x - dx) % width + width) % width
+                        pDst[dstRow + x] = pSrc[srcRow + srcX]
+                    }
+                }
+            }
+        }
+    }}
+    
+    // Chroma planes (half resolution)
+    let halfW = (width + 1) / 2
+    let halfH = (height + 1) / 2
+    let halfBlockSize = blockSize / 2
+    
+    plane.cb.withUnsafeBufferPointer { srcCb in
+    plane.cr.withUnsafeBufferPointer { srcCr in
+    scb.withUnsafeMutableBufferPointer { dstCb in
+    scr.withUnsafeMutableBufferPointer { dstCr in
+        guard let pSrcCb = srcCb.baseAddress, let pSrcCr = srcCr.baseAddress,
+              let pDstCb = dstCb.baseAddress, let pDstCr = dstCr.baseAddress else { return }
+        
+        for by in 0..<blocksY {
+            for bx in 0..<blocksX {
+                let blockId = by * blocksX + bx
+                let mv = mvs[blockId]
+                let halfDX = -mv.dx / 2 // Half translation for chroma
+                let halfDY = -mv.dy / 2
+                
+                let startY = by * halfBlockSize
+                let endY = min(startY + halfBlockSize, halfH)
+                let startX = bx * halfBlockSize
+                let endX = min(startX + halfBlockSize, halfW)
+                
+                for y in startY..<endY {
+                    // In the original shiftPlane, dx and dy are used with modulo on the entire plane width/height.
+                    // For chroma, the translation is (dx / 2) and (dy / 2).
+                    // We must ensure the modulo applies correctly as a cyclic shift on the half-plane.
+                    let dstRow = y * halfW
+                    let srcY = ((y - halfDY) % halfH + halfH) % halfH
+                    let srcRow = srcY * halfW
+                    
+                    for x in startX..<endX {
+                        let srcX = ((x - halfDX) % halfW + halfW) % halfW
+                        let dstIdx = dstRow + x
+                        let srcIdx = srcRow + srcX
+                        
+                        pDstCb[dstIdx] = pSrcCb[srcIdx]
+                        pDstCr[dstIdx] = pSrcCr[srcIdx]
+                    }
+                }
+            }
+        }
+    }}}}
+    
+    return PlaneData420(width: width, height: height, y: sy, cb: scb, cr: scr)
+}
+
 public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     let gopSize = 4
@@ -468,21 +603,17 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         
         let planes = toPlaneData420(images: chunk4)
         
-        // GOP processing in SERIAL (Phase 4: Temporary Mock for compilation)
         let blockSize = 16
-        let gmv1_array = estimateGMV(curr: planes[1], prev: planes[0], blockSize: blockSize)
-        let gmv2_array = estimateGMV(curr: planes[2], prev: planes[0], blockSize: blockSize)
-        let gmv3_array = estimateGMV(curr: planes[3], prev: planes[0], blockSize: blockSize)
         
-        let gmv1 = gmv1_array.isEmpty ? MotionVector(dx: 0, dy: 0) : gmv1_array[0]
-        let gmv2 = gmv2_array.isEmpty ? MotionVector(dx: 0, dy: 0) : gmv2_array[0]
-        let gmv3 = gmv3_array.isEmpty ? MotionVector(dx: 0, dy: 0) : gmv3_array[0]
+        // HBMA Estimate block-level MVs (Test fallback)
+        let gmv1 = estimateGMV_old(curr: planes[1], prev: planes[0])
+        let gmv2 = estimateGMV_old(curr: planes[2], prev: planes[0])
+        let gmv3 = estimateGMV_old(curr: planes[3], prev: planes[0])
         
-        // Temporarily pass original planes since shiftPlane is removed.
-        // Will be replaced by actual MB-based builder in Phase 5.
-        let p1_v = planes[1]
-        let p2_v = planes[2]
-        let p3_v = planes[3]
+        // Build predicted planes using block-level MVs
+        let p1_v = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
+        let p2_v = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
+        let p3_v = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
         
         let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
         
@@ -499,13 +630,22 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         
         out.append(contentsOf: [0x56, 0x45, 0x4C, UInt8(gopSize)]) // 'VEL' + GOP size
         
-        // Write GMVs as Int16 (12 bytes total)
-        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dx)))
-        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dy)))
-        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dx)))
-        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dy)))
-        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dx)))
-        appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dy)))
+        // Write Block Size
+        out.append(UInt8(blockSize))
+        
+        // Count should be the same for all MV arrays since they use the same block size
+        let mvCount = 1
+        appendUInt16BE(&out, UInt16(mvCount))
+        
+        // Write all MVs (delta coding can be introduced later if size becomes an issue, but standard binary struct for now)
+        for _ in 0..<mvCount {
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dx)))
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dy)))
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dx)))
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dy)))
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dx)))
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dy)))
+        }
         
         appendUInt32BE(&out, UInt32(llBytes.count))
         out.append(contentsOf: llBytes)

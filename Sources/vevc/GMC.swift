@@ -77,6 +77,118 @@ public struct MotionVector {
 }
 
 @inline(__always)
+func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
+    let dsCurr = downscale4x(pd: curr)
+    let dsPrev = downscale4x(pd: prev)
+
+    var bestSAD = Int.max
+    var bestDX = 0
+    var bestDY = 0
+    
+    // Coarse search range: +- 32 pixels in full res (+- 8 in 1/4 scale)
+    let range = 4
+    
+    dsCurr.data.withUnsafeBufferPointer { currPtr in
+        guard let pCurr = currPtr.baseAddress else { return }
+        dsPrev.data.withUnsafeBufferPointer { prevPtr in
+            guard let pPrev = prevPtr.baseAddress else { return }
+            
+            for dy in -range...range {
+                for dx in -range...range {
+                    var sad = 0
+                    
+                    // Evaluate overlapping area in 1/4 scale sparsely for speed
+                    // (stride by 8 in 1/4 scale means stride by 32 in full res)
+                    for y in stride(from: 0, to: dsCurr.h, by: 8) {
+                        let srcY = y - dy
+                        if srcY < 0 || srcY >= dsPrev.h { continue }
+                        
+                        let dstRow = y * dsCurr.w
+                        let srcRow = srcY * dsPrev.w
+                        
+                        let safeStartX = max(0, dx)
+                        let safeEndX = min(dsCurr.w, dsPrev.w + dx)
+                        
+                        if safeStartX < safeEndX {
+                            let count = safeEndX - safeStartX
+                            sad &+= calculateSAD(
+                                p1: pCurr.advanced(by: dstRow + safeStartX), 
+                                p2: pPrev.advanced(by: srcRow + safeStartX - dx), 
+                                count: count
+                            )
+                        }
+                    }
+                    
+                    if sad < bestSAD {
+                        bestSAD = sad
+                        bestDX = dx
+                        bestDY = dy
+                    }
+                }
+            }
+        }
+    }
+
+    let cDX = bestDX * 4
+    let cDY = bestDY * 4
+    
+    var fineBestSAD = Int.max
+    var fineBestDX = cDX
+    var fineBestDY = cDY
+    
+    // Fine search in full resolution with sparse sampling (16x16 grid effectively)
+    // Coarse search at 1/4 scale got us within 4 pixels, so range 2 is sufficient
+    // to find the best pixel-aligned match, saving massive computation time.
+    curr.y.withUnsafeBufferPointer { currYPtr in
+        guard let pCurrY = currYPtr.baseAddress else { return }
+        prev.y.withUnsafeBufferPointer { prevYPtr in
+            guard let pPrevY = prevYPtr.baseAddress else { return }
+            
+            let marginY = 16
+            let marginX = 16
+            let stepY = 128 // Evaluate only 1 in 128 lines for extreme speed
+            
+            for dy in (cDY - 2)...(cDY + 2) {
+                for dx in (cDX - 2)...(cDX + 2) {
+                    var sad = 0
+                    
+                    let startY = max(marginY, marginY + dy)
+                    let endY = min(curr.height - marginY, prev.height - marginY + dy)
+                    
+                    if startY >= endY { continue }
+                    
+                    for y in stride(from: startY, to: endY, by: stepY) {
+                        let srcY = y - dy
+                        let dstRow = y * curr.width
+                        let srcRow = srcY * prev.width
+                        
+                        let safeStartX = max(marginX, marginX + dx)
+                        let safeEndX = min(curr.width - marginX, prev.width - marginX + dx)
+                        
+                        if safeStartX < safeEndX {
+                            let count = safeEndX - safeStartX
+                            sad &+= calculateSAD(
+                                p1: pCurrY.advanced(by: dstRow + safeStartX), 
+                                p2: pPrevY.advanced(by: srcRow + safeStartX - dx), 
+                                count: count
+                            )
+                        }
+                    }
+                    
+                    if sad < fineBestSAD {
+                        fineBestSAD = sad
+                        fineBestDX = dx
+                        fineBestDY = dy
+                    }
+                }
+            }
+        }
+    }
+    
+    return (dx: fineBestDX, dy: fineBestDY)
+}
+
+@inline(__always)
 func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [MotionVector] {
     let dsCurr = downscale4x(pd: curr)
     let dsPrev = downscale4x(pd: prev)
@@ -86,10 +198,10 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [Mot
     let blocksY = (curr.height + blockSize - 1) / blockSize
     var mvs = [MotionVector](repeating: MotionVector(dx: 0, dy: 0), count: blocksX * blocksY)
     
-    // Coarse search range: +- 32 pixels in full res (+- 8 in 1/4 scale)
-    let range = 8
+    // Coarse search range for Global MV: +- 32 pixels in full res (+- 8 in 1/4 scale)
+    let coarseRange = 8
     
-    // Fine search range in full res: +- 2 pixels around coarse result
+    // Fine search range in full res: +- 2 pixels around global coarse result
     let fineRange = 2
 
     dsCurr.data.withUnsafeBufferPointer { currPtr in
@@ -101,6 +213,58 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [Mot
     prev.y.withUnsafeBufferPointer { prevYPtr in
     guard let pPrevY = prevYPtr.baseAddress else { return }
         
+        // ----------------------------------------------------
+        // 1. Global Coarse Search on 1/4 scale image
+        // ----------------------------------------------------
+        var globalSAD = Int.max
+        var globalDX = 0
+        var globalDY = 0
+        
+        for dy in -coarseRange...coarseRange {
+            for dx in -coarseRange...coarseRange {
+                var sad = 0
+                
+                // Evaluate overlapping area in 1/4 scale for the entire image
+                let dsStartY = 0
+                let dsEndY = dsCurr.h
+                let dsStartX = 0
+                let dsEndX = dsCurr.w
+                
+                // Step by 8 (same as 1.04% version) for speed and avoiding high-frequency noise in global coarse
+                for y in stride(from: dsStartY, to: dsEndY, by: 8) {
+                    let srcY = y - dy
+                    if srcY < 0 || srcY >= dsPrev.h { continue }
+                    
+                    let dstRow = y * dsCurr.w
+                    let srcRow = srcY * dsPrev.w
+                    
+                    let safeStartX = max(0, dx)
+                    let safeEndX = min(dsCurr.w, dsPrev.w + dx)
+                    
+                    if safeStartX < safeEndX {
+                        let count = safeEndX - safeStartX
+                        sad &+= calculateSAD(
+                            p1: pCurrDs.advanced(by: dstRow + safeStartX),
+                            p2: pPrevDs.advanced(by: srcRow + safeStartX - dx),
+                            count: count
+                        )
+                    }
+                }
+                
+                if sad < globalSAD {
+                    globalSAD = sad
+                    globalDX = dx
+                    globalDY = dy
+                }
+            }
+        }
+        
+        let baseDX = globalDX * 4
+        let baseDY = globalDY * 4
+
+        // ----------------------------------------------------
+        // 2. Local Fine Search (Refinement) per MacroBlock
+        // ----------------------------------------------------
         for by in 0..<blocksY {
             for bx in 0..<blocksX {
                 let blockId = by * blocksX + bx
@@ -111,77 +275,16 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [Mot
                 let startX = bx * blockSize
                 let endX = min(startX + blockSize, curr.width)
                 
-                // 1/4 scale block boundaries
-                let dsStartY = startY / 4
-                let dsEndY = endY / 4
-                let dsStartX = startX / 4
-                let dsEndX = endX / 4
-                let dsBlockH = dsEndY - dsStartY
-                let dsBlockW = dsEndX - dsStartX
-                
-                if dsBlockW <= 0 || dsBlockH <= 0 { continue }
-                
-                // ----------------------------------------------------
-                // 1. Coarse search in 1/4 scale
-                // ----------------------------------------------------
-                var bestSAD = Int.max
-                var bestDX = 0
-                var bestDY = 0
-                
-                for dy in -range...range {
-                    for dx in -range...range {
-                        var sad = 0
-                        
-                        // Evaluate overlapping area in 1/4 scale
-                        // We step by 2 in 1/4 scale to keep it fast but accurate
-                        for y in stride(from: dsStartY, to: dsEndY, by: 2) {
-                            let srcY = y - dy
-                            if srcY < 0 || srcY >= dsPrev.h { continue }
-                            
-                            let dstRow = y * dsCurr.w
-                            let srcRow = srcY * dsPrev.w
-                            
-                            // Calculate safe X boundaries for SAD
-                            let scanStartX = max(dsStartX, dsStartX + dx)
-                            let scanEndX = min(dsEndX, dsPrev.w + dx, dsCurr.w)
-                            
-                            if scanStartX < scanEndX {
-                                let count = scanEndX - scanStartX
-                                sad &+= calculateSAD(
-                                    p1: pCurrDs.advanced(by: dstRow + scanStartX),
-                                    p2: pPrevDs.advanced(by: srcRow + scanStartX - dx),
-                                    count: count
-                                )
-                            }
-                        }
-                        
-                        // Small penalty to prefer static (0,0) or small motions
-                        sad &+= (abs(dx) + abs(dy)) * 2
-                        
-                        if sad < bestSAD {
-                            bestSAD = sad
-                            bestDX = dx
-                            bestDY = dy
-                        }
-                    }
-                }
-                
-                // ----------------------------------------------------
-                // 2. Fine search in full resolution (Refinement)
-                // ----------------------------------------------------
-                let cDX = bestDX * 4
-                let cDY = bestDY * 4
-                
                 var fineBestSAD = Int.max
-                var fineBestDX = cDX
-                var fineBestDY = cDY
+                var fineBestDX = baseDX
+                var fineBestDY = baseDY
                 
-                let stepY = 2 // Extremely dense search but only +-2 range for this tiny MB
-                for fineDy in (cDY - fineRange)...(cDY + fineRange) {
-                    for fineDx in (cDX - fineRange)...(cDX + fineRange) {
+                for fineDy in (baseDY - fineRange)...(baseDY + fineRange) {
+                    for fineDx in (baseDX - fineRange)...(baseDX + fineRange) {
                         var sad = 0
                         
-                        for y in stride(from: startY, to: endY, by: stepY) {
+                        // Exact match inside the block
+                        for y in startY..<endY {
                             let srcY = y - fineDy
                             if srcY < 0 || srcY >= prev.height { continue }
                             
@@ -201,7 +304,10 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [Mot
                             }
                         }
                         
-                        sad &+= (abs(fineDx) + abs(fineDy)) * 2
+                        // Slight penalty to prefer keeping the global motion vector
+                        let diffGlobalX = abs(fineDx - baseDX)
+                        let diffGlobalY = abs(fineDy - baseDY)
+                        sad &+= (diffGlobalX + diffGlobalY) * 2 // Mild smoothing
                         
                         if sad < fineBestSAD {
                             fineBestSAD = sad
@@ -211,10 +317,13 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [Mot
                     }
                 }
                 
-                mvs[blockId] = MotionVector(dx: fineBestDX, dy: fineBestDY)
+                // Test: Force Global MV to everything
+                // mvs[blockId] = MotionVector(dx: fineBestDX, dy: fineBestDY)
+                mvs[blockId] = MotionVector(dx: baseDX, dy: baseDY)
             }
         }
     }}}}
+
     
     return mvs
 }

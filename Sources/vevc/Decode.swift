@@ -566,12 +566,26 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let _ = Int(data[offset]) // GOP size (not used yet)
         offset += 1
         
-        let gmv1_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-        let gmv1_dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-        let gmv2_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-        let gmv2_dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-        let gmv3_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-        let gmv3_dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        let blockSize = Int(data[offset])
+        offset += 1
+        
+        let mvCount = Int(try readUInt16BEFromBytes(data, offset: &offset))
+        var mvs1 = [MotionVector]()
+        var mvs2 = [MotionVector]()
+        var mvs3 = [MotionVector]()
+        
+        for _ in 0..<mvCount {
+            let dx1 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let dy1 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let dx2 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let dy2 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let dx3 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let dy3 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            
+            mvs1.append(MotionVector(dx: dx1, dy: dy1))
+            mvs2.append(MotionVector(dx: dx2, dy: dy2))
+            mvs3.append(MotionVector(dx: dx3, dy: dy3))
+        }
         
         func readPlane() async throws -> PlaneData420 {
             let len = try readUInt32BEFromBytes(data, offset: &offset)
@@ -599,10 +613,10 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let (f0_s, f1_s, f2_s, f3_s) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
         
         let f0 = f0_s
-        // Phase 4 temporary mock: shiftPlane has been removed, actual synthesis will be in Phase 5
-        async let f1_t = f1_s
-        async let f2_t = f2_s
-        async let f3_t = f3_s
+        // Apply HBMA prediction utilizing decoded MV arrays (Test fallback to global)
+        async let f1_t = shiftPlane(f1_s, dx: mvs1[0].dx, dy: mvs1[0].dy)
+        async let f2_t = shiftPlane(f2_s, dx: mvs2[0].dx, dy: mvs2[0].dy)
+        async let f3_t = shiftPlane(f3_s, dx: mvs3[0].dx, dy: mvs3[0].dy)
         let (f1, f2, f3) = await (f1_t, f2_t, f3_t)
         
         out.append(f0.toYCbCr())
