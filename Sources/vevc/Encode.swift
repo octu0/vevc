@@ -468,14 +468,21 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
         
         let planes = toPlaneData420(images: chunk4)
         
-        // GOP processing in SERIAL
-        let gmv1 = estimateGMV(curr: planes[1], prev: planes[0])
-        let gmv2 = estimateGMV(curr: planes[2], prev: planes[0])
-        let gmv3 = estimateGMV(curr: planes[3], prev: planes[0])
+        // GOP processing in SERIAL (Phase 4: Temporary Mock for compilation)
+        let blockSize = 16
+        let gmv1_array = estimateGMV(curr: planes[1], prev: planes[0], blockSize: blockSize)
+        let gmv2_array = estimateGMV(curr: planes[2], prev: planes[0], blockSize: blockSize)
+        let gmv3_array = estimateGMV(curr: planes[3], prev: planes[0], blockSize: blockSize)
         
-        let p1_v = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
-        let p2_v = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
-        let p3_v = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
+        let gmv1 = gmv1_array.isEmpty ? MotionVector(dx: 0, dy: 0) : gmv1_array[0]
+        let gmv2 = gmv2_array.isEmpty ? MotionVector(dx: 0, dy: 0) : gmv2_array[0]
+        let gmv3 = gmv3_array.isEmpty ? MotionVector(dx: 0, dy: 0) : gmv3_array[0]
+        
+        // Temporarily pass original planes since shiftPlane is removed.
+        // Will be replaced by actual MB-based builder in Phase 5.
+        let p1_v = planes[1]
+        let p2_v = planes[2]
+        let p3_v = planes[3]
         
         let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
         

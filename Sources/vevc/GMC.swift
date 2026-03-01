@@ -71,169 +71,152 @@ func downscale4x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
     return (out, w, h)
 }
 
+public struct MotionVector {
+    public let dx: Int
+    public let dy: Int
+}
+
 @inline(__always)
-func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
+func estimateGMV(curr: PlaneData420, prev: PlaneData420, blockSize: Int) -> [MotionVector] {
     let dsCurr = downscale4x(pd: curr)
     let dsPrev = downscale4x(pd: prev)
 
-    var bestSAD = Int.max
-    var bestDX = 0
-    var bestDY = 0
+    // Number of blocks in horizontal and vertical directions
+    let blocksX = (curr.width + blockSize - 1) / blockSize
+    let blocksY = (curr.height + blockSize - 1) / blockSize
+    var mvs = [MotionVector](repeating: MotionVector(dx: 0, dy: 0), count: blocksX * blocksY)
     
     // Coarse search range: +- 32 pixels in full res (+- 8 in 1/4 scale)
     let range = 8
     
+    // Fine search range in full res: +- 2 pixels around coarse result
+    let fineRange = 2
+
     dsCurr.data.withUnsafeBufferPointer { currPtr in
-        guard let pCurr = currPtr.baseAddress else { return }
-        dsPrev.data.withUnsafeBufferPointer { prevPtr in
-            guard let pPrev = prevPtr.baseAddress else { return }
-            
-            for dy in -range...range {
-                for dx in -range...range {
-                    var sad = 0
-                    
-                    // Evaluate overlapping area in 1/4 scale sparsely for speed
-                    // (stride by 8 in 1/4 scale means stride by 32 in full res)
-                    for y in stride(from: 0, to: dsCurr.h, by: 8) {
-                        let srcY = y - dy
-                        if srcY < 0 || srcY >= dsPrev.h { continue }
-                        
-                        let dstRow = y * dsCurr.w
-                        let srcRow = srcY * dsPrev.w
-                        
-                        let safeStartX = max(0, dx)
-                        let safeEndX = min(dsCurr.w, dsPrev.w + dx)
-                        
-                        if safeStartX < safeEndX {
-                            let count = safeEndX - safeStartX
-                            sad &+= calculateSAD(
-                                p1: pCurr.advanced(by: dstRow + safeStartX), 
-                                p2: pPrev.advanced(by: srcRow + safeStartX - dx), 
-                                count: count
-                            )
-                        }
-                    }
-                    
-                    // Penalty for motion to prefer static background
-                    sad &+= (abs(dx) + abs(dy)) * 8
-                    
-                    if sad < bestSAD {
-                        bestSAD = sad
-                        bestDX = dx
-                        bestDY = dy
-                    }
-                }
-            }
-        }
-    }
-
-    let cDX = bestDX * 4
-    let cDY = bestDY * 4
-    
-    var fineBestSAD = Int.max
-    var fineBestDX = cDX
-    var fineBestDY = cDY
-    
-    // Fine search in full resolution with sparse sampling (16x16 grid effectively)
-    // Coarse search at 1/4 scale got us within 4 pixels, so range 2 is sufficient
-    // to find the best pixel-aligned match, saving massive computation time.
+    guard let pCurrDs = currPtr.baseAddress else { return }
+    dsPrev.data.withUnsafeBufferPointer { prevPtr in
+    guard let pPrevDs = prevPtr.baseAddress else { return }
     curr.y.withUnsafeBufferPointer { currYPtr in
-        guard let pCurrY = currYPtr.baseAddress else { return }
-        prev.y.withUnsafeBufferPointer { prevYPtr in
-            guard let pPrevY = prevYPtr.baseAddress else { return }
-            
-            let marginY = 16
-            let marginX = 16
-            let stepY = 128 // Evaluate only 1 in 128 lines for extreme speed
-            
-            for dy in (cDY - 2)...(cDY + 2) {
-                for dx in (cDX - 2)...(cDX + 2) {
-                    var sad = 0
-                    
-                    let startY = max(marginY, marginY + dy)
-                    let endY = min(curr.height - marginY, prev.height - marginY + dy)
-                    
-                    let startX = max(marginX, marginX + dx)
-                    let endX = min(curr.width - marginX, prev.width - marginX + dx)
-                    let countX = endX - startX
-                    
-                    if startY < endY && countX > 0 {
-                        for y in stride(from: startY, to: endY, by: stepY) {
-                            let dstRow = y * curr.width
-                            let srcRow = (y - dy) * prev.width
+    guard let pCurrY = currYPtr.baseAddress else { return }
+    prev.y.withUnsafeBufferPointer { prevYPtr in
+    guard let pPrevY = prevYPtr.baseAddress else { return }
+        
+        for by in 0..<blocksY {
+            for bx in 0..<blocksX {
+                let blockId = by * blocksX + bx
+                
+                // Full res block boundaries
+                let startY = by * blockSize
+                let endY = min(startY + blockSize, curr.height)
+                let startX = bx * blockSize
+                let endX = min(startX + blockSize, curr.width)
+                
+                // 1/4 scale block boundaries
+                let dsStartY = startY / 4
+                let dsEndY = endY / 4
+                let dsStartX = startX / 4
+                let dsEndX = endX / 4
+                let dsBlockH = dsEndY - dsStartY
+                let dsBlockW = dsEndX - dsStartX
+                
+                if dsBlockW <= 0 || dsBlockH <= 0 { continue }
+                
+                // ----------------------------------------------------
+                // 1. Coarse search in 1/4 scale
+                // ----------------------------------------------------
+                var bestSAD = Int.max
+                var bestDX = 0
+                var bestDY = 0
+                
+                for dy in -range...range {
+                    for dx in -range...range {
+                        var sad = 0
+                        
+                        // Evaluate overlapping area in 1/4 scale
+                        // We step by 2 in 1/4 scale to keep it fast but accurate
+                        for y in stride(from: dsStartY, to: dsEndY, by: 2) {
+                            let srcY = y - dy
+                            if srcY < 0 || srcY >= dsPrev.h { continue }
                             
-                            sad &+= calculateSAD(
-                                p1: pCurrY.advanced(by: dstRow + startX),
-                                p2: pPrevY.advanced(by: srcRow + startX - dx),
-                                count: countX
-                            )
+                            let dstRow = y * dsCurr.w
+                            let srcRow = srcY * dsPrev.w
+                            
+                            // Calculate safe X boundaries for SAD
+                            let scanStartX = max(dsStartX, dsStartX + dx)
+                            let scanEndX = min(dsEndX, dsPrev.w + dx, dsCurr.w)
+                            
+                            if scanStartX < scanEndX {
+                                let count = scanEndX - scanStartX
+                                sad &+= calculateSAD(
+                                    p1: pCurrDs.advanced(by: dstRow + scanStartX),
+                                    p2: pPrevDs.advanced(by: srcRow + scanStartX - dx),
+                                    count: count
+                                )
+                            }
+                        }
+                        
+                        // Small penalty to prefer static (0,0) or small motions
+                        sad &+= (abs(dx) + abs(dy)) * 2
+                        
+                        if sad < bestSAD {
+                            bestSAD = sad
+                            bestDX = dx
+                            bestDY = dy
                         }
                     }
-                    
-                    sad &+= (abs(dx) + abs(dy)) * 2
-                    
-                    if sad < fineBestSAD {
-                        fineBestSAD = sad
-                        fineBestDX = dx
-                        fineBestDY = dy
+                }
+                
+                // ----------------------------------------------------
+                // 2. Fine search in full resolution (Refinement)
+                // ----------------------------------------------------
+                let cDX = bestDX * 4
+                let cDY = bestDY * 4
+                
+                var fineBestSAD = Int.max
+                var fineBestDX = cDX
+                var fineBestDY = cDY
+                
+                let stepY = 2 // Extremely dense search but only +-2 range for this tiny MB
+                for fineDy in (cDY - fineRange)...(cDY + fineRange) {
+                    for fineDx in (cDX - fineRange)...(cDX + fineRange) {
+                        var sad = 0
+                        
+                        for y in stride(from: startY, to: endY, by: stepY) {
+                            let srcY = y - fineDy
+                            if srcY < 0 || srcY >= prev.height { continue }
+                            
+                            let dstRow = y * curr.width
+                            let srcRow = srcY * prev.width
+                            
+                            let scanStartX = max(startX, startX + fineDx)
+                            let scanEndX = min(endX, prev.width + fineDx, curr.width)
+                            
+                            if scanStartX < scanEndX {
+                                let count = scanEndX - scanStartX
+                                sad &+= calculateSAD(
+                                    p1: pCurrY.advanced(by: dstRow + scanStartX),
+                                    p2: pPrevY.advanced(by: srcRow + scanStartX - fineDx),
+                                    count: count
+                                )
+                            }
+                        }
+                        
+                        sad &+= (abs(fineDx) + abs(fineDy)) * 2
+                        
+                        if sad < fineBestSAD {
+                            fineBestSAD = sad
+                            fineBestDX = fineDx
+                            fineBestDY = fineDy
+                        }
                     }
                 }
+                
+                mvs[blockId] = MotionVector(dx: fineBestDX, dy: fineBestDY)
             }
         }
-    }
+    }}}}
     
-    return (fineBestDX, fineBestDY)
+    return mvs
 }
 
-@inline(__always)
-func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
-    if dx == 0 && dy == 0 { return plane }
-    
-    @Sendable
-    func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
-        if w == 0 || h == 0 { return data }
-        
-        var out = [Int16](repeating: 0, count: w * h)
-        
-        data.withUnsafeBufferPointer { dPtr in
-            guard let pData = dPtr.baseAddress else { return }
-            out.withUnsafeMutableBufferPointer { oPtr in
-                guard let pOut = oPtr.baseAddress else { return }
-                
-                let eX = ((sX % w) + w) % w
-                let eY = ((sY % h) + h) % h
-                
-                for dstY in 0..<h {
-                    let dstRow = dstY * w
-                    let srcY = (dstY - eY + h) % h
-                    let srcRow = srcY * w
-                    
-                    if eX == 0 {
-                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow), count: w)
-                    } else {
-                        let part1Len = eX
-                        let part2Len = w - eX
-                        
-                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow + w - eX), count: part1Len)
-                        pOut.advanced(by: dstRow + eX).update(from: pData.advanced(by: srcRow), count: part2Len)
-                    }
-                }
-            }
-        }
-        
-        return out
-    }
-    
-    let results = ConcurrentBox([[Int16]](repeating: [], count: 3))
-    
-    DispatchQueue.concurrentPerform(iterations: 3) { index in
-        switch index {
-        case 0: results.value[0] = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
-        case 1: results.value[1] = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-        case 2: results.value[2] = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-        default: break
-        }
-    }
-    
-    return PlaneData420(width: plane.width, height: plane.height, y: results.value[0], cb: results.value[1], cr: results.value[2])
-}
+// ShiftPlane is replaced by HBMA implementation in Encode.swift/Decode.swift

@@ -599,9 +599,10 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let (f0_s, f1_s, f2_s, f3_s) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
         
         let f0 = f0_s
-        async let f1_t = shiftPlane(f1_s, dx: gmv1_dx, dy: gmv1_dy)
-        async let f2_t = shiftPlane(f2_s, dx: gmv2_dx, dy: gmv2_dy)
-        async let f3_t = shiftPlane(f3_s, dx: gmv3_dx, dy: gmv3_dy)
+        // Phase 4 temporary mock: shiftPlane has been removed, actual synthesis will be in Phase 5
+        async let f1_t = f1_s
+        async let f2_t = f2_s
+        async let f3_t = f3_s
         let (f1, f2, f3) = await (f1_t, f2_t, f3_t)
         
         out.append(f0.toYCbCr())
