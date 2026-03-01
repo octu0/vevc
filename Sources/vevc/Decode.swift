@@ -566,7 +566,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let _ = Int(data[offset]) // GOP size (not used yet)
         offset += 1
         
-        let blockSize = Int(data[offset])
+        let _ = Int(data[offset]) // blockSize
         offset += 1
         
         let mvCount = Int(try readUInt16BEFromBytes(data, offset: &offset))
