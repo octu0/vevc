@@ -40,9 +40,9 @@ func calculateSAD(p1: UnsafePointer<Int16>, p2: UnsafePointer<Int16>, count: Int
 }
 
 @inline(__always)
-func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
-    let w = pd.width / 8
-    let h = pd.height / 8
+func downscale4x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
+    let w = pd.width / 4
+    let h = pd.height / 4
     var out = [Int16](repeating: 0, count: w * h)
     
     pd.y.withUnsafeBufferPointer { yPtr in
@@ -52,19 +52,18 @@ func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
             
             let pdWidth = pd.width
             for y in 0..<h {
-                let py = y * 8
+                let py = y * 4
                 let outRow = y * w
                 for x in 0..<w {
-                    let px = x * 8
+                    let px = x * 4
                     var sum: Int = 0
                     
-                    // Simple average of 8x8 block using auto-vectorized loop
-                    for dy in 0..<8 {
+                    // Simple average of 4x4 block using auto-vectorized loop
+                    for dy in 0..<4 {
                         let off = (py + dy) * pdWidth + px
-                        sum &+= Int(pY[off]) &+ Int(pY[off+1]) &+ Int(pY[off+2]) &+ Int(pY[off+3]) &+
-                                Int(pY[off+4]) &+ Int(pY[off+5]) &+ Int(pY[off+6]) &+ Int(pY[off+7])
+                        sum &+= Int(pY[off]) &+ Int(pY[off+1]) &+ Int(pY[off+2]) &+ Int(pY[off+3])
                     }
-                    pOut[outRow + x] = Int16(sum / 64)
+                    pOut[outRow + x] = Int16(sum / 16)
                 }
             }
         }
@@ -74,15 +73,15 @@ func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
 
 @inline(__always)
 func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
-    let dsCurr = downscale8x(pd: curr)
-    let dsPrev = downscale8x(pd: prev)
+    let dsCurr = downscale4x(pd: curr)
+    let dsPrev = downscale4x(pd: prev)
 
     var bestSAD = Int.max
     var bestDX = 0
     var bestDY = 0
     
-    // Coarse search range: +- 32 pixels in full res (+- 4 in 1/8 scale)
-    let range = 4
+    // Coarse search range: +- 32 pixels in full res (+- 8 in 1/4 scale)
+    let range = 8
     
     dsCurr.data.withUnsafeBufferPointer { currPtr in
         guard let pCurr = currPtr.baseAddress else { return }
@@ -93,8 +92,9 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
                 for dx in -range...range {
                     var sad = 0
                     
-                    // Evaluate overlapping area in 1/8 scale sparsely for speed
-                    for y in stride(from: 0, to: dsCurr.h, by: 32) {
+                    // Evaluate overlapping area in 1/4 scale sparsely for speed
+                    // (stride by 8 in 1/4 scale means stride by 32 in full res)
+                    for y in stride(from: 0, to: dsCurr.h, by: 8) {
                         let srcY = y - dy
                         if srcY < 0 || srcY >= dsPrev.h { continue }
                         
@@ -127,16 +127,16 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
         }
     }
 
-    let cDX = bestDX * 8
-    let cDY = bestDY * 8
+    let cDX = bestDX * 4
+    let cDY = bestDY * 4
     
     var fineBestSAD = Int.max
     var fineBestDX = cDX
     var fineBestDY = cDY
     
     // Fine search in full resolution with sparse sampling (16x16 grid effectively)
-    // Coarse search at 1/8 scale got us within 8 pixels, so range 4 is sufficient
-    // to find the best pixel-aligned match.
+    // Coarse search at 1/4 scale got us within 4 pixels, so range 2 is sufficient
+    // to find the best pixel-aligned match, saving massive computation time.
     curr.y.withUnsafeBufferPointer { currYPtr in
         guard let pCurrY = currYPtr.baseAddress else { return }
         prev.y.withUnsafeBufferPointer { prevYPtr in
@@ -144,10 +144,10 @@ func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
             
             let marginY = 16
             let marginX = 16
-            let stepY = 64 // Evaluate only 1 in 64 lines for speed
+            let stepY = 128 // Evaluate only 1 in 128 lines for extreme speed
             
-            for dy in (cDY - 4)...(cDY + 4) {
-                for dx in (cDX - 4)...(cDX + 4) {
+            for dy in (cDY - 2)...(cDY + 2) {
+                for dx in (cDX - 2)...(cDX + 2) {
                     var sad = 0
                     
                     let startY = max(marginY, marginY + dy)
