@@ -82,7 +82,10 @@ func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, 
 
 // MARK: - Decode Logic
 
-private let k: UInt8 = 4
+private let kLL: UInt8 = 4
+private let kHL: UInt8 = 4
+private let kLH: UInt8 = 4
+private let kHH: UInt8 = 4
 
 @inline(__always)
 func toInt16(_ u: UInt16) -> Int16 {
@@ -92,7 +95,7 @@ func toInt16(_ u: UInt16) -> Int16 {
 }
 
 @inline(__always)
-func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int) throws {
+func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8) throws {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
@@ -103,7 +106,7 @@ func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int) throws
 }
 
 @inline(__always)
-func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int) throws {
+func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8) throws {
     var prevVal: Int16 = 0
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
@@ -145,9 +148,9 @@ func invertLayer(br: BitReader, ll: Block2D, size: Int, qt: QuantizationTable) t
         
         if isZero != true {
             var rr = RiceReader(br: br)
-            try blockDecode(rr: &rr, block: &hlView, size: half)
-            try blockDecode(rr: &rr, block: &lhView, size: half)
-            try blockDecode(rr: &rr, block: &hhView, size: half)
+            try blockDecode(rr: &rr, block: &hlView, size: half, k: kHL)
+            try blockDecode(rr: &rr, block: &lhView, size: half, k: kLH)
+            try blockDecode(rr: &rr, block: &hhView, size: half, k: kHH)
             
             dequantizeMidSignedMapping(&hlView, qt: qt)
             dequantizeMidSignedMapping(&lhView, qt: qt)
@@ -177,10 +180,10 @@ func invertBase(br: BitReader, size: Int, qt: QuantizationTable) throws -> Block
         
         if !isZero {
             var rr = RiceReader(br: br)
-            try blockDecodeDPCM(rr: &rr, block: &llView, size: half)
-            try blockDecode(rr: &rr, block: &hlView, size: half)
-            try blockDecode(rr: &rr, block: &lhView, size: half)
-            try blockDecode(rr: &rr, block: &hhView, size: half)
+            try blockDecodeDPCM(rr: &rr, block: &llView, size: half, k: kLL)
+            try blockDecode(rr: &rr, block: &hlView, size: half, k: kHL)
+            try blockDecode(rr: &rr, block: &lhView, size: half, k: kLH)
+            try blockDecode(rr: &rr, block: &hhView, size: half, k: kHH)
             
             dequantizeLow(&llView, qt: qt)
             dequantizeMidSignedMapping(&hlView, qt: qt)

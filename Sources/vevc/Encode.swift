@@ -1,6 +1,9 @@
 // MARK: - Encode
 
-private let k: UInt8 = 4
+private let kLL: UInt8 = 4
+private let kHL: UInt8 = 4
+private let kLH: UInt8 = 4
+private let kHH: UInt8 = 4
 
 @inline(__always)
 func toUint16(_ n: Int16) -> UInt16 {
@@ -8,17 +11,18 @@ func toUint16(_ n: Int16) -> UInt16 {
 }
 
 @inline(__always)
-func blockEncode(rw: inout RiceWriter, block: BlockView, size: Int) {
+func blockEncode(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8) {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
             rw.write(val: UInt16(bitPattern: ptr[x]), k: k)
         }
     }
+    rw.flushZeros(k: k)
 }
 
 @inline(__always)
-func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int) {
+func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8) {
     var prevVal: Int16 = 0
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
@@ -29,6 +33,7 @@ func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int) {
             prevVal = val
         }
     }
+    rw.flushZeros(k: k)
 }
 
 
@@ -96,9 +101,9 @@ func transformLayer(bw: inout BitWriter, block: inout Block2D, size: Int, qt: Qu
     } else {
         bw.writeBit(0)
         RiceWriter.withWriter(&bw) { rw in
-            blockEncode(rw: &rw, block: sub.hl, size: sub.size)
-            blockEncode(rw: &rw, block: sub.lh, size: sub.size)
-            blockEncode(rw: &rw, block: sub.hh, size: sub.size)
+            blockEncode(rw: &rw, block: sub.hl, size: sub.size, k: kHL)
+            blockEncode(rw: &rw, block: sub.lh, size: sub.size, k: kLH)
+            blockEncode(rw: &rw, block: sub.hh, size: sub.size, k: kHH)
         }
     }
     
@@ -130,10 +135,10 @@ func transformBase(bw: inout BitWriter, block: inout Block2D, size: Int, qt: Qua
     } else {
         bw.writeBit(0)
         RiceWriter.withWriter(&bw) { rw in
-            blockEncodeDPCM(rw: &rw, block: sub.ll, size: sub.size)
-            blockEncode(rw: &rw, block: sub.hl, size: sub.size)
-            blockEncode(rw: &rw, block: sub.lh, size: sub.size)
-            blockEncode(rw: &rw, block: sub.hh, size: sub.size)
+            blockEncodeDPCM(rw: &rw, block: sub.ll, size: sub.size, k: kLL)
+            blockEncode(rw: &rw, block: sub.hl, size: sub.size, k: kHL)
+            blockEncode(rw: &rw, block: sub.lh, size: sub.size, k: kLH)
+            blockEncode(rw: &rw, block: sub.hh, size: sub.size, k: kHH)
         }
     }
 }

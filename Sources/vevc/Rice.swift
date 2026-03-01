@@ -93,7 +93,7 @@ public struct RiceWriter {
     }
     
     @inline(__always)
-    internal mutating func flushZeros(k: UInt8) {
+    public mutating func flushZeros(k: UInt8) {
         if zeroCount == 0 {
             return
         }
