@@ -86,7 +86,7 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
     var bestDY = 0
     
     // Coarse search range: +- 32 pixels in full res (+- 8 in 1/4 scale)
-    let range = 4
+    let range = 8
     
     dsCurr.data.withUnsafeBufferPointer { currPtr in
         guard let pCurr = currPtr.baseAddress else { return }
@@ -118,6 +118,9 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
                             )
                         }
                     }
+                    
+                    // Penalty for motion to prefer static background
+                    sad &+= (abs(dx) + abs(dy)) * 8
                     
                     if sad < bestSAD {
                         bestSAD = sad
@@ -155,25 +158,24 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
                     let startY = max(marginY, marginY + dy)
                     let endY = min(curr.height - marginY, prev.height - marginY + dy)
                     
-                    if startY >= endY { continue }
+                    let startX = max(marginX, marginX + dx)
+                    let endX = min(curr.width - marginX, prev.width - marginX + dx)
+                    let countX = endX - startX
                     
-                    for y in stride(from: startY, to: endY, by: stepY) {
-                        let srcY = y - dy
-                        let dstRow = y * curr.width
-                        let srcRow = srcY * prev.width
-                        
-                        let safeStartX = max(marginX, marginX + dx)
-                        let safeEndX = min(curr.width - marginX, prev.width - marginX + dx)
-                        
-                        if safeStartX < safeEndX {
-                            let count = safeEndX - safeStartX
+                    if startY < endY && countX > 0 {
+                        for y in stride(from: startY, to: endY, by: stepY) {
+                            let dstRow = y * curr.width
+                            let srcRow = (y - dy) * prev.width
+                            
                             sad &+= calculateSAD(
-                                p1: pCurrY.advanced(by: dstRow + safeStartX), 
-                                p2: pPrevY.advanced(by: srcRow + safeStartX - dx), 
-                                count: count
+                                p1: pCurrY.advanced(by: dstRow + startX),
+                                p2: pPrevY.advanced(by: srcRow + startX - dx),
+                                count: countX
                             )
                         }
                     }
+                    
+                    sad &+= (abs(dx) + abs(dy)) * 2
                     
                     if sad < fineBestSAD {
                         fineBestSAD = sad

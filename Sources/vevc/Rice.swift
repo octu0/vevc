@@ -54,7 +54,7 @@ public struct RiceWriter {
     
     public init(bw: BitWriter) {
         self.bw = bw
-        self.maxVal = UInt16.max
+        self.maxVal = 256
         self.zeroCount = 0
         self.lastK = 0
     }
