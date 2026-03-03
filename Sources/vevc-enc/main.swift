@@ -6,6 +6,8 @@ let args = CommandLine.arguments
 var bitrate = 500
 var positionalArgs: [String] = []
 var outPath = "a.vevc"
+var zeroThreshold = 0
+var gopSize = 8
 
 var i = 1
 while i < args.count {
@@ -21,6 +23,16 @@ while i < args.count {
             outPath = args[i + 1]
             i += 1
         }
+    case "-zeroThreshold":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { zeroThreshold = v }
+            i += 1
+        }
+    case "-gopSize":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { gopSize = v }
+            i += 1
+        }
     default:
         positionalArgs.append(arg)
     }
@@ -28,7 +40,7 @@ while i < args.count {
 }
 
 if positionalArgs.isEmpty {
-    print("Usage: vevc-enc -o <output.vevc> <input1.png> [input2.png ...]")
+    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-gopSize <frames>] <input1.png> [input2.png ...]")
     exit(1)
 }
 
@@ -57,7 +69,7 @@ for p in positionalArgs {
 
 do {
     let startTime = Date()
-    let out: [UInt8] = try await vevc.encode(images: images, maxbitrate: bitrate * 1000)
+    let out: [UInt8] = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize)
     let elapsed = Date().timeIntervalSince(startTime)
     
     let dataSize = images.reduce(0) { $0 + ($1.width * $1.height * 3) }

@@ -59,7 +59,7 @@ extension PlaneData420 {
     }
 }
 
-func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable) async throws -> ([UInt8], PlaneData420) {
+func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
     let dx = pd.width
     let dy = pd.height
     
@@ -248,9 +248,9 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
         }
     }
     
-    let bufY = encodePlaneSubbands(blocks: &subBlocksY, size: size)
-    let bufCb = encodePlaneSubbands(blocks: &subBlocksCb, size: size)
-    let bufCr = encodePlaneSubbands(blocks: &subBlocksCr, size: size)
+    let bufY = encodePlaneSubbands(blocks: &subBlocksY, size: size, zeroThreshold: zeroThreshold)
+    let bufCb = encodePlaneSubbands(blocks: &subBlocksCb, size: size, zeroThreshold: zeroThreshold)
+    let bufCr = encodePlaneSubbands(blocks: &subBlocksCr, size: size, zeroThreshold: zeroThreshold)
     
     var out: [UInt8] = []
     out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer]) // 'VEVC' + layer
@@ -271,7 +271,7 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     return (out, subPlane)
 }
 
-func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable) async throws -> [UInt8] {
+func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
     let dx = pd.width
     let dy = pd.height
     let chunkSize = 4
@@ -390,9 +390,9 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
         }
     }
     
-    let bufY = encodePlaneBaseSubbands(blocks: &subBlocksY, size: size)
-    let bufCb = encodePlaneBaseSubbands(blocks: &subBlocksCb, size: size)
-    let bufCr = encodePlaneBaseSubbands(blocks: &subBlocksCr, size: size)
+    let bufY = encodePlaneBaseSubbands(blocks: &subBlocksY, size: size, zeroThreshold: zeroThreshold)
+    let bufCb = encodePlaneBaseSubbands(blocks: &subBlocksCb, size: size, zeroThreshold: zeroThreshold)
+    let bufCr = encodePlaneBaseSubbands(blocks: &subBlocksCr, size: size, zeroThreshold: zeroThreshold)
     
     var out: [UInt8] = []
     out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer]) // 'VEVC' + layer
@@ -412,10 +412,10 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
     return out
 }
 
-func encodeSpatialLayers(pd: PlaneData420, maxbitrate: Int, qt: QuantizationTable) async throws -> [UInt8] {
-    let (layer2, sub2) = try await encodePlaneLayer(pd: pd, layer: 2, size: 32, qt: qt)
-    let (layer1, sub1) = try await encodePlaneLayer(pd: sub2, layer: 1, size: 16, qt: qt)
-    let layer0 = try await encodePlaneBase(pd: sub1, layer: 0, size: 8, qt: qt)
+func encodeSpatialLayers(pd: PlaneData420, maxbitrate: Int, qt: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
+    let (layer2, sub2) = try await encodePlaneLayer(pd: pd, layer: 2, size: 32, qt: qt, zeroThreshold: zeroThreshold)
+    let (layer1, sub1) = try await encodePlaneLayer(pd: sub2, layer: 1, size: 16, qt: qt, zeroThreshold: zeroThreshold)
+    let layer0 = try await encodePlaneBase(pd: sub1, layer: 0, size: 8, qt: qt, zeroThreshold: zeroThreshold)
     
     var out: [UInt8] = []
     

@@ -62,33 +62,69 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 // MARK: - Transform Functions
 
 @inline(__always)
-func isAllZero(hl: BlockView, lh: BlockView, hh: BlockView, size: Int) -> Bool {
+func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
         for x in 0..<size {
-            if ptrHL[x] != 0 || ptrLH[x] != 0 || ptrHH[x] != 0 {
+            if abs(Int(ptrHL[x])) > threshold || abs(Int(ptrLH[x])) > threshold || abs(Int(ptrHH[x])) > threshold {
                 return false
             }
         }
     }
+    
+    // threshold以下のノイズのみであった場合、後段のエントロピー結合やデコーダとの不整合を防ぐため
+    // 実際にメモリ上の値をすべて0にクリアする
+    for y in 0..<size {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<size {
+            ptrHL[x] = 0
+            ptrLH[x] = 0
+            ptrHH[x] = 0
+        }
+    }
+    
     return true
 }
 
 @inline(__always)
-func isAllZeroBase(ll: BlockView, hl: BlockView, lh: BlockView, hh: BlockView, size: Int) -> Bool {
+func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
+    // LL帯域は視覚への影響が大きい（DPCM残差）ため、一切の閾値緩和(Deadzone)を行わない
     for y in 0..<size {
         let ptrLL = ll.rowPointer(y: y)
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
         for x in 0..<size {
-            if ptrLL[x] != 0 || ptrHL[x] != 0 || ptrLH[x] != 0 || ptrHH[x] != 0 {
+            if ptrLL[x] != 0 {
                 return false
             }
         }
     }
+    
+    for y in 0..<size {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<size {
+            if abs(Int(ptrHL[x])) > threshold || abs(Int(ptrLH[x])) > threshold || abs(Int(ptrHH[x])) > threshold {
+                return false
+            }
+        }
+    }
+    
+    // 高周波帯域のみゼロクリアする
+    for y in 0..<size {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<size {
+            ptrHL[x] = 0
+            ptrLH[x] = 0
+            ptrHH[x] = 0
+        }
+    }
+    
     return true
 }
 
@@ -198,14 +234,17 @@ private func estimateOptimalK(blocks: inout [Block2D], indices: [Int], size: Int
     return bestK
 }
 
-func encodePlaneSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
+func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BitWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            if isAllZero(hl: subs.hl, lh: subs.lh, hh: subs.hh, size: subs.size) {
+            var hl = subs.hl
+            var lh = subs.lh
+            var hh = subs.hh
+            if isEffectivelyZero(hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
                 bwFlags.writeBit(1)
             } else {
                 bwFlags.writeBit(0)
@@ -256,14 +295,17 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
     return out
 }
 
-func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
+func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BitWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            if isAllZeroBase(ll: subs.ll, hl: subs.hl, lh: subs.lh, hh: subs.hh, size: subs.size) {
+            var hl = subs.hl
+            var lh = subs.lh
+            var hh = subs.hh
+            if isEffectivelyZeroBase(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
                 bwFlags.writeBit(1)
             } else {
                 bwFlags.writeBit(0)
@@ -381,7 +423,10 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     quantizeMid(&sub.lh, qt: qt)
     quantizeHigh(&sub.hh, qt: qt)
     
-    if isAllZeroBase(ll: sub.ll, hl: sub.hl, lh: sub.lh, hh: sub.hh, size: sub.size) {
+    var hl = sub.hl
+    var lh = sub.lh
+    var hh = sub.hh
+    if isEffectivelyZeroBase(ll: sub.ll, hl: &hl, lh: &lh, hh: &hh, size: sub.size, threshold: 0) {
         return 1
     }
     
@@ -629,7 +674,7 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
 
 
 
-public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8] {
+public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 0, gopSize: Int = 8) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     
     let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
@@ -641,10 +686,10 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
     for i in 0..<planes.count {
         let curr = planes[i]
         
-        if i == 0 {
+        if i % gopSize == 0 {
             // I-Frame
             let qtI = QuantizationTable(baseStep: max(1, Int(qt.step)))
-            let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qt: qtI)
+            let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qt: qtI, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // 'VEVI'
             appendUInt32BE(&out, UInt32(bytes.count))
@@ -669,7 +714,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8
             
             // P-Frame uses 4x quantization step (similar to H0/H1 in the old architecture)
             let qtP = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
-            let bytes = try await encodeSpatialLayers(pd: residual, maxbitrate: maxbitrate, qt: qtP)
+            let bytes = try await encodeSpatialLayers(pd: residual, maxbitrate: maxbitrate, qt: qtP, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
             appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dx)))
