@@ -36,8 +36,6 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
 
 // MARK: - Decode Logic
 
-private let k: UInt8 = 2
-
 @inline(__always)
 func toInt16(_ u: UInt16) -> Int16 {
     let s = Int16(bitPattern: (u >> 1))
@@ -46,7 +44,7 @@ func toInt16(_ u: UInt16) -> Int16 {
 }
 
 @inline(__always)
-func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int) throws {
+func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8) throws {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
@@ -57,7 +55,7 @@ func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int) throws
 }
 
 @inline(__always)
-func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int) throws {
+func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8) throws {
     var prevVal: Int16 = 0
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
@@ -91,26 +89,37 @@ func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [B
         }
     }
     
-    let brData = BitReader(data: dataSlice)
-    var rr = RiceReader(br: brData)
+    var brData = BitReader(data: dataSlice)
     
     let half = size / 2
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(rr: &rr, block: &hlView, size: half)
+    
+    let kHL = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+                try blockDecode(rr: &rr, block: &hlView, size: half, k: kHL)
+            }
         }
     }
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-            try blockDecode(rr: &rr, block: &lhView, size: half)
+    
+    let kLH = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+                try blockDecode(rr: &rr, block: &lhView, size: half, k: kLH)
+            }
         }
     }
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-            try blockDecode(rr: &rr, block: &hhView, size: half)
+    
+    let kHH = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                try blockDecode(rr: &rr, block: &hhView, size: half, k: kHH)
+            }
         }
     }
     return blocks
@@ -136,32 +145,47 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
         }
     }
     
-    let brData = BitReader(data: dataSlice)
-    var rr = RiceReader(br: brData)
+    var brData = BitReader(data: dataSlice)
     
     let half = size / 2
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var llView = BlockView(base: view.base, width: half, height: half, stride: size)
-            try blockDecodeDPCM(rr: &rr, block: &llView, size: half)
+    
+    let kLL = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var llView = BlockView(base: view.base, width: half, height: half, stride: size)
+                try blockDecodeDPCM(rr: &rr, block: &llView, size: half, k: kLL)
+            }
         }
     }
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(rr: &rr, block: &hlView, size: half)
+    
+    let kHL = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+                try blockDecode(rr: &rr, block: &hlView, size: half, k: kHL)
+            }
         }
     }
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-            try blockDecode(rr: &rr, block: &lhView, size: half)
+    
+    let kLH = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+                try blockDecode(rr: &rr, block: &lhView, size: half, k: kLH)
+            }
         }
     }
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-            try blockDecode(rr: &rr, block: &hhView, size: half)
+    
+    let kHH = UInt8(try brData.readBits(n: 4))
+    try RiceReader.withReader(&brData) { rr in
+        for i in nonZeroIndices {
+            try blocks[i].withView { view in
+                var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                try blockDecode(rr: &rr, block: &hhView, size: half, k: kHH)
+            }
         }
     }
     return blocks

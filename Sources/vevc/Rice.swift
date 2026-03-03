@@ -113,10 +113,15 @@ public struct RiceWriter {
     }
     
     @inline(__always)
-    public mutating func flush() {
+    public mutating func flushRice() {
         if 0 < zeroCount {
             flushZeros(k: lastK)
         }
+    }
+    
+    @inline(__always)
+    public mutating func flush() {
+        flushRice()
         bw.flush()
     }
     
@@ -126,10 +131,14 @@ public struct RiceWriter {
     }
     
     @inline(__always)
-    public static func withWriter(_ bw: inout BitWriter, body: (inout RiceWriter) throws -> Void) rethrows {
+    public static func withWriter(_ bw: inout BitWriter, flushBits: Bool = true, body: (inout RiceWriter) throws -> Void) rethrows {
         var rw = RiceWriter(bw: bw)
         try body(&rw)
-        rw.flush()
+        if flushBits {
+            rw.flush()
+        } else {
+            rw.flushRice()
+        }
         bw = rw.extractWriter()
     }
 }
@@ -226,6 +235,18 @@ public struct RiceReader {
         }
         
         return val
+    }
+    
+    @inline(__always)
+    internal mutating func extractReader() -> BitReader {
+        return br
+    }
+    
+    @inline(__always)
+    public static func withReader(_ br: inout BitReader, body: (inout RiceReader) throws -> Void) rethrows {
+        var rr = RiceReader(br: br)
+        try body(&rr)
+        br = rr.extractReader()
     }
 }
 

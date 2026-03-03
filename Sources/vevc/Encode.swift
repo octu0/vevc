@@ -1,14 +1,12 @@
 // MARK: - Encode
 
-private let k: UInt8 = 2
-
 @inline(__always)
 func toUint16(_ n: Int16) -> UInt16 {
     return UInt16(bitPattern: ((n &<< 1) ^ (n >> 15)))
 }
 
 @inline(__always)
-func blockEncode(rw: inout RiceWriter, block: BlockView, size: Int) {
+func blockEncode(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8) {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
@@ -31,7 +29,7 @@ func getSubbands(view: BlockView, size: Int) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int) {
+func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8) {
     var prevVal: Int16 = 0
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
@@ -115,6 +113,91 @@ func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
     }
 }
 
+private enum SubbandType { case ll, hl, lh, hh }
+
+private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type: SubbandType, isDPCM: Bool, k: UInt8) -> Int {
+    var bitCount = 0
+    var zeroCount: UInt16 = 0
+    let half = size / 2
+    
+    @inline(__always)
+    func simWrite(_ val: UInt16) {
+        if val == 0 {
+            zeroCount &+= 1
+            return
+        }
+        if zeroCount > 0 {
+            if zeroCount < 255 {
+                let q = zeroCount >> k
+                bitCount += Int(q) + 1 + Int(k)
+            } else {
+                let q = UInt16(255) >> k
+                bitCount += Int(q) + 1 + Int(k) + 16
+            }
+            zeroCount = 0
+        }
+        let q = val >> k
+        bitCount += Int(q) + 1 + Int(k)
+    }
+    
+    for i in indices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            let b: BlockView
+            switch type {
+            case .ll: b = subs.ll
+            case .hl: b = subs.hl
+            case .lh: b = subs.lh
+            case .hh: b = subs.hh
+            }
+            if isDPCM {
+                var prev: Int16 = 0
+                for y in 0..<half {
+                    let ptr = b.rowPointer(y: y)
+                    for x in 0..<half {
+                        let val = ptr[x]
+                        let diff = val - prev
+                        simWrite(toUint16(diff))
+                        prev = val
+                    }
+                }
+            } else {
+                for y in 0..<half {
+                    let ptr = b.rowPointer(y: y)
+                    for x in 0..<half {
+                        simWrite(UInt16(bitPattern: ptr[x]))
+                    }
+                }
+            }
+        }
+    }
+    
+    if zeroCount > 0 {
+        if zeroCount < 255 {
+            let q = zeroCount >> k
+            bitCount += Int(q) + 1 + Int(k)
+        } else {
+            let q = UInt16(255) >> k
+            bitCount += Int(q) + 1 + Int(k) + 16
+        }
+    }
+    return bitCount
+}
+
+private func estimateOptimalK(blocks: inout [Block2D], indices: [Int], size: Int, type: SubbandType, isDPCM: Bool) -> UInt8 {
+    if indices.isEmpty { return 0 }
+    var bestK: UInt8 = 0
+    var minBits = Int.max
+    for k in UInt8(0)...UInt8(6) {
+        let bits = evaluateK(blocks: &blocks, indices: indices, size: size, type: type, isDPCM: isDPCM, k: k)
+        if bits < minBits {
+            minBits = bits
+            bestK = k
+        }
+    }
+    return bestK
+}
+
 func encodePlaneSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
     var bwFlags = BitWriter()
     var nonZeroIndices: [Int] = []
@@ -133,27 +216,41 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
     bwFlags.flush()
     
     var bwData = BitWriter()
-    RiceWriter.withWriter(&bwData) { rw in
+    
+    let kHL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hl, isDPCM: false)
+    bwData.writeBits(val: UInt16(kHL), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
         for i in nonZeroIndices {
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hl, size: subs.size)
-            }
-        }
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.lh, size: subs.size)
-            }
-        }
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hh, size: subs.size)
+                blockEncode(rw: &rw, block: subs.hl, size: subs.size, k: kHL)
             }
         }
     }
     
+    let kLH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .lh, isDPCM: false)
+    bwData.writeBits(val: UInt16(kLH), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.lh, size: subs.size, k: kLH)
+            }
+        }
+    }
+    
+    let kHH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hh, isDPCM: false)
+    bwData.writeBits(val: UInt16(kHH), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hh, size: subs.size, k: kHH)
+            }
+        }
+    }
+    
+    bwData.flush()
     var out = bwFlags.data
     out.append(contentsOf: bwData.data)
     return out
@@ -177,33 +274,52 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
     bwFlags.flush()
     
     var bwData = BitWriter()
-    RiceWriter.withWriter(&bwData) { rw in
+    
+    let kLL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .ll, isDPCM: true)
+    bwData.writeBits(val: UInt16(kLL), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
         for i in nonZeroIndices {
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
-                blockEncodeDPCM(rw: &rw, block: subs.ll, size: subs.size)
-            }
-        }
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hl, size: subs.size)
-            }
-        }
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.lh, size: subs.size)
-            }
-        }
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hh, size: subs.size)
+                blockEncodeDPCM(rw: &rw, block: subs.ll, size: subs.size, k: kLL)
             }
         }
     }
     
+    let kHL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hl, isDPCM: false)
+    bwData.writeBits(val: UInt16(kHL), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hl, size: subs.size, k: kHL)
+            }
+        }
+    }
+    
+    let kLH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .lh, isDPCM: false)
+    bwData.writeBits(val: UInt16(kLH), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.lh, size: subs.size, k: kLH)
+            }
+        }
+    }
+    
+    let kHH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hh, isDPCM: false)
+    bwData.writeBits(val: UInt16(kHH), n: 4)
+    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hh, size: subs.size, k: kHH)
+            }
+        }
+    }
+    
+    bwData.flush()
     var out = bwFlags.data
     out.append(contentsOf: bwData.data)
     return out
