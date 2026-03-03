@@ -54,7 +54,7 @@ public struct RiceWriter {
     
     public init(bw: BitWriter) {
         self.bw = bw
-        self.maxVal = 256
+        self.maxVal = UInt16.max
         self.zeroCount = 0
         self.lastK = 0
     }
@@ -75,20 +75,22 @@ public struct RiceWriter {
     
     @inline(__always)
     public mutating func write(val: UInt16, k: UInt8) {
-        lastK = k
-        
         if val == 0 {
+            let currentK = (zeroCount == 0) ? k : lastK
             if zeroCount == maxVal {
-                flushZeros(k: k)
+                flushZeros(k: currentK)
+                // flushZeros resets zeroCount to 0
             }
             zeroCount += 1
+            lastK = currentK
             return
         }
         
         if 0 < zeroCount {
-             flushZeros(k: k)
+             flushZeros(k: lastK)
         }
         
+        lastK = k
         writePrimitive(val: val, k: k)
     }
     
@@ -98,7 +100,14 @@ public struct RiceWriter {
             return
         }
         writePrimitive(val: 0, k: k)
-        writePrimitive(val: zeroCount, k: k)
+        
+        let escapeVal: UInt16 = 255
+        if zeroCount < escapeVal {
+            writePrimitive(val: zeroCount, k: k)
+        } else {
+            writePrimitive(val: escapeVal, k: k)
+            bw.writeBits(val: zeroCount, n: 16)
+        }
         
         zeroCount = 0
     }
@@ -206,7 +215,13 @@ public struct RiceReader {
         
         if val == 0 {
             let count = try readPrimitive(k: k)
-            pendingZeros = (Int(count) - 1)
+            let escapeVal: UInt16 = 255
+            if count == escapeVal {
+                let actualCount = try br.readBits(n: 16)
+                pendingZeros = (Int(actualCount) - 1)
+            } else {
+                pendingZeros = (Int(count) - 1)
+            }
             return 0
         }
         

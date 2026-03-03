@@ -36,7 +36,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
 
 // MARK: - Decode Logic
 
-private let k: UInt8 = 4
+private let k: UInt8 = 2
 
 @inline(__always)
 func toInt16(_ u: UInt16) -> Int16 {
@@ -71,96 +71,100 @@ func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int) th
     }
 }
 
-@inline(__always)
-func invertLayer(br: BitReader, ll: Block2D, size: Int, qt: QuantizationTable) throws -> Block2D {
-    var ll = ll
-    var block = Block2D(width: size, height: size)
+func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [Block2D] {
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity(blockCount)
+    for _ in 0..<blockCount {
+        blocks.append(Block2D(width: size, height: size))
+    }
+    
+    let flagsByteCount = (blockCount + 7) / 8
+    guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
+    let flagsData = Array(data[0..<flagsByteCount])
+    let dataSlice = Array(data[flagsByteCount...])
+    
+    var brFlags = BitReader(data: flagsData)
+    var nonZeroIndices: [Int] = []
+    for i in 0..<blockCount {
+        if try brFlags.readBit() == 0 {
+            nonZeroIndices.append(i)
+        }
+    }
+    
+    let brData = BitReader(data: dataSlice)
+    var rr = RiceReader(br: brData)
+    
     let half = size / 2
-    
-    // Copy LL to top-left
-    ll.withView { srcView in
-        block.withView { destView in
-            for y in 0..<half {
-                let srcPtr = srcView.rowPointer(y: y)
-                let destPtr = destView.rowPointer(y: y)
-                destPtr.update(from: srcPtr, count: half)
-            }
-        }
-    }
-    
-    var br = br
-    let isZero = try br.readBit() == 1
-    
-    try block.withView { view in
-        let base = view.base
-        var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
-        var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
-        var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-        
-        if isZero != true {
-            var rr = RiceReader(br: br)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
             try blockDecode(rr: &rr, block: &hlView, size: half)
-            try blockDecode(rr: &rr, block: &lhView, size: half)
-            try blockDecode(rr: &rr, block: &hhView, size: half)
-            
-            dequantizeMidSignedMapping(&hlView, qt: qt)
-            dequantizeMidSignedMapping(&lhView, qt: qt)
-            dequantizeHighSignedMapping(&hhView, qt: qt)
         }
-        
-        invDwt2d(&view, size: size)
     }
-    
-    return block
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+            try blockDecode(rr: &rr, block: &lhView, size: half)
+        }
+    }
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+            try blockDecode(rr: &rr, block: &hhView, size: half)
+        }
+    }
+    return blocks
 }
 
-@inline(__always)
-func invertBase(br: BitReader, size: Int, qt: QuantizationTable) throws -> Block2D {
-    var block = Block2D(width: size, height: size)
+func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [Block2D] {
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity(blockCount)
+    for _ in 0..<blockCount {
+        blocks.append(Block2D(width: size, height: size))
+    }
+    
+    let flagsByteCount = (blockCount + 7) / 8
+    guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
+    let flagsData = Array(data[0..<flagsByteCount])
+    let dataSlice = Array(data[flagsByteCount...])
+    
+    var brFlags = BitReader(data: flagsData)
+    var nonZeroIndices: [Int] = []
+    for i in 0..<blockCount {
+        if try brFlags.readBit() == 0 {
+            nonZeroIndices.append(i)
+        }
+    }
+    
+    let brData = BitReader(data: dataSlice)
+    var rr = RiceReader(br: brData)
+    
     let half = size / 2
-    
-    var br = br
-    let isZero = try br.readBit() == 1
-    
-    try block.withView { view in
-        let base = view.base
-        var llView = BlockView(base: base, width: half, height: half, stride: size)
-        var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
-        var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
-        var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-        
-        if !isZero {
-            var rr = RiceReader(br: br)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var llView = BlockView(base: view.base, width: half, height: half, stride: size)
             try blockDecodeDPCM(rr: &rr, block: &llView, size: half)
-            try blockDecode(rr: &rr, block: &hlView, size: half)
-            try blockDecode(rr: &rr, block: &lhView, size: half)
-            try blockDecode(rr: &rr, block: &hhView, size: half)
-            
-            dequantizeLow(&llView, qt: qt)
-            dequantizeMidSignedMapping(&hlView, qt: qt)
-            dequantizeMidSignedMapping(&lhView, qt: qt)
-            dequantizeHighSignedMapping(&hhView, qt: qt)
         }
-        
-        invDwt2d(&view, size: size)
     }
-    
-    return block
-}
-
-public typealias GetLLFunc = (_ x: Int, _ y: Int, _ size: Int) -> Block2D
-
-@inline(__always)
-func invertLayerFunc(br: BitReader, w: Int, h: Int, size: Int, qt: QuantizationTable, getLL: GetLLFunc) throws -> Block2D {
-    let ll = getLL(w/2, h/2, size/2)
-    let planes = try invertLayer(br: br, ll: ll, size: size, qt: qt)
-    return planes
-}
-
-@inline(__always)
-func invertBaseFunc(br: BitReader, w: Int, h: Int, size: Int, qt: QuantizationTable) throws -> Block2D {
-    let planes = try invertBase(br: br, size: size, qt: qt)
-    return planes
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+            try blockDecode(rr: &rr, block: &hlView, size: half)
+        }
+    }
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+            try blockDecode(rr: &rr, block: &lhView, size: half)
+        }
+    }
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+            try blockDecode(rr: &rr, block: &hhView, size: half)
+        }
+    }
+    return blocks
 }
 
 @inline(__always)
@@ -218,127 +222,185 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let qt = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
     
-    let bufYLen = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    var yBufs: [[UInt8]] = []
-    for _ in 0..<bufYLen {
-        yBufs.append(try readBlockFromBytes(r, offset: &offset))
-    }
+    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufY = Array(r[offset..<(offset + bufYLen)])
+    offset += bufYLen
     
-    let bufCbLen = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    var cbBufs: [[UInt8]] = []
-    for _ in 0..<bufCbLen {
-        cbBufs.append(try readBlockFromBytes(r, offset: &offset))
-    }
+    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufCb = Array(r[offset..<(offset + bufCbLen)])
+    offset += bufCbLen
     
-    let bufCrLen = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    var crBufs: [[UInt8]] = []
-    for _ in 0..<bufCrLen {
-        crBufs.append(try readBlockFromBytes(r, offset: &offset))
-    }
+    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufCr = Array(r[offset..<(offset + bufCrLen)])
+    offset += bufCrLen
     
     var sub = Image16(width: dx, height: dy)
     
+    let rowCountY = (dy + size - 1) / size
+    let colCountY = (dx + size - 1) / size
+    let yBlocks = try decodePlaneSubbands(data: bufY, size: size, blockCount: rowCountY * colCountY)
+    
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let rowCountCb = (cbDy + size - 1) / size
+    let colCountCb = (cbDx + size - 1) / size
+    let cbBlocks = try decodePlaneSubbands(data: bufCb, size: size, blockCount: rowCountCb * colCountCb)
+    
+    let rowCountCr = (cbDy + size - 1) / size
+    let colCountCr = (cbDx + size - 1) / size
+    let crBlocks = try decodePlaneSubbands(data: bufCr, size: size, blockCount: rowCountCr * colCountCr)
+    
+    let chunkSize = 4
+    
     // Y
-    try await withThrowingTaskGroup(of: (Int, [(Block2D, Int, Int)]).self) { group in
-        var bufIndex = 0
-        for h in stride(from: 0, to: dy, by: size) {
-            let wStride = Array(stride(from: 0, to: dx, by: size))
-            let rowBufs = Array(yBufs[bufIndex..<(bufIndex + wStride.count)])
-            bufIndex += wStride.count
-            
+    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountY {
             group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountY)
                 var rowResults: [(Block2D, Int, Int)] = []
-                for (i, w) in wStride.enumerated() {
-                    let data = rowBufs[i]
-                    let br = BitReader(data: data)
-                    let ll = try invertLayerFunc(br: br, w: w, h: h, size: size, qt: qt, getLL: prev.getY)
-                    rowResults.append((ll, w, h))
+                for i in startRow..<endRow {
+                    let h = i * size
+                    for (xIdx, w) in stride(from: 0, to: dx, by: size).enumerated() {
+                        let blockIndex = i * colCountY + xIdx
+                        var block = yBlocks[blockIndex]
+                        let half = size / 2
+                        var ll = prev.getY(x: w / 2, y: h / 2, size: half)
+                        ll.withView { srcView in
+                            block.withView { destView in
+                                for yi in 0..<half {
+                                    let srcPtr = srcView.rowPointer(y: yi)
+                                    let destPtr = destView.rowPointer(y: yi)
+                                    destPtr.update(from: srcPtr, count: half)
+                                }
+                            }
+                        }
+                        block.withView { view in
+                            let base = view.base
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
+                            var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
+                            var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                            dequantizeMidSignedMapping(&hlView, qt: qt)
+                            dequantizeMidSignedMapping(&lhView, qt: qt)
+                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            invDwt2d(&view, size: size)
+                        }
+                        rowResults.append((block, w, h))
+                    }
                 }
-                return (h, rowResults)
+                return rowResults
             }
         }
-        
-        var results: [(Int, [(Block2D, Int, Int)])] = []
         for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                let w = results[i].1[j].1
-                let h = results[i].1[j].2
-                sub.updateY(data: &results[i].1[j].0, startX: w, startY: h, size: size)
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateY(data: &blk, startX: w, startY: h, size: size)
             }
         }
     }
     
     // Cb
-    try await withThrowingTaskGroup(of: (Int, [(Block2D, Int, Int)]).self) { group in
-        var bufIndex = 0
-        for h in stride(from: 0, to: ((dy + 1) / 2), by: size) {
-            let wStride = Array(stride(from: 0, to: ((dx + 1) / 2), by: size))
-            let rowBufs = Array(cbBufs[bufIndex..<(bufIndex + wStride.count)])
-            bufIndex += wStride.count
-            
+    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountCb {
             group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCb)
                 var rowResults: [(Block2D, Int, Int)] = []
-                for (i, w) in wStride.enumerated() {
-                    let data = rowBufs[i]
-                    let br = BitReader(data: data)
-                    let ll = try invertLayerFunc(br: br, w: w, h: h, size: size, qt: qt, getLL: prev.getCb)
-                    rowResults.append((ll, w, h))
+                for i in startRow..<endRow {
+                    let h = i * size
+                    for (xIdx, w) in stride(from: 0, to: cbDx, by: size).enumerated() {
+                        let blockIndex = i * colCountCb + xIdx
+                        var block = cbBlocks[blockIndex]
+                        let half = size / 2
+                        var ll = prev.getCb(x: w / 2, y: h / 2, size: half)
+                        ll.withView { srcView in
+                            block.withView { destView in
+                                for yi in 0..<half {
+                                    let srcPtr = srcView.rowPointer(y: yi)
+                                    let destPtr = destView.rowPointer(y: yi)
+                                    destPtr.update(from: srcPtr, count: half)
+                                }
+                            }
+                        }
+                        block.withView { view in
+                            let base = view.base
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
+                            var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
+                            var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                            dequantizeMidSignedMapping(&hlView, qt: qt)
+                            dequantizeMidSignedMapping(&lhView, qt: qt)
+                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            invDwt2d(&view, size: size)
+                        }
+                        rowResults.append((block, w, h))
+                    }
                 }
-                return (h, rowResults)
+                return rowResults
             }
         }
-        
-        var results: [(Int, [(Block2D, Int, Int)])] = []
         for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                let w = results[i].1[j].1
-                let h = results[i].1[j].2
-                sub.updateCb(data: &results[i].1[j].0, startX: w, startY: h, size: size)
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateCb(data: &blk, startX: w, startY: h, size: size)
             }
         }
     }
     
     // Cr
-    try await withThrowingTaskGroup(of: (Int, [(Block2D, Int, Int)]).self) { group in
-        var bufIndex = 0
-        for h in stride(from: 0, to: ((dy + 1) / 2), by: size) {
-            let wStride = Array(stride(from: 0, to: ((dx + 1) / 2), by: size))
-            let rowBufs = Array(crBufs[bufIndex..<(bufIndex + wStride.count)])
-            bufIndex += wStride.count
-            
+    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountCr {
             group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCr)
                 var rowResults: [(Block2D, Int, Int)] = []
-                for (i, w) in wStride.enumerated() {
-                    let data = rowBufs[i]
-                    let br = BitReader(data: data)
-                    let ll = try invertLayerFunc(br: br, w: w, h: h, size: size, qt: qt, getLL: prev.getCr)
-                    rowResults.append((ll, w, h))
+                for i in startRow..<endRow {
+                    let h = i * size
+                    for (xIdx, w) in stride(from: 0, to: cbDx, by: size).enumerated() {
+                        let blockIndex = i * colCountCr + xIdx
+                        var block = crBlocks[blockIndex]
+                        let half = size / 2
+                        var ll = prev.getCr(x: w / 2, y: h / 2, size: half)
+                        ll.withView { srcView in
+                            block.withView { destView in
+                                for yi in 0..<half {
+                                    let srcPtr = srcView.rowPointer(y: yi)
+                                    let destPtr = destView.rowPointer(y: yi)
+                                    destPtr.update(from: srcPtr, count: half)
+                                }
+                            }
+                        }
+                        block.withView { view in
+                            let base = view.base
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
+                            var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
+                            var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                            dequantizeMidSignedMapping(&hlView, qt: qt)
+                            dequantizeMidSignedMapping(&lhView, qt: qt)
+                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            invDwt2d(&view, size: size)
+                        }
+                        rowResults.append((block, w, h))
+                    }
                 }
-                return (h, rowResults)
+                return rowResults
             }
         }
-        
-        var results: [(Int, [(Block2D, Int, Int)])] = []
         for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                let w = results[i].1[j].1
-                let h = results[i].1[j].2
-                sub.updateCr(data: &results[i].1[j].0, startX: w, startY: h, size: size)
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateCr(data: &blk, startX: w, startY: h, size: size)
             }
         }
     }
@@ -365,127 +427,161 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let qt = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
     
-    let bufYLen = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    var yBufs: [[UInt8]] = []
-    for _ in 0..<bufYLen {
-        yBufs.append(try readBlockFromBytes(r, offset: &offset))
-    }
+    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufY = Array(r[offset..<(offset + bufYLen)])
+    offset += bufYLen
     
-    let bufCbLen = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    var cbBufs: [[UInt8]] = []
-    for _ in 0..<bufCbLen {
-        cbBufs.append(try readBlockFromBytes(r, offset: &offset))
-    }
+    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufCb = Array(r[offset..<(offset + bufCbLen)])
+    offset += bufCbLen
     
-    let bufCrLen = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    var crBufs: [[UInt8]] = []
-    for _ in 0..<bufCrLen {
-        crBufs.append(try readBlockFromBytes(r, offset: &offset))
-    }
+    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufCr = Array(r[offset..<(offset + bufCrLen)])
+    offset += bufCrLen
     
     var sub = Image16(width: dx, height: dy)
     
+    let rowCountY = (dy + size - 1) / size
+    let colCountY = (dx + size - 1) / size
+    let yBlocks = try decodePlaneBaseSubbands(data: bufY, size: size, blockCount: rowCountY * colCountY)
+    
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let rowCountCb = (cbDy + size - 1) / size
+    let colCountCb = (cbDx + size - 1) / size
+    let cbBlocks = try decodePlaneBaseSubbands(data: bufCb, size: size, blockCount: rowCountCb * colCountCb)
+    
+    let rowCountCr = (cbDy + size - 1) / size
+    let colCountCr = (cbDx + size - 1) / size
+    let crBlocks = try decodePlaneBaseSubbands(data: bufCr, size: size, blockCount: rowCountCr * colCountCr)
+    
+    let chunkSize = 4
+    
     // Y
-    try await withThrowingTaskGroup(of: (Int, [(Block2D, Int, Int)]).self) { group in
-        var bufIndex = 0
-        for h in stride(from: 0, to: dy, by: size) {
-            let wStride = Array(stride(from: 0, to: dx, by: size))
-            let rowBufs = Array(yBufs[bufIndex..<(bufIndex + wStride.count)])
-            bufIndex += wStride.count
-            
+    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountY {
             group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountY)
                 var rowResults: [(Block2D, Int, Int)] = []
-                for (i, w) in wStride.enumerated() {
-                    let data = rowBufs[i]
-                    let br = BitReader(data: data)
-                    let ll = try invertBaseFunc(br: br, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((ll, w, h))
+                for i in startRow..<endRow {
+                    let h = i * size
+                    for (xIdx, w) in stride(from: 0, to: dx, by: size).enumerated() {
+                        let blockIndex = i * colCountY + xIdx
+                        var block = yBlocks[blockIndex]
+                        let half = size / 2
+                        block.withView { view in
+                            let base = view.base
+                            var llView = BlockView(base: base, width: half, height: half, stride: size)
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
+                            var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
+                            var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                            dequantizeLow(&llView, qt: qt)
+                            dequantizeMidSignedMapping(&hlView, qt: qt)
+                            dequantizeMidSignedMapping(&lhView, qt: qt)
+                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            invDwt2d(&view, size: size)
+                        }
+                        rowResults.append((block, w, h))
+                    }
                 }
-                return (h, rowResults)
+                return rowResults
             }
         }
-        
-        var results: [(Int, [(Block2D, Int, Int)])] = []
         for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                let w = results[i].1[j].1
-                let h = results[i].1[j].2
-                sub.updateY(data: &results[i].1[j].0, startX: w, startY: h, size: size)
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateY(data: &blk, startX: w, startY: h, size: size)
             }
         }
     }
     
     // Cb
-    try await withThrowingTaskGroup(of: (Int, [(Block2D, Int, Int)]).self) { group in
-        var bufIndex = 0
-        for h in stride(from: 0, to: ((dy + 1) / 2), by: size) {
-            let wStride = Array(stride(from: 0, to: ((dx + 1) / 2), by: size))
-            let rowBufs = Array(cbBufs[bufIndex..<(bufIndex + wStride.count)])
-            bufIndex += wStride.count
-            
+    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountCb {
             group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCb)
                 var rowResults: [(Block2D, Int, Int)] = []
-                for (i, w) in wStride.enumerated() {
-                    let data = rowBufs[i]
-                    let br = BitReader(data: data)
-                    let ll = try invertBaseFunc(br: br, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((ll, w, h))
+                for i in startRow..<endRow {
+                    let h = i * size
+                    for (xIdx, w) in stride(from: 0, to: cbDx, by: size).enumerated() {
+                        let blockIndex = i * colCountCb + xIdx
+                        var block = cbBlocks[blockIndex]
+                        let half = size / 2
+                        block.withView { view in
+                            let base = view.base
+                            var llView = BlockView(base: base, width: half, height: half, stride: size)
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
+                            var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
+                            var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                            dequantizeLow(&llView, qt: qt)
+                            dequantizeMidSignedMapping(&hlView, qt: qt)
+                            dequantizeMidSignedMapping(&lhView, qt: qt)
+                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            invDwt2d(&view, size: size)
+                        }
+                        rowResults.append((block, w, h))
+                    }
                 }
-                return (h, rowResults)
+                return rowResults
             }
         }
-        
-        var results: [(Int, [(Block2D, Int, Int)])] = []
         for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                let w = results[i].1[j].1
-                let h = results[i].1[j].2
-                sub.updateCb(data: &results[i].1[j].0, startX: w, startY: h, size: size)
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateCb(data: &blk, startX: w, startY: h, size: size)
             }
         }
     }
     
     // Cr
-    try await withThrowingTaskGroup(of: (Int, [(Block2D, Int, Int)]).self) { group in
-        var bufIndex = 0
-        for h in stride(from: 0, to: ((dy + 1) / 2), by: size) {
-            let wStride = Array(stride(from: 0, to: ((dx + 1) / 2), by: size))
-            let rowBufs = Array(crBufs[bufIndex..<(bufIndex + wStride.count)])
-            bufIndex += wStride.count
-            
+    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountCr {
             group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCr)
                 var rowResults: [(Block2D, Int, Int)] = []
-                for (i, w) in wStride.enumerated() {
-                    let data = rowBufs[i]
-                    let br = BitReader(data: data)
-                    let ll = try invertBaseFunc(br: br, w: w, h: h, size: size, qt: qt)
-                    rowResults.append((ll, w, h))
+                for i in startRow..<endRow {
+                    let h = i * size
+                    for (xIdx, w) in stride(from: 0, to: cbDx, by: size).enumerated() {
+                        let blockIndex = i * colCountCr + xIdx
+                        var block = crBlocks[blockIndex]
+                        let half = size / 2
+                        block.withView { view in
+                            let base = view.base
+                            var llView = BlockView(base: base, width: half, height: half, stride: size)
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
+                            var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
+                            var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                            dequantizeLow(&llView, qt: qt)
+                            dequantizeMidSignedMapping(&hlView, qt: qt)
+                            dequantizeMidSignedMapping(&lhView, qt: qt)
+                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            invDwt2d(&view, size: size)
+                        }
+                        rowResults.append((block, w, h))
+                    }
                 }
-                return (h, rowResults)
+                return rowResults
             }
         }
-        
-        var results: [(Int, [(Block2D, Int, Int)])] = []
         for try await res in group {
-            results.append(res)
-        }
-        results.sort { $0.0 < $1.0 }
-        
-        for i in results.indices {
-            for j in results[i].1.indices {
-                let w = results[i].1[j].1
-                let h = results[i].1[j].2
-                sub.updateCr(data: &results[i].1[j].0, startX: w, startY: h, size: size)
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateCr(data: &blk, startX: w, startY: h, size: size)
             }
         }
     }

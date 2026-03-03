@@ -1,6 +1,6 @@
 // MARK: - Encode
 
-private let k: UInt8 = 4
+private let k: UInt8 = 2
 
 @inline(__always)
 func toUint16(_ n: Int16) -> UInt16 {
@@ -15,6 +15,19 @@ func blockEncode(rw: inout RiceWriter, block: BlockView, size: Int) {
             rw.write(val: UInt16(bitPattern: ptr[x]), k: k)
         }
     }
+}
+
+@inline(__always)
+func getSubbands(view: BlockView, size: Int) -> Subbands {
+    let half = size / 2
+    let base = view.base
+    return Subbands(
+        ll: BlockView(base: base, width: half, height: half, stride: size),
+        hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: size),
+        lh: BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size),
+        hh: BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size),
+        size: half
+    )
 }
 
 @inline(__always)
@@ -82,92 +95,118 @@ func isAllZeroBase(ll: BlockView, hl: BlockView, lh: BlockView, hh: BlockView, s
 }
 
 @inline(__always)
-func transformLayer(bw: inout BitWriter, block: inout Block2D, size: Int, qt: QuantizationTable) throws -> Block2D {
-    var sub = block.withView { view in
-        return dwt2d(&view, size: size)
-    }
-    
-    quantizeMidSignedMapping(&sub.hl, qt: qt)
-    quantizeMidSignedMapping(&sub.lh, qt: qt)
-    quantizeHighSignedMapping(&sub.hh, qt: qt)
-    
-    if isAllZero(hl: sub.hl, lh: sub.lh, hh: sub.hh, size: sub.size) {
-        bw.writeBit(1)
-    } else {
-        bw.writeBit(0)
-        RiceWriter.withWriter(&bw) { rw in
-            blockEncode(rw: &rw, block: sub.hl, size: sub.size)
-            blockEncode(rw: &rw, block: sub.lh, size: sub.size)
-            blockEncode(rw: &rw, block: sub.hh, size: sub.size)
-        }
-    }
-    
-    var llBlock = Block2D(width: sub.size, height: sub.size)
-    llBlock.withView { dest in
-        let src = sub.ll
-        for y in 0..<sub.size {
-            let srcPtr = src.rowPointer(y: y)
-            let destPtr = dest.rowPointer(y: y)
-            destPtr.update(from: srcPtr, count: sub.size)
-        }
-    }
-    return llBlock
-}
-
-@inline(__always)
-func transformBase(bw: inout BitWriter, block: inout Block2D, size: Int, qt: QuantizationTable) throws {
-    var sub = block.withView { view in
-        return dwt2d(&view, size: size)
-    }
-    
-    quantizeLow(&sub.ll, qt: qt)
-    quantizeMidSignedMapping(&sub.hl, qt: qt)
-    quantizeMidSignedMapping(&sub.lh, qt: qt)
-    quantizeHighSignedMapping(&sub.hh, qt: qt)
-    
-    if isAllZeroBase(ll: sub.ll, hl: sub.hl, lh: sub.lh, hh: sub.hh, size: sub.size) {
-        bw.writeBit(1)
-    } else {
-        bw.writeBit(0)
-        RiceWriter.withWriter(&bw) { rw in
-            blockEncodeDPCM(rw: &rw, block: sub.ll, size: sub.size)
-            blockEncode(rw: &rw, block: sub.hl, size: sub.size)
-            blockEncode(rw: &rw, block: sub.lh, size: sub.size)
-            blockEncode(rw: &rw, block: sub.hh, size: sub.size)
-        }
-    }
-}
-
-@inline(__always)
-func transformLayerFunc(rows: RowFunc, w: Int, h: Int, size: Int, qt: QuantizationTable) throws -> ([UInt8], Block2D) {
-    var block = Block2D(width: size, height: size)
+func transformLayer(block: inout Block2D, size: Int, qt: QuantizationTable) {
     block.withView { view in
-        for i in 0..<size {
-            let row = rows(w, (h + i), size)
-            view.setRow(offsetY: i, row: row)
-        }
+        var sub = dwt2d(&view, size: size)
+        quantizeMidSignedMapping(&sub.hl, qt: qt)
+        quantizeMidSignedMapping(&sub.lh, qt: qt)
+        quantizeHighSignedMapping(&sub.hh, qt: qt)
     }
-    
-    var bw = BitWriter()
-    let ll = try transformLayer(bw: &bw, block: &block, size: size, qt: qt)
-    bw.flush()
-    return (bw.data, ll)
 }
 
 @inline(__always)
-func transformBaseFunc(rows: RowFunc, w: Int, h: Int, size: Int, qt: QuantizationTable) throws -> [UInt8] {
-    var block = Block2D(width: size, height: size)
+func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
     block.withView { view in
-        for i in 0..<size {
-            let row = rows(w, (h + i), size)
-            view.setRow(offsetY: i, row: row)
+        var sub = dwt2d(&view, size: size)
+        quantizeLow(&sub.ll, qt: qt)
+        quantizeMidSignedMapping(&sub.hl, qt: qt)
+        quantizeMidSignedMapping(&sub.lh, qt: qt)
+        quantizeHighSignedMapping(&sub.hh, qt: qt)
+    }
+}
+
+func encodePlaneSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
+    var bwFlags = BitWriter()
+    var nonZeroIndices: [Int] = []
+    
+    for i in blocks.indices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            if isAllZero(hl: subs.hl, lh: subs.lh, hh: subs.hh, size: subs.size) {
+                bwFlags.writeBit(1)
+            } else {
+                bwFlags.writeBit(0)
+                nonZeroIndices.append(i)
+            }
+        }
+    }
+    bwFlags.flush()
+    
+    var bwData = BitWriter()
+    RiceWriter.withWriter(&bwData) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hl, size: subs.size)
+            }
+        }
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.lh, size: subs.size)
+            }
+        }
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hh, size: subs.size)
+            }
         }
     }
     
-    var bw = BitWriter()
-    try transformBase(bw: &bw, block: &block, size: size, qt: qt)
-    bw.flush()
-    return bw.data
+    var out = bwFlags.data
+    out.append(contentsOf: bwData.data)
+    return out
+}
+
+func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int) -> [UInt8] {
+    var bwFlags = BitWriter()
+    var nonZeroIndices: [Int] = []
+    
+    for i in blocks.indices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            if isAllZeroBase(ll: subs.ll, hl: subs.hl, lh: subs.lh, hh: subs.hh, size: subs.size) {
+                bwFlags.writeBit(1)
+            } else {
+                bwFlags.writeBit(0)
+                nonZeroIndices.append(i)
+            }
+        }
+    }
+    bwFlags.flush()
+    
+    var bwData = BitWriter()
+    RiceWriter.withWriter(&bwData) { rw in
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncodeDPCM(rw: &rw, block: subs.ll, size: subs.size)
+            }
+        }
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hl, size: subs.size)
+            }
+        }
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.lh, size: subs.size)
+            }
+        }
+        for i in nonZeroIndices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                blockEncode(rw: &rw, block: subs.hh, size: subs.size)
+            }
+        }
+    }
+    
+    var out = bwFlags.data
+    out.append(contentsOf: bwData.data)
+    return out
 }
 
 private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
