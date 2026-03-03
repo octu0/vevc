@@ -385,67 +385,49 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
 }
 
 @inline(__always)
-func applyTemporal(planes: [PlaneData420]) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
-    let pd0 = planes[0], pd1 = planes[1], pd2 = planes[2], pd3 = planes[3]
-    let dx = pd0.width, dy = pd0.height
-    
-    func transform(p0: [Int16], p1: [Int16], p2: [Int16], p3: [Int16]) -> ([Int16], [Int16], [Int16], [Int16]) {
-        let count = p0.count
-
-        // Temporal Dead-zone / Noise reduction
-        var mp1 = p1
-        var mp2 = p2
-        var mp3 = p3
-        for i in 0..<count {
-            if abs(mp1[i] - p0[i]) <= 5 {
-                mp1[i] = p0[i]
-            }
-            if abs(mp2[i] - mp1[i]) <= 5 {
-                mp2[i] = mp1[i]
-            }
-            if abs(mp3[i] - mp2[i]) <= 5 {
-                mp3[i] = mp2[i]
+func subtractPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
+    @Sendable
+    func sub(c: [Int16], p: [Int16]) -> [Int16] {
+        let count = c.count
+        var res = [Int16](repeating: 0, count: count)
+        c.withUnsafeBufferPointer { cPtr in
+            p.withUnsafeBufferPointer { pPtr in
+                for i in 0..<count { res[i] = cPtr[i] - pPtr[i] }
             }
         }
-
-        var ll = [Int16](repeating: 0, count: count)
-        var lh = [Int16](repeating: 0, count: count)
-        var h0 = [Int16](repeating: 0, count: count)
-        var h1 = [Int16](repeating: 0, count: count)
-        var t0 = [Int16](repeating: 0, count: count)
-        var t1 = [Int16](repeating: 0, count: count)
-        
-        p0.withUnsafeBufferPointer { ptr0 in
-        mp1.withUnsafeBufferPointer { ptr1 in
-        mp2.withUnsafeBufferPointer { ptr2 in
-        mp3.withUnsafeBufferPointer { ptr3 in
-            temporalDWT(
-                f0: ptr0.baseAddress!, f1: ptr1.baseAddress!, f2: ptr2.baseAddress!, f3: ptr3.baseAddress!,
-                count: count,
-                outLL: &ll, outLH: &lh, outH0: &h0, outH1: &h1,
-                tempL0: &t0, tempL1: &t1
-            )
-        }}}}
-        return (ll, lh, h0, h1)
+        return res
     }
     
-    // Y, Cb, Cr planes in parallel
-    async let yResult = { transform(p0: pd0.y, p1: pd1.y, p2: pd2.y, p3: pd3.y) }()
-    async let cbResult = { transform(p0: pd0.cb, p1: pd1.cb, p2: pd2.cb, p3: pd3.cb) }()
-    async let crResult = { transform(p0: pd0.cr, p1: pd1.cr, p2: pd2.cr, p3: pd3.cr) }()
+    async let y = sub(c: curr.y, p: predicted.y)
+    async let cb = sub(c: curr.cb, p: predicted.cb)
+    async let cr = sub(c: curr.cr, p: predicted.cr)
     
-    let (y, cb, cr) = await (yResult, cbResult, crResult)
-    
-    return (
-        PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
-        PlaneData420(width: dx, height: dy, y: y.1, cb: cb.1, cr: cr.1),
-        PlaneData420(width: dx, height: dy, y: y.2, cb: cb.2, cr: cr.2),
-        PlaneData420(width: dx, height: dy, y: y.3, cb: cb.3, cr: cr.3)
-    )
+    return PlaneData420(width: curr.width, height: curr.height, y: await y, cb: await cb, cr: await cr)
 }
 
 @inline(__always)
-func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
+func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
+    @Sendable
+    func add(r: [Int16], p: [Int16]) -> [Int16] {
+        let count = r.count
+        var curr = [Int16](repeating: 0, count: count)
+        r.withUnsafeBufferPointer { rPtr in
+            p.withUnsafeBufferPointer { pPtr in
+                for i in 0..<count { curr[i] = rPtr[i] + pPtr[i] }
+            }
+        }
+        return curr
+    }
+    
+    async let y = add(r: residual.y, p: predicted.y)
+    async let cb = add(r: residual.cb, p: predicted.cb)
+    async let cr = add(r: residual.cr, p: predicted.cr)
+    
+    return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
+}
+
+@inline(__always)
+func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
     @Sendable
@@ -483,89 +465,67 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
         return out
     }
     
-    let yTask = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
-    let cbTask = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-    let crTask = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+    async let yTask = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
+    async let cbTask = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
+    async let crTask = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
     
-    return PlaneData420(width: plane.width, height: plane.height, y: yTask, cb: cbTask, cr: crTask)
+    return PlaneData420(width: plane.width, height: plane.height, y: await yTask, cb: await cbTask, cr: await crTask)
 }
 
 
 
 public func encode(images: [YCbCrImage], maxbitrate: Int) async throws -> [UInt8] {
     if images.isEmpty { return [] }
-    let gopSize = 4
     
     let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
-    
     var out: [UInt8] = []
     
-    for i in stride(from: 0, to: images.count, by: gopSize) {        
-        let endIndex = min(i + gopSize, images.count)
-        let chunkImages = Array(images[i..<endIndex])
+    var prevReconstructed: PlaneData420? = nil
+    let planes = toPlaneData420(images: images)
+    
+    for i in 0..<planes.count {
+        let curr = planes[i]
         
-        var chunk4 = chunkImages
-        while chunk4.count % 4 != 0 {
-            chunk4.append(chunkImages.last!)
+        if i == 0 {
+            // I-Frame
+            let qtI = QuantizationTable(baseStep: max(1, Int(qt.step)))
+            let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qt: qtI)
+            
+            out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // 'VEVI'
+            appendUInt32BE(&out, UInt32(bytes.count))
+            out.append(contentsOf: bytes)
+            
+            let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
+            prevReconstructed = PlaneData420(img16: img16)
+        } else {
+            // P-Frame
+            guard let prev = prevReconstructed else { continue }
+            
+            // GMC Estimate
+            let gmv = estimateGMV(curr: curr, prev: prev)
+            
+            // Predict
+            // In GMC, estimateGMV_old returns how much curr shifted from prev.
+            // If curr shifted by (dx, dy) compared to prev, then predicted = prev shifted by (dx, dy).
+            let predictedPlane = await shiftPlane(prev, dx: gmv.dx, dy: gmv.dy)
+            
+            // Residual
+            let residual = await subtractPlanes(curr: curr, predicted: predictedPlane)
+            
+            // P-Frame uses 4x quantization step (similar to H0/H1 in the old architecture)
+            let qtP = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+            let bytes = try await encodeSpatialLayers(pd: residual, maxbitrate: maxbitrate, qt: qtP)
+            
+            out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dx)))
+            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dy)))
+            appendUInt32BE(&out, UInt32(bytes.count))
+            out.append(contentsOf: bytes)
+            
+            let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
+            let reconstructedResidual = PlaneData420(img16: img16)
+            prevReconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane)
         }
-        
-        let planes = toPlaneData420(images: chunk4)
-        
-        let blockSize = 16
-        
-        // HBMA Estimate block-level MVs (Test fallback)
-        let gmv1 = estimateGMV_old(curr: planes[1], prev: planes[0])
-        let gmv2 = estimateGMV_old(curr: planes[2], prev: planes[0])
-        let gmv3 = estimateGMV_old(curr: planes[3], prev: planes[0])
-        
-        // Build predicted planes using block-level MVs
-        let p1_v = shiftPlane(planes[1], dx: -gmv1.dx, dy: -gmv1.dy)
-        let p2_v = shiftPlane(planes[2], dx: -gmv2.dx, dy: -gmv2.dy)
-        let p3_v = shiftPlane(planes[3], dx: -gmv3.dx, dy: -gmv3.dy)
-        
-        let (ll, lh, h0, h1) = await applyTemporal(planes: [planes[0], p1_v, p2_v, p3_v])
-        
-        let qtLL = QuantizationTable(baseStep: max(1, Int(qt.step)))
-        let qtLH = QuantizationTable(baseStep: Int(qt.step) * 2)
-        let qtH0 = QuantizationTable(baseStep: Int(qt.step) * 4)
-        let qtH1 = QuantizationTable(baseStep: Int(qt.step) * 4)
-        
-        // Encode 4 temporal bands in SERIAL to avoid nested parallelism overhead on M4 Max
-        let llBytes = try await encodeSpatialLayers(pd: ll, maxbitrate: maxbitrate, qt: qtLL)
-        let lhBytes = try await encodeSpatialLayers(pd: lh, maxbitrate: maxbitrate, qt: qtLH)
-        let h0Bytes = try await encodeSpatialLayers(pd: h0, maxbitrate: maxbitrate, qt: qtH0)
-        let h1Bytes = try await encodeSpatialLayers(pd: h1, maxbitrate: maxbitrate, qt: qtH1)
-        
-        out.append(contentsOf: [0x56, 0x45, 0x4C, UInt8(gopSize)]) // 'VEL' + GOP size
-        
-        // Write Block Size
-        out.append(UInt8(blockSize))
-        
-        // Count should be the same for all MV arrays since they use the same block size
-        let mvCount = 1
-        appendUInt16BE(&out, UInt16(mvCount))
-        
-        // Write all MVs (delta coding can be introduced later if size becomes an issue, but standard binary struct for now)
-        for _ in 0..<mvCount {
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dx)))
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv1.dy)))
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dx)))
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv2.dy)))
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dx)))
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv3.dy)))
-        }
-        
-        appendUInt32BE(&out, UInt32(llBytes.count))
-        out.append(contentsOf: llBytes)
-        
-        appendUInt32BE(&out, UInt32(lhBytes.count))
-        out.append(contentsOf: lhBytes)
-        
-        appendUInt32BE(&out, UInt32(h0Bytes.count))
-        out.append(contentsOf: h0Bytes)
-        
-        appendUInt32BE(&out, UInt32(h1Bytes.count))
-        out.append(contentsOf: h1Bytes)
     }
     
     return out

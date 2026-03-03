@@ -58,7 +58,6 @@ func downscale4x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
                     let px = x * 4
                     var sum: Int = 0
                     
-                    // Simple average of 4x4 block using auto-vectorized loop
                     for dy in 0..<4 {
                         let off = (py + dy) * pdWidth + px
                         sum &+= Int(pY[off]) &+ Int(pY[off+1]) &+ Int(pY[off+2]) &+ Int(pY[off+3])
@@ -77,7 +76,7 @@ public struct MotionVector {
 }
 
 @inline(__always)
-func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
+func estimateGMV(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: Int) {
     let dsCurr = downscale4x(pd: curr)
     let dsPrev = downscale4x(pd: prev)
 
@@ -85,7 +84,6 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
     var bestDX = 0
     var bestDY = 0
     
-    // Coarse search range: +- 32 pixels in full res (+- 8 in 1/4 scale)
     let range = 8
     
     dsCurr.data.withUnsafeBufferPointer { currPtr in
@@ -97,9 +95,7 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
                 for dx in -range...range {
                     var sad = 0
                     
-                    // Evaluate overlapping area in 1/4 scale sparsely for speed
-                    // (stride by 8 in 1/4 scale means stride by 32 in full res)
-                    for y in stride(from: 0, to: dsCurr.h, by: 8) {
+                    for y in stride(from: 0, to: dsCurr.h, by: 4) {
                         let srcY = y - dy
                         if srcY < 0 || srcY >= dsPrev.h { continue }
                         
@@ -119,7 +115,6 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
                         }
                     }
                     
-                    // Penalty for motion to prefer static background
                     sad &+= (abs(dx) + abs(dy)) * 8
                     
                     if sad < bestSAD {
@@ -139,9 +134,6 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
     var fineBestDX = cDX
     var fineBestDY = cDY
     
-    // Fine search in full resolution with sparse sampling (16x16 grid effectively)
-    // Coarse search at 1/4 scale got us within 4 pixels, so range 2 is sufficient
-    // to find the best pixel-aligned match, saving massive computation time.
     curr.y.withUnsafeBufferPointer { currYPtr in
         guard let pCurrY = currYPtr.baseAddress else { return }
         prev.y.withUnsafeBufferPointer { prevYPtr in
@@ -149,7 +141,7 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
             
             let marginY = 16
             let marginX = 16
-            let stepY = 128 // Evaluate only 1 in 128 lines for extreme speed
+            let stepY = 16
             
             for dy in (cDY - 2)...(cDY + 2) {
                 for dx in (cDX - 2)...(cDX + 2) {
@@ -175,7 +167,7 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
                         }
                     }
                     
-                    sad &+= (abs(dx) + abs(dy)) * 2
+                    sad &+= (abs(dx) + abs(dy))
                     
                     if sad < fineBestSAD {
                         fineBestSAD = sad
@@ -189,7 +181,3 @@ func estimateGMV_old(curr: PlaneData420, prev: PlaneData420) -> (dx: Int, dy: In
     
     return (dx: fineBestDX, dy: fineBestDY)
 }
-
-
-
-// ShiftPlane is replaced by HBMA implementation in Encode.swift/Decode.swift

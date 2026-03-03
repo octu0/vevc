@@ -32,53 +32,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
     return current
 }
 
-@inline(__always)
-func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, h1: PlaneData420, countY: Int, countC: Int) async -> (PlaneData420, PlaneData420, PlaneData420, PlaneData420) {
-    let dx = ll.width, dy = ll.height
-    
-    func transform(l: [Int16], h: [Int16], hh0: [Int16], hh1: [Int16], count: Int) -> ([Int16], [Int16], [Int16], [Int16]) {
-        var f0 = [Int16](repeating: 0, count: count)
-        var f1 = [Int16](repeating: 0, count: count)
-        var f2 = [Int16](repeating: 0, count: count)
-        var f3 = [Int16](repeating: 0, count: count)
-        var t0 = [Int16](repeating: 0, count: count)
-        var t1 = [Int16](repeating: 0, count: count)
-        
-        l.withUnsafeBufferPointer { ptrL in
-        h.withUnsafeBufferPointer { ptrH in
-        hh0.withUnsafeBufferPointer { ptrH0 in
-        hh1.withUnsafeBufferPointer { ptrH1 in
-            invTemporalDWT(
-                inLL: ptrL.baseAddress!,
-                inLH: ptrH.baseAddress!,
-                inH0: ptrH0.baseAddress!,
-                inH1: ptrH1.baseAddress!,
-                count: count,
-                outF0: &f0,
-                outF1: &f1,
-                outF2: &f2,
-                outF3: &f3,
-                tempL0: &t0,
-                tempL1: &t1
-            )
-        }}}}
-        return (f0, f1, f2, f3)
-    }
-    
-    // Y, Cb, Cr planes in parallel
-    async let yResult = { transform(l: ll.y, h: lh.y, hh0: h0.y, hh1: h1.y, count: countY) }()
-    async let cbResult = { transform(l: ll.cb, h: lh.cb, hh0: h0.cb, hh1: h1.cb, count: countC) }()
-    async let crResult = { transform(l: ll.cr, h: lh.cr, hh0: h0.cr, hh1: h1.cr, count: countC) }()
-    
-    let (y, cb, cr) = await (yResult, cbResult, crResult)
-    
-    return (
-        PlaneData420(width: dx, height: dy, y: y.0, cb: cb.0, cr: cr.0),
-        PlaneData420(width: dx, height: dy, y: y.1, cb: cb.1, cr: cr.1),
-        PlaneData420(width: dx, height: dy, y: y.2, cb: cb.2, cr: cr.2),
-        PlaneData420(width: dx, height: dy, y: y.3, cb: cb.3, cr: cr.3)
-    )
-}
+
 
 // MARK: - Decode Logic
 
@@ -552,77 +506,45 @@ public struct DecodeOptions: Sendable {
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
     var out: [YCbCrImage] = []
     var offset = 0
+    var prevReconstructed: PlaneData420? = nil
     
     while offset + 4 <= data.count {
-        let magic = Array(data[offset..<(offset + 3)])
-        offset += 3
-        guard magic == [0x56, 0x45, 0x4C] else {
-            throw DecodeError.invalidHeader
-        }
+        let magic = Array(data[offset..<(offset + 4)])
+        offset += 4
         
-        let _ = Int(data[offset]) // GOP size (not used yet)
-        offset += 1
-        
-        let _ = Int(data[offset]) // blockSize
-        offset += 1
-        
-        let mvCount = Int(try readUInt16BEFromBytes(data, offset: &offset))
-        var mvs1 = [MotionVector]()
-        var mvs2 = [MotionVector]()
-        var mvs3 = [MotionVector]()
-        
-        for _ in 0..<mvCount {
-            let dx1 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-            let dy1 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-            let dx2 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-            let dy2 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-            let dx3 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-            let dy3 = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+        if magic == [0x56, 0x45, 0x56, 0x49] { // 'VEVI'
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let chunk = Array(data[offset..<(offset + len)])
+            offset += len
             
-            mvs1.append(MotionVector(dx: dx1, dy: dy1))
-            mvs2.append(MotionVector(dx: dx2, dy: dy2))
-            mvs3.append(MotionVector(dx: dx3, dy: dy3))
-        }
-        
-        func readPlane() async throws -> PlaneData420 {
-            let len = try readUInt32BEFromBytes(data, offset: &offset)
-            let chunk = Array(data[offset..<(offset + Int(len))])
-            offset += Int(len)
-            let img = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
-            return PlaneData420(img16: img)
-        }
-        
-        let ll = try await readPlane()
-        let lh = try await readPlane()
-        let h0 = try await readPlane()
-        let h1 = try await readPlane()
-        
-        let countY = ll.y.count
-        let countC = ll.cb.count
-        
-        let emptyPlane = PlaneData420(width: ll.width, height: ll.height, y: [Int16](repeating: 0, count: countY), cb: [Int16](repeating: 0, count: countC), cr: [Int16](repeating: 0, count: countC))
-        
-        let actualLH = opts.maxFrames >= 2 ? lh : emptyPlane
-        let actualH0 = opts.maxFrames >= 4 ? h0 : emptyPlane
-        let actualH1 = opts.maxFrames >= 4 ? h1 : emptyPlane
-
-        // temporal inverse
-        let (f0_s, f1_s, f2_s, f3_s) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
-        
-        let f0 = f0_s
-        // Apply HBMA prediction utilizing decoded MV arrays (Test fallback to global)
-        async let f1_t = shiftPlane(f1_s, dx: mvs1[0].dx, dy: mvs1[0].dy)
-        async let f2_t = shiftPlane(f2_s, dx: mvs2[0].dx, dy: mvs2[0].dy)
-        async let f3_t = shiftPlane(f3_s, dx: mvs3[0].dx, dy: mvs3[0].dy)
-        let (f1, f2, f3) = await (f1_t, f2_t, f3_t)
-        
-        out.append(f0.toYCbCr())
-        if opts.maxFrames >= 2 {
-            out.append(f1.toYCbCr())
-            if opts.maxFrames >= 4 {
-                out.append(f2.toYCbCr())
-                out.append(f3.toYCbCr())
+            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            let pd = PlaneData420(img16: img16)
+            out.append(pd.toYCbCr())
+            prevReconstructed = pd
+            
+        } else if magic == [0x56, 0x45, 0x56, 0x50] { // 'VEVP'
+            let dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let chunk = Array(data[offset..<(offset + len)])
+            offset += len
+            
+            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            let residual = PlaneData420(img16: img16)
+            
+            if let prev = prevReconstructed {
+                let predicted = await shiftPlane(prev, dx: dx, dy: dy)
+                let curr = await addPlanes(residual: residual, predicted: predicted)
+                out.append(curr.toYCbCr())
+                prevReconstructed = curr
+            } else {
+                // If there's no previous frame, we can't decode a P-frame properly.
+                // Just use residual as is or fail.
+                out.append(residual.toYCbCr())
             }
+        } else {
+             throw DecodeError.invalidHeader
         }
     }
     
