@@ -74,8 +74,6 @@ func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout Block
         }
     }
     
-    // threshold以下のノイズのみであった場合、後段のエントロピー結合やデコーダとの不整合を防ぐため
-    // 実際にメモリ上の値をすべて0にクリアする
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
@@ -92,7 +90,6 @@ func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout Block
 
 @inline(__always)
 func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
-    // LL帯域は視覚への影響が大きい（DPCM残差）ため、一切の閾値緩和(Deadzone)を行わない
     for y in 0..<size {
         let ptrLL = ll.rowPointer(y: y)
         for x in 0..<size {
@@ -113,7 +110,6 @@ func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockVi
         }
     }
     
-    // 高周波帯域のみゼロクリアする
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
@@ -151,6 +147,7 @@ func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
 
 private enum SubbandType { case ll, hl, lh, hh }
 
+@inline(__always)
 private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type: SubbandType, isDPCM: Bool, k: UInt8) -> Int {
     var bitCount = 0
     var zeroCount: UInt16 = 0
@@ -220,6 +217,7 @@ private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type:
     return bitCount
 }
 
+@inline(__always)
 private func estimateOptimalK(blocks: inout [Block2D], indices: [Int], size: Int, type: SubbandType, isDPCM: Bool) -> UInt8 {
     if indices.isEmpty { return 0 }
     var bestK: UInt8 = 0
@@ -234,6 +232,7 @@ private func estimateOptimalK(blocks: inout [Block2D], indices: [Int], size: Int
     return bestK
 }
 
+@inline(__always)
 func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BitWriter()
     var nonZeroIndices: [Int] = []
@@ -295,6 +294,7 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
     return out
 }
 
+@inline(__always)
 func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BitWriter()
     var nonZeroIndices: [Int] = []
@@ -671,8 +671,6 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     
     return PlaneData420(width: plane.width, height: plane.height, y: await yTask, cb: await cbTask, cr: await crTask)
 }
-
-
 
 public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 0, gopSize: Int = 8) async throws -> [UInt8] {
     if images.isEmpty { return [] }

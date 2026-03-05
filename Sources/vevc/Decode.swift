@@ -32,8 +32,6 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
     return current
 }
 
-
-
 // MARK: - Decode Logic
 
 @inline(__always)
@@ -69,6 +67,7 @@ func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int, k:
     }
 }
 
+@inline(__always)
 func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
@@ -125,6 +124,7 @@ func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [B
     return blocks
 }
 
+@inline(__always)
 func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
@@ -659,8 +659,6 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                 out.append(curr.toYCbCr())
                 prevReconstructed = curr
             } else {
-                // If there's no previous frame, we can't decode a P-frame properly.
-                // Just use residual as is or fail.
                 out.append(residual.toYCbCr())
             }
         } else {

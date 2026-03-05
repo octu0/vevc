@@ -1,4 +1,4 @@
-// MARK: - Rice Coding (Foundation-free)
+// MARK: - Rice Coding
 
 // MARK: - BitWriter
 

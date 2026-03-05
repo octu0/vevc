@@ -1,5 +1,3 @@
-import Foundation
-
 @inline(__always)
 func calculateSAD(p1: UnsafePointer<Int16>, p2: UnsafePointer<Int16>, count: Int) -> Int {
     var sad: UInt = 0
