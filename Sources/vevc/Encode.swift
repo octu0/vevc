@@ -88,7 +88,16 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 // MARK: - Transform Functions
 
 @inline(__always)
-func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
+func isEffectivelyZero(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
+    for y in 0..<size {
+        let ptrLL = ll.rowPointer(y: y)
+        for x in 0..<size {
+            if ptrLL[x] != 0 {
+                return false
+            }
+        }
+    }
+    
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
@@ -288,7 +297,7 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
             var hl = subs.hl
             var lh = subs.lh
             var hh = subs.hh
-            if isEffectivelyZero(hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
+            if isEffectivelyZero(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
                 bwFlags.writeBit(1)
             } else {
                 bwFlags.writeBit(0)
