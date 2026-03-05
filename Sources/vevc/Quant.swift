@@ -22,7 +22,7 @@ struct QuantizationTable: Sendable {
     public init(baseStep: Int) {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
-        self.qLow  = Quantizer(step: s, roundToNearest: true)
+        self.qLow  = Quantizer(step: 1, roundToNearest: true) // ALWAYS 1 (Lossless for DC)
         self.qMid  = Quantizer(step: s * 2, roundToNearest: false)
         self.qHigh = Quantizer(step: s * 4, roundToNearest: false)
     }

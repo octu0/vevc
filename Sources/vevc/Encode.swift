@@ -88,16 +88,7 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 // MARK: - Transform Functions
 
 @inline(__always)
-func isEffectivelyZero(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
-    for y in 0..<size {
-        let ptrLL = ll.rowPointer(y: y)
-        for x in 0..<size {
-            if ptrLL[x] != 0 {
-                return false
-            }
-        }
-    }
-    
+func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
@@ -209,46 +200,62 @@ private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type:
         bitCount += Int(q) + 1 + Int(k)
     }
     
-    for i in indices {
-        blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            let b: BlockView
-            switch type {
-            case .ll: b = subs.ll
-            case .hl: b = subs.hl
-            case .lh: b = subs.lh
-            case .hh: b = subs.hh
-            }
-            if isDPCM {
-                for y in 0..<half {
-                    let ptr = b.rowPointer(y: y)
-                    for x in 0..<half {
-                        let val = ptr[x]
-                        let predicted: Int16
-                        if x == 0 && y == 0 {
-                            predicted = lastVal
-                        } else if y == 0 {
-                            predicted = ptr[x - 1]
-                        } else if x == 0 {
-                            predicted = b.rowPointer(y: y - 1)[x]
-                        } else {
-                            let a = Int(ptr[x - 1])
-                            let bv = Int(b.rowPointer(y: y - 1)[x])
-                            let c = Int(b.rowPointer(y: y - 1)[x - 1])
-                            if c >= max(a, bv) {
-                                predicted = Int16(min(a, bv))
-                            } else if c <= min(a, bv) {
-                                predicted = Int16(max(a, bv))
-                            } else {
-                                predicted = Int16(a + bv - c)
-                            }
-                        }
-                        let diff = val - predicted
-                        simWrite(toUint16(diff))
+    if isDPCM {
+        for i in blocks.indices {
+            if indices.contains(i) {
+                blocks[i].withView { view in
+                    let subs = getSubbands(view: view, size: size)
+                    let b: BlockView
+                    switch type {
+                    case .ll: b = subs.ll
+                    case .hl: b = subs.hl
+                    case .lh: b = subs.lh
+                    case .hh: b = subs.hh
                     }
+                    for y in 0..<half {
+                        let ptr = b.rowPointer(y: y)
+                        for x in 0..<half {
+                            let val = ptr[x]
+                            let predicted: Int16
+                            if x == 0 && y == 0 {
+                                predicted = lastVal
+                            } else if y == 0 {
+                                predicted = ptr[x - 1]
+                            } else if x == 0 {
+                                predicted = b.rowPointer(y: y - 1)[x]
+                            } else {
+                                let a = Int(ptr[x - 1])
+                                let bv = Int(b.rowPointer(y: y - 1)[x])
+                                let c = Int(b.rowPointer(y: y - 1)[x - 1])
+                                if c >= max(a, bv) {
+                                    predicted = Int16(min(a, bv))
+                                } else if c <= min(a, bv) {
+                                    predicted = Int16(max(a, bv))
+                                } else {
+                                    predicted = Int16(a + bv - c)
+                                }
+                            }
+                            let diff = val - predicted
+                            simWrite(toUint16(diff))
+                        }
+                    }
+                    lastVal = b.rowPointer(y: half - 1)[half - 1]
                 }
-                lastVal = b.rowPointer(y: half - 1)[half - 1]
             } else {
+                lastVal = 0
+            }
+        }
+    } else {
+        for i in indices {
+            blocks[i].withView { view in
+                let subs = getSubbands(view: view, size: size)
+                let b: BlockView
+                switch type {
+                case .ll: b = subs.ll
+                case .hl: b = subs.hl
+                case .lh: b = subs.lh
+                case .hh: b = subs.hh
+                }
                 for y in 0..<half {
                     let ptr = b.rowPointer(y: y)
                     for x in 0..<half {
@@ -297,7 +304,7 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
             var hl = subs.hl
             var lh = subs.lh
             var hh = subs.hh
-            if isEffectivelyZero(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
+            if isEffectivelyZero(hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
                 bwFlags.writeBit(1)
             } else {
                 bwFlags.writeBit(0)
@@ -431,7 +438,7 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
     return out
 }
 
-private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
+private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout Int16) -> Int {
     var sumDiffAbs = 0
     let count = size * size
     
@@ -441,7 +448,7 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
             let val = ptr[x]
             let predicted: Int16
             if x == 0 && y == 0 {
-                predicted = 0
+                predicted = lastVal
             } else if y == 0 {
                 predicted = ptr[x - 1]
             } else if x == 0 {
@@ -462,6 +469,7 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
             sumDiffAbs += diff
         }
     }
+    lastVal = block.rowPointer(y: size - 1)[size - 1]
     
     if count == 0 { return 0 }
     
@@ -512,7 +520,8 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     }
     
     var bits = 1
-    bits += estimateRiceBitsDPCM(block: sub.ll, size: sub.size)
+    var lastVal: Int16 = 0
+    bits += estimateRiceBitsDPCM(block: sub.ll, size: sub.size, lastVal: &lastVal)
     bits += estimateRiceBits(block: sub.hl, size: sub.size)
     bits += estimateRiceBits(block: sub.lh, size: sub.size)
     bits += estimateRiceBits(block: sub.hh, size: sub.size)
@@ -715,6 +724,7 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
         if w == 0 || h == 0 { return data }
         
+        // エッジクランプシフト: 範囲外は端のピクセルを繰り返して埋める（BORDER_REPLICATE）
         var out = [Int16](repeating: 0, count: w * h)
         
         data.withUnsafeBufferPointer { dPtr in
@@ -722,22 +732,37 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
             out.withUnsafeMutableBufferPointer { oPtr in
                 guard let pOut = oPtr.baseAddress else { return }
                 
-                let eX = ((sX % w) + w) % w
-                let eY = ((sY % h) + h) % h
-                
                 for dstY in 0..<h {
+                    // srcY をクランプ
+                    let srcY = min(max(dstY - sY, 0), h - 1)
                     let dstRow = dstY * w
-                    let srcY = (dstY - eY + h) % h
                     let srcRow = srcY * w
                     
-                    if eX == 0 {
-                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow), count: w)
-                    } else {
-                        let part1Len = eX
-                        let part2Len = w - eX
-                        
-                        pOut.advanced(by: dstRow).update(from: pData.advanced(by: srcRow + w - eX), count: part1Len)
-                        pOut.advanced(by: dstRow + eX).update(from: pData.advanced(by: srcRow), count: part2Len)
+                    // 有効な X コピー範囲を計算
+                    let dstXStart = max(0, sX)
+                    let dstXEnd = min(w, w + sX)
+                    
+                    if dstXStart < dstXEnd {
+                        let srcXStart = dstXStart - sX
+                        let copyLen = dstXEnd - dstXStart
+                        pOut.advanced(by: dstRow + dstXStart)
+                            .update(from: pData.advanced(by: srcRow + srcXStart), count: copyLen)
+                    }
+                    
+                    // 左端の余白: src の左端ピクセルで埋める
+                    if sX > 0 {
+                        let fillVal = pData[srcRow] // srcの左端ピクセル
+                        for x in 0..<min(sX, w) {
+                            pOut[dstRow + x] = fillVal
+                        }
+                    }
+                    
+                    // 右端の余白: src の右端ピクセルで埋める
+                    if sX < 0 {
+                        let fillVal = pData[srcRow + w - 1] // srcの右端ピクセル
+                        for x in max(0, w + sX)..<w {
+                            pOut[dstRow + x] = fillVal
+                        }
                     }
                 }
             }
@@ -753,7 +778,7 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     return PlaneData420(width: plane.width, height: plane.height, y: await yTask, cb: await cbTask, cr: await crTask)
 }
 
-public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15) async throws -> [UInt8] {
+public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     
     let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
@@ -762,11 +787,48 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
     var prevReconstructed: PlaneData420? = nil
     let planes = toPlaneData420(images: images)
     
+    var gopCount = 0
+    
     for i in 0..<planes.count {
         let curr = planes[i]
+        var forceIFrame = false
+        var residual: PlaneData420? = nil
+        var predictedPlane: PlaneData420? = nil
+        var gmv: (dx: Int, dy: Int) = (0, 0)
+        var meanSAD: Int = 0
         
-        if i % gopSize == 0 {
-            // I-Frame
+        if gopCount >= gopSize || prevReconstructed == nil {
+            forceIFrame = true
+        } else {
+            // P-Frame の試行
+            guard let prev = prevReconstructed else { continue }
+            
+            // GMC Estimate
+            gmv = estimateGMV(curr: curr, prev: prev)
+            
+            // Predict
+            predictedPlane = await shiftPlane(prev, dx: gmv.dx, dy: gmv.dy)
+            
+            // Residual
+            residual = await subtractPlanes(curr: curr, predicted: predictedPlane!)
+            
+            // SAD (Sum of Absolute Differences) を計算して品質劣化を判定
+            var sumSAD = 0
+            for y in 0..<residual!.height {
+                for x in 0..<residual!.width {
+                    sumSAD += abs(Int(residual!.y[y * residual!.width + x]))
+                }
+            }
+            meanSAD = sumSAD / (residual!.width * residual!.height)
+            
+            if meanSAD > sceneChangeThreshold {
+                forceIFrame = true
+                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high SAD (\(meanSAD) > \(sceneChangeThreshold))")
+            }
+        }
+        
+        if forceIFrame {
+            // I-Frame のエンコード
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2)) // 2x for Chroma
             let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
@@ -778,34 +840,24 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             prevReconstructed = PlaneData420(img16: img16)
+            gopCount = 1
         } else {
-            // P-Frame
-            guard let prev = prevReconstructed else { continue }
-            
-            // GMC Estimate
-            let gmv = estimateGMV(curr: curr, prev: prev)
-            
-            // Predict
-            let predictedPlane = await shiftPlane(prev, dx: gmv.dx, dy: gmv.dy)
-            
-            // Residual
-            let residual = await subtractPlanes(curr: curr, predicted: predictedPlane)
-            
-            // P-Frame uses moderate quantization
+            // P-Frame のエンコード (SAD 判定済み)
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
-            let bytes = try await encodeSpatialLayers(pd: residual, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let bytes = try await encodeSpatialLayers(pd: residual!, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
             appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dx)))
             appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dy)))
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
-            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) GMV=(\(gmv.dx),\(gmv.dy))")
+            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) GMV=(\(gmv.dx),\(gmv.dy)) meanSAD=\(meanSAD)")
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
-            prevReconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane)
+            prevReconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane!)
+            gopCount += 1
         }
     }
     

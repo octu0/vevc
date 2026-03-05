@@ -6,8 +6,9 @@ let args = CommandLine.arguments
 var bitrate = 500
 var positionalArgs: [String] = []
 var outPath = "a.vevc"
-var zeroThreshold = 3
+var zeroThreshold = 0
 var gopSize = 15
+var sceneThreshold = 8
 
 var i = 1
 while i < args.count {
@@ -33,6 +34,11 @@ while i < args.count {
             if let v = Int(args[i + 1]) { gopSize = v }
             i += 1
         }
+    case "-sceneThreshold":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { sceneThreshold = v }
+            i += 1
+        }
     default:
         positionalArgs.append(arg)
     }
@@ -40,7 +46,7 @@ while i < args.count {
 }
 
 if positionalArgs.isEmpty {
-    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-gopSize <frames>] <input1.png> [input2.png ...]")
+    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] <input1.png> [input2.png ...]")
     exit(1)
 }
 
@@ -69,7 +75,7 @@ for p in positionalArgs {
 
 do {
     let startTime = Date()
-    let out: [UInt8] = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize)
+    let out: [UInt8] = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize, sceneChangeThreshold: sceneThreshold)
     let elapsed = Date().timeIntervalSince(startTime)
     
     let dataSize = images.reduce(0) { $0 + ($1.width * $1.height * 3) }
