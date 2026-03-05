@@ -53,18 +53,36 @@ func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int, k: UIn
 }
 
 @inline(__always)
-func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8) throws {
-    var prevVal: Int16 = 0
+func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8, lastVal: inout Int16) throws {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
             let v = try rr.read(k: k)
             let diff = toInt16(v)
-            let val = diff + prevVal
+            let predicted: Int16
+            if x == 0 && y == 0 {
+                predicted = lastVal
+            } else if y == 0 {
+                predicted = ptr[x - 1]
+            } else if x == 0 {
+                predicted = block.rowPointer(y: y - 1)[x]
+            } else {
+                let a = Int(ptr[x - 1])
+                let b = Int(block.rowPointer(y: y - 1)[x])
+                let c = Int(block.rowPointer(y: y - 1)[x - 1])
+                if c >= max(a, b) {
+                    predicted = Int16(min(a, b))
+                } else if c <= min(a, b) {
+                    predicted = Int16(max(a, b))
+                } else {
+                    predicted = Int16(a + b - c)
+                }
+            }
+            let val = diff + predicted
             ptr[x] = val
-            prevVal = val
         }
     }
+    lastVal = block.rowPointer(y: size - 1)[size - 1]
 }
 
 @inline(__always)
@@ -151,10 +169,16 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
     
     let kLL = UInt8(try brData.readBits(n: 4))
     try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var llView = BlockView(base: view.base, width: half, height: half, stride: size)
-                try blockDecodeDPCM(rr: &rr, block: &llView, size: half, k: kLL)
+        var lastVal: Int16 = 0
+        let nonZeroSet = Set(nonZeroIndices)
+        for i in 0..<blockCount {
+            if nonZeroSet.contains(i) {
+                try blocks[i].withView { view in
+                    var llView = BlockView(base: view.base, width: half, height: half, stride: size)
+                    try blockDecodeDPCM(rr: &rr, block: &llView, size: half, k: kLL, lastVal: &lastVal)
+                }
+            } else {
+                lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
             }
         }
     }
@@ -244,7 +268,8 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
     
     let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let qt = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
@@ -308,9 +333,9 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
                             var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
                             var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
                             var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                            dequantizeMidSignedMapping(&hlView, qt: qt)
-                            dequantizeMidSignedMapping(&lhView, qt: qt)
-                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            dequantizeMidSignedMapping(&hlView, qt: qtY)
+                            dequantizeMidSignedMapping(&lhView, qt: qtY)
+                            dequantizeHighSignedMapping(&hhView, qt: qtY)
                             invDwt2d(&view, size: size)
                         }
                         rowResults.append((block, w, h))
@@ -358,9 +383,9 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
                             var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
                             var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
                             var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                            dequantizeMidSignedMapping(&hlView, qt: qt)
-                            dequantizeMidSignedMapping(&lhView, qt: qt)
-                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            dequantizeMidSignedMapping(&hlView, qt: qtC)
+                            dequantizeMidSignedMapping(&lhView, qt: qtC)
+                            dequantizeHighSignedMapping(&hhView, qt: qtC)
                             invDwt2d(&view, size: size)
                         }
                         rowResults.append((block, w, h))
@@ -408,9 +433,9 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
                             var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
                             var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
                             var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                            dequantizeMidSignedMapping(&hlView, qt: qt)
-                            dequantizeMidSignedMapping(&lhView, qt: qt)
-                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            dequantizeMidSignedMapping(&hlView, qt: qtC)
+                            dequantizeMidSignedMapping(&lhView, qt: qtC)
+                            dequantizeHighSignedMapping(&hhView, qt: qtC)
                             invDwt2d(&view, size: size)
                         }
                         rowResults.append((block, w, h))
@@ -449,7 +474,8 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
     
     let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let qt = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
@@ -504,10 +530,10 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
                             var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
                             var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
                             var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                            dequantizeLow(&llView, qt: qt)
-                            dequantizeMidSignedMapping(&hlView, qt: qt)
-                            dequantizeMidSignedMapping(&lhView, qt: qt)
-                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            dequantizeLow(&llView, qt: qtY)
+                            dequantizeMidSignedMapping(&hlView, qt: qtY)
+                            dequantizeMidSignedMapping(&lhView, qt: qtY)
+                            dequantizeHighSignedMapping(&hhView, qt: qtY)
                             invDwt2d(&view, size: size)
                         }
                         rowResults.append((block, w, h))
@@ -546,10 +572,10 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
                             var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
                             var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
                             var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                            dequantizeLow(&llView, qt: qt)
-                            dequantizeMidSignedMapping(&hlView, qt: qt)
-                            dequantizeMidSignedMapping(&lhView, qt: qt)
-                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            dequantizeLow(&llView, qt: qtC)
+                            dequantizeMidSignedMapping(&hlView, qt: qtC)
+                            dequantizeMidSignedMapping(&lhView, qt: qtC)
+                            dequantizeHighSignedMapping(&hhView, qt: qtC)
                             invDwt2d(&view, size: size)
                         }
                         rowResults.append((block, w, h))
@@ -588,10 +614,10 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
                             var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: size)
                             var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
                             var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                            dequantizeLow(&llView, qt: qt)
-                            dequantizeMidSignedMapping(&hlView, qt: qt)
-                            dequantizeMidSignedMapping(&lhView, qt: qt)
-                            dequantizeHighSignedMapping(&hhView, qt: qt)
+                            dequantizeLow(&llView, qt: qtC)
+                            dequantizeMidSignedMapping(&hlView, qt: qtC)
+                            dequantizeMidSignedMapping(&lhView, qt: qtC)
+                            dequantizeHighSignedMapping(&hhView, qt: qtC)
                             invDwt2d(&view, size: size)
                         }
                         rowResults.append((block, w, h))

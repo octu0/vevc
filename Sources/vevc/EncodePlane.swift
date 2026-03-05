@@ -59,7 +59,7 @@ extension PlaneData420 {
     }
 }
 
-func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
+func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
     let dx = pd.width
     let dy = pd.height
     
@@ -93,7 +93,7 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
                         view.setRow(offsetY: line, row: row)
                     }
                 }
-                transformLayer(block: &block, size: size, qt: qt)
+                transformLayer(block: &block, size: size, qt: qtY)
                 rowResults.append((block, w, h))
             }
             resultsY.value[i] = (h, rowResults)
@@ -155,7 +155,7 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
                         view.setRow(offsetY: line, row: row)
                     }
                 }
-                transformLayer(block: &block, size: size, qt: qt)
+                transformLayer(block: &block, size: size, qt: qtC)
                 rowResults.append((block, w, h))
             }
             resultsCb.value[i] = (h, rowResults)
@@ -212,7 +212,7 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
                         view.setRow(offsetY: line, row: row)
                     }
                 }
-                transformLayer(block: &block, size: size, qt: qt)
+                transformLayer(block: &block, size: size, qt: qtC)
                 rowResults.append((block, w, h))
             }
             resultsCr.value[i] = (h, rowResults)
@@ -251,12 +251,14 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     let bufY = encodePlaneSubbands(blocks: &subBlocksY, size: size, zeroThreshold: zeroThreshold)
     let bufCb = encodePlaneSubbands(blocks: &subBlocksCb, size: size, zeroThreshold: zeroThreshold)
     let bufCr = encodePlaneSubbands(blocks: &subBlocksCr, size: size, zeroThreshold: zeroThreshold)
+    debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
     out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer]) // 'VEVC' + layer
     appendUInt16BE(&out, UInt16(dx))
     appendUInt16BE(&out, UInt16(dy))
-    out.append(UInt8(qt.step))
+    out.append(UInt8(qtY.step))
+    out.append(UInt8(qtC.step))
     
     appendUInt32BE(&out, UInt32(bufY.count))
     out.append(contentsOf: bufY)
@@ -271,7 +273,7 @@ func encodePlaneLayer(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantizatio
     return (out, subPlane)
 }
 
-func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
+func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
     let dx = pd.width
     let dy = pd.height
     let chunkSize = 4
@@ -297,7 +299,7 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
                         view.setRow(offsetY: line, row: row)
                     }
                 }
-                transformBase(block: &block, size: size, qt: qt)
+                transformBase(block: &block, size: size, qt: qtY)
                 rowResults.append((block, w, h))
             }
             resultsY.value[i] = (h, rowResults)
@@ -336,7 +338,7 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
                         view.setRow(offsetY: line, row: row)
                     }
                 }
-                transformBase(block: &block, size: size, qt: qt)
+                transformBase(block: &block, size: size, qt: qtC)
                 rowResults.append((block, w, h))
             }
             resultsCb.value[i] = (h, rowResults)
@@ -373,7 +375,7 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
                         view.setRow(offsetY: line, row: row)
                     }
                 }
-                transformBase(block: &block, size: size, qt: qt)
+                transformBase(block: &block, size: size, qt: qtC)
                 rowResults.append((block, w, h))
             }
             resultsCr.value[i] = (h, rowResults)
@@ -393,12 +395,14 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
     let bufY = encodePlaneBaseSubbands(blocks: &subBlocksY, size: size, zeroThreshold: zeroThreshold)
     let bufCb = encodePlaneBaseSubbands(blocks: &subBlocksCb, size: size, zeroThreshold: zeroThreshold)
     let bufCr = encodePlaneBaseSubbands(blocks: &subBlocksCr, size: size, zeroThreshold: zeroThreshold)
+    debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
     out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer]) // 'VEVC' + layer
     appendUInt16BE(&out, UInt16(dx))
     appendUInt16BE(&out, UInt16(dy))
-    out.append(UInt8(qt.step))
+    out.append(UInt8(qtY.step))
+    out.append(UInt8(qtC.step))
     
     appendUInt32BE(&out, UInt32(bufY.count))
     out.append(contentsOf: bufY)
@@ -412,10 +416,12 @@ func encodePlaneBase(pd: PlaneData420, layer: UInt8, size: Int, qt: Quantization
     return out
 }
 
-func encodeSpatialLayers(pd: PlaneData420, maxbitrate: Int, qt: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
-    let (layer2, sub2) = try await encodePlaneLayer(pd: pd, layer: 2, size: 32, qt: qt, zeroThreshold: zeroThreshold)
-    let (layer1, sub1) = try await encodePlaneLayer(pd: sub2, layer: 1, size: 16, qt: qt, zeroThreshold: zeroThreshold)
-    let layer0 = try await encodePlaneBase(pd: sub1, layer: 0, size: 8, qt: qt, zeroThreshold: zeroThreshold)
+func encodeSpatialLayers(pd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
+    let (layer2, sub2) = try await encodePlaneLayer(pd: pd, layer: 2, size: 32, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    let (layer1, sub1) = try await encodePlaneLayer(pd: sub2, layer: 1, size: 16, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    let layer0 = try await encodePlaneBase(pd: sub1, layer: 0, size: 8, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    
+    debugLog("  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
     
     var out: [UInt8] = []
     

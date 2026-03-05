@@ -6,8 +6,8 @@ let args = CommandLine.arguments
 var bitrate = 500
 var positionalArgs: [String] = []
 var outPath = "a.vevc"
-var zeroThreshold = 0
-var gopSize = 8
+var zeroThreshold = 3
+var gopSize = 15
 
 var i = 1
 while i < args.count {

@@ -1,5 +1,12 @@
 // MARK: - Encode
 
+import Foundation
+
+@inline(__always)
+func debugLog(_ msg: String) {
+    FileHandle.standardError.write(Data((msg + "\n").utf8))
+}
+
 @inline(__always)
 func toUint16(_ n: Int16) -> UInt16 {
     return UInt16(bitPattern: ((n &<< 1) ^ (n >> 15)))
@@ -29,17 +36,36 @@ func getSubbands(view: BlockView, size: Int) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8) {
-    var prevVal: Int16 = 0
+func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8, lastVal: inout Int16) {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
             let val = ptr[x]
-            let diff = val - prevVal
+            let predicted: Int16
+            if x == 0 && y == 0 {
+                predicted = lastVal
+            } else if y == 0 {
+                predicted = ptr[x - 1] // left only
+            } else if x == 0 {
+                predicted = block.rowPointer(y: y - 1)[x] // top only
+            } else {
+                let a = Int(ptr[x - 1])         // left
+                let b = Int(block.rowPointer(y: y - 1)[x]) // top
+                let c = Int(block.rowPointer(y: y - 1)[x - 1]) // top-left
+                // MED (Median Edge Detector)
+                if c >= max(a, b) {
+                    predicted = Int16(min(a, b))
+                } else if c <= min(a, b) {
+                    predicted = Int16(max(a, b))
+                } else {
+                    predicted = Int16(a + b - c)
+                }
+            }
+            let diff = val - predicted
             rw.write(val: toUint16(diff), k: k)
-            prevVal = val
         }
     }
+    lastVal = block.rowPointer(y: size - 1)[size - 1]
 }
 
 
@@ -152,6 +178,7 @@ private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type:
     var bitCount = 0
     var zeroCount: UInt16 = 0
     let half = size / 2
+    var lastVal: Int16 = 0
     
     @inline(__always)
     func simWrite(_ val: UInt16) {
@@ -184,16 +211,34 @@ private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type:
             case .hh: b = subs.hh
             }
             if isDPCM {
-                var prev: Int16 = 0
                 for y in 0..<half {
                     let ptr = b.rowPointer(y: y)
                     for x in 0..<half {
                         let val = ptr[x]
-                        let diff = val - prev
+                        let predicted: Int16
+                        if x == 0 && y == 0 {
+                            predicted = lastVal
+                        } else if y == 0 {
+                            predicted = ptr[x - 1]
+                        } else if x == 0 {
+                            predicted = b.rowPointer(y: y - 1)[x]
+                        } else {
+                            let a = Int(ptr[x - 1])
+                            let bv = Int(b.rowPointer(y: y - 1)[x])
+                            let c = Int(b.rowPointer(y: y - 1)[x - 1])
+                            if c >= max(a, bv) {
+                                predicted = Int16(min(a, bv))
+                            } else if c <= min(a, bv) {
+                                predicted = Int16(max(a, bv))
+                            } else {
+                                predicted = Int16(a + bv - c)
+                            }
+                        }
+                        let diff = val - predicted
                         simWrite(toUint16(diff))
-                        prev = val
                     }
                 }
+                lastVal = b.rowPointer(y: half - 1)[half - 1]
             } else {
                 for y in 0..<half {
                     let ptr = b.rowPointer(y: y)
@@ -252,6 +297,7 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
         }
     }
     bwFlags.flush()
+    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
     var bwData = BitWriter()
     
@@ -289,6 +335,7 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
     }
     
     bwData.flush()
+    debugLog("    [Subbands] k: HL=\(kHL) LH=\(kLH) HH=\(kHH)")
     var out = bwFlags.data
     out.append(contentsOf: bwData.data)
     return out
@@ -314,16 +361,23 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
         }
     }
     bwFlags.flush()
+    debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
     var bwData = BitWriter()
     
     let kLL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .ll, isDPCM: true)
     bwData.writeBits(val: UInt16(kLL), n: 4)
     RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncodeDPCM(rw: &rw, block: subs.ll, size: subs.size, k: kLL)
+        var lastVal: Int16 = 0
+        let nonZeroSet = Set(nonZeroIndices)
+        for i in blocks.indices {
+            if nonZeroSet.contains(i) {
+                blocks[i].withView { view in
+                    let subs = getSubbands(view: view, size: size)
+                    blockEncodeDPCM(rw: &rw, block: subs.ll, size: subs.size, k: kLL, lastVal: &lastVal)
+                }
+            } else {
+                lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
             }
         }
     }
@@ -362,6 +416,7 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
     }
     
     bwData.flush()
+    debugLog("    [BaseSubbands] k: LL=\(kLL) HL=\(kHL) LH=\(kLH) HH=\(kHH)")
     var out = bwFlags.data
     out.append(contentsOf: bwData.data)
     return out
@@ -370,15 +425,32 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
 private func estimateRiceBitsDPCM(block: BlockView, size: Int) -> Int {
     var sumDiffAbs = 0
     let count = size * size
-    var prev: Int16 = 0
     
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
             let val = ptr[x]
-            let diff = abs(Int(val - prev))
+            let predicted: Int16
+            if x == 0 && y == 0 {
+                predicted = 0
+            } else if y == 0 {
+                predicted = ptr[x - 1]
+            } else if x == 0 {
+                predicted = block.rowPointer(y: y - 1)[x]
+            } else {
+                let a = Int(ptr[x - 1])
+                let b = Int(block.rowPointer(y: y - 1)[x])
+                let c = Int(block.rowPointer(y: y - 1)[x - 1])
+                if c >= max(a, b) {
+                    predicted = Int16(min(a, b))
+                } else if c <= min(a, b) {
+                    predicted = Int16(max(a, b))
+                } else {
+                    predicted = Int16(a + b - c)
+                }
+            }
+            let diff = abs(Int(val - predicted))
             sumDiffAbs += diff
-            prev = val
         }
     }
     
@@ -672,7 +744,7 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     return PlaneData420(width: plane.width, height: plane.height, y: await yTask, cb: await cbTask, cr: await crTask)
 }
 
-public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 0, gopSize: Int = 8) async throws -> [UInt8] {
+public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     
     let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
@@ -686,12 +758,14 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 0
         
         if i % gopSize == 0 {
             // I-Frame
-            let qtI = QuantizationTable(baseStep: max(1, Int(qt.step)))
-            let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qt: qtI, zeroThreshold: zeroThreshold)
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2)) // 2x for Chroma
+            let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // 'VEVI'
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
+            debugLog("[Frame \(i)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             prevReconstructed = PlaneData420(img16: img16)
@@ -703,22 +777,22 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 0
             let gmv = estimateGMV(curr: curr, prev: prev)
             
             // Predict
-            // In GMC, estimateGMV_old returns how much curr shifted from prev.
-            // If curr shifted by (dx, dy) compared to prev, then predicted = prev shifted by (dx, dy).
             let predictedPlane = await shiftPlane(prev, dx: gmv.dx, dy: gmv.dy)
             
             // Residual
             let residual = await subtractPlanes(curr: curr, predicted: predictedPlane)
             
-            // P-Frame uses 4x quantization step (similar to H0/H1 in the old architecture)
-            let qtP = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
-            let bytes = try await encodeSpatialLayers(pd: residual, maxbitrate: maxbitrate, qt: qtP, zeroThreshold: zeroThreshold)
+            // P-Frame uses moderate quantization
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
+            let bytes = try await encodeSpatialLayers(pd: residual, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
             appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dx)))
             appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dy)))
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
+            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) GMV=(\(gmv.dx),\(gmv.dy))")
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
