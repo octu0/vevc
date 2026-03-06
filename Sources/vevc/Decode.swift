@@ -683,7 +683,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                 let predicted = await shiftPlane(prev, dx: dx, dy: dy)
                 let curr = await addPlanes(residual: residual, predicted: predicted)
                 out.append(curr.toYCbCr())
-                prevReconstructed = curr
+                prevReconstructed = cleanExposedRegion(curr, dx: dx, dy: dy)
             } else {
                 out.append(residual.toYCbCr())
             }

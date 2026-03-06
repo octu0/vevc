@@ -628,17 +628,34 @@ struct Int16Reader {
     @inline(__always)
     func row(x: Int, y: Int, size: Int) -> [Int16] {
         var r = [Int16](repeating: 0, count: size)
-        if y < height {
-            let limit = min(size, width - x)
-            if limit > 0 {
-                data.withUnsafeBufferPointer { ptr in
-                    let base = ptr.baseAddress!.advanced(by: y * width + x)
-                    r.withUnsafeMutableBufferPointer { dst in
-                        dst.baseAddress!.update(from: base, count: limit)
+        let safeY = min(y, height - 1)
+        
+        // y > height の場合、最後の行(height-1)と同じ内容を返す（Y方向のクランプ）
+        let limit = min(size, width - x)
+        if limit > 0 {
+            data.withUnsafeBufferPointer { ptr in
+                let base = ptr.baseAddress!.advanced(by: safeY * width + x)
+                r.withUnsafeMutableBufferPointer { dst in
+                    dst.baseAddress!.update(from: base, count: limit)
+                    
+                    // x方向の端数処理: 足りない分は最後の有効ピクセルで埋める（X方向のクランプ）
+                    if limit < size {
+                        let lastVal = dst[limit - 1]
+                        for i in limit..<size {
+                            dst[i] = lastVal
+                        }
                     }
                 }
             }
+        } else {
+            // ブロック全体が画像外（x >= width）の場合
+            // 左端（x = width - 1）の値を繰り返す
+            let lastVal = data[safeY * width + (width - 1)]
+            for i in 0..<size {
+                r[i] = lastVal
+            }
         }
+        
         return r
     }
 }
@@ -716,7 +733,167 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
     return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
 }
 
-@inline(__always)
+/// EXPOSED領域クリーンアップ: GMVシフトによって予測データが存在しない端の領域を、
+/// 隣接する有効領域の境界値で上書きする。
+/// エンコーダ・デコーダの両方で同じ処理を行い、整合性を保ちつつ誤差蓄積を断ち切る。
+func cleanExposedRegion(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
+    if dx == 0 && dy == 0 { return plane }
+    
+    func clean(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
+        if w == 0 || h == 0 { return data }
+        var out = data
+        
+        out.withUnsafeMutableBufferPointer { buf in
+            guard let p = buf.baseAddress else { return }
+            
+            // 左端の EXPOSED 領域 (sX > 0 の場合: 左端 sX 列が予測不能)
+            if sX > 0 {
+                let cols = min(sX, w)
+                let srcCol = cols // 有効領域の左端列
+                if srcCol < w {
+                    for y in 0..<h {
+                        let row = y * w
+                        let fillVal = p[row + srcCol]
+                        for x in 0..<cols {
+                            p[row + x] = fillVal
+                        }
+                    }
+                }
+            }
+            
+            // 右端の EXPOSED 領域 (sX < 0 の場合: 右端 |sX| 列が予測不能)
+            if sX < 0 {
+                let cols = min(-sX, w)
+                let srcCol = w - cols - 1 // 有効領域の右端列
+                if srcCol >= 0 {
+                    for y in 0..<h {
+                        let row = y * w
+                        let fillVal = p[row + srcCol]
+                        for x in (w - cols)..<w {
+                            p[row + x] = fillVal
+                        }
+                    }
+                }
+            }
+            
+            // 上端の EXPOSED 領域 (sY > 0 の場合: 上端 sY 行が予測不能)
+            if sY > 0 {
+                let rows = min(sY, h)
+                let srcRow = rows // 有効領域の上端行
+                if srcRow < h {
+                    let srcOff = srcRow * w
+                    for y in 0..<rows {
+                        let dstOff = y * w
+                        for x in 0..<w {
+                            p[dstOff + x] = p[srcOff + x]
+                        }
+                    }
+                }
+            }
+            
+            // 下端の EXPOSED 領域 (sY < 0 の場合: 下端 |sY| 行が予測不能)
+            if sY < 0 {
+                let rows = min(-sY, h)
+                let srcRow = h - rows - 1 // 有効領域の下端行
+                if srcRow >= 0 {
+                    let srcOff = srcRow * w
+                    for y in (h - rows)..<h {
+                        let dstOff = y * w
+                        for x in 0..<w {
+                            p[dstOff + x] = p[srcOff + x]
+                        }
+                    }
+                }
+            }
+        }
+        
+        return out
+    }
+    
+    let chromaW = (plane.width + 1) / 2
+    let chromaH = (plane.height + 1) / 2
+    
+    return PlaneData420(
+        width: plane.width, height: plane.height,
+        y:  clean(data: plane.y,  w: plane.width, h: plane.height, sX: dx, sY: dy),
+        cb: clean(data: plane.cb, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2),
+        cr: clean(data: plane.cr, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2)
+    )
+}
+
+/// EXPOSED領域を元画像で上書き: 残差計算前に予測画像のEXPOSED領域を元画像の値で置き換える
+/// → 残差がゼロになり、量子化損失がなく、再構築後も元画像と一致するためドリフトが起きない
+func patchExposedWithCurrent(predicted: PlaneData420, current: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
+    if dx == 0 && dy == 0 { return predicted }
+    
+    func patch(pred: [Int16], curr: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
+        if w == 0 || h == 0 { return pred }
+        var out = pred
+        
+        out.withUnsafeMutableBufferPointer { buf in
+            curr.withUnsafeBufferPointer { cBuf in
+                guard let p = buf.baseAddress, let c = cBuf.baseAddress else { return }
+                
+                // 左端の EXPOSED 列 (sX > 0)
+                if sX > 0 {
+                    let cols = min(sX, w)
+                    for y in 0..<h {
+                        let row = y * w
+                        for x in 0..<cols {
+                            p[row + x] = c[row + x]
+                        }
+                    }
+                }
+                
+                // 右端の EXPOSED 列 (sX < 0)
+                if sX < 0 {
+                    let cols = min(-sX, w)
+                    for y in 0..<h {
+                        let row = y * w
+                        for x in (w - cols)..<w {
+                            p[row + x] = c[row + x]
+                        }
+                    }
+                }
+                
+                // 上端の EXPOSED 行 (sY > 0)
+                if sY > 0 {
+                    let rows = min(sY, h)
+                    for y in 0..<rows {
+                        let off = y * w
+                        for x in 0..<w {
+                            p[off + x] = c[off + x]
+                        }
+                    }
+                }
+                
+                // 下端の EXPOSED 行 (sY < 0)
+                if sY < 0 {
+                    let rows = min(-sY, h)
+                    for y in (h - rows)..<h {
+                        let off = y * w
+                        for x in 0..<w {
+                            p[off + x] = c[off + x]
+                        }
+                    }
+                }
+            }
+        }
+        
+        return out
+    }
+    
+    let chromaW = (predicted.width + 1) / 2
+    let chromaH = (predicted.height + 1) / 2
+    
+    return PlaneData420(
+        width: predicted.width, height: predicted.height,
+        y:  patch(pred: predicted.y,  curr: current.y,  w: predicted.width, h: predicted.height, sX: dx, sY: dy),
+        cb: patch(pred: predicted.cb, curr: current.cb, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2),
+        cr: patch(pred: predicted.cr, curr: current.cr, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2)
+    )
+}
+
 func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
@@ -733,12 +910,10 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
                 guard let pOut = oPtr.baseAddress else { return }
                 
                 for dstY in 0..<h {
-                    // srcY をクランプ
                     let srcY = min(max(dstY - sY, 0), h - 1)
                     let dstRow = dstY * w
                     let srcRow = srcY * w
                     
-                    // 有効な X コピー範囲を計算
                     let dstXStart = max(0, sX)
                     let dstXEnd = min(w, w + sX)
                     
@@ -749,17 +924,15 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
                             .update(from: pData.advanced(by: srcRow + srcXStart), count: copyLen)
                     }
                     
-                    // 左端の余白: src の左端ピクセルで埋める
                     if sX > 0 {
-                        let fillVal = pData[srcRow] // srcの左端ピクセル
+                        let fillVal = pData[srcRow]
                         for x in 0..<min(sX, w) {
                             pOut[dstRow + x] = fillVal
                         }
                     }
                     
-                    // 右端の余白: src の右端ピクセルで埋める
                     if sX < 0 {
-                        let fillVal = pData[srcRow + w - 1] // srcの右端ピクセル
+                        let fillVal = pData[srcRow + w - 1]
                         for x in max(0, w + sX)..<w {
                             pOut[dstRow + x] = fillVal
                         }
@@ -856,7 +1029,8 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
-            prevReconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane!)
+            let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane!)
+            prevReconstructed = cleanExposedRegion(reconstructed, dx: gmv.dx, dy: gmv.dy)
             gopCount += 1
         }
     }
