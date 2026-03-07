@@ -658,6 +658,35 @@ struct Int16Reader {
         
         return r
     }
+
+    @inline(__always)
+    func fillRow(x: Int, y: Int, size: Int, dest: UnsafeMutablePointer<Int16>) {
+        let safeY = min(y, height - 1)
+
+        // y > height の場合、最後の行(height-1)と同じ内容を返す（Y方向のクランプ）
+        let limit = min(size, width - x)
+        if limit > 0 {
+            data.withUnsafeBufferPointer { ptr in
+                let base = ptr.baseAddress!.advanced(by: safeY * width + x)
+                dest.update(from: base, count: limit)
+
+                // x方向の端数処理: 足りない分は最後の有効ピクセルで埋める（X方向のクランプ）
+                if limit < size {
+                    let lastVal = dest[limit - 1]
+                    for i in limit..<size {
+                        dest[i] = lastVal
+                    }
+                }
+            }
+        } else {
+            // ブロック全体が画像外（x >= width）の場合
+            // 左端（x = width - 1）の値を繰り返す
+            let lastVal = data[safeY * width + (width - 1)]
+            for i in 0..<size {
+                dest[i] = lastVal
+            }
+        }
+    }
 }
 
 @inline(__always)

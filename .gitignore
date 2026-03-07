@@ -63,3 +63,5 @@ fastlane/test_output
 
 .DS_Store
 .vscode/settings.json
+swift-6.0.3-RELEASE-ubuntu24.04/
+swift.tar.gz

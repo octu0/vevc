@@ -113,8 +113,7 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
                 var block = Block2D(width: size, height: size)
                 block.withView { view in
                     for line in 0..<size {
-                        let row = rY.row(x: w, y: (h + line), size: size)
-                        view.setRow(offsetY: line, row: row)
+                        view.fillRow(offsetY: line, from: rY, x: w, y: (h + line))
                     }
                     _ = dwt2d(&view, size: size)
                 }
@@ -179,8 +178,7 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
                 var block = Block2D(width: size, height: size)
                 block.withView { view in
                     for line in 0..<size {
-                        let row = rCb.row(x: w, y: (h + line), size: size)
-                        view.setRow(offsetY: line, row: row)
+                        view.fillRow(offsetY: line, from: rCb, x: w, y: (h + line))
                     }
                     _ = dwt2d(&view, size: size)
                 }
@@ -239,8 +237,7 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
                 var block = Block2D(width: size, height: size)
                 block.withView { view in
                     for line in 0..<size {
-                        let row = rCr.row(x: w, y: (h + line), size: size)
-                        view.setRow(offsetY: line, row: row)
+                        view.fillRow(offsetY: line, from: rCr, x: w, y: (h + line))
                     }
                     _ = dwt2d(&view, size: size)
                 }

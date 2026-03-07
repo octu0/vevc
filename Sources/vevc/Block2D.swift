@@ -33,6 +33,13 @@ public struct BlockView {
             ptr.update(from: srcBase, count: width)
         }
     }
+
+    @inline(__always)
+    func fillRow(offsetY: Int, from reader: Int16Reader, x: Int, y: Int) {
+        let ptr = rowPointer(y: offsetY)
+        reader.fillRow(x: x, y: y, size: width, dest: ptr)
+    }
+
 }
 
 // MARK: - Block2D
