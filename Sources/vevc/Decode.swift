@@ -10,11 +10,12 @@ public enum DecodeError: Error {
 }
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
     let layer0Data = Array(r[offset..<(offset + Int(len0))])
     offset += Int(len0)
+    
     var current = try await decodeBase(r: layer0Data, layer: 0, size: 8)
     
     if maxLayer >= 1 {

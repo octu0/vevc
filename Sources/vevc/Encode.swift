@@ -1004,7 +1004,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             // I-Frame のエンコード
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2)) // 2x for Chroma
-            let bytes = try await encodeSpatialLayers(pd: curr, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: true)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // 'VEVI'
             appendUInt32BE(&out, UInt32(bytes.count))
@@ -1018,7 +1018,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             // P-Frame のエンコード (SAD 判定済み)
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
-            let bytes = try await encodeSpatialLayers(pd: residual!, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: false)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
             appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dx)))
