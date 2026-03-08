@@ -13,18 +13,33 @@ public enum DecodeError: Error {
 func decodeSpatialLayers(r: [UInt8], maxLayer: Int) async throws -> Image16 {
     var offset = 0
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
+    guard (offset + Int(len0)) <= r.count else {
+        throw DecodeError.insufficientData
+    }
     let layer0Data = Array(r[offset..<(offset + Int(len0))])
     offset += Int(len0)
     var current = try await decodeBase(r: layer0Data, layer: 0, size: 8)
     
-    if maxLayer >= 1 {
+    if 1 <= maxLayer {
+        guard (offset + 4) <= r.count else {
+            return current
+        }
         let len1 = try readUInt32BEFromBytes(r, offset: &offset)
+        guard (offset + Int(len1)) <= r.count else {
+            throw DecodeError.insufficientData
+        }
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
         current = try await decodeLayer(r: layer1Data, layer: 1, prev: current, size: 16)
     }
-    if maxLayer >= 2 {
+    if 2 <= maxLayer {
+        guard (offset + 4) <= r.count else {
+            return current
+        }
         let len2 = try readUInt32BEFromBytes(r, offset: &offset)
+        guard (offset + Int(len2)) <= r.count else {
+            throw DecodeError.insufficientData
+        }
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         current = try await decodeLayer(r: layer2Data, layer: 2, prev: current, size: 32)
@@ -48,11 +63,16 @@ func applyInverseTemporal(ll: PlaneData420, lh: PlaneData420, h0: PlaneData420, 
         h.withUnsafeBufferPointer { ptrH in
         hh0.withUnsafeBufferPointer { ptrH0 in
         hh1.withUnsafeBufferPointer { ptrH1 in
+            guard let bL = ptrL.baseAddress else { return }
+            guard let bH = ptrH.baseAddress else { return }
+            guard let b0 = ptrH0.baseAddress else { return }
+            guard let b1 = ptrH1.baseAddress else { return }
+
             invTemporalDWT(
-                inLL: ptrL.baseAddress!,
-                inLH: ptrH.baseAddress!,
-                inH0: ptrH0.baseAddress!,
-                inH1: ptrH1.baseAddress!,
+                inLL: bL,
+                inLH: bH,
+                inH0: b0,
+                inH1: b1,
                 count: count,
                 outF0: &f0,
                 outF1: &f1,
@@ -175,7 +195,7 @@ func invertBase(br: BitReader, size: Int, qt: QuantizationTable) throws -> Block
         var lhView = BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size)
         var hhView = BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size)
         
-        if !isZero {
+        if isZero != true {
             var rr = RiceReader(br: br)
             try blockDecodeDPCM(rr: &rr, block: &llView, size: half)
             try blockDecode(rr: &rr, block: &hlView, size: half)
@@ -211,24 +231,30 @@ func invertBaseFunc(br: BitReader, w: Int, h: Int, size: Int, qt: QuantizationTa
 
 @inline(__always)
 func readUInt8FromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt8 {
-    guard (offset + 1) <= r.count else { throw DecodeError.insufficientData }
-    let val = r[offset]
+    guard (offset + 1) <= r.count else {
+        throw DecodeError.insufficientData
+    }
+    let val = r[offset + 0]
     offset += 1
     return val
 }
 
 @inline(__always)
 func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt16 {
-    guard (offset + 2) <= r.count else { throw DecodeError.insufficientData }
-    let val = (UInt16(r[offset]) << 8) | UInt16(r[offset + 1])
+    guard (offset + 2) <= r.count else {
+        throw DecodeError.insufficientData
+    }
+    let val = (UInt16(r[offset + 0]) << 8) | UInt16(r[offset + 1])
     offset += 2
     return val
 }
 
 @inline(__always)
 func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
-    guard (offset + 4) <= r.count else { throw DecodeError.insufficientData }
-    let val = (UInt32(r[offset]) << 24) | (UInt32(r[offset + 1]) << 16) | (UInt32(r[offset + 2]) << 8) | UInt32(r[offset + 3])
+    guard (offset + 4) <= r.count else {
+        throw DecodeError.insufficientData
+    }
+    let val = (UInt32(r[offset + 0]) << 24) | (UInt32(r[offset + 1]) << 16) | (UInt32(r[offset + 2]) << 8) | UInt32(r[offset + 3])
     offset += 4
     return val
 }
@@ -237,7 +263,9 @@ func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
 func readBlockFromBytes(_ r: [UInt8], offset: inout Int) throws -> [UInt8] {
     let len = try readUInt16BEFromBytes(r, offset: &offset)
     let intLen = Int(len)
-    guard (offset + intLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + intLen) <= r.count else {
+        throw DecodeError.invalidBlockData
+    }
     let block = Array(r[offset..<(offset + intLen)])
     offset += intLen
     return block
@@ -550,17 +578,20 @@ public struct DecodeOptions: Sendable {
 }
 
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
+    guard data.isEmpty != true else {
+        throw DecodeError.noDataProvided
+    }
     var out: [YCbCrImage] = []
     var offset = 0
     
-    while offset + 4 <= data.count {
+    while (offset + 4) <= data.count {
         let magic = Array(data[offset..<(offset + 3)])
         offset += 3
         guard magic == [0x56, 0x45, 0x4C] else {
             throw DecodeError.invalidHeader
         }
         
-        let _ = Int(data[offset]) // GOP size (not used yet)
+        _ = Int(data[offset + 0]) // GOP size (not used yet)
         offset += 1
         
         let gmv1_dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
@@ -572,6 +603,9 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         
         func readPlane() async throws -> PlaneData420 {
             let len = try readUInt32BEFromBytes(data, offset: &offset)
+            guard (offset + Int(len)) <= data.count else {
+                throw DecodeError.insufficientData
+            }
             let chunk = Array(data[offset..<(offset + Int(len))])
             offset += Int(len)
             let img = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
@@ -588,9 +622,9 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         
         let emptyPlane = PlaneData420(width: ll.width, height: ll.height, y: [Int16](repeating: 0, count: countY), cb: [Int16](repeating: 0, count: countC), cr: [Int16](repeating: 0, count: countC))
         
-        let actualLH = opts.maxFrames >= 2 ? lh : emptyPlane
-        let actualH0 = opts.maxFrames >= 4 ? h0 : emptyPlane
-        let actualH1 = opts.maxFrames >= 4 ? h1 : emptyPlane
+        let actualLH = 2 <= opts.maxFrames ? lh : emptyPlane
+        let actualH0 = 4 <= opts.maxFrames ? h0 : emptyPlane
+        let actualH1 = 4 <= opts.maxFrames ? h1 : emptyPlane
 
         // temporal inverse
         let (f0_s, f1_s, f2_s, f3_s) = await applyInverseTemporal(ll: ll, lh: actualLH, h0: actualH0, h1: actualH1, countY: countY, countC: countC)
@@ -602,9 +636,9 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let (f1, f2, f3) = await (f1_t, f2_t, f3_t)
         
         out.append(f0.toYCbCr())
-        if opts.maxFrames >= 2 {
+        if 2 <= opts.maxFrames {
             out.append(f1.toYCbCr())
-            if opts.maxFrames >= 4 {
+            if 4 <= opts.maxFrames {
                 out.append(f2.toYCbCr())
                 out.append(f3.toYCbCr())
             }
