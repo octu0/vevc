@@ -29,13 +29,30 @@ extension PlaneData420 {
     init(img16: Image16) {
         self.width = img16.width
         self.height = img16.height
-        // flattened arrays
+
+        let yCount = (img16.width * img16.height)
         var yFlat = [Int16]()
-        for row in img16.y { yFlat.append(contentsOf: row) }
+        yFlat.reserveCapacity(yCount)
+        for row in img16.y {
+            yFlat.append(contentsOf: row)
+        }
+
+        let cWidth = ((img16.width + 1) / 2)
+        let cHeight = ((img16.height + 1) / 2)
+        let cCount = (cWidth * cHeight)
+
         var cbFlat = [Int16]()
-        for row in img16.cb { cbFlat.append(contentsOf: row) }
+        cbFlat.reserveCapacity(cCount)
+        for row in img16.cb {
+            cbFlat.append(contentsOf: row)
+        }
+
         var crFlat = [Int16]()
-        for row in img16.cr { crFlat.append(contentsOf: row) }
+        crFlat.reserveCapacity(cCount)
+        for row in img16.cr {
+            crFlat.append(contentsOf: row)
+        }
+
         self.y = yFlat
         self.cb = cbFlat
         self.cr = crFlat
