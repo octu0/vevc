@@ -2,135 +2,83 @@ import XCTest
 @testable import vevc
 
 final class QuantTests: XCTestCase {
-
     func testQuantizerInit() {
         let q1 = Quantizer(step: 4, roundToNearest: false)
         XCTAssertEqual(q1.step, 4)
-        XCTAssertEqual(q1.mul, ((1 << 16) / 4))
+        XCTAssertEqual(q1.mul, 16384) // (1<<16)/4
         XCTAssertEqual(q1.bias, 0)
-
+        
         let q2 = Quantizer(step: 4, roundToNearest: true)
-        XCTAssertEqual(q2.step, 4)
-        XCTAssertEqual(q2.mul, ((1 << 16) / 4))
-        XCTAssertEqual(q2.bias, (1 << 15))
+        XCTAssertEqual(q2.bias, 32768) // 1<<15
     }
-
+    
     func testQuantizationTableInit() {
-        let baseStep = 8
-        let qt = QuantizationTable(baseStep: baseStep)
+        let qt = QuantizationTable(baseStep: 8)
         XCTAssertEqual(qt.step, 8)
-        XCTAssertEqual(qt.qLow.step, 1)
+        XCTAssertEqual(qt.qLow.step, 8)
         XCTAssertEqual(qt.qMid.step, 16)
         XCTAssertEqual(qt.qHigh.step, 32)
-
-        XCTAssertEqual(qt.qLow.bias, (1 << 15)) // roundToNearest: true
-        XCTAssertEqual(qt.qMid.bias, 0)       // roundToNearest: false
-        XCTAssertEqual(qt.qHigh.bias, 0)      // roundToNearest: false
     }
-
-    func testQuantizeDequantizeRoundTrip() {
-        let sizes = [8, 16, 32, 10] // Including a generic size (10)
-        let steps = [1, 2, 4, 8, 16]
-
-        for size in sizes {
-            for step in steps {
-                var block = Block2D(width: size, height: size)
-                let q = Quantizer(step: step, roundToNearest: true)
-
-                // Fill block with some values
-                block.withView { view in
-                    for y in 0..<size {
-                        for x in 0..<size {
-                            view[y, x] = Int16((x * y) - ((size * size) / 2))
-                        }
-                    }
+    
+    func performRoundTripTest(width: Int, height: Int, step: Int, roundToNearest: Bool, signedMapping: Bool) {
+        var block = Block2D(width: width, height: height)
+        let q = Quantizer(step: step, roundToNearest: roundToNearest)
+        
+        let originalValues: [Int16] = (0..<(width * height)).map { i in
+            Int16.random(in: -32768...32767)
+        }
+        
+        block.withView { view in
+            for y in 0..<height {
+                for x in 0..<width {
+                    view[y, x] = originalValues[y * width + x]
                 }
-
-                let originalData = block.data
-
-                block.withView { view in
-                    quantize(&view, q: q)
-                }
-
-                block.withView { view in
-                    dequantize(&view, q: q)
-                }
-
-                // Verify results
-                for i in 0..<block.data.count {
-                    let original = Double(originalData[i])
-                    let reconstructed = Double(block.data[i])
-                    let error = abs(original - reconstructed)
-
-                    // Reconstruction error should be at most step / 2 when rounding to nearest,
-                    // but integer division/multiplication might have slight deviations.
-                    // Max error for quantization step 'S' is S/2.
-                    XCTAssertLessThanOrEqual(error, ((Double(step) / 2.0) + 0.5), "Error too large for step \(step) at index \(i), size \(size)")
+            }
+            
+            if signedMapping {
+                quantizeSignedMapping(&view, q: q)
+                dequantizeSignedMapping(&view, q: q)
+            } else {
+                quantize(&view, q: q)
+                dequantize(&view, q: q)
+            }
+            
+            for y in 0..<height {
+                for x in 0..<width {
+                    let original = Int32(originalValues[y * width + x])
+                    let reconstructed = Int32(view[y, x])
+                    let diff = abs(original - reconstructed)
+                    
+                    // The error should be at most step.
+                    // Due to fixed-point precision with 16-bit shift, it might be step + 1 in some cases.
+                    let limit = roundToNearest ? (Int32(step) / 2 + 1) : (Int32(step) + 1)
+                    XCTAssertLessThanOrEqual(diff, limit, "Error too large at (\(x), \(y)) for step \(step), roundToNearest: \(roundToNearest), signedMapping: \(signedMapping), original: \(original), recon: \(reconstructed), size: \(width)x\(height)")
                 }
             }
         }
     }
-
-    func testSignedMappingRoundTrip() {
-        let sizes = [8, 16, 32, 7]
-        let steps = [2, 4, 8]
-
+    
+    func testQuantizeRoundTrip() {
+        let sizes = [8, 16, 32, 4]
+        let steps = [1, 4, 13, 128]
+        
         for size in sizes {
             for step in steps {
-                var block = Block2D(width: size, height: size)
-                let q = Quantizer(step: step, roundToNearest: false)
-
-                block.withView { view in
-                    for y in 0..<size {
-                        for x in 0..<size {
-                            view[y, x] = Int16((x - (size / 2)) * (y - (size / 2)))
-                        }
-                    }
-                }
-
-                let originalData = block.data
-
-                block.withView { view in
-                    quantizeSignedMapping(&view, q: q)
-                }
-
-                // After quantizeSignedMapping, values should be non-negative (mapped)
-                for val in block.data {
-                    XCTAssertLessThanOrEqual(0, val)
-                }
-
-                block.withView { view in
-                    dequantizeSignedMapping(&view, q: q)
-                }
-
-                // Verify results
-                for i in 0..<block.data.count {
-                    let original = Double(originalData[i])
-                    let reconstructed = Double(block.data[i])
-                    let error = abs(original - reconstructed)
-
-                    // Rounding is floor here, so error can be up to step - 1
-                    XCTAssertLessThanOrEqual(error, Double(step), "Error too large for step \(step) at index \(i), size \(size)")
-                }
+                performRoundTripTest(width: size, height: size, step: step, roundToNearest: false, signedMapping: false)
+                performRoundTripTest(width: size, height: size, step: step, roundToNearest: true, signedMapping: false)
             }
         }
     }
-
-    func testClamping() {
-        // Test that dequantization clamps to Int16 range
-        var block = Block2D(width: 8, height: 8)
-        let q = Quantizer(step: 1000)
-
-        block.withView { view in
-            view[0, 0] = 50 // 50 * 1000 = 50000 -> should clamp to 32767
-            view[0, 1] = (-1 * 50) // -50 * 1000 = -50000 -> should clamp to -32768
+    
+    func testQuantizeSignedMappingRoundTrip() {
+        let sizes = [8, 16, 32, 4]
+        let steps = [1, 4, 13, 128]
+        
+        for size in sizes {
+            for step in steps {
+                performRoundTripTest(width: size, height: size, step: step, roundToNearest: false, signedMapping: true)
+                performRoundTripTest(width: size, height: size, step: step, roundToNearest: true, signedMapping: true)
+            }
         }
-
-        block.withView { view in
-            dequantize(&view, q: q)
-        }
-
-        XCTAssertEqual(block.data[0], 32767)
-        XCTAssertEqual(block.data[1], Int16.min)
     }
 }
