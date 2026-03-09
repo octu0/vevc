@@ -16,7 +16,8 @@ final class QuantTests: XCTestCase {
     }
 
     func testQuantizationTableInit() {
-        let qt = QuantizationTable(baseStep: 8)
+        let baseStep = 8
+        let qt = QuantizationTable(baseStep: baseStep)
         XCTAssertEqual(qt.step, 8)
         XCTAssertEqual(qt.qLow.step, 8)
         XCTAssertEqual(qt.qMid.step, 16)
