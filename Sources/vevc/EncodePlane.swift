@@ -31,11 +31,20 @@ extension PlaneData420 {
         self.height = img16.height
         // flattened arrays
         var yFlat = [Int16]()
+        yFlat.reserveCapacity((img16.width * img16.height))
         for row in img16.y { yFlat.append(contentsOf: row) }
+
+        let cWidth = ((img16.width + 1) / 2)
+        let cHeight = ((img16.height + 1) / 2)
+
         var cbFlat = [Int16]()
+        cbFlat.reserveCapacity((cWidth * cHeight))
         for row in img16.cb { cbFlat.append(contentsOf: row) }
+
         var crFlat = [Int16]()
+        crFlat.reserveCapacity((cWidth * cHeight))
         for row in img16.cr { crFlat.append(contentsOf: row) }
+
         self.y = yFlat
         self.cb = cbFlat
         self.cr = crFlat
@@ -46,14 +55,14 @@ extension PlaneData420 {
         let countY = img.yPlane.count
         for i in 0..<countY {
             let v = self.y[i]
-            img.yPlane[i] = v < -128 ? 0 : (v > 127 ? 255 : UInt8(v + 128))
+            img.yPlane[i] = v < -128 ? 0 : (127 < v ? 255 : UInt8(v + 128))
         }
         let countCbCr = img.cbPlane.count
         for i in 0..<countCbCr {
             let cbVal = self.cb[i]
-            img.cbPlane[i] = cbVal < -128 ? 0 : (cbVal > 127 ? 255 : UInt8(cbVal + 128))
+            img.cbPlane[i] = cbVal < -128 ? 0 : (127 < cbVal ? 255 : UInt8(cbVal + 128))
             let crVal = self.cr[i]
-            img.crPlane[i] = crVal < -128 ? 0 : (crVal > 127 ? 255 : UInt8(crVal + 128))
+            img.crPlane[i] = crVal < -128 ? 0 : (127 < crVal ? 255 : UInt8(crVal + 128))
         }
         return img
     }
@@ -91,23 +100,23 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     let dx = pd.width
     let dy = pd.height
     
-    var subY: [Int16]? = isBase ? nil : [Int16](repeating: 0, count: (dx / 2) * (dy / 2))
-    var subCb: [Int16]? = isBase ? nil : [Int16](repeating: 0, count: ((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2))
-    var subCr: [Int16]? = isBase ? nil : [Int16](repeating: 0, count: ((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2))
+    var subY: [Int16]? = isBase ? nil : [Int16](repeating: 0, count: ((dx / 2) * (dy / 2)))
+    var subCb: [Int16]? = isBase ? nil : [Int16](repeating: 0, count: (((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2)))
+    var subCr: [Int16]? = isBase ? nil : [Int16](repeating: 0, count: (((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2)))
     
     let rY = pd.rY
-    let rowCountY = (dy + size - 1) / size
+    let rowCountY = ((dy + size - 1) / size)
     let resultsY = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountY))
     let errorY = ConcurrentBox<Error?>(nil)
     let chunkSize = 4
-    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
+    let taskCountY = ((rowCountY + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountY)
+        let startRow = (taskIdx * chunkSize)
+        let endRow = min((startRow + chunkSize), rowCountY)
         
         for i in startRow..<endRow {
-            let h = i * size
+            let h = (i * size)
             var rowResults: [(Block2D, Int, Int)] = []
             for w in stride(from: 0, to: dx, by: size) {
                 var block = Block2D(width: size, height: size)
@@ -126,32 +135,36 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     if let err = errorY.value { throw err }
     
     var blocksY: [Block2D] = []
-    blocksY.reserveCapacity(rowCountY * ((dx + size - 1) / size))
+    blocksY.reserveCapacity((rowCountY * ((dx + size - 1) / size)))
     for i in 0..<rowCountY {
         guard let res = resultsY.value[i] else { continue }
         for j in res.1.indices {
             var (llBlock, w, h) = res.1[j]
             blocksY.append(llBlock)
-            if !isBase, let _ = subY { 
-                let subDxWidth = dx / 2
-                let subDyHeight = dy / 2
-                let destStartX = w / 2
-                let destStartY = h / 2
-                let subSize = size / 2
-                llBlock.withView { view in
-                    let subs = getSubbands(view: view, size: size)
-                    let srcBase = subs.ll.base
-                    for blockY in 0..<subSize {
-                        let dstY = destStartY + blockY
-                        if subDyHeight <= dstY { continue }
-                        let srcPtr = srcBase.advanced(by: blockY * size)
-                        let limit = min(subSize, subDxWidth - destStartX)
-                        if 0 < limit {
-                            let dstIdx = dstY * subDxWidth + destStartX
-                            subY!.withUnsafeMutableBufferPointer { dstPtr in
-                                dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                            }
-                        }
+
+            guard isBase != true else { continue }
+
+            let subDxWidth = (dx / 2)
+            let subDyHeight = (dy / 2)
+            let destStartX = (w / 2)
+            let destStartY = (h / 2)
+            let subSize = (size / 2)
+
+            llBlock.withView { view in
+                let subs = getSubbands(view: view, size: size)
+                let srcBase = subs.ll.base
+                for blockY in 0..<subSize {
+                    let dstY = (destStartY + blockY)
+                    if subDyHeight <= dstY { continue }
+                    let srcPtr = srcBase.advanced(by: (blockY * size))
+                    let limit = min(subSize, (subDxWidth - destStartX))
+
+                    guard 0 < limit else { continue }
+
+                    let dstIdx = ((dstY * subDxWidth) + destStartX)
+                    subY?.withUnsafeMutableBufferPointer { dstPtr in
+                        guard let base = dstPtr.baseAddress else { return }
+                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
             }
@@ -159,21 +172,21 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     }
     
     let rCb = pd.rCb
-    let cbDx = (dx + 1) / 2
-    let cbDy = (dy + 1) / 2
-    let subCbDx = cbDx / 2
-    let subCbDy = cbDy / 2
-    let rowCountCb = (cbDy + size - 1) / size
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    let subCbDx = (cbDx / 2)
+    let subCbDy = (cbDy / 2)
+    let rowCountCb = ((cbDy + size - 1) / size)
     let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
     let errorCb = ConcurrentBox<Error?>(nil)
-    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
+    let taskCountCb = ((rowCountCb + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountCb)
+        let startRow = (taskIdx * chunkSize)
+        let endRow = min((startRow + chunkSize), rowCountCb)
         
         for i in startRow..<endRow {
-            let h = i * size
+            let h = (i * size)
             var rowResults: [(Block2D, Int, Int)] = []
             for w in stride(from: 0, to: cbDx, by: size) {
                 var block = Block2D(width: size, height: size)
@@ -192,30 +205,34 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     if let err = errorCb.value { throw err }
     
     var blocksCb: [Block2D] = []
-    blocksCb.reserveCapacity(rowCountCb * ((cbDx + size - 1) / size))
+    blocksCb.reserveCapacity((rowCountCb * ((cbDx + size - 1) / size)))
     for i in 0..<rowCountCb {
         guard let res = resultsCb.value[i] else { continue }
         for j in res.1.indices {
             var (llBlock, w, h) = res.1[j]
             blocksCb.append(llBlock)
-            if !isBase {
-                let destStartX = w / 2
-                let destStartY = h / 2
-                let subSize = size / 2
-                llBlock.withView { view in
-                    let subs = getSubbands(view: view, size: size)
-                    let srcBase = subs.ll.base
-                    for blockY in 0..<subSize {
-                        let dstY = destStartY + blockY
-                        if dstY >= subCbDy { continue }
-                        let srcPtr = srcBase.advanced(by: blockY * size)
-                        let limit = min(subSize, subCbDx - destStartX)
-                        if 0 < limit {
-                            let dstIdx = dstY * subCbDx + destStartX
-                            subCb!.withUnsafeMutableBufferPointer { dstPtr in
-                                dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                            }
-                        }
+
+            guard isBase != true else { continue }
+
+            let destStartX = (w / 2)
+            let destStartY = (h / 2)
+            let subSize = (size / 2)
+
+            llBlock.withView { view in
+                let subs = getSubbands(view: view, size: size)
+                let srcBase = subs.ll.base
+                for blockY in 0..<subSize {
+                    let dstY = (destStartY + blockY)
+                    if subCbDy <= dstY { continue }
+                    let srcPtr = srcBase.advanced(by: (blockY * size))
+                    let limit = min(subSize, (subCbDx - destStartX))
+
+                    guard 0 < limit else { continue }
+
+                    let dstIdx = ((dstY * subCbDx) + destStartX)
+                    subCb?.withUnsafeMutableBufferPointer { dstPtr in
+                        guard let base = dstPtr.baseAddress else { return }
+                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
             }
@@ -223,17 +240,17 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     }
     
     let rCr = pd.rCr
-    let rowCountCr = (cbDy + size - 1) / size
+    let rowCountCr = ((cbDy + size - 1) / size)
     let resultsCr = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCr))
     let errorCr = ConcurrentBox<Error?>(nil)
-    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+    let taskCountCr = ((rowCountCr + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
-        let startRow = taskIdx * chunkSize
-        let endRow = min(startRow + chunkSize, rowCountCr)
+        let startRow = (taskIdx * chunkSize)
+        let endRow = min((startRow + chunkSize), rowCountCr)
         
         for i in startRow..<endRow {
-            let h = i * size
+            let h = (i * size)
             var rowResults: [(Block2D, Int, Int)] = []
             for w in stride(from: 0, to: cbDx, by: size) {
                 var block = Block2D(width: size, height: size)
@@ -252,43 +269,53 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     if let err = errorCr.value { throw err }
     
     var blocksCr: [Block2D] = []
-    blocksCr.reserveCapacity(rowCountCr * ((cbDx + size - 1) / size))
+    blocksCr.reserveCapacity((rowCountCr * ((cbDx + size - 1) / size)))
     for i in 0..<rowCountCr {
         guard let res = resultsCr.value[i] else { continue }
         for j in res.1.indices {
             var (llBlock, w, h) = res.1[j]
             blocksCr.append(llBlock)
-            if !isBase {
-                let destStartX = w / 2
-                let destStartY = h / 2
-                let subSize = size / 2
-                llBlock.withView { view in
-                    let subs = getSubbands(view: view, size: size)
-                    let srcBase = subs.ll.base
-                    for blockY in 0..<subSize {
-                        let dstY = destStartY + blockY
-                        if subCbDy <= dstY { continue }
-                        let srcPtr = srcBase.advanced(by: blockY * size)
-                        let limit = min(subSize, subCbDx - destStartX)
-                        if 0 < limit {
-                            let dstIdx = dstY * subCbDx + destStartX
-                            subCr!.withUnsafeMutableBufferPointer { dstPtr in
-                                dstPtr.baseAddress!.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                            }
-                        }
+
+            guard isBase != true else { continue }
+
+            let destStartX = (w / 2)
+            let destStartY = (h / 2)
+            let subSize = (size / 2)
+
+            llBlock.withView { view in
+                let subs = getSubbands(view: view, size: size)
+                let srcBase = subs.ll.base
+                for blockY in 0..<subSize {
+                    let dstY = (destStartY + blockY)
+                    if subCbDy <= dstY { continue }
+                    let srcPtr = srcBase.advanced(by: (blockY * size))
+                    let limit = min(subSize, (subCbDx - destStartX))
+
+                    guard 0 < limit else { continue }
+
+                    let dstIdx = ((dstY * subCbDx) + destStartX)
+                    subCr?.withUnsafeMutableBufferPointer { dstPtr in
+                        guard let base = dstPtr.baseAddress else { return }
+                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
             }
         }
     }
     
-    let subPlane: PlaneData420? = isBase ? nil : PlaneData420(width: dx / 2, height: dy / 2, y: subY!, cb: subCb!, cr: subCr!)
+    var subPlane: PlaneData420? = nil
+    if isBase != true {
+        guard let sY = subY else { return (blocksY, blocksCb, blocksCr, nil) }
+        guard let sCb = subCb else { return (blocksY, blocksCb, blocksCr, nil) }
+        guard let sCr = subCr else { return (blocksY, blocksCb, blocksCr, nil) }
+        subPlane = PlaneData420(width: (dx / 2), height: (dy / 2), y: sY, cb: sCb, cr: sCr)
+    }
     return (blocksY, blocksCb, blocksCr, subPlane)
 }
 
 @inline(__always)
 func subtractCoeffs(currBlocks: inout [Block2D], predBlocks: inout [Block2D], isBase: Bool, size: Int) {
-    let half = size / 2
+    let half = (size / 2)
     for i in currBlocks.indices {
         currBlocks[i].withView { vC in
             predBlocks[i].withView { vP in
@@ -363,7 +390,11 @@ func encodePlaneLayer(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return (out, subPlane!, subPredPlane)
+    guard let finalSubPlane = subPlane else {
+        fatalError("subPlane must not be nil in encodePlaneLayer")
+    }
+
+    return (out, finalSubPlane, subPredPlane)
 }
 
 func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, size: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isIFrame: Bool) async throws -> [UInt8] {
