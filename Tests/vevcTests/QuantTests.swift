@@ -19,7 +19,7 @@ final class QuantTests: XCTestCase {
         let baseStep = 8
         let qt = QuantizationTable(baseStep: baseStep)
         XCTAssertEqual(qt.step, 8)
-        XCTAssertEqual(qt.qLow.step, 8)
+        XCTAssertEqual(qt.qLow.step, 1)
         XCTAssertEqual(qt.qMid.step, 16)
         XCTAssertEqual(qt.qHigh.step, 32)
 
