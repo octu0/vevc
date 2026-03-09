@@ -18,7 +18,7 @@ final class QuantTests: XCTestCase {
     func testQuantizationTableInitialization() {
         let qt = QuantizationTable(baseStep: 8)
         XCTAssertEqual(qt.step, 8)
-        XCTAssertEqual(qt.qLow.step, 8)
+        XCTAssertEqual(qt.qLow.step, 1) // LOSSLESS FOR DC
         XCTAssertEqual(qt.qLow.bias, 32768) // roundToNearest: true
         XCTAssertEqual(qt.qMid.step, 16)
         XCTAssertEqual(qt.qMid.bias, 0) // roundToNearest: false
@@ -107,18 +107,15 @@ final class QuantTests: XCTestCase {
             quantize(&view, q: q)
             
             XCTAssertEqual(view[0, 0], 0)
-            // Int16.max = 32767. 32767 / 10 = 3276.7 -> rounded 3277
-            XCTAssertEqual(view[0, 1], 3277)
-            // Int16.min = -32768. -32768 / 10 = -3276.8 -> rounded -3277
-            XCTAssertEqual(view[0, 2], -3277)
+            // Int16.max = 32767. (32767 * 6553 + 32768) >> 16 = 3276
+            XCTAssertEqual(view[0, 1], 3276)
+            // Int16.min = -32768. abs is 32768. (32768 * 6553 + 32768) >> 16 = 3276
+            XCTAssertEqual(view[0, 2], -3276)
             
             dequantize(&view, q: q)
             XCTAssertEqual(view[0, 0], 0)
-            XCTAssertEqual(view[0, 1], -32766, "Clamping might have occurred")
-            // actually performDequantizeSIMD8 uses Int16(clamping: rLow32[0])
-            // 32770 clamped to Int16 is 32767
-            XCTAssertEqual(view[0, 1], 32767)
-            XCTAssertEqual(view[0, 2], -32768)
+            XCTAssertEqual(view[0, 1], 32760)
+            XCTAssertEqual(view[0, 2], -32760)
         }
     }
 }

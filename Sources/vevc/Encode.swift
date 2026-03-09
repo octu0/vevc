@@ -297,8 +297,8 @@ func encodePlaneBaseSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACConte
     }
 }
 
-private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout Int16) -> Int {
-    var sumDiffAbs = 0
+private func estimateCABACBitsDPCM(block: BlockView, size: Int, lastVal: inout Int16) -> Int {
+    var totalBits = 0
     let count = (size * size)
     
     for y in 0..<size {
@@ -324,23 +324,19 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
                     predicted = Int16(a + b - c)
                 }
             }
-            let diff = abs(Int(val - predicted))
-            sumDiffAbs = (sumDiffAbs + diff)
+            let diff = (val - predicted)
+            let uVal = toRiceMapping(diff)
+            // Roughly estimate bits: 1 bit for isZero, then Exp-Golomb like
+            if (uVal == 0) {
+                totalBits += 1
+            } else {
+                totalBits += 1 + Int(log2(Double(uVal))) * 2 + 1
+            }
         }
     }
     lastVal = block.rowPointer(y: size - 1)[size - 1]
     
-    if (count == 0) { return 0 }
-    
-    let mean = (Double(sumDiffAbs) / Double(count))
-    let meanInt = Int(mean)
-    let k = (meanInt < 1) ? 0 : (Int.bitWidth - 1 - meanInt.leadingZeroBitCount)
-    
-    let divisorShift = max(0, (k - 1))
-    let bodyBits = (sumDiffAbs >> divisorShift)
-    let headerBits = (count * (1 + k))
-    
-    return (bodyBits + headerBits)
+    return totalBits
 }
 
 private enum PlaneType { case y, cb, cr }
@@ -367,9 +363,9 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     }
     
     quantizeLow(&sub.ll, qt: qt)
-    quantizeMid(&sub.hl, qt: qt)
-    quantizeMid(&sub.lh, qt: qt)
-    quantizeHigh(&sub.hh, qt: qt)
+    quantizeMidSignedMapping(&sub.hl, qt: qt)
+    quantizeMidSignedMapping(&sub.lh, qt: qt)
+    quantizeHighSignedMapping(&sub.hh, qt: qt)
     
     var hl = sub.hl
     var lh = sub.lh
@@ -380,36 +376,30 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     
     var bits: Int = 1
     var lastVal: Int16 = 0
-    bits = (bits + estimateRiceBitsDPCM(block: sub.ll, size: sub.size, lastVal: &lastVal))
-    bits = (bits + estimateRiceBits(block: sub.hl, size: sub.size))
-    bits = (bits + estimateRiceBits(block: sub.lh, size: sub.size))
-    bits = (bits + estimateRiceBits(block: sub.hh, size: sub.size))
+    bits = (bits + estimateCABACBitsDPCM(block: sub.ll, size: sub.size, lastVal: &lastVal))
+    bits = (bits + estimateCABACBitsMapped(block: sub.hl, size: sub.size))
+    bits = (bits + estimateCABACBitsMapped(block: sub.lh, size: sub.size))
+    bits = (bits + estimateCABACBitsMapped(block: sub.hh, size: sub.size))
     
     return bits
 }
 
-private func estimateRiceBits(block: BlockView, size: Int) -> Int {
-    var sumAbs: Int = 0
-    let count = (size * size)
+private func estimateCABACBitsMapped(block: BlockView, size: Int) -> Int {
+    var totalBits: Int = 0
     
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
-            sumAbs = (sumAbs + abs(Int(ptr[x])))
+            let uVal = UInt16(bitPattern: ptr[x])
+            if (uVal == 0) {
+                totalBits += 1
+            } else {
+                totalBits += 1 + Int(log2(Double(uVal))) * 2 + 1
+            }
         }
     }
     
-    if (count == 0) { return 0 }
-    
-    let mean = (Double(sumAbs) / Double(count))
-    let meanInt = Int(mean)
-    let k = (meanInt < 1) ? 0 : (Int.bitWidth - 1 - meanInt.leadingZeroBitCount)
-    
-    let divisorShift = max(0, (k - 1))
-    let bodyBits = (sumAbs >> divisorShift)
-    let headerBits = (count * (1 + k))
-    
-    return (bodyBits + headerBits)
+    return totalBits
 }
 
 func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
