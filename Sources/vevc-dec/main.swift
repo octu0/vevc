@@ -60,25 +60,28 @@ do {
         elapsed * 1000 / Double(images.count),
     ))
     
-    try? FileManager.default.createDirectory(atPath: outDir, withIntermediateDirectories: true)
-    
+    let outputURL: URL = URL(fileURLWithPath: outDir).standardized
+
+    try? FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
+
     for (idx, img) in images.enumerated() {
-        let rgba = vevc.ycbcrToRGBA(img: img)
-        let imgSize: (x:Int, y:Int) = (x:img.width, y:img.height)
+        let rgba: [UInt8] = vevc.ycbcrToRGBA(img: img)
+        let imgSize: (x: Int, y: Int) = (x: img.width, y: img.height)
         let layout: PNG.Layout = .init(format: .rgba8(palette: [], fill: nil))
-        
+
         var packed: [PNG.RGBA<UInt8>] = []
         packed.reserveCapacity(img.width * img.height)
-        let total = img.width * img.height
-        for j in 0..<total {
-            let offset = j * 4
-            packed.append(PNG.RGBA<UInt8>(rgba[offset], rgba[offset+1], rgba[offset+2], rgba[offset+3]))
+        let total: Int = img.width * img.height
+        for j: Int in 0..<total {
+            let offset: Int = j * 4
+            packed.append(PNG.RGBA<UInt8>(rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]))
         }
-        
-        let ppng = PNG.Image(packing: packed, size: imgSize, layout: layout)
-        let outPath = "\(outDir)/frame_\(String(format: "%04d", idx)).png"
-        try ppng.compress(path: outPath)
-        print("Saved \(outPath)")
+
+        let ppng: PNG.Image = PNG.Image(packing: packed, size: imgSize, layout: layout)
+        let fileName: String = "frame_\(String(format: "%04d", idx)).png"
+        let fileURL: URL = outputURL.appendingPathComponent(fileName)
+        try ppng.compress(path: fileURL.path)
+        print("Saved \(fileURL.path)")
     }
 } catch {
     print("Failed to decode: \(error)")
