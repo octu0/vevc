@@ -48,29 +48,29 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
     // Layer 0
     let row0Y = ((dy / 4) + 7) / 8
     let col0Y = ((dx / 4) + 7) / 8
-    let blocks0Y = try decodePlaneBaseSubbands(cd: &cdY, ctxs: &ctxsY, size: 8, blockCount: (row0Y * col0Y))
+    let blocks0Y = try decodePlaneBaseSubbands(cd: &cdY, ctxFlags: &ctxsY.ctxFlagsL0, ctxZeroLL: &ctxsY.ctxZeroLL0, ctxG1LL: &ctxsY.ctxG1LL0, ctxZeroHL: &ctxsY.ctxZeroHL0, ctxG1HL: &ctxsY.ctxG1HL0, ctxZeroLH: &ctxsY.ctxZeroLH0, ctxG1LH: &ctxsY.ctxG1LH0, ctxZeroHH: &ctxsY.ctxZeroHH0, ctxG1HH: &ctxsY.ctxG1HH0, size: 8, blockCount: (row0Y * col0Y))
     let row0C = ((((dy + 1) / 2 / 4)) + 7) / 8
     let col0C = ((((dx + 1) / 2 / 4)) + 7) / 8
-    let blocks0Cb = try decodePlaneBaseSubbands(cd: &cdCb, ctxs: &ctxsCb, size: 8, blockCount: (row0C * col0C))
-    let blocks0Cr = try decodePlaneBaseSubbands(cd: &cdCr, ctxs: &ctxsCr, size: 8, blockCount: (row0C * col0C))
+    let blocks0Cb = try decodePlaneBaseSubbands(cd: &cdCb, ctxFlags: &ctxsCb.ctxFlagsL0, ctxZeroLL: &ctxsCb.ctxZeroLL0, ctxG1LL: &ctxsCb.ctxG1LL0, ctxZeroHL: &ctxsCb.ctxZeroHL0, ctxG1HL: &ctxsCb.ctxG1HL0, ctxZeroLH: &ctxsCb.ctxZeroLH0, ctxG1LH: &ctxsCb.ctxG1LH0, ctxZeroHH: &ctxsCb.ctxZeroHH0, ctxG1HH: &ctxsCb.ctxG1HH0, size: 8, blockCount: (row0C * col0C))
+    let blocks0Cr = try decodePlaneBaseSubbands(cd: &cdCr, ctxFlags: &ctxsCr.ctxFlagsL0, ctxZeroLL: &ctxsCr.ctxZeroLL0, ctxG1LL: &ctxsCr.ctxG1LL0, ctxZeroHL: &ctxsCr.ctxZeroHL0, ctxG1HL: &ctxsCr.ctxG1HL0, ctxZeroLH: &ctxsCr.ctxZeroLH0, ctxG1LH: &ctxsCr.ctxG1LH0, ctxZeroHH: &ctxsCr.ctxZeroHH0, ctxG1HH: &ctxsCr.ctxG1HH0, size: 8, blockCount: (row0C * col0C))
 
     // Layer 1
     let row1Y = ((dy / 2) + 15) / 16
     let col1Y = ((dx / 2) + 15) / 16
-    let blocks1Y = try decodePlaneSubbands(cd: &cdY, ctxs: &ctxsY, size: 16, blockCount: (row1Y * col1Y))
+    let blocks1Y = try decodePlaneSubbands(cd: &cdY, ctxFlags: &ctxsY.ctxFlagsL1, ctxZeroHL: &ctxsY.ctxZeroHL1, ctxG1HL: &ctxsY.ctxG1HL1, ctxZeroLH: &ctxsY.ctxZeroLH1, ctxG1LH: &ctxsY.ctxG1LH1, ctxZeroHH: &ctxsY.ctxZeroHH1, ctxG1HH: &ctxsY.ctxG1HH1, size: 16, blockCount: (row1Y * col1Y))
     let row1C = ((((dy + 1) / 2 / 2)) + 15) / 16
     let col1C = ((((dx + 1) / 2 / 2)) + 15) / 16
-    let blocks1Cb = try decodePlaneSubbands(cd: &cdCb, ctxs: &ctxsCb, size: 16, blockCount: (row1C * col1C))
-    let blocks1Cr = try decodePlaneSubbands(cd: &cdCr, ctxs: &ctxsCr, size: 16, blockCount: (row1C * col1C))
+    let blocks1Cb = try decodePlaneSubbands(cd: &cdCb, ctxFlags: &ctxsCb.ctxFlagsL1, ctxZeroHL: &ctxsCb.ctxZeroHL1, ctxG1HL: &ctxsCb.ctxG1HL1, ctxZeroLH: &ctxsCb.ctxZeroLH1, ctxG1LH: &ctxsCb.ctxG1LH1, ctxZeroHH: &ctxsCb.ctxZeroHH1, ctxG1HH: &ctxsCb.ctxG1HH1, size: 16, blockCount: (row1C * col1C))
+    let blocks1Cr = try decodePlaneSubbands(cd: &cdCr, ctxFlags: &ctxsCr.ctxFlagsL1, ctxZeroHL: &ctxsCr.ctxZeroHL1, ctxG1HL: &ctxsCr.ctxG1HL1, ctxZeroLH: &ctxsCr.ctxZeroLH1, ctxG1LH: &ctxsCr.ctxG1LH1, ctxZeroHH: &ctxsCr.ctxZeroHH1, ctxG1HH: &ctxsCr.ctxG1HH1, size: 16, blockCount: (row1C * col1C))
 
     // Layer 2
     let row2Y = (dy + 31) / 32
     let col2Y = (dx + 31) / 32
-    let blocks2Y = try decodePlaneSubbands(cd: &cdY, ctxs: &ctxsY, size: 32, blockCount: (row2Y * col2Y))
+    let blocks2Y = try decodePlaneSubbands(cd: &cdY, ctxFlags: &ctxsY.ctxFlagsL2, ctxZeroHL: &ctxsY.ctxZeroHL2, ctxG1HL: &ctxsY.ctxG1HL2, ctxZeroLH: &ctxsY.ctxZeroLH2, ctxG1LH: &ctxsY.ctxG1LH2, ctxZeroHH: &ctxsY.ctxZeroHH2, ctxG1HH: &ctxsY.ctxG1HH2, size: 32, blockCount: (row2Y * col2Y))
     let row2C = (((dy + 1) / 2) + 31) / 32
     let col2C = (((dx + 1) / 2) + 31) / 32
-    let blocks2Cb = try decodePlaneSubbands(cd: &cdCb, ctxs: &ctxsCb, size: 32, blockCount: (row2C * col2C))
-    let blocks2Cr = try decodePlaneSubbands(cd: &cdCr, ctxs: &ctxsCr, size: 32, blockCount: (row2C * col2C))
+    let blocks2Cb = try decodePlaneSubbands(cd: &cdCb, ctxFlags: &ctxsCb.ctxFlagsL2, ctxZeroHL: &ctxsCb.ctxZeroHL2, ctxG1HL: &ctxsCb.ctxG1HL2, ctxZeroLH: &ctxsCb.ctxZeroLH2, ctxG1LH: &ctxsCb.ctxG1LH2, ctxZeroHH: &ctxsCb.ctxZeroHH2, ctxG1HH: &ctxsCb.ctxG1HH2, size: 32, blockCount: (row2C * col2C))
+    let blocks2Cr = try decodePlaneSubbands(cd: &cdCr, ctxFlags: &ctxsCr.ctxFlagsL2, ctxZeroHL: &ctxsCr.ctxZeroHL2, ctxG1HL: &ctxsCr.ctxG1HL2, ctxZeroLH: &ctxsCr.ctxZeroLH2, ctxG1LH: &ctxsCr.ctxG1LH2, ctxZeroHH: &ctxsCr.ctxZeroHH2, ctxG1HH: &ctxsCr.ctxG1HH2, size: 32, blockCount: (row2C * col2C))
 
     // L0
     var img0 = Image16(width: (dx / 4), height: (dy / 4))
@@ -253,7 +253,7 @@ func blockDecodeDPCM(cd: inout CABACDecoder, ctxZero: inout [ContextModel], ctxG
 }
 
 @inline(__always)
-func decodePlaneSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACContexts, size: Int, blockCount: Int) throws -> [Block2D] {
+func decodePlaneSubbands(cd: inout CABACDecoder, ctxFlags: inout ContextModel, ctxZeroHL: inout [ContextModel], ctxG1HL: inout [ContextModel], ctxZeroLH: inout [ContextModel], ctxG1LH: inout [ContextModel], ctxZeroHH: inout [ContextModel], ctxG1HH: inout [ContextModel], size: Int, blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
@@ -262,7 +262,7 @@ func decodePlaneSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACContexts,
     
     var nonZeroIndices: [Int] = []
     for i in 0..<blockCount {
-        if (cd.decode(context: &ctxs.ctxFlags) == 0) {
+        if (cd.decode(context: &ctxFlags) == 0) {
             nonZeroIndices.append(i)
         }
     }
@@ -271,21 +271,21 @@ func decodePlaneSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACContexts,
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(cd: &cd, ctxZero: &ctxs.ctxZeroHL, ctxG1: &ctxs.ctxG1HL, block: &hlView, size: half)
+            try blockDecode(cd: &cd, ctxZero: &ctxZeroHL, ctxG1: &ctxG1HL, block: &hlView, size: half)
         }
     }
     
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var lhView = BlockView(base: view.base.advanced(by: (half * size)), width: half, height: half, stride: size)
-            try blockDecode(cd: &cd, ctxZero: &ctxs.ctxZeroLH, ctxG1: &ctxs.ctxG1LH, block: &lhView, size: half)
+            try blockDecode(cd: &cd, ctxZero: &ctxZeroLH, ctxG1: &ctxG1LH, block: &lhView, size: half)
         }
     }
     
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var hhView = BlockView(base: view.base.advanced(by: (half * size + half)), width: half, height: half, stride: size)
-            try blockDecode(cd: &cd, ctxZero: &ctxs.ctxZeroHH, ctxG1: &ctxs.ctxG1HH, block: &hhView, size: half)
+            try blockDecode(cd: &cd, ctxZero: &ctxZeroHH, ctxG1: &ctxG1HH, block: &hhView, size: half)
         }
     }
 
@@ -293,7 +293,7 @@ func decodePlaneSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACContexts,
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACContexts, size: Int, blockCount: Int) throws -> [Block2D] {
+func decodePlaneBaseSubbands(cd: inout CABACDecoder, ctxFlags: inout ContextModel, ctxZeroLL: inout [ContextModel], ctxG1LL: inout [ContextModel], ctxZeroHL: inout [ContextModel], ctxG1HL: inout [ContextModel], ctxZeroLH: inout [ContextModel], ctxG1LH: inout [ContextModel], ctxZeroHH: inout [ContextModel], ctxG1HH: inout [ContextModel], size: Int, blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
@@ -302,7 +302,7 @@ func decodePlaneBaseSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACConte
     
     var nonZeroIndices: [Int] = []
     for i in 0..<blockCount {
-        if (cd.decode(context: &ctxs.ctxFlags) == 0) {
+        if (cd.decode(context: &ctxFlags) == 0) {
             nonZeroIndices.append(i)
         }
     }
@@ -314,7 +314,7 @@ func decodePlaneBaseSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACConte
         if (nonZeroSet.contains(i)) {
             try blocks[i].withView { view in
                 var llView = BlockView(base: view.base, width: half, height: half, stride: size)
-                try blockDecodeDPCM(cd: &cd, ctxZero: &ctxs.ctxZeroLL, ctxG1: &ctxs.ctxG1LL, block: &llView, size: half, lastVal: &lastVal)
+                try blockDecodeDPCM(cd: &cd, ctxZero: &ctxZeroLL, ctxG1: &ctxG1LL, block: &llView, size: half, lastVal: &lastVal)
             }
         } else {
             lastVal = 0
@@ -324,21 +324,21 @@ func decodePlaneBaseSubbands(cd: inout CABACDecoder, ctxs: inout PlaneCABACConte
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(cd: &cd, ctxZero: &ctxs.ctxZeroHL, ctxG1: &ctxs.ctxG1HL, block: &hlView, size: half)
+            try blockDecode(cd: &cd, ctxZero: &ctxZeroHL, ctxG1: &ctxG1HL, block: &hlView, size: half)
         }
     }
     
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var lhView = BlockView(base: view.base.advanced(by: (half * size)), width: half, height: half, stride: size)
-            try blockDecode(cd: &cd, ctxZero: &ctxs.ctxZeroLH, ctxG1: &ctxs.ctxG1LH, block: &lhView, size: half)
+            try blockDecode(cd: &cd, ctxZero: &ctxZeroLH, ctxG1: &ctxG1LH, block: &lhView, size: half)
         }
     }
     
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var hhView = BlockView(base: view.base.advanced(by: (half * size + half)), width: half, height: half, stride: size)
-            try blockDecode(cd: &cd, ctxZero: &ctxs.ctxZeroHH, ctxG1: &ctxs.ctxG1HH, block: &hhView, size: half)
+            try blockDecode(cd: &cd, ctxZero: &ctxZeroHH, ctxG1: &ctxG1HH, block: &hhView, size: half)
         }
     }
 

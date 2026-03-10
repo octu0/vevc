@@ -106,13 +106,18 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 
 @inline(__always)
 func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
-    let t2 = (2 * threshold)
+    let t2 = Int16(2 * threshold)
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
         for x in 0..<size {
-            if Int(UInt16(bitPattern: ptrHL[x])) > t2 || Int(UInt16(bitPattern: ptrLH[x])) > t2 || Int(UInt16(bitPattern: ptrHH[x])) > t2 {
+            // After signed mapping, values {-threshold...threshold}
+            // map to unsigned range [0...2*threshold].
+            // We use bitPattern to treat them as unsigned for comparison.
+            if UInt16(bitPattern: ptrHL[x]) > UInt16(bitPattern: t2) ||
+               UInt16(bitPattern: ptrLH[x]) > UInt16(bitPattern: t2) ||
+               UInt16(bitPattern: ptrHH[x]) > UInt16(bitPattern: t2) {
                 return false
             }
         }
@@ -143,13 +148,15 @@ func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockVi
         }
     }
     
-    let t2 = (2 * threshold)
+    let t2 = Int16(2 * threshold)
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
         for x in 0..<size {
-            if Int(UInt16(bitPattern: ptrHL[x])) > t2 || Int(UInt16(bitPattern: ptrLH[x])) > t2 || Int(UInt16(bitPattern: ptrHH[x])) > t2 {
+            if UInt16(bitPattern: ptrHL[x]) > UInt16(bitPattern: t2) ||
+               UInt16(bitPattern: ptrLH[x]) > UInt16(bitPattern: t2) ||
+               UInt16(bitPattern: ptrHH[x]) > UInt16(bitPattern: t2) {
                 return false
             }
         }
@@ -191,21 +198,39 @@ func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
 }
 
 public struct PlaneCABACContexts {
-    var ctxFlags = ContextModel()
-    var ctxZeroLL = [ContextModel](repeating: ContextModel(), count: 16)
-    var ctxG1LL = [ContextModel](repeating: ContextModel(), count: 3)
-    var ctxZeroHL = [ContextModel](repeating: ContextModel(), count: 16)
-    var ctxG1HL = [ContextModel](repeating: ContextModel(), count: 3)
-    var ctxZeroLH = [ContextModel](repeating: ContextModel(), count: 16)
-    var ctxG1LH = [ContextModel](repeating: ContextModel(), count: 3)
-    var ctxZeroHH = [ContextModel](repeating: ContextModel(), count: 16)
-    var ctxG1HH = [ContextModel](repeating: ContextModel(), count: 3)
-    
+    var ctxFlagsL0 = ContextModel()
+    var ctxFlagsL1 = ContextModel()
+    var ctxFlagsL2 = ContextModel()
+
+    var ctxZeroLL0 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1LL0 = [ContextModel](repeating: ContextModel(), count: 8)
+
+    var ctxZeroHL0 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1HL0 = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxZeroLH0 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1LH0 = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxZeroHH0 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1HH0 = [ContextModel](repeating: ContextModel(), count: 8)
+
+    var ctxZeroHL1 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1HL1 = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxZeroLH1 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1LH1 = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxZeroHH1 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1HH1 = [ContextModel](repeating: ContextModel(), count: 8)
+
+    var ctxZeroHL2 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1HL2 = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxZeroLH2 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1LH2 = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxZeroHH2 = [ContextModel](repeating: ContextModel(), count: 16)
+    var ctxG1HH2 = [ContextModel](repeating: ContextModel(), count: 8)
+
     public init() {}
 }
 
 @inline(__always)
-func encodePlaneSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACContexts, blocks: inout [Block2D], size: Int, zeroThreshold: Int) {
+func encodePlaneSubbands(ce: inout CABACEncoder, ctxFlags: inout ContextModel, ctxZeroHL: inout [ContextModel], ctxG1HL: inout [ContextModel], ctxZeroLH: inout [ContextModel], ctxG1LH: inout [ContextModel], ctxZeroHH: inout [ContextModel], ctxG1HH: inout [ContextModel], blocks: inout [Block2D], size: Int, zeroThreshold: Int) {
     var nonZeroIndices: [Int] = []
     for i in blocks.indices {
         blocks[i].withView { view in
@@ -214,9 +239,9 @@ func encodePlaneSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACContexts,
             var lh = subs.lh
             var hh = subs.hh
             if isEffectivelyZero(hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
-                ce.encode(bit: 1, context: &ctxs.ctxFlags)
+                ce.encode(bit: 1, context: &ctxFlags)
             } else {
-                ce.encode(bit: 0, context: &ctxs.ctxFlags)
+                ce.encode(bit: 0, context: &ctxFlags)
                 nonZeroIndices.append(i)
             }
         }
@@ -225,27 +250,27 @@ func encodePlaneSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACContexts,
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(ce: &ce, ctxZero: &ctxs.ctxZeroHL, ctxG1: &ctxs.ctxG1HL, block: subs.hl, size: subs.size)
+            blockEncode(ce: &ce, ctxZero: &ctxZeroHL, ctxG1: &ctxG1HL, block: subs.hl, size: subs.size)
         }
     }
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(ce: &ce, ctxZero: &ctxs.ctxZeroLH, ctxG1: &ctxs.ctxG1LH, block: subs.lh, size: subs.size)
+            blockEncode(ce: &ce, ctxZero: &ctxZeroLH, ctxG1: &ctxG1LH, block: subs.lh, size: subs.size)
         }
     }
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(ce: &ce, ctxZero: &ctxs.ctxZeroHH, ctxG1: &ctxs.ctxG1HH, block: subs.hh, size: subs.size)
+            blockEncode(ce: &ce, ctxZero: &ctxZeroHH, ctxG1: &ctxG1HH, block: subs.hh, size: subs.size)
         }
     }
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACContexts, blocks: inout [Block2D], size: Int, zeroThreshold: Int) {
+func encodePlaneBaseSubbands(ce: inout CABACEncoder, ctxFlags: inout ContextModel, ctxZeroLL: inout [ContextModel], ctxG1LL: inout [ContextModel], ctxZeroHL: inout [ContextModel], ctxG1HL: inout [ContextModel], ctxZeroLH: inout [ContextModel], ctxG1LH: inout [ContextModel], ctxZeroHH: inout [ContextModel], ctxG1HH: inout [ContextModel], blocks: inout [Block2D], size: Int, zeroThreshold: Int) {
     var nonZeroIndices: [Int] = []
     for i in blocks.indices {
         blocks[i].withView { view in
@@ -254,9 +279,9 @@ func encodePlaneBaseSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACConte
             var lh = subs.lh
             var hh = subs.hh
             if isEffectivelyZeroBase(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
-                ce.encode(bit: 1, context: &ctxs.ctxFlags)
+                ce.encode(bit: 1, context: &ctxFlags)
             } else {
-                ce.encode(bit: 0, context: &ctxs.ctxFlags)
+                ce.encode(bit: 0, context: &ctxFlags)
                 nonZeroIndices.append(i)
             }
         }
@@ -268,7 +293,7 @@ func encodePlaneBaseSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACConte
         if nonZeroSet.contains(i) {
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
-                blockEncodeDPCM(ce: &ce, ctxZero: &ctxs.ctxZeroLL, ctxG1: &ctxs.ctxG1LL, block: subs.ll, size: subs.size, lastVal: &lastVal)
+                blockEncodeDPCM(ce: &ce, ctxZero: &ctxZeroLL, ctxG1: &ctxG1LL, block: subs.ll, size: subs.size, lastVal: &lastVal)
             }
         } else {
             lastVal = 0
@@ -278,21 +303,21 @@ func encodePlaneBaseSubbands(ce: inout CABACEncoder, ctxs: inout PlaneCABACConte
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(ce: &ce, ctxZero: &ctxs.ctxZeroHL, ctxG1: &ctxs.ctxG1HL, block: subs.hl, size: subs.size)
+            blockEncode(ce: &ce, ctxZero: &ctxZeroHL, ctxG1: &ctxG1HL, block: subs.hl, size: subs.size)
         }
     }
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(ce: &ce, ctxZero: &ctxs.ctxZeroLH, ctxG1: &ctxs.ctxG1LH, block: subs.lh, size: subs.size)
+            blockEncode(ce: &ce, ctxZero: &ctxZeroLH, ctxG1: &ctxG1LH, block: subs.lh, size: subs.size)
         }
     }
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(ce: &ce, ctxZero: &ctxs.ctxZeroHH, ctxG1: &ctxs.ctxG1HH, block: subs.hh, size: subs.size)
+            blockEncode(ce: &ce, ctxZero: &ctxZeroHH, ctxG1: &ctxG1HH, block: subs.hh, size: subs.size)
         }
     }
 }

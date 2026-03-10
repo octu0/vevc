@@ -9,7 +9,7 @@ final class CABACTests: XCTestCase {
         // Update with MPS
         context.update(bit: 0)
         XCTAssertEqual(context.mps, 0)
-        XCTAssertGreaterThan(context.state, 0)
+        XCTAssertLessThan(context.prob, 16384)
 
         // Update with LPS multiple times to switch MPS
         for _ in 0..<100 {

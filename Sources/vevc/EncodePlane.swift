@@ -345,23 +345,23 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     // Unified CABAC Streams per Plane
     var ceY = CABACEncoder()
     var ctxsY = PlaneCABACContexts()
-    encodePlaneBaseSubbands(ce: &ceY, ctxs: &ctxsY, blocks: &blocks0Y, size: 8, zeroThreshold: zeroThreshold)
-    encodePlaneSubbands(ce: &ceY, ctxs: &ctxsY, blocks: &blocks1Y, size: 16, zeroThreshold: zeroThreshold)
-    encodePlaneSubbands(ce: &ceY, ctxs: &ctxsY, blocks: &blocks2Y, size: 32, zeroThreshold: zeroThreshold)
+    encodePlaneBaseSubbands(ce: &ceY, ctxFlags: &ctxsY.ctxFlagsL0, ctxZeroLL: &ctxsY.ctxZeroLL0, ctxG1LL: &ctxsY.ctxG1LL0, ctxZeroHL: &ctxsY.ctxZeroHL0, ctxG1HL: &ctxsY.ctxG1HL0, ctxZeroLH: &ctxsY.ctxZeroLH0, ctxG1LH: &ctxsY.ctxG1LH0, ctxZeroHH: &ctxsY.ctxZeroHH0, ctxG1HH: &ctxsY.ctxG1HH0, blocks: &blocks0Y, size: 8, zeroThreshold: zeroThreshold)
+    encodePlaneSubbands(ce: &ceY, ctxFlags: &ctxsY.ctxFlagsL1, ctxZeroHL: &ctxsY.ctxZeroHL1, ctxG1HL: &ctxsY.ctxG1HL1, ctxZeroLH: &ctxsY.ctxZeroLH1, ctxG1LH: &ctxsY.ctxG1LH1, ctxZeroHH: &ctxsY.ctxZeroHH1, ctxG1HH: &ctxsY.ctxG1HH1, blocks: &blocks1Y, size: 16, zeroThreshold: zeroThreshold)
+    encodePlaneSubbands(ce: &ceY, ctxFlags: &ctxsY.ctxFlagsL2, ctxZeroHL: &ctxsY.ctxZeroHL2, ctxG1HL: &ctxsY.ctxG1HL2, ctxZeroLH: &ctxsY.ctxZeroLH2, ctxG1LH: &ctxsY.ctxG1LH2, ctxZeroHH: &ctxsY.ctxZeroHH2, ctxG1HH: &ctxsY.ctxG1HH2, blocks: &blocks2Y, size: 32, zeroThreshold: zeroThreshold)
     ceY.flush()
 
     var ceCb = CABACEncoder()
     var ctxsCb = PlaneCABACContexts()
-    encodePlaneBaseSubbands(ce: &ceCb, ctxs: &ctxsCb, blocks: &blocks0Cb, size: 8, zeroThreshold: zeroThreshold)
-    encodePlaneSubbands(ce: &ceCb, ctxs: &ctxsCb, blocks: &blocks1Cb, size: 16, zeroThreshold: zeroThreshold)
-    encodePlaneSubbands(ce: &ceCb, ctxs: &ctxsCb, blocks: &blocks2Cb, size: 32, zeroThreshold: zeroThreshold)
+    encodePlaneBaseSubbands(ce: &ceCb, ctxFlags: &ctxsCb.ctxFlagsL0, ctxZeroLL: &ctxsCb.ctxZeroLL0, ctxG1LL: &ctxsCb.ctxG1LL0, ctxZeroHL: &ctxsCb.ctxZeroHL0, ctxG1HL: &ctxsCb.ctxG1HL0, ctxZeroLH: &ctxsCb.ctxZeroLH0, ctxG1LH: &ctxsCb.ctxG1LH0, ctxZeroHH: &ctxsCb.ctxZeroHH0, ctxG1HH: &ctxsCb.ctxG1HH0, blocks: &blocks0Cb, size: 8, zeroThreshold: zeroThreshold)
+    encodePlaneSubbands(ce: &ceCb, ctxFlags: &ctxsCb.ctxFlagsL1, ctxZeroHL: &ctxsCb.ctxZeroHL1, ctxG1HL: &ctxsCb.ctxG1HL1, ctxZeroLH: &ctxsCb.ctxZeroLH1, ctxG1LH: &ctxsCb.ctxG1LH1, ctxZeroHH: &ctxsCb.ctxZeroHH1, ctxG1HH: &ctxsCb.ctxG1HH1, blocks: &blocks1Cb, size: 16, zeroThreshold: zeroThreshold)
+    encodePlaneSubbands(ce: &ceCb, ctxFlags: &ctxsCb.ctxFlagsL2, ctxZeroHL: &ctxsCb.ctxZeroHL2, ctxG1HL: &ctxsCb.ctxG1HL2, ctxZeroLH: &ctxsCb.ctxZeroLH2, ctxG1LH: &ctxsCb.ctxG1LH2, ctxZeroHH: &ctxsCb.ctxZeroHH2, ctxG1HH: &ctxsCb.ctxG1HH2, blocks: &blocks2Cb, size: 32, zeroThreshold: zeroThreshold)
     ceCb.flush()
 
     var ceCr = CABACEncoder()
     var ctxsCr = PlaneCABACContexts()
-    encodePlaneBaseSubbands(ce: &ceCr, ctxs: &ctxsCr, blocks: &blocks0Cr, size: 8, zeroThreshold: zeroThreshold)
-    encodePlaneSubbands(ce: &ceCr, ctxs: &ctxsCr, blocks: &blocks1Cr, size: 16, zeroThreshold: zeroThreshold)
-    encodePlaneSubbands(ce: &ceCr, ctxs: &ctxsCr, blocks: &blocks2Cr, size: 32, zeroThreshold: zeroThreshold)
+    encodePlaneBaseSubbands(ce: &ceCr, ctxFlags: &ctxsCr.ctxFlagsL0, ctxZeroLL: &ctxsCr.ctxZeroLL0, ctxG1LL: &ctxsCr.ctxG1LL0, ctxZeroHL: &ctxsCr.ctxZeroHL0, ctxG1HL: &ctxsCr.ctxG1HL0, ctxZeroLH: &ctxsCr.ctxZeroLH0, ctxG1LH: &ctxsCr.ctxG1LH0, ctxZeroHH: &ctxsCr.ctxZeroHH0, ctxG1HH: &ctxsCr.ctxG1HH0, blocks: &blocks0Cr, size: 8, zeroThreshold: zeroThreshold)
+    encodePlaneSubbands(ce: &ceCr, ctxFlags: &ctxsCr.ctxFlagsL1, ctxZeroHL: &ctxsCr.ctxZeroHL1, ctxG1HL: &ctxsCr.ctxG1HL1, ctxZeroLH: &ctxsCr.ctxZeroLH1, ctxG1LH: &ctxsCr.ctxG1LH1, ctxZeroHH: &ctxsCr.ctxZeroHH1, ctxG1HH: &ctxsCr.ctxG1HH1, blocks: &blocks1Cr, size: 16, zeroThreshold: zeroThreshold)
+    encodePlaneSubbands(ce: &ceCr, ctxFlags: &ctxsCr.ctxFlagsL2, ctxZeroHL: &ctxsCr.ctxZeroHL2, ctxG1HL: &ctxsCr.ctxG1HL2, ctxZeroLH: &ctxsCr.ctxZeroLH2, ctxG1LH: &ctxsCr.ctxG1LH2, ctxZeroHH: &ctxsCr.ctxZeroHH2, ctxG1HH: &ctxsCr.ctxG1HH2, blocks: &blocks2Cr, size: 32, zeroThreshold: zeroThreshold)
     ceCr.flush()
 
     var out: [UInt8] = []
