@@ -82,30 +82,40 @@ internal func quantizeSignedMapping(_ block: inout BlockView, q: Quantizer) {
 
 @inline(__always)
 private func performQuantizeSIMD8(_ vec: SIMD8<Int16>, mul: Int32, shift: Int32, bias: Int32) -> SIMD8<Int16> {
-    let zero = SIMD8<Int16>.zero
-    let isNeg = vec .< zero
-    let absVec = vec.replacing(with: 0 &- vec, where: isNeg)
-    
     let low32 = SIMD4<Int32>(
-        Int32(absVec[0]), Int32(absVec[1]), Int32(absVec[2]), Int32(absVec[3])
+        Int32(vec[0]), Int32(vec[1]), Int32(vec[2]), Int32(vec[3])
     )
     let high32 = SIMD4<Int32>(
-        Int32(absVec[4]), Int32(absVec[5]), Int32(absVec[6]), Int32(absVec[7])
+        Int32(vec[4]), Int32(vec[5]), Int32(vec[6]), Int32(vec[7])
     )
     
+    let zero32 = SIMD4<Int32>.zero
+    let isNegLow = low32 .< zero32
+    let isNegHigh = high32 .< zero32
+
+    let aLow32 = low32.replacing(with: zero32 &- low32, where: isNegLow)
+    let aHigh32 = high32.replacing(with: zero32 &- high32, where: isNegHigh)
+
     let mulVec = SIMD4<Int32>(repeating: mul)
     let shiftVec = SIMD4<Int32>(repeating: shift)
     let biasVec = SIMD4<Int32>(repeating: bias)
     
-    let resLow32 = ((low32 &* mulVec) &+ biasVec) &>> shiftVec
-    let resHigh32 = ((high32 &* mulVec) &+ biasVec) &>> shiftVec
+    let qLow32 = ((aLow32 &* mulVec) &+ biasVec) &>> shiftVec
+    let qHigh32 = ((aHigh32 &* mulVec) &+ biasVec) &>> shiftVec
     
-    let res = SIMD8<Int16>(
-        Int16(resLow32[0]), Int16(resLow32[1]), Int16(resLow32[2]), Int16(resLow32[3]),
-        Int16(resHigh32[0]), Int16(resHigh32[1]), Int16(resHigh32[2]), Int16(resHigh32[3])
-    )
+    let resLow32 = qLow32.replacing(with: zero32 &- qLow32, where: isNegLow)
+    let resHigh32 = qHigh32.replacing(with: zero32 &- qHigh32, where: isNegHigh)
+
+    let r0 = Int16(resLow32[0])
+    let r1 = Int16(resLow32[1])
+    let r2 = Int16(resLow32[2])
+    let r3 = Int16(resLow32[3])
+    let r4 = Int16(resHigh32[0])
+    let r5 = Int16(resHigh32[1])
+    let r6 = Int16(resHigh32[2])
+    let r7 = Int16(resHigh32[3])
     
-    return res.replacing(with: 0 &- res, where: isNeg)
+    return SIMD8<Int16>(r0, r1, r2, r3, r4, r5, r6, r7)
 }
 
 @inline(__always)

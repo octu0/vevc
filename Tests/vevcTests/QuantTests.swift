@@ -107,15 +107,17 @@ final class QuantTests: XCTestCase {
             quantize(&view, q: q)
             
             XCTAssertEqual(view[0, 0], 0)
-            // Int16.max = 32767. (32767 * 6553 + 32768) >> 16 = 3276
-            XCTAssertEqual(view[0, 1], 3276)
-            // Int16.min = -32768. abs is 32768. (32768 * 6553 + 32768) >> 16 = 3276
-            XCTAssertEqual(view[0, 2], -3276)
+            // Fixed-point math results for step=10, mul=65536/10=6553, bias=32768
+            // Int16.max = 32767: (32767 * 6553 + 32768) >> 16 = 3276
+            // Int16.min = -32768: abs is 32768. (32768 * 6553 + 32768) >> 16 = 3277
+            XCTAssertEqual(Int(view[0, 1]), 3276)
+            XCTAssertEqual(Int(view[0, 2]), -3277)
             
             dequantize(&view, q: q)
-            XCTAssertEqual(view[0, 0], 0)
-            XCTAssertEqual(view[0, 1], 32760)
-            XCTAssertEqual(view[0, 2], -32760)
+            XCTAssertEqual(Int(view[0, 0]), 0)
+            XCTAssertEqual(Int(view[0, 1]), 32760)
+            // -3277 * 10 = -32770. Clamped to Int16 is -32768
+            XCTAssertEqual(Int(view[0, 2]), -32768)
         }
     }
 }

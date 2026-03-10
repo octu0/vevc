@@ -330,7 +330,7 @@ private func estimateCABACBitsDPCM(block: BlockView, size: Int, lastVal: inout I
             if (uVal == 0) {
                 totalBits += 1
             } else {
-                totalBits += 1 + Int(log2(Double(uVal))) * 2 + 1
+                totalBits += 1 + (uVal < 2 ? 1 : (2 * (Int.bitWidth - 1 - uVal.leadingZeroBitCount) + 1))
             }
         }
     }
@@ -394,7 +394,7 @@ private func estimateCABACBitsMapped(block: BlockView, size: Int) -> Int {
             if (uVal == 0) {
                 totalBits += 1
             } else {
-                totalBits += 1 + Int(log2(Double(uVal))) * 2 + 1
+                totalBits += 1 + (uVal < 2 ? 1 : (2 * (Int.bitWidth - 1 - uVal.leadingZeroBitCount) + 1))
             }
         }
     }
