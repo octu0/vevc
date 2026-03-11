@@ -43,23 +43,62 @@ func toInt16(_ u: UInt16) -> Int16 {
 }
 
 @inline(__always)
-func blockDecode(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8) throws {
+func decodeExpGolomb(decoder: inout CABACDecoder) throws -> UInt32 {
+    var q: UInt32 = 0
+    while try decoder.decodeBypass() == 1 {
+        q += 1
+    }
+    var val: UInt32 = 0
+    for _ in 0..<q {
+        let bit = try decoder.decodeBypass()
+        val = (val << 1) | UInt32(bit)
+    }
+    return ((1 << q) + val - 1)
+}
+
+@inline(__always)
+func decodeCoeff(decoder: inout CABACDecoder, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws -> Int16 {
+    let sig = try decoder.decodeBin(ctx: &ctxSig)
+    if sig == 0 {
+        return 0
+    }
+
+    let signBit = try decoder.decodeBin(ctx: &ctxSign)
+
+    var mag: UInt32 = 1
+    for i in 0..<7 {
+        let bit = try decoder.decodeBin(ctx: &ctxMag[Int(i)])
+        if bit == 0 {
+            break
+        }
+        mag += 1
+    }
+
+    if mag == 8 {
+        let rem = try decodeExpGolomb(decoder: &decoder)
+        mag += rem
+    }
+
+    let sVal = Int16(mag)
+    return (signBit == 1) ? -sVal : sVal
+}
+
+@inline(__always)
+func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
-            let v = try rr.read(k: k)
-            ptr[x] = Int16(bitPattern: v)
+            ptr[x] = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         }
     }
 }
 
 @inline(__always)
-func blockDecodeDPCM(rr: inout RiceReader, block: inout BlockView, size: Int, k: UInt8, lastVal: inout Int16) throws {
+func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
-            let v = try rr.read(k: k)
-            let diff = toInt16(v)
+            let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
             let predicted: Int16
             if x == 0 && y == 0 {
                 predicted = lastVal
@@ -99,7 +138,7 @@ func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [B
     let flagsData = Array(data[0..<flagsByteCount])
     let dataSlice = Array(data[flagsByteCount...])
     
-    var brFlags = BitReader(data: flagsData)
+    var brFlags = CABACBitReader(data: flagsData)
     var nonZeroIndices: [Int] = []
     for i in 0..<blockCount {
         if try brFlags.readBit() == 0 {
@@ -107,39 +146,40 @@ func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [B
         }
     }
     
-    var brData = BitReader(data: dataSlice)
+    var decoder = try CABACDecoder(data: dataSlice)
     
     let half = size / 2
     
-    let kHL = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-                try blockDecode(rr: &rr, block: &hlView, size: half, k: kHL)
-            }
+    var ctxSigHL = ContextModel()
+    var ctxSignHL = ContextModel()
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
         }
     }
     
-    let kLH = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-                try blockDecode(rr: &rr, block: &lhView, size: half, k: kLH)
-            }
+    var ctxSigLH = ContextModel()
+    var ctxSignLH = ContextModel()
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
         }
     }
     
-    let kHH = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                try blockDecode(rr: &rr, block: &hhView, size: half, k: kHH)
-            }
+    var ctxSigHH = ContextModel()
+    var ctxSignHH = ContextModel()
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
     }
+
     return blocks
 }
 
@@ -156,7 +196,7 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
     let flagsData = Array(data[0..<flagsByteCount])
     let dataSlice = Array(data[flagsByteCount...])
     
-    var brFlags = BitReader(data: flagsData)
+    var brFlags = CABACBitReader(data: flagsData)
     var nonZeroIndices: [Int] = []
     for i in 0..<blockCount {
         if try brFlags.readBit() == 0 {
@@ -164,55 +204,57 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
         }
     }
     
-    var brData = BitReader(data: dataSlice)
+    var decoder = try CABACDecoder(data: dataSlice)
     
     let half = size / 2
     
-    let kLL = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        var lastVal: Int16 = 0
-        let nonZeroSet = Set(nonZeroIndices)
-        for i in 0..<blockCount {
-            if nonZeroSet.contains(i) {
-                try blocks[i].withView { view in
-                    var llView = BlockView(base: view.base, width: half, height: half, stride: size)
-                    try blockDecodeDPCM(rr: &rr, block: &llView, size: half, k: kLL, lastVal: &lastVal)
-                }
-            } else {
-                lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
+    var ctxSigLL = ContextModel()
+    var ctxSignLL = ContextModel()
+    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 8)
+
+    var lastVal: Int16 = 0
+    let nonZeroSet = Set(nonZeroIndices)
+    for i in 0..<blockCount {
+        if nonZeroSet.contains(i) {
+            try blocks[i].withView { view in
+                var llView = BlockView(base: view.base, width: half, height: half, stride: size)
+                try blockDecodeDPCM(decoder: &decoder, block: &llView, size: half, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
             }
+        } else {
+            lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
         }
     }
     
-    let kHL = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-                try blockDecode(rr: &rr, block: &hlView, size: half, k: kHL)
-            }
+    var ctxSigHL = ContextModel()
+    var ctxSignHL = ContextModel()
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
         }
     }
     
-    let kLH = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-                try blockDecode(rr: &rr, block: &lhView, size: half, k: kLH)
-            }
+    var ctxSigLH = ContextModel()
+    var ctxSignLH = ContextModel()
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
         }
     }
     
-    let kHH = UInt8(try brData.readBits(n: 4))
-    try RiceReader.withReader(&brData) { rr in
-        for i in nonZeroIndices {
-            try blocks[i].withView { view in
-                var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                try blockDecode(rr: &rr, block: &hhView, size: half, k: kHH)
-            }
+    var ctxSigHH = ContextModel()
+    var ctxSignHH = ContextModel()
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    for i in nonZeroIndices {
+        try blocks[i].withView { view in
+            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
     }
+
     return blocks
 }
 

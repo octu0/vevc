@@ -13,11 +13,57 @@ func toUint16(_ n: Int16) -> UInt16 {
 }
 
 @inline(__always)
-func blockEncode(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8) {
+func encodeExpGolomb(val: UInt32, encoder: inout CABACEncoder) {
+    var q: Int = 0
+    var temp = val &+ 1
+    while temp > 1 {
+        q += 1
+        temp >>= 1
+    }
+    for _ in 0..<q {
+        encoder.encodeBypass(binVal: 1)
+    }
+    encoder.encodeBypass(binVal: 0)
+    if q > 0 {
+        for i in stride(from: q - 1, through: 0, by: -1) {
+            let bit = UInt8(((val &+ 1) >> i) & 1)
+            encoder.encodeBypass(binVal: bit)
+        }
+    }
+}
+
+@inline(__always)
+func encodeCoeff(val: Int16, encoder: inout CABACEncoder, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
+    if val == 0 {
+        encoder.encodeBin(binVal: 0, ctx: &ctxSig)
+        return
+    }
+    encoder.encodeBin(binVal: 1, ctx: &ctxSig)
+
+    let signBit: UInt8 = (val < 0) ? 1 : 0
+    let absVal = UInt32(abs(Int(val)))
+
+    encoder.encodeBin(binVal: signBit, ctx: &ctxSign)
+
+    let magMinus1 = absVal &- 1
+    let numBins = min(magMinus1, 7)
+    for i in 0..<numBins {
+        encoder.encodeBin(binVal: 1, ctx: &ctxMag[Int(i)])
+    }
+    if magMinus1 < 7 {
+        encoder.encodeBin(binVal: 0, ctx: &ctxMag[Int(numBins)])
+    } else {
+        let rem = magMinus1 &- 7
+        encodeExpGolomb(val: rem, encoder: &encoder)
+    }
+}
+
+@inline(__always)
+func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
-            rw.write(val: UInt16(bitPattern: ptr[x]), k: k)
+            encodeCoeff(val: ptr[x], encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         }
     }
 }
@@ -36,7 +82,7 @@ func getSubbands(view: BlockView, size: Int) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8, lastVal: inout Int16) {
+func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
         for x in 0..<size {
@@ -62,7 +108,7 @@ func blockEncodeDPCM(rw: inout RiceWriter, block: BlockView, size: Int, k: UInt8
                 }
             }
             let diff = val - predicted
-            rw.write(val: toUint16(diff), k: k)
+            encodeCoeff(val: diff, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         }
     }
     lastVal = block.rowPointer(y: size - 1)[size - 1]
@@ -171,131 +217,9 @@ func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
     }
 }
 
-private enum SubbandType { case ll, hl, lh, hh }
-
-@inline(__always)
-private func evaluateK(blocks: inout [Block2D], indices: [Int], size: Int, type: SubbandType, isDPCM: Bool, k: UInt8) -> Int {
-    var bitCount = 0
-    var zeroCount: UInt16 = 0
-    let half = size / 2
-    var lastVal: Int16 = 0
-    
-    @inline(__always)
-    func simWrite(_ val: UInt16) {
-        if val == 0 {
-            zeroCount &+= 1
-            return
-        }
-        if zeroCount > 0 {
-            if zeroCount < 255 {
-                let q = zeroCount >> k
-                bitCount += Int(q) + 1 + Int(k)
-            } else {
-                let q = UInt16(255) >> k
-                bitCount += Int(q) + 1 + Int(k) + 16
-            }
-            zeroCount = 0
-        }
-        let q = val >> k
-        bitCount += Int(q) + 1 + Int(k)
-    }
-    
-    if isDPCM {
-        for i in blocks.indices {
-            if indices.contains(i) {
-                blocks[i].withView { view in
-                    let subs = getSubbands(view: view, size: size)
-                    let b: BlockView
-                    switch type {
-                    case .ll: b = subs.ll
-                    case .hl: b = subs.hl
-                    case .lh: b = subs.lh
-                    case .hh: b = subs.hh
-                    }
-                    for y in 0..<half {
-                        let ptr = b.rowPointer(y: y)
-                        for x in 0..<half {
-                            let val = ptr[x]
-                            let predicted: Int16
-                            if x == 0 && y == 0 {
-                                predicted = lastVal
-                            } else if y == 0 {
-                                predicted = ptr[x - 1]
-                            } else if x == 0 {
-                                predicted = b.rowPointer(y: y - 1)[x]
-                            } else {
-                                let a = Int(ptr[x - 1])
-                                let bv = Int(b.rowPointer(y: y - 1)[x])
-                                let c = Int(b.rowPointer(y: y - 1)[x - 1])
-                                if c >= max(a, bv) {
-                                    predicted = Int16(min(a, bv))
-                                } else if c <= min(a, bv) {
-                                    predicted = Int16(max(a, bv))
-                                } else {
-                                    predicted = Int16(a + bv - c)
-                                }
-                            }
-                            let diff = val - predicted
-                            simWrite(toUint16(diff))
-                        }
-                    }
-                    lastVal = b.rowPointer(y: half - 1)[half - 1]
-                }
-            } else {
-                lastVal = 0
-            }
-        }
-    } else {
-        for i in indices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                let b: BlockView
-                switch type {
-                case .ll: b = subs.ll
-                case .hl: b = subs.hl
-                case .lh: b = subs.lh
-                case .hh: b = subs.hh
-                }
-                for y in 0..<half {
-                    let ptr = b.rowPointer(y: y)
-                    for x in 0..<half {
-                        simWrite(UInt16(bitPattern: ptr[x]))
-                    }
-                }
-            }
-        }
-    }
-    
-    if zeroCount > 0 {
-        if zeroCount < 255 {
-            let q = zeroCount >> k
-            bitCount += Int(q) + 1 + Int(k)
-        } else {
-            let q = UInt16(255) >> k
-            bitCount += Int(q) + 1 + Int(k) + 16
-        }
-    }
-    return bitCount
-}
-
-@inline(__always)
-private func estimateOptimalK(blocks: inout [Block2D], indices: [Int], size: Int, type: SubbandType, isDPCM: Bool) -> UInt8 {
-    if indices.isEmpty { return 0 }
-    var bestK: UInt8 = 0
-    var minBits = Int.max
-    for k in UInt8(0)...UInt8(6) {
-        let bits = evaluateK(blocks: &blocks, indices: indices, size: size, type: type, isDPCM: isDPCM, k: k)
-        if bits < minBits {
-            minBits = bits
-            bestK = k
-        }
-    }
-    return bestK
-}
-
 @inline(__always)
 func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = BitWriter()
+    var bwFlags = CABACBitWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
@@ -315,51 +239,49 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var bwData = BitWriter()
+    var encoder = CABACEncoder()
+    var ctxSigHL = ContextModel()
+    var ctxSignHL = ContextModel()
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
     
-    let kHL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hl, isDPCM: false)
-    bwData.writeBits(val: UInt16(kHL), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hl, size: subs.size, k: kHL)
-            }
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
         }
     }
     
-    let kLH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .lh, isDPCM: false)
-    bwData.writeBits(val: UInt16(kLH), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.lh, size: subs.size, k: kLH)
-            }
+    var ctxSigLH = ContextModel()
+    var ctxSignLH = ContextModel()
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
         }
     }
     
-    let kHH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hh, isDPCM: false)
-    bwData.writeBits(val: UInt16(kHH), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hh, size: subs.size, k: kHH)
-            }
+    var ctxSigHH = ContextModel()
+    var ctxSignHH = ContextModel()
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
     }
     
-    bwData.flush()
-    debugLog("    [Subbands] k: HL=\(kHL) LH=\(kLH) HH=\(kHH)")
+    encoder.flush()
     var out = bwFlags.data
-    out.append(contentsOf: bwData.data)
+    out.append(contentsOf: encoder.getData())
     return out
 }
 
 @inline(__always)
 func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = BitWriter()
+    var bwFlags = CABACBitWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
@@ -379,62 +301,60 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
     bwFlags.flush()
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var bwData = BitWriter()
+    var encoder = CABACEncoder()
+    var ctxSigLL = ContextModel()
+    var ctxSignLL = ContextModel()
+    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 8)
     
-    let kLL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .ll, isDPCM: true)
-    bwData.writeBits(val: UInt16(kLL), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        var lastVal: Int16 = 0
-        let nonZeroSet = Set(nonZeroIndices)
-        for i in blocks.indices {
-            if nonZeroSet.contains(i) {
-                blocks[i].withView { view in
-                    let subs = getSubbands(view: view, size: size)
-                    blockEncodeDPCM(rw: &rw, block: subs.ll, size: subs.size, k: kLL, lastVal: &lastVal)
-                }
-            } else {
-                lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
-            }
-        }
-    }
-    
-    let kHL = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hl, isDPCM: false)
-    bwData.writeBits(val: UInt16(kHL), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
+    var lastVal: Int16 = 0
+    let nonZeroSet = Set(nonZeroIndices)
+    for i in blocks.indices {
+        if nonZeroSet.contains(i) {
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hl, size: subs.size, k: kHL)
+                blockEncodeDPCM(encoder: &encoder, block: subs.ll, size: subs.size, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
             }
+        } else {
+            lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
         }
     }
     
-    let kLH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .lh, isDPCM: false)
-    bwData.writeBits(val: UInt16(kLH), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.lh, size: subs.size, k: kLH)
-            }
+    var ctxSigHL = ContextModel()
+    var ctxSignHL = ContextModel()
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
         }
     }
     
-    let kHH = estimateOptimalK(blocks: &blocks, indices: nonZeroIndices, size: size, type: .hh, isDPCM: false)
-    bwData.writeBits(val: UInt16(kHH), n: 4)
-    RiceWriter.withWriter(&bwData, flushBits: false) { rw in
-        for i in nonZeroIndices {
-            blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncode(rw: &rw, block: subs.hh, size: subs.size, k: kHH)
-            }
+    var ctxSigLH = ContextModel()
+    var ctxSignLH = ContextModel()
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
         }
     }
     
-    bwData.flush()
-    debugLog("    [BaseSubbands] k: LL=\(kLL) HL=\(kHL) LH=\(kLH) HH=\(kHH)")
+    var ctxSigHH = ContextModel()
+    var ctxSignHH = ContextModel()
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
+        }
+    }
+    
+    encoder.flush()
     var out = bwFlags.data
-    out.append(contentsOf: bwData.data)
+    out.append(contentsOf: encoder.getData())
     return out
 }
 
@@ -751,7 +671,7 @@ func subtractPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneD
         var res = [Int16](repeating: 0, count: count)
         c.withUnsafeBufferPointer { cPtr in
             p.withUnsafeBufferPointer { pPtr in
-                for i in 0..<count { res[i] = cPtr[i] - pPtr[i] }
+                for i in 0..<count { res[i] = cPtr[i] &- pPtr[i] }
             }
         }
         return res
@@ -772,7 +692,7 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
         var curr = [Int16](repeating: 0, count: count)
         r.withUnsafeBufferPointer { rPtr in
             p.withUnsafeBufferPointer { pPtr in
-                for i in 0..<count { curr[i] = rPtr[i] + pPtr[i] }
+                for i in 0..<count { curr[i] = rPtr[i] &+ pPtr[i] }
             }
         }
         return curr
