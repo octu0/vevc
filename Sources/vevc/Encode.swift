@@ -40,7 +40,12 @@ func encodeCoeff(val: Int16, encoder: inout CABACEncoder, ctxSig: inout ContextM
     }
     encoder.encodeBin(binVal: 1, ctx: &ctxSig)
 
-    let signBit: UInt8 = (val < 0) ? 1 : 0
+    let signBit: UInt8
+    if val <= -1 {
+        signBit = 1
+    } else {
+        signBit = 0
+    }
     let absVal = UInt32(abs(Int(val)))
 
     encoder.encodeBin(binVal: signBit, ctx: &ctxSign)
@@ -533,9 +538,11 @@ struct Int16Reader {
         let limit = min(size, width - x)
         if limit > 0 {
             data.withUnsafeBufferPointer { ptr in
-                let base = ptr.baseAddress!.advanced(by: safeY * width + x)
+                guard let basePtr = ptr.baseAddress else { return }
+                let base = basePtr.advanced(by: safeY * width + x)
                 r.withUnsafeMutableBufferPointer { dst in
-                    dst.baseAddress!.update(from: base, count: limit)
+                    guard let dstBase = dst.baseAddress else { return }
+                    dstBase.update(from: base, count: limit)
                     
                     if limit < size {
                         let lastVal = dst[limit - 1]
@@ -725,7 +732,7 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
                         }
                     }
                     
-                    if sX < 0 {
+                    if sX <= -1 {
                         let fillVal = pData[srcRow + w - 1]
                         for x in max(0, w + sX)..<w {
                             pOut[dstRow + x] = fillVal
@@ -759,7 +766,6 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
     for i in 0..<planes.count {
         let curr = planes[i]
         var forceIFrame = false
-        var residual: PlaneData420? = nil
         var predictedPlane: PlaneData420? = nil
         var mvs: [MotionVector] = []
         var meanSAD: Int = 0
@@ -770,16 +776,17 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             guard let prev = prevReconstructed else { continue }
             
             mvs = estimateMBME(curr: curr, prev: prev)
-            predictedPlane = await applyMBME(prev: prev, mvs: mvs)
-            residual = await subtractPlanes(curr: curr, predicted: predictedPlane!)
+            let predicted = await applyMBME(prev: prev, mvs: mvs)
+            predictedPlane = predicted
+            let res = await subtractPlanes(curr: curr, predicted: predicted)
             
             var sumSAD = 0
-            for y in 0..<residual!.height {
-                for x in 0..<residual!.width {
-                    sumSAD += abs(Int(residual!.y[y * residual!.width + x]))
+            for y in 0..<res.height {
+                for x in 0..<res.width {
+                    sumSAD += abs(Int(res.y[y * res.width + x]))
                 }
             }
-            meanSAD = sumSAD / (residual!.width * residual!.height)
+            meanSAD = sumSAD / (res.width * res.height)
             
             if meanSAD > sceneChangeThreshold {
                 forceIFrame = true
@@ -792,7 +799,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
             let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: true)
             
-            out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // 'VEVI'
+            out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
             debugLog("[Frame \(i)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
@@ -805,7 +812,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
             let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: false)
             
-            out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
+            out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
             var mvBw = CABACEncoder()
             var ctxDx = ContextModel()
@@ -815,12 +822,23 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
                     mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
                 } else {
                     mvBw.encodeBin(binVal: 1, ctx: &ctxDx)
-                    let sx: UInt8 = mv.dx < 0 ? 1 : 0
+
+                    let sx: UInt8
+                    if mv.dx <= -1 {
+                        sx = 1
+                    } else {
+                        sx = 0
+                    }
                     mvBw.encodeBypass(binVal: sx)
                     let mx = UInt32(abs(mv.dx))
                     encodeExpGolomb(val: mx, encoder: &mvBw)
 
-                    let sy: UInt8 = mv.dy < 0 ? 1 : 0
+                    let sy: UInt8
+                    if mv.dy <= -1 {
+                        sy = 1
+                    } else {
+                        sy = 0
+                    }
                     mvBw.encodeBypass(binVal: sy)
                     let my = UInt32(abs(mv.dy))
                     encodeExpGolomb(val: my, encoder: &mvBw)
@@ -838,8 +856,12 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
-            let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane!)
-            prevReconstructed = reconstructed
+            if let predicted = predictedPlane {
+                let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
+                prevReconstructed = reconstructed
+            } else {
+                prevReconstructed = reconstructedResidual
+            }
             gopCount += 1
         }
     }

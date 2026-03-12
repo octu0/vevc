@@ -9,11 +9,11 @@ func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, 
     
     if width <= x {
         x = (width - 1 - (x - width))
-        if x < 0 {
+        if x <= -1 {
             x = 0
         }
     } else {
-        if x < 0 {
+        if x <= -1 {
             x = (-1 * x)
             if width <= x {
                 x = (width - 1)
@@ -23,11 +23,11 @@ func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, 
     
     if height <= y {
         y = (height - 1 - (y - height))
-        if y < 0 {
+        if y <= -1 {
             y = 0
         }
     } else {
-        if y < 0 {
+        if y <= -1 {
             y = (-1 * y)
             if height <= y {
                 y = (height - 1)
@@ -40,7 +40,7 @@ func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, 
 
 @inline(__always)
 func clampU8(_ v: Int16) -> UInt8 {
-    if v < 0 {
+    if v <= -1 {
         return 0
     }
     if 255 < v {

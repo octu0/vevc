@@ -57,7 +57,14 @@ extension PlaneData420 {
         if countY > 0 {
             for i in 0..<countY {
                 let v = self.y[i]
-                img.yPlane[i] = v < -128 ? 0 : (127 < v ? 255 : UInt8(v + 128))
+                switch v {
+                case ..<(-128):
+                    img.yPlane[i] = 0
+                case 128...:
+                    img.yPlane[i] = 255
+                default:
+                    img.yPlane[i] = UInt8(v + 128)
+                }
             }
         }
 
@@ -65,9 +72,24 @@ extension PlaneData420 {
         if countCbCr > 0 {
             for i in 0..<countCbCr {
                 let cbVal = self.cb[i]
-                img.cbPlane[i] = cbVal < -128 ? 0 : (127 < cbVal ? 255 : UInt8(cbVal + 128))
+                switch cbVal {
+                case ..<(-128):
+                    img.cbPlane[i] = 0
+                case 128...:
+                    img.cbPlane[i] = 255
+                default:
+                    img.cbPlane[i] = UInt8(cbVal + 128)
+                }
+
                 let crVal = self.cr[i]
-                img.crPlane[i] = crVal < -128 ? 0 : (127 < crVal ? 255 : UInt8(crVal + 128))
+                switch crVal {
+                case ..<(-128):
+                    img.crPlane[i] = 0
+                case 128...:
+                    img.crPlane[i] = 255
+                default:
+                    img.crPlane[i] = UInt8(crVal + 128)
+                }
             }
         }
 
@@ -522,7 +544,7 @@ func encodePlaneLayer(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer]) // 'VEVC' + layer
+    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
     appendUInt16BE(&out, UInt16(dx))
     appendUInt16BE(&out, UInt16(dy))
     out.append(UInt8(qtY.step))
@@ -561,7 +583,7 @@ func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8,
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer]) // 'VEVC' + layer
+    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
     appendUInt16BE(&out, UInt16(dx))
     appendUInt16BE(&out, UInt16(dy))
     out.append(UInt8(qtY.step))

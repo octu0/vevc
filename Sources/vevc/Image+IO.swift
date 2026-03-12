@@ -23,7 +23,9 @@ public func pngToYCbCr(data: Data) throws -> YCbCrImage {
         throw NSError(domain: "ImageError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to get pixel data"])
     }
     
-    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+        throw NSError(domain: "ImageError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to create color space"])
+    }
     let bytesPerPixel = 4
     let bytesPerRow = (bytesPerPixel * width)
     var rawData = [UInt8](repeating: 0, count: (height * bytesPerRow))
@@ -56,7 +58,7 @@ public func pngToYCbCr(data: Data) throws -> YCbCrImage {
             let yIdx = ycbcr.yOffset(x, y)
             ycbcr.yPlane[yIdx] = UInt8(clamping: yVal)
             
-            let cOff = ycbcr.cOffset(x, y) // Full resolution for 4:4:4
+            let cOff = ycbcr.cOffset(x, y)
              if cOff < ycbcr.cbPlane.count {
                 ycbcr.cbPlane[cOff] = UInt8(clamping: cbVal)
                 ycbcr.crPlane[cOff] = UInt8(clamping: crVal)
@@ -101,7 +103,9 @@ public func saveImage(img: YCbCrImage, url: URL) throws {
         }
     }
     
-    let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    guard let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) else {
+        throw NSError(domain: "ImageError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to create color space"])
+    }
     guard let context = CGContext(
         data: &rawData,
         width: width,
@@ -123,7 +127,7 @@ public func saveImage(img: YCbCrImage, url: URL) throws {
     }
     
     CGImageDestinationAddImage(destination, cgImage, nil)
-    if CGImageDestinationFinalize(destination) != true {
+    if CGImageDestinationFinalize(destination) == false {
         throw NSError(domain: "ImageError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to finalize image destination"])
     }
 }

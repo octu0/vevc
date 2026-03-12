@@ -5,10 +5,6 @@ import Foundation
 // MARK: - Probability State and LUT
 
 let rangeLPS_table: [[UInt32]] = [
-    // [RangeIndex][pStateIdx]
-    // Here we define a simplified 128x4 LUT.
-    // Range is split into 4 quarters: (R >> 6) & 3
-    // State goes from 0 to 127
     (0...127).map { s in
         let p = pow(0.5, Double(s) / 10.0)
         return UInt32(max(1, min(255, Int(p * 256.0))))
@@ -38,7 +34,6 @@ public struct ContextModel {
 
     @inline(__always)
     public mutating func update(binVal: UInt8) {
-        // Simplified counter-based probability update
         if binVal == valMPS {
             if pStateIdx < 127 {
                 pStateIdx += 1
@@ -183,7 +178,6 @@ public struct CABACEncoder {
 
     @inline(__always)
     public mutating func flush() {
-        // Output the remaining bits
         bitsPending += 1
         let bit = UInt8((low >> 9) & 1)
         putBit(bit)
@@ -223,7 +217,6 @@ public struct CABACBitReader {
     public mutating func readBit() throws -> UInt8 {
         if bits == 0 {
             if offset >= data.count {
-                // If out of data, return 0 (padding)
                 return 0
             }
             cache = data[offset]
@@ -246,7 +239,6 @@ public struct CABACDecoder {
         self.range = 510
         self.value = 0
 
-        // Initialize value with 10 bits
         for _ in 0..<10 {
             let b = try br.readBit()
             value = (value << 1) | UInt32(b)

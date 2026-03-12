@@ -6,10 +6,10 @@ public func rgbaToYCbCr(data: [UInt8], width: Int, height: Int) -> YCbCrImage {
         ycbcr.yPlane.withUnsafeMutableBufferPointer { yPtr in
             ycbcr.cbPlane.withUnsafeMutableBufferPointer { cbPtr in
                 ycbcr.crPlane.withUnsafeMutableBufferPointer { crPtr in
-                    let dataBase = dataPtr.baseAddress!
-                    let yBase = yPtr.baseAddress!
-                    let cbBase = cbPtr.baseAddress!
-                    let crBase = crPtr.baseAddress!
+                    guard let dataBase = dataPtr.baseAddress,
+                          let yBase = yPtr.baseAddress,
+                          let cbBase = cbPtr.baseAddress,
+                          let crBase = crPtr.baseAddress else { return }
                     
                     let totalPixels = width * height
                     for i in 0..<totalPixels {
@@ -44,10 +44,10 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
         img.yPlane.withUnsafeBufferPointer { yPtr in
             img.cbPlane.withUnsafeBufferPointer { cbPtr in
                 img.crPlane.withUnsafeBufferPointer { crPtr in
-                    let outBase = outPtr.baseAddress!
-                    let yBase = yPtr.baseAddress!
-                    let cbBase = cbPtr.baseAddress!
-                    let crBase = crPtr.baseAddress!
+                    guard let outBase = outPtr.baseAddress,
+                          let yBase = yPtr.baseAddress,
+                          let cbBase = cbPtr.baseAddress,
+                          let crBase = crPtr.baseAddress else { return }
                     
                     if img.ratio == .ratio444 {
                         for i in 0..<totalPixels {

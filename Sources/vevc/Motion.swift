@@ -9,7 +9,11 @@ func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
 
         for x in 0..<32 {
             let diff = Int(currRow[x]) - Int(prevRow[x])
-            sad &+= UInt(diff > 0 ? diff : -diff)
+            if diff > 0 {
+                sad &+= UInt(diff)
+            } else {
+                sad &+= UInt(-1 * diff)
+            }
         }
     }
     return Int(sad)
@@ -82,7 +86,11 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                                         let prevRow = (refY + y) * w
                                         for x in 0..<actW {
                                             let diff = Int(pCurr[currRow + startX + x]) - Int(pPrev[prevRow + refX + x])
-                                            s &+= UInt(diff > 0 ? diff : -diff)
+                                            if diff > 0 {
+                                                s &+= UInt(diff)
+                                            } else {
+                                                s &+= UInt(-1 * diff)
+                                            }
                                         }
                                     }
                                     sad = Int(s)
@@ -126,7 +134,11 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
             let px = max(0, min(w - 1, cx + dx))
 
             let diff = Int(pCurr[currRow + cx]) - Int(pPrev[prevRow + px])
-            sad &+= UInt(diff > 0 ? diff : -diff)
+            if diff > 0 {
+                sad &+= UInt(diff)
+            } else {
+                sad &+= UInt(-1 * diff)
+            }
         }
     }
     return Int(sad)

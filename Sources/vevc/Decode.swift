@@ -80,7 +80,10 @@ func decodeCoeff(decoder: inout CABACDecoder, ctxSig: inout ContextModel, ctxSig
     }
 
     let sVal = Int16(mag)
-    return (signBit == 1) ? -sVal : sVal
+    if signBit == 1 {
+        return -1 * sVal
+    }
+    return sVal
 }
 
 @inline(__always)
@@ -297,10 +300,10 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
     let header = Array(r[offset..<(offset + 5)])
     offset += 5
     
-    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else { // check 'VEVC'
+    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
          throw DecodeError.invalidHeader
     }
-    guard header[4] == layer else { // check layer
+    guard header[4] == layer else {
         throw DecodeError.invalidLayerNumber
     }
     
@@ -500,10 +503,10 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
     let header = Array(r[offset..<(offset + 5)])
     offset += 5
     
-    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else { // check 'VEVC'
+    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
          throw DecodeError.invalidHeader
     }
-    guard header[4] == layer else { // check layer
+    guard header[4] == layer else {
         throw DecodeError.invalidLayerNumber
     }
     
@@ -690,7 +693,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let magic = Array(data[offset..<(offset + 4)])
         offset += 4
         
-        if magic == [0x56, 0x45, 0x56, 0x49] { // 'VEVI'
+        if magic == [0x56, 0x45, 0x56, 0x49] {
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let chunk = Array(data[offset..<(offset + len)])
             offset += len
@@ -700,7 +703,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             out.append(pd.toYCbCr())
             prevReconstructed = pd
             
-        } else if magic == [0x56, 0x45, 0x56, 0x50] { // 'VEVP'
+        } else if magic == [0x56, 0x45, 0x56, 0x50] {
             let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
             var mvs: [MotionVector] = []
@@ -718,11 +721,23 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                 } else {
                     let sx = try mvBr.decodeBypass()
                     let mx = try decodeExpGolomb(decoder: &mvBr)
-                    let dx = sx == 1 ? -Int(mx) : Int(mx)
+
+                    let dx: Int
+                    if sx == 1 {
+                        dx = -1 * Int(mx)
+                    } else {
+                        dx = Int(mx)
+                    }
 
                     let sy = try mvBr.decodeBypass()
                     let my = try decodeExpGolomb(decoder: &mvBr)
-                    let dy = sy == 1 ? -Int(my) : Int(my)
+
+                    let dy: Int
+                    if sy == 1 {
+                        dy = -1 * Int(my)
+                    } else {
+                        dy = Int(my)
+                    }
 
                     mvs.append(MotionVector(dx: dx, dy: dy))
                 }

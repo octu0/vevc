@@ -194,7 +194,7 @@ private func quantizeSIMDGeneric(_ block: inout BlockView, q: Quantizer) {
             let absVal = abs(val)
             let qVal = (((absVal &* mul) &+ bias) &>> shift)
             var res: Int32 = qVal
-            if val < 0 {
+            if val <= -1 {
                 res = (-1 * qVal)
             }
             ptr[i] = Int16(res)
@@ -293,7 +293,7 @@ private func quantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Quant
             let absVal = abs(val)
             let qVal = (((absVal &* mul) &+ bias) &>> shift)
             var res: Int32 = qVal
-            if val < 0 {
+            if val <= -1 {
                 res = (-1 * qVal)
             }
             let v = Int16(res)
@@ -303,7 +303,7 @@ private func quantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Quant
     }
 }
 
-#endif  // arch(arm64) || arch(x86_64)
+#endif
 
 // MARK: - Quantization Scalar (fallback)
 
@@ -320,7 +320,7 @@ internal func quantizeScalar(_ block: inout BlockView, q: Quantizer) {
             let absVal = abs(val)
             let qVal = (((absVal &* mul) &+ bias) &>> shift)
             var res: Int32 = qVal
-            if val < 0 {
+            if val <= -1 {
                 res = (-1 * qVal)
             }
             ptr[x] = Int16(res)
@@ -341,7 +341,7 @@ internal func quantizeScalarSignedMapping(_ block: inout BlockView, q: Quantizer
             let absVal = abs(val)
             let qVal = (((absVal &* mul) &+ bias) &>> shift)
             var res: Int32 = qVal
-            if val < 0 {
+            if val <= -1 {
                 res = (-1 * qVal)
             }
             let v = Int16(res)
@@ -616,7 +616,7 @@ private func dequantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Qua
     }
 }
 
-#endif  // arch(arm64) || arch(x86_64)
+#endif
 
 // MARK: - Dequantization Scalar (fallback)
 
