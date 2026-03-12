@@ -68,16 +68,33 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
 
                             // To allow out of bounds, we will clamp
 
+                            
                             var sad = 0
-                            if actW == 32 && actH == 32 && refX >= 0 && refY >= 0 && refX + 32 <= w && refY + 32 <= h {
-                                sad = calculateSAD32x32(
-                                    pCurr: pCurr.advanced(by: startY * w + startX),
-                                    pPrev: pPrev.advanced(by: refY * w + refX),
-                                    currStride: w, prevStride: w
-                                )
+                            // Fast Path: fully inside
+                            if refX >= 0 && refY >= 0 && refX + actW <= w && refY + actH <= h {
+                                if actW == 32 && actH == 32 {
+                                    sad = calculateSAD32x32(
+                                        pCurr: pCurr.advanced(by: startY * w + startX),
+                                        pPrev: pPrev.advanced(by: refY * w + refX),
+                                        currStride: w, prevStride: w
+                                    )
+                                } else {
+                                    var s: UInt = 0
+                                    for y in 0..<actH {
+                                        let currRow = (startY + y) * w
+                                        let prevRow = (refY + y) * w
+                                        for x in 0..<actW {
+                                            let diff = Int(pCurr[currRow + startX + x]) - Int(pPrev[prevRow + refX + x])
+                                            s &+= UInt(diff > 0 ? diff : -diff)
+                                        }
+                                    }
+                                    sad = Int(s)
+                                }
                             } else {
+                                // Slow Path: edge clamping
                                 sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
                             }
+
 
                             // Slight penalty for longer vectors
                             sad += (abs(dx) + abs(dy))
@@ -151,18 +168,35 @@ func applyMBME(prev: PlaneData420, mvs: [MotionVector]) async -> PlaneData420 {
                         let dx = mv.dx / div
                         let dy = mv.dy / div
 
-                        for y in 0..<actH {
-                            let dstY = startY + y
-                            let srcY = max(0, min(pH - 1, dstY + dy))
-                            let dstRow = dstY * pW
-                            let srcRow = srcY * pW
+                        
+                        let refX = startX + dx
+                        let refY = startY + dy
+                        
+                        // Fast Path
+                        if refX >= 0 && refY >= 0 && refX + actW <= pW && refY + actH <= pH {
+                            for y in 0..<actH {
+                                let dstRow = (startY + y) * pW
+                                let srcRow = (refY + y) * pW
+                                for x in 0..<actW {
+                                    pOut[dstRow + startX + x] = pData[srcRow + refX + x]
+                                }
+                            }
+                        } else {
+                            // Slow Path
+                            for y in 0..<actH {
+                                let dstY = startY + y
+                                let srcY = max(0, min(pH - 1, dstY + dy))
+                                let dstRow = dstY * pW
+                                let srcRow = srcY * pW
 
-                            for x in 0..<actW {
-                                let dstX = startX + x
-                                let srcX = max(0, min(pW - 1, dstX + dx))
-                                pOut[dstRow + dstX] = pData[srcRow + srcX]
+                                for x in 0..<actW {
+                                    let dstX = startX + x
+                                    let srcX = max(0, min(pW - 1, dstX + dx))
+                                    pOut[dstRow + dstX] = pData[srcRow + srcX]
+                                }
                             }
                         }
+
                     }
                 }
             }

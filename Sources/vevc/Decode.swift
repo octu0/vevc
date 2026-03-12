@@ -232,9 +232,11 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
 
     var lastVal: Int16 = 0
-    let nonZeroSet = Set(nonZeroIndices)
+    var nzCur = 0
+    let nzCount = nonZeroIndices.count
     for i in 0..<blockCount {
-        if nonZeroSet.contains(i) {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
             try blocks[i].withView { view in
                 var llView = BlockView(base: view.base, width: half, height: half, stride: size)
                 try blockDecodeDPCM(decoder: &decoder, block: &llView, size: half, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)

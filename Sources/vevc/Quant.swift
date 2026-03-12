@@ -436,6 +436,17 @@ private func performDequantizeSIMD8(_ vec: SIMD8<Int16>, step: Int32) -> SIMD8<I
 }
 
 @inline(__always)
+private func performDequantizeSIMDSignedMapping8(_ vec: SIMD8<Int16>, step: Int32) -> SIMD8<Int16> {
+    let dVal = unsafeBitCast(vec, to: SIMD8<UInt16>.self)
+    let one = SIMD8<UInt16>(repeating: 1)
+    let signMask = ~(dVal & one) &+ one
+    let sign = unsafeBitCast(signMask, to: SIMD8<Int16>.self)
+    let orig = unsafeBitCast(dVal &>> 1, to: SIMD8<Int16>.self) ^ sign
+    
+    return performDequantizeSIMD8(orig, step: step)
+}
+
+@inline(__always)
 private func dequantizeSIMD(_ block: inout BlockView, q: Quantizer) {
     switch block.width {
     case 8:  dequantizeSIMD8(&block, q: q)

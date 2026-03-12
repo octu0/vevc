@@ -317,9 +317,13 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
     
     var lastVal: Int16 = 0
-    let nonZeroSet = Set(nonZeroIndices)
+    
+    var nzCur = 0
+    let nzCount = nonZeroIndices.count
     for i in blocks.indices {
-        if nonZeroSet.contains(i) {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
+
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
                 blockEncodeDPCM(encoder: &encoder, block: subs.ll, size: subs.size, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
@@ -377,12 +381,13 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
         }
     }
     lastVal = block.rowPointer(y: size - 1)[size - 1]
-    
-    if count == 0 { return 0 }
-    
-    let mean = Double(sumDiffAbs) / Double(count)
-    let meanInt = Int(mean)
-    let k = (meanInt < 1) ? 0 : (Int.bitWidth - 1 - meanInt.leadingZeroBitCount)
+    let meanInt = sumDiffAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
     
     let divisorShift = max(0, k - 1)
     let bodyBits = sumDiffAbs >> divisorShift
@@ -391,28 +396,6 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
     return bodyBits + headerBits
 }
 
-private enum PlaneType { case y, cb, cr }
-
-private func fetchBlock(reader: ImageReader, plane: PlaneType, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-    var block = Block2D(width: w, height: h)
-    block.withView { view in
-        switch plane {
-        case .y:
-            for i in 0..<h {
-                view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
-            }
-        case .cb:
-            for i in 0..<h {
-                view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
-            }
-        case .cr:
-            for i in 0..<h {
-                view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
-            }
-        }
-    }
-    return block
-}
 
 private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
@@ -451,12 +434,13 @@ private func estimateRiceBits(block: BlockView, size: Int) -> Int {
             sumAbs += abs(Int(ptr[x]))
         }
     }
-    
-    if count == 0 { return 0 }
-    
-    let mean = Double(sumAbs) / Double(count)
-    let meanInt = Int(mean)
-    let k = (meanInt < 1) ? 0 : (Int.bitWidth - 1 - meanInt.leadingZeroBitCount)
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
     
     let divisorShift = max(0, k - 1)
     let bodyBits = sumAbs >> divisorShift
@@ -486,26 +470,34 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     
     var totalSampleBits = 0
     let reader = ImageReader(img: img)
-
-    enum PlaneType { case y, cb, cr }
-    
     @inline(__always)
-    func fetchBlock(reader: ImageReader, plane: PlaneType, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+    func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
         var block = Block2D(width: w, height: h)
         block.withView { view in
-            switch plane {
-            case .y:
-                for i in 0..<h {
-                    view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
-                }
-            case .cb:
-                for i in 0..<h {
-                    view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
-                }
-            case .cr:
-                for i in 0..<h {
-                    view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
-                }
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
+            }
+        }
+        return block
+    }
+
+    @inline(__always)
+    func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+        var block = Block2D(width: w, height: h)
+        block.withView { view in
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
+            }
+        }
+        return block
+    }
+
+    @inline(__always)
+    func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+        var block = Block2D(width: w, height: h)
+        block.withView { view in
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
             }
         }
         return block
@@ -513,15 +505,15 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     
     for (sx, sy) in points {
         // Y Plane
-        var blockY = fetchBlock(reader: reader, plane: .y, x: sx, y: sy, w: w, h: h)
+        var blockY = fetchBlockY(reader: reader, x: sx, y: sy, w: w, h: h)
         totalSampleBits += measureBlockBits(block: &blockY, size: size, qt: qt)
         
         // Cb Plane
-        var blockCb = fetchBlock(reader: reader, plane: .cb, x: sx, y: sy, w: w, h: h)
+        var blockCb = fetchBlockCb(reader: reader, x: sx, y: sy, w: w, h: h)
         totalSampleBits += measureBlockBits(block: &blockCb, size: size, qt: qt)
         
         // Cr Plane
-        var blockCr = fetchBlock(reader: reader, plane: .cr, x: sx, y: sy, w: w, h: h)
+        var blockCr = fetchBlockCr(reader: reader, x: sx, y: sy, w: w, h: h)
         totalSampleBits += measureBlockBits(block: &blockCr, size: size, qt: qt)
     }
     
@@ -702,166 +694,9 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
     return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
 }
 
-/// EXPOSED領域クリーンアップ: GMVシフトによって予測データが存在しない端の領域を、
-/// 隣接する有効領域の境界値で上書きする。
-/// エンコーダ・デコーダの両方で同じ処理を行い、整合性を保ちつつ誤差蓄積を断ち切る。
-func cleanExposedRegion(_ plane: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
-    if dx == 0 && dy == 0 { return plane }
-    
-    func clean(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
-        if w == 0 || h == 0 { return data }
-        var out = data
-        
-        out.withUnsafeMutableBufferPointer { buf in
-            guard let p = buf.baseAddress else { return }
-            
-            // 左端の EXPOSED 領域 (sX > 0 の場合: 左端 sX 列が予測不能)
-            if sX > 0 {
-                let cols = min(sX, w)
-                let srcCol = cols // 有効領域の左端列
-                if srcCol < w {
-                    for y in 0..<h {
-                        let row = y * w
-                        let fillVal = p[row + srcCol]
-                        for x in 0..<cols {
-                            p[row + x] = fillVal
-                        }
-                    }
-                }
-            }
-            
-            // 右端の EXPOSED 領域 (sX < 0 の場合: 右端 |sX| 列が予測不能)
-            if sX < 0 {
-                let cols = min(-sX, w)
-                let srcCol = w - cols - 1 // 有効領域の右端列
-                if srcCol >= 0 {
-                    for y in 0..<h {
-                        let row = y * w
-                        let fillVal = p[row + srcCol]
-                        for x in (w - cols)..<w {
-                            p[row + x] = fillVal
-                        }
-                    }
-                }
-            }
-            
-            // 上端の EXPOSED 領域 (sY > 0 の場合: 上端 sY 行が予測不能)
-            if sY > 0 {
-                let rows = min(sY, h)
-                let srcRow = rows // 有効領域の上端行
-                if srcRow < h {
-                    let srcOff = srcRow * w
-                    for y in 0..<rows {
-                        let dstOff = y * w
-                        for x in 0..<w {
-                            p[dstOff + x] = p[srcOff + x]
-                        }
-                    }
-                }
-            }
-            
-            // 下端の EXPOSED 領域 (sY < 0 の場合: 下端 |sY| 行が予測不能)
-            if sY < 0 {
-                let rows = min(-sY, h)
-                let srcRow = h - rows - 1 // 有効領域の下端行
-                if srcRow >= 0 {
-                    let srcOff = srcRow * w
-                    for y in (h - rows)..<h {
-                        let dstOff = y * w
-                        for x in 0..<w {
-                            p[dstOff + x] = p[srcOff + x]
-                        }
-                    }
-                }
-            }
-        }
-        
-        return out
-    }
-    
-    let chromaW = (plane.width + 1) / 2
-    let chromaH = (plane.height + 1) / 2
-    
-    return PlaneData420(
-        width: plane.width, height: plane.height,
-        y:  clean(data: plane.y,  w: plane.width, h: plane.height, sX: dx, sY: dy),
-        cb: clean(data: plane.cb, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2),
-        cr: clean(data: plane.cr, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2)
-    )
-}
 
-/// EXPOSED領域を元画像で上書き: 残差計算前に予測画像のEXPOSED領域を元画像の値で置き換える
-/// → 残差がゼロになり、量子化損失がなく、再構築後も元画像と一致するためドリフトが起きない
-func patchExposedWithCurrent(predicted: PlaneData420, current: PlaneData420, dx: Int, dy: Int) -> PlaneData420 {
-    if dx == 0 && dy == 0 { return predicted }
-    
-    func patch(pred: [Int16], curr: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
-        if w == 0 || h == 0 { return pred }
-        var out = pred
-        
-        out.withUnsafeMutableBufferPointer { buf in
-            curr.withUnsafeBufferPointer { cBuf in
-                guard let p = buf.baseAddress, let c = cBuf.baseAddress else { return }
-                
-                // 左端の EXPOSED 列 (sX > 0)
-                if sX > 0 {
-                    let cols = min(sX, w)
-                    for y in 0..<h {
-                        let row = y * w
-                        for x in 0..<cols {
-                            p[row + x] = c[row + x]
-                        }
-                    }
-                }
-                
-                // 右端の EXPOSED 列 (sX < 0)
-                if sX < 0 {
-                    let cols = min(-sX, w)
-                    for y in 0..<h {
-                        let row = y * w
-                        for x in (w - cols)..<w {
-                            p[row + x] = c[row + x]
-                        }
-                    }
-                }
-                
-                // 上端の EXPOSED 行 (sY > 0)
-                if sY > 0 {
-                    let rows = min(sY, h)
-                    for y in 0..<rows {
-                        let off = y * w
-                        for x in 0..<w {
-                            p[off + x] = c[off + x]
-                        }
-                    }
-                }
-                
-                // 下端の EXPOSED 行 (sY < 0)
-                if sY < 0 {
-                    let rows = min(-sY, h)
-                    for y in (h - rows)..<h {
-                        let off = y * w
-                        for x in 0..<w {
-                            p[off + x] = c[off + x]
-                        }
-                    }
-                }
-            }
-        }
-        
-        return out
-    }
-    
-    let chromaW = (predicted.width + 1) / 2
-    let chromaH = (predicted.height + 1) / 2
-    
-    return PlaneData420(
-        width: predicted.width, height: predicted.height,
-        y:  patch(pred: predicted.y,  curr: current.y,  w: predicted.width, h: predicted.height, sX: dx, sY: dy),
-        cb: patch(pred: predicted.cb, curr: current.cb, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2),
-        cr: patch(pred: predicted.cr, curr: current.cr, w: chromaW, h: chromaH, sX: dx / 2, sY: dy / 2)
-    )
-}
+
+
 
 func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
@@ -1016,7 +851,6 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
             let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane!)
-            // exposed region is already handled by block-level applyMBME for simple out-of-bounds, so no cleanExposedRegion is needed.
             prevReconstructed = reconstructed
             gopCount += 1
         }
