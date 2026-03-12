@@ -396,14 +396,19 @@ private enum PlaneType { case y, cb, cr }
 private func fetchBlock(reader: ImageReader, plane: PlaneType, x: Int, y: Int, w: Int, h: Int) -> Block2D {
     var block = Block2D(width: w, height: h)
     block.withView { view in
-        for i in 0..<h {
-            let row: [Int16]
-            switch plane {
-            case .y:  row = reader.rowY(x: x, y: y + i, size: w)
-            case .cb: row = reader.rowCb(x: x, y: y + i, size: w)
-            case .cr: row = reader.rowCr(x: x, y: y + i, size: w)
+        switch plane {
+        case .y:
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
             }
-            view.setRow(offsetY: i, row: row)
+        case .cb:
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
+            }
+        case .cr:
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
+            }
         }
     }
     return block
@@ -488,14 +493,19 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     func fetchBlock(reader: ImageReader, plane: PlaneType, x: Int, y: Int, w: Int, h: Int) -> Block2D {
         var block = Block2D(width: w, height: h)
         block.withView { view in
-            for i in 0..<h {
-                let row: [Int16]
-                switch plane {
-                case .y:  row = reader.rowY(x: x, y: y + i, size: w)
-                case .cb: row = reader.rowCb(x: x, y: y + i, size: w)
-                case .cr: row = reader.rowCr(x: x, y: y + i, size: w)
+            switch plane {
+            case .y:
+                for i in 0..<h {
+                    view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
                 }
-                view.setRow(offsetY: i, row: row)
+            case .cb:
+                for i in 0..<h {
+                    view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
+                }
+            case .cr:
+                for i in 0..<h {
+                    view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
+                }
             }
         }
         return block
