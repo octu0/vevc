@@ -15,7 +15,6 @@ public func pngToYCbCr(data: Data) throws -> YCbCrImage {
     
     let width = cgImage.width
     let height = cgImage.height
-    // Use 4:4:4
     var ycbcr = YCbCrImage(width: width, height: height, ratio: .ratio444)
     
     guard let dataProvider = cgImage.dataProvider,
@@ -98,7 +97,7 @@ public func saveImage(img: YCbCrImage, url: URL) throws {
             rawData[offset + 0] = UInt8(clamping: r)
             rawData[offset + 1] = UInt8(clamping: g)
             rawData[offset + 2] = UInt8(clamping: b)
-            rawData[offset + 3] = 255 // Alpha
+            rawData[offset + 3] = 255
         }
     }
     

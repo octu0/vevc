@@ -48,7 +48,6 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                     var bestDX = 0
                     var bestDY = 0
 
-                    // Center prediction (0,0)
                     if actW == 32 && actH == 32 {
                         bestSAD = calculateSAD32x32(
                             pCurr: pCurr.advanced(by: startY * w + startX),
@@ -66,11 +65,9 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                             let refX = startX + dx
                             let refY = startY + dy
 
-                            // To allow out of bounds, we will clamp
 
                             
                             var sad = 0
-                            // Fast Path: fully inside
                             if refX >= 0 && refY >= 0 && refX + actW <= w && refY + actH <= h {
                                 if actW == 32 && actH == 32 {
                                     sad = calculateSAD32x32(
@@ -91,12 +88,10 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                                     sad = Int(s)
                                 }
                             } else {
-                                // Slow Path: edge clamping
                                 sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
                             }
 
 
-                            // Slight penalty for longer vectors
                             sad += (abs(dx) + abs(dy))
 
                             if sad < bestSAD {
@@ -172,7 +167,6 @@ func applyMBME(prev: PlaneData420, mvs: [MotionVector]) async -> PlaneData420 {
                         let refX = startX + dx
                         let refY = startY + dy
                         
-                        // Fast Path
                         if refX >= 0 && refY >= 0 && refX + actW <= pW && refY + actH <= pH {
                             for y in 0..<actH {
                                 let dstRow = (startY + y) * pW
@@ -182,7 +176,6 @@ func applyMBME(prev: PlaneData420, mvs: [MotionVector]) async -> PlaneData420 {
                                 }
                             }
                         } else {
-                            // Slow Path
                             for y in 0..<actH {
                                 let dstY = startY + y
                                 let srcY = max(0, min(pH - 1, dstY + dy))

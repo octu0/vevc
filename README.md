@@ -13,7 +13,7 @@
 
 1. **Pixel-Domain Prediction & 2D-DWT**
    - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
-   - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 32x32 blocks, followed by highly-optimized CABAC entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
+   - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 16x16 blocks, followed by highly-optimized CABAC entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -48,7 +48,7 @@
                                      Frame Structure
 +---------------------------------------------------------------------------------------------+
 |     Magic (4B)     |   CABAC Encoded MVs (P-Frame)  |           Spatial Data            |
-|  'VEVI' or 'VEVP'  | RLE-CABAC 32x32 Motion Vectors |                                   |
+|  'VEVI' or 'VEVP'  | RLE-CABAC 16x16 Motion Vectors |                                   |
 +--------------------+--------------------------------+-----------------------------------+
                                                 |
                                                 v
@@ -105,7 +105,7 @@ $ swift run -c release vevc-dec -i output.vevc -o .out/
 
 The core components of the implementation consist of the following files:
 
-- `Motion`: Macroblock-based Motion Estimation (MBME) utilizing 32x32 block searches to estimate accurate localized motion vectors between frames, significantly reducing prediction residual.
+- `Motion`: Macroblock-based Motion Estimation (MBME) utilizing 16x16 block searches to estimate accurate localized motion vectors between frames, significantly reducing prediction residual.
 - `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process I-Frames and P-Frames. P-Frames generate a residual plane which is then passed to the Spatial 2D-DWT and entropy encoded efficiently with custom CABAC spatial context derivation.
 - `CABAC`: Multi-state Context-Adaptive Binary Arithmetic Coding engine utilizing an H.264-like fast adaptive state transition to compress heavily skewed DWT and MV structures.
 

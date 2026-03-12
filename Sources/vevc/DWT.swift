@@ -67,13 +67,11 @@ internal func lift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count: I
     var low = [Int16](repeating: 0, count: half)
     var high = [Int16](repeating: 0, count: half)
     
-    // Split
     for i in 0..<half {
         low[i] = buffer[2 * i * stride]
         high[i] = buffer[(2 * i + 1) * stride]
     }
     
-    // Predict
     for i in 0..<half {
         let l = Int32(low[i])
         var r = Int32(low[i])
@@ -83,7 +81,6 @@ internal func lift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count: I
         high[i] -= Int16((l + r) >> 1)
     }
     
-    // Update
     for i in 0..<half {
         let d = Int32(high[i])
         var dp = Int32(high[i])
@@ -93,7 +90,6 @@ internal func lift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count: I
         low[i] += Int16(((dp + d) + 2) >> 2)
     }
     
-    // Merge
     for i in 0..<half {
         buffer[i * stride] = low[i]
         buffer[(half + i) * stride] = high[i]
@@ -105,13 +101,11 @@ internal func invLift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count
     var low = [Int16](repeating: 0, count: half)
     var high = [Int16](repeating: 0, count: half)
     
-    // Split
     for i in 0..<half {
         low[i] = buffer[i * stride]
         high[i] = buffer[(half + i) * stride]
     }
     
-    // Inv Update
     for i in 0..<half {
         let d = Int32(high[i])
         var dp = Int32(high[i])
@@ -121,7 +115,6 @@ internal func invLift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count
         low[i] -= Int16(((dp + d) + 2) >> 2)
     }
     
-    // Inv Predict
     for i in 0..<half {
         let l = Int32(low[i])
         var r = Int32(low[i])
@@ -131,7 +124,6 @@ internal func invLift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count
         high[i] += Int16((l + r) >> 1)
     }
     
-    // Merge
     for i in 0..<half {
         buffer[2 * i * stride] = low[i]
         buffer[(2 * i + 1) * stride] = high[i]

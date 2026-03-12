@@ -97,26 +97,21 @@ func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int,
 func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
     let ptr0 = block.rowPointer(y: 0)
     
-    // y = 0, x = 0
     let diff00 = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
     ptr0[0] = diff00 + lastVal
     
-    // y = 0, x > 0
     for x in 1..<size {
         let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         ptr0[x] = diff + ptr0[x - 1]
     }
     
-    // y > 0
     for y in 1..<size {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
         
-        // x = 0
         let diffY0 = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         ptr[0] = diffY0 + ptrPrev[0]
         
-        // x > 0
         for x in 1..<size {
             let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
             
@@ -251,7 +246,7 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
                 try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
             }
         } else {
-            lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
+            lastVal = 0
         }
     }
 
@@ -347,7 +342,6 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
     
     let chunkSize = 4
     
-    // Y
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
@@ -397,7 +391,6 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
         }
     }
     
-    // Cb
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
@@ -447,7 +440,6 @@ func decodeLayer(r: [UInt8], layer: UInt8, prev: Image16, size: Int) async throw
         }
     }
     
-    // Cr
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
@@ -553,7 +545,6 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
     
     let chunkSize = 4
     
-    // Y
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
@@ -595,7 +586,6 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
         }
     }
     
-    // Cb
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
@@ -637,7 +627,6 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
         }
     }
     
-    // Cr
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
@@ -684,7 +673,7 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
 
 public struct DecodeOptions: Sendable {
     public var maxLayer: Int = 2
-    public var maxFrames: Int = 4 // 1, 2, or 4
+    public var maxFrames: Int = 4
     
     public init(maxLayer: Int = 2, maxFrames: Int = 4) {
         self.maxLayer = maxLayer

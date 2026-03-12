@@ -29,7 +29,6 @@ extension PlaneData420 {
     init(img16: Image16) {
         self.width = img16.width
         self.height = img16.height
-        // flattened arrays
         var yFlat = [Int16]()
         yFlat.reserveCapacity((img16.width * img16.height))
         for row in img16.y { yFlat.append(contentsOf: row) }
@@ -52,18 +51,26 @@ extension PlaneData420 {
     
     func toYCbCr() -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
+        if width < 1 || height < 1 { return img }
+
         let countY = img.yPlane.count
-        for i in 0..<countY {
-            let v = self.y[i]
-            img.yPlane[i] = v < -128 ? 0 : (127 < v ? 255 : UInt8(v + 128))
+        if countY > 0 {
+            for i in 0..<countY {
+                let v = self.y[i]
+                img.yPlane[i] = v < -128 ? 0 : (127 < v ? 255 : UInt8(v + 128))
+            }
         }
+
         let countCbCr = img.cbPlane.count
-        for i in 0..<countCbCr {
-            let cbVal = self.cb[i]
-            img.cbPlane[i] = cbVal < -128 ? 0 : (127 < cbVal ? 255 : UInt8(cbVal + 128))
-            let crVal = self.cr[i]
-            img.crPlane[i] = crVal < -128 ? 0 : (127 < crVal ? 255 : UInt8(crVal + 128))
+        if countCbCr > 0 {
+            for i in 0..<countCbCr {
+                let cbVal = self.cb[i]
+                img.cbPlane[i] = cbVal < -128 ? 0 : (127 < cbVal ? 255 : UInt8(cbVal + 128))
+                let crVal = self.cr[i]
+                img.crPlane[i] = crVal < -128 ? 0 : (127 < crVal ? 255 : UInt8(crVal + 128))
+            }
         }
+
         return img
     }
 }
@@ -440,19 +447,16 @@ func subtractCoeffs(currBlocks: inout [Block2D], predBlocks: inout [Block2D], si
     for i in currBlocks.indices {
         currBlocks[i].withView { vC in
             predBlocks[i].withView { vP in
-                // HL
                 for y in 0..<half {
                     let ptrC = vC.rowPointer(y: y).advanced(by: half)
                     let ptrP = vP.rowPointer(y: y).advanced(by: half)
                     for x in 0..<half { ptrC[x] &-= ptrP[x] }
                 }
-                // LH
                 for y in half..<size {
                     let ptrC = vC.rowPointer(y: y)
                     let ptrP = vP.rowPointer(y: y)
                     for x in 0..<half { ptrC[x] &-= ptrP[x] }
                 }
-                // HH
                 for y in half..<size {
                     let ptrC = vC.rowPointer(y: y).advanced(by: half)
                     let ptrP = vP.rowPointer(y: y).advanced(by: half)
@@ -469,25 +473,21 @@ func subtractCoeffsBase(currBlocks: inout [Block2D], predBlocks: inout [Block2D]
     for i in currBlocks.indices {
         currBlocks[i].withView { vC in
             predBlocks[i].withView { vP in
-                // LL
                 for y in 0..<half {
                     let ptrC = vC.rowPointer(y: y)
                     let ptrP = vP.rowPointer(y: y)
                     for x in 0..<half { ptrC[x] &-= ptrP[x] }
                 }
-                // HL
                 for y in 0..<half {
                     let ptrC = vC.rowPointer(y: y).advanced(by: half)
                     let ptrP = vP.rowPointer(y: y).advanced(by: half)
                     for x in 0..<half { ptrC[x] &-= ptrP[x] }
                 }
-                // LH
                 for y in half..<size {
                     let ptrC = vC.rowPointer(y: y)
                     let ptrP = vP.rowPointer(y: y)
                     for x in 0..<half { ptrC[x] &-= ptrP[x] }
                 }
-                // HH
                 for y in half..<size {
                     let ptrC = vC.rowPointer(y: y).advanced(by: half)
                     let ptrP = vP.rowPointer(y: y).advanced(by: half)
@@ -512,7 +512,6 @@ func encodePlaneLayer(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
         subPredPlane = pSub
     }
     
-    // 量子化 (差分計算後に実行)
     for i in subBlocksY.indices { evaluateQuantizeLayer(block: &subBlocksY[i], size: size, qt: qtY) }
     for i in subBlocksCb.indices { evaluateQuantizeLayer(block: &subBlocksCb[i], size: size, qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeLayer(block: &subBlocksCr[i], size: size, qt: qtC) }
@@ -552,7 +551,6 @@ func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8,
         subtractCoeffsBase(currBlocks: &subBlocksCr, predBlocks: &pCr, size: size)
     }
     
-    // 量子化 (差分計算後に実行)
     for i in subBlocksY.indices { evaluateQuantizeBase(block: &subBlocksY[i], size: size, qt: qtY) }
     for i in subBlocksCb.indices { evaluateQuantizeBase(block: &subBlocksCb[i], size: size, qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeBase(block: &subBlocksCr[i], size: size, qt: qtC) }

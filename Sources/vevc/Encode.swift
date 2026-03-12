@@ -85,26 +85,21 @@ func getSubbands(view: BlockView, size: Int) -> Subbands {
 func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
     let ptr0 = block.rowPointer(y: 0)
     
-    // y = 0, x = 0
     let diff00 = ptr0[0] - lastVal
     encodeCoeff(val: diff00, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
     
-    // y = 0, x > 0
     for x in 1..<size {
         let diff = ptr0[x] - ptr0[x - 1]
         encodeCoeff(val: diff, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
     }
     
-    // y > 0
     for y in 1..<size {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
         
-        // x = 0
         let diffY0 = ptr[0] - ptrPrev[0]
         encodeCoeff(val: diffY0, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         
-        // x > 0
         for x in 1..<size {
             let a = Int(ptr[x - 1])
             let b = Int(ptrPrev[x])
@@ -332,7 +327,7 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
                 blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
             }
         } else {
-            lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
+            lastVal = 0
         }
     }
     
@@ -343,28 +338,25 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
 }
 
 private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout Int16) -> Int {
+    if size < 1 { return 0 }
+
     var sumDiffAbs = 0
-    let count = size * size
+    let count = (size * size)
     
     let ptr0 = block.rowPointer(y: 0)
     
-    // y = 0, x = 0
     sumDiffAbs += abs(Int(ptr0[0] - lastVal))
     
-    // y = 0, x > 0
     for x in 1..<size {
         sumDiffAbs += abs(Int(ptr0[x] - ptr0[x - 1]))
     }
     
-    // y > 0
     for y in 1..<size {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
         
-        // x = 0
         sumDiffAbs += abs(Int(ptr[0] - ptrPrev[0]))
         
-        // x > 0
         for x in 1..<size {
             let a = Int(ptr[x - 1])
             let b = Int(ptrPrev[x])
@@ -425,8 +417,10 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
 }
 
 private func estimateRiceBits(block: BlockView, size: Int) -> Int {
+    if size < 1 { return 0 }
+
     var sumAbs = 0
-    let count = size * size
+    let count = (size * size)
     
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
@@ -458,14 +452,14 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     let h = (img.height / size)
     
     let points: [(Int, Int)] = [
-        (0, 0),                                    // Top-Left
-        ((img.width - w), 0),                      // Top-Right
-        (0, (img.height - h)),                     // Bottom-Left
-        ((img.width - w), (img.height - h)),       // Bottom-Right
-        (((img.width - w) / 2), 0),                // Top-Center
-        ((img.width - w), ((img.height - h) / 2)), // Right-Center
-        (((img.width - w) / 2), (img.height - h)), // Bottom-Center
-        (0, ((img.height - h) / 2)),               // Left-Center
+        (0, 0),
+        ((img.width - w), 0),
+        (0, (img.height - h)),
+        ((img.width - w), (img.height - h)),
+        (((img.width - w) / 2), 0),
+        ((img.width - w), ((img.height - h) / 2)),
+        (((img.width - w) / 2), (img.height - h)),
+        (0, ((img.height - h) / 2)),
     ]
     
     var totalSampleBits = 0
@@ -504,20 +498,17 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     }
     
     for (sx, sy) in points {
-        // Y Plane
         var blockY = fetchBlockY(reader: reader, x: sx, y: sy, w: w, h: h)
         totalSampleBits += measureBlockBits(block: &blockY, size: size, qt: qt)
         
-        // Cb Plane
         var blockCb = fetchBlockCb(reader: reader, x: sx, y: sy, w: w, h: h)
         totalSampleBits += measureBlockBits(block: &blockCb, size: size, qt: qt)
         
-        // Cr Plane
         var blockCr = fetchBlockCr(reader: reader, x: sx, y: sy, w: w, h: h)
         totalSampleBits += measureBlockBits(block: &blockCr, size: size, qt: qt)
     }
     
-    let samplePixels = points.count * (w * h) * 3 // Y+Cb+Cr
+    let samplePixels = points.count * (w * h) * 3
     let totalPixels = img.width * img.height * 3
     
     let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
@@ -539,7 +530,6 @@ struct Int16Reader {
         var r = [Int16](repeating: 0, count: size)
         let safeY = min(y, height - 1)
         
-        // y > height の場合、最後の行(height-1)と同じ内容を返す（Y方向のクランプ）
         let limit = min(size, width - x)
         if limit > 0 {
             data.withUnsafeBufferPointer { ptr in
@@ -547,7 +537,6 @@ struct Int16Reader {
                 r.withUnsafeMutableBufferPointer { dst in
                     dst.baseAddress!.update(from: base, count: limit)
                     
-                    // x方向の端数処理: 足りない分は最後の有効ピクセルで埋める（X方向のクランプ）
                     if limit < size {
                         let lastVal = dst[limit - 1]
                         for i in limit..<size {
@@ -557,8 +546,6 @@ struct Int16Reader {
                 }
             }
         } else {
-            // ブロック全体が画像外（x >= width）の場合
-            // 左端（x = width - 1）の値を繰り返す
             let lastVal = data[safeY * width + (width - 1)]
             for i in 0..<size {
                 r[i] = lastVal
@@ -657,6 +644,8 @@ func subtractPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneD
     @Sendable
     func sub(c: [Int16], p: [Int16]) -> [Int16] {
         let count = c.count
+        if count < 1 { return [] }
+
         var res = [Int16](repeating: 0, count: count)
         c.withUnsafeBufferPointer { cPtr in
             p.withUnsafeBufferPointer { pPtr in
@@ -678,6 +667,8 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
     @Sendable
     func add(r: [Int16], p: [Int16]) -> [Int16] {
         let count = r.count
+        if count < 1 { return [] }
+
         var curr = [Int16](repeating: 0, count: count)
         r.withUnsafeBufferPointer { rPtr in
             p.withUnsafeBufferPointer { pPtr in
@@ -705,7 +696,6 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
         if w == 0 || h == 0 { return data }
         
-        // エッジクランプシフト: 範囲外は端のピクセルを繰り返して埋める（BORDER_REPLICATE）
         var out = [Int16](repeating: 0, count: w * h)
         
         data.withUnsafeBufferPointer { dPtr in
@@ -817,9 +807,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
 
-            // Encode MVs with CABAC instead of raw bytes!
             var mvBw = CABACEncoder()
-            // We use simple contexts for dx and dy, and count.
             var ctxDx = ContextModel()
 
             for mv in mvs {

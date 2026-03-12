@@ -7,11 +7,10 @@ func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, 
     var x = px
     var y = py
     
-    // Width boundary
     if width <= x {
-        x = (width - 1 - (x - width)) // Reflection
+        x = (width - 1 - (x - width))
         if x < 0 {
-            x = 0 // Clamp
+            x = 0
         }
     } else {
         if x < 0 {
@@ -22,7 +21,6 @@ func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, 
         }
     }
     
-    // Height boundary
     if height <= y {
         y = (height - 1 - (y - height))
         if y < 0 {
@@ -137,13 +135,11 @@ public struct YCbCrImage: Sendable {
         let (srcCW, srcCH) = getChromaSize(w: self.width, h: self.height, ratio: self.ratio)
         let (dstCW, dstCH) = getChromaSize(w: dstImg.width, h: dstImg.height, ratio: dstImg.ratio)
 
-        // Cb
         boxResizePlane(
             src: self.cbPlane, srcW: srcCW, srcH: srcCH, srcStride: self.cStride,
             dst: &dstImg.cbPlane, dstW: dstCW, dstH: dstCH, dstStride: dstImg.cStride
         )
 
-        // Cr
         boxResizePlane(
             src: self.crPlane, srcW: srcCW, srcH: srcCH, srcStride: self.cStride,
             dst: &dstImg.crPlane, dstW: dstCW, dstH: dstCH, dstStride: dstImg.cStride
@@ -213,7 +209,6 @@ public struct ImageReader: Sendable {
     public func rowY(x: Int, y: Int, size: Int) -> [Int16] {
         var plane = [Int16](repeating: 0, count: size)
         
-        // Fast path: fully within bounds
         if 0 <= x && 0 <= y && y < height && (x + size) <= width {
              let offset = img.yOffset(x, y)
              img.yPlane.withUnsafeBufferPointer { srcPtr in
