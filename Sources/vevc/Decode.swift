@@ -712,8 +712,32 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             prevReconstructed = pd
             
         } else if magic == [0x56, 0x45, 0x56, 0x50] { // 'VEVP'
-            let dx = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
-            let dy = Int(Int16(bitPattern: try readUInt16BEFromBytes(data, offset: &offset)))
+            let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            var mvs: [MotionVector] = []
+            mvs.reserveCapacity(mvsCount)
+
+            let mvData = Array(data[offset..<(offset + mvDataLen)])
+            offset += mvDataLen
+            var mvBr = try CABACDecoder(data: mvData)
+            var ctxDx = ContextModel()
+
+            for _ in 0..<mvsCount {
+                let isSig = try mvBr.decodeBin(ctx: &ctxDx)
+                if isSig == 0 {
+                    mvs.append(MotionVector(dx: 0, dy: 0))
+                } else {
+                    let sx = try mvBr.decodeBypass()
+                    let mx = try decodeExpGolomb(decoder: &mvBr)
+                    let dx = sx == 1 ? -Int(mx) : Int(mx)
+
+                    let sy = try mvBr.decodeBypass()
+                    let my = try decodeExpGolomb(decoder: &mvBr)
+                    let dy = sy == 1 ? -Int(my) : Int(my)
+
+                    mvs.append(MotionVector(dx: dx, dy: dy))
+                }
+            }
             
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let chunk = Array(data[offset..<(offset + len)])
@@ -723,10 +747,10 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             let residual = PlaneData420(img16: img16)
             
             if let prev = prevReconstructed {
-                let predicted = await shiftPlane(prev, dx: dx, dy: dy)
+                let predicted = await applyMBME(prev: prev, mvs: mvs)
                 let curr = await addPlanes(residual: residual, predicted: predicted)
                 out.append(curr.toYCbCr())
-                prevReconstructed = cleanExposedRegion(curr, dx: dx, dy: dy)
+                prevReconstructed = curr
             } else {
                 out.append(residual.toYCbCr())
             }

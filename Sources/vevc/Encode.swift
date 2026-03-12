@@ -534,7 +534,7 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
         
     let ratio = estimatedTotalBits / Double(targetBits)
-    let predictedStep = Double(probeStep) * ratio
+    let predictedStep = Double(probeStep) * ratio * 1.5
     let q = Int(max(1, predictedStep))
     
     return QuantizationTable(baseStep: q)
@@ -939,25 +939,18 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         var forceIFrame = false
         var residual: PlaneData420? = nil
         var predictedPlane: PlaneData420? = nil
-        var gmv: (dx: Int, dy: Int) = (0, 0)
+        var mvs: [MotionVector] = []
         var meanSAD: Int = 0
         
         if gopCount >= gopSize || prevReconstructed == nil {
             forceIFrame = true
         } else {
-            // P-Frame の試行
             guard let prev = prevReconstructed else { continue }
             
-            // GMC Estimate
-            gmv = estimateGMV(curr: curr, prev: prev)
-            
-            // Predict
-            predictedPlane = await shiftPlane(prev, dx: gmv.dx, dy: gmv.dy)
-            
-            // Residual
+            mvs = estimateMBME(curr: curr, prev: prev)
+            predictedPlane = await applyMBME(prev: prev, mvs: mvs)
             residual = await subtractPlanes(curr: curr, predicted: predictedPlane!)
             
-            // SAD (Sum of Absolute Differences) を計算して品質劣化を判定
             var sumSAD = 0
             for y in 0..<residual!.height {
                 for x in 0..<residual!.width {
@@ -973,9 +966,8 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         }
         
         if forceIFrame {
-            // I-Frame のエンコード
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2)) // 2x for Chroma
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
             let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: true)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // 'VEVI'
@@ -987,22 +979,48 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             prevReconstructed = PlaneData420(img16: img16)
             gopCount = 1
         } else {
-            // P-Frame のエンコード (SAD 判定済み)
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
             let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: false)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // 'VEVP'
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dx)))
-            appendUInt16BE(&out, UInt16(bitPattern: Int16(gmv.dy)))
+
+            // Encode MVs with CABAC instead of raw bytes!
+            var mvBw = CABACEncoder()
+            // We use simple contexts for dx and dy, and count.
+            var ctxDx = ContextModel()
+
+            for mv in mvs {
+                if mv.dx == 0 && mv.dy == 0 {
+                    mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
+                } else {
+                    mvBw.encodeBin(binVal: 1, ctx: &ctxDx)
+                    let sx: UInt8 = mv.dx < 0 ? 1 : 0
+                    mvBw.encodeBypass(binVal: sx)
+                    let mx = UInt32(abs(mv.dx))
+                    encodeExpGolomb(val: mx, encoder: &mvBw)
+
+                    let sy: UInt8 = mv.dy < 0 ? 1 : 0
+                    mvBw.encodeBypass(binVal: sy)
+                    let my = UInt32(abs(mv.dy))
+                    encodeExpGolomb(val: my, encoder: &mvBw)
+                }
+            }
+            mvBw.flush()
+            let mvOut = mvBw.getData()
+            appendUInt32BE(&out, UInt32(mvs.count))
+            appendUInt32BE(&out, UInt32(mvOut.count))
+            out.append(contentsOf: mvOut)
+
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
-            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) GMV=(\(gmv.dx),\(gmv.dy)) meanSAD=\(meanSAD)")
+            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) MVs=\(mvs.count) meanSAD=\(meanSAD)")
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
             let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predictedPlane!)
-            prevReconstructed = cleanExposedRegion(reconstructed, dx: gmv.dx, dy: gmv.dy)
+            // exposed region is already handled by block-level applyMBME for simple out-of-bounds, so no cleanExposedRegion is needed.
+            prevReconstructed = reconstructed
             gopCount += 1
         }
     }

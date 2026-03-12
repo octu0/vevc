@@ -7,7 +7,7 @@ var bitrate = 500
 var positionalArgs: [String] = []
 var outPath = "a.vevc"
 var zeroThreshold = 0
-var gopSize = 8
+var gopSize = 15
 var sceneThreshold = 8
 
 var i = 1
