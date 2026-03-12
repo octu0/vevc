@@ -127,7 +127,7 @@ func applyMBME(prev: PlaneData420, mvs: [MotionVector]) async -> PlaneData420 {
     let mbCols = (w + mbSize - 1) / mbSize
 
     @Sendable
-    func apply(data: [Int16], pW: Int, pH: Int, div: Int) -> [Int16] {
+    func apply(data: [Int16], pW: Int, pH: Int, div: Int) async -> [Int16] {
         if pW == 0 || pH == 0 { return data }
         var out = [Int16](repeating: 0, count: pW * pH)
 

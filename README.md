@@ -5,7 +5,7 @@
 > Work In Progress
 
 
-**vevc** is a high-speed video compression format, extending the high-efficiency, multi-resolution image format [veif](https://github.com/octu0/veif) (velocity image format) with Pixel-Domain Global Motion Compensation (GMC) and Residual 2D-DWT.
+**vevc** is a high-speed video compression format, extending the high-efficiency, multi-resolution image format [veif](https://github.com/octu0/veif) (velocity image format) with Pixel-Domain Macroblock-based Motion Estimation (MBME) and Residual 2D-DWT.
 
 ![figure0](docs/fig0.jpg)
 
@@ -13,7 +13,7 @@
 
 1. **Pixel-Domain Prediction & 2D-DWT**
    - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
-   - **Temporal**: Global Motion Compensation (GMC) to predict pixel movement, followed by 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
+   - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 32x32 blocks, followed by highly-optimized CABAC entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -46,10 +46,10 @@
 +-------------------------+-------------------------+-------------------------+
 
                                      Frame Structure
-+-----------------------------------------------------------------------------------+
-|     Magic (4B)     |  Motion Vector (P-Frame) |           Spatial Data            |
-|  'VEVI' or 'VEVP'  |      dx (2B), dy (2B)    |                                   |
-+--------------------+--------------------------+-----------------------------------+
++---------------------------------------------------------------------------------------------+
+|     Magic (4B)     |   CABAC Encoded MVs (P-Frame)  |           Spatial Data            |
+|  'VEVI' or 'VEVP'  | RLE-CABAC 32x32 Motion Vectors |                                   |
++--------------------+--------------------------------+-----------------------------------+
                                                 |
                                                 v
     +-----------------------------------------------------------------------------------------------+
@@ -63,7 +63,7 @@
 ```
 
 - **I-Frame (`VEVI`)**: The base keyframe encoded as a standalone 2D-DWT image.
-- **P-Frame (`VEVP`)**: The predicted frame, containing the Global Motion Vector relative to the previous frame, followed by the encoded spatial layers of the **residual** (the difference after prediction).
+- **P-Frame (`VEVP`)**: The predicted frame, containing the CABAC RLE encoded Motion Vectors relative to the previous frame, followed by the encoded spatial layers of the **residual** (the difference after prediction).
 
 Spatial information (image resolution) is organized hierarchically as Layer 0 to 2 (from `veif`) inside the frame data.
 
@@ -105,8 +105,9 @@ $ swift run -c release vevc-dec -i output.vevc -o .out/
 
 The core components of the implementation consist of the following files:
 
-- `GMC`: Fast Global Motion Compensation using downscaled (Layer 0 equivalent) reference frames to estimate a single dominant motion vector between frames.
-- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process I-Frames and P-Frames. P-Frames generate a residual plane which is then passed to the Spatial 2D-DWT encoder.
+- `Motion`: Macroblock-based Motion Estimation (MBME) utilizing 32x32 block searches to estimate accurate localized motion vectors between frames, significantly reducing prediction residual.
+- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process I-Frames and P-Frames. P-Frames generate a residual plane which is then passed to the Spatial 2D-DWT and entropy encoded efficiently with custom CABAC spatial context derivation.
+- `CABAC`: Multi-state Context-Adaptive Binary Arithmetic Coding engine utilizing an H.264-like fast adaptive state transition to compress heavily skewed DWT and MV structures.
 
 ## License
 
