@@ -211,7 +211,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
             var (llBlock, w, h) = res.1[j]
             blocksCb.append(llBlock)
 
-            
             let destStartX = (w / 2)
             let destStartY = (h / 2)
             let subSize = (size / 2)
@@ -353,8 +352,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
     let rCb = pd.rCb
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
-    let subCbDx = (cbDx / 2)
-    let subCbDy = (cbDy / 2)
     let rowCountCb = ((cbDy + size - 1) / size)
     let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
     let errorCb = ConcurrentBox<Error?>(nil)

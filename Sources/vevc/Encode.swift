@@ -83,31 +83,41 @@ func getSubbands(view: BlockView, size: Int) -> Subbands {
 
 @inline(__always)
 func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
-    for y in 0..<size {
+    let ptr0 = block.rowPointer(y: 0)
+    
+    // y = 0, x = 0
+    let diff00 = ptr0[0] - lastVal
+    encodeCoeff(val: diff00, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+    
+    // y = 0, x > 0
+    for x in 1..<size {
+        let diff = ptr0[x] - ptr0[x - 1]
+        encodeCoeff(val: diff, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+    }
+    
+    // y > 0
+    for y in 1..<size {
         let ptr = block.rowPointer(y: y)
-        for x in 0..<size {
-            let val = ptr[x]
+        let ptrPrev = block.rowPointer(y: y - 1)
+        
+        // x = 0
+        let diffY0 = ptr[0] - ptrPrev[0]
+        encodeCoeff(val: diffY0, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        
+        // x > 0
+        for x in 1..<size {
+            let a = Int(ptr[x - 1])
+            let b = Int(ptrPrev[x])
+            let c = Int(ptrPrev[x - 1])
             let predicted: Int16
-            if x == 0 && y == 0 {
-                predicted = lastVal
-            } else if y == 0 {
-                predicted = ptr[x - 1] // left only
-            } else if x == 0 {
-                predicted = block.rowPointer(y: y - 1)[x] // top only
+            if c >= a && c >= b {
+                predicted = Int16(min(a, b))
+            } else if c <= a && c <= b {
+                predicted = Int16(max(a, b))
             } else {
-                let a = Int(ptr[x - 1])         // left
-                let b = Int(block.rowPointer(y: y - 1)[x]) // top
-                let c = Int(block.rowPointer(y: y - 1)[x - 1]) // top-left
-                // MED (Median Edge Detector)
-                if c >= max(a, b) {
-                    predicted = Int16(min(a, b))
-                } else if c <= min(a, b) {
-                    predicted = Int16(max(a, b))
-                } else {
-                    predicted = Int16(a + b - c)
-                }
+                predicted = Int16(a + b - c)
             }
-            let diff = val - predicted
+            let diff = ptr[x] - predicted
             encodeCoeff(val: diff, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
         }
     }
@@ -244,24 +254,10 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
     var ctxSignHL = ContextModel()
     var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
     
-    for i in nonZeroIndices {
-        blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
-        }
-    }
-    
     var ctxSigLH = ContextModel()
     var ctxSignLH = ContextModel()
     var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
 
-    for i in nonZeroIndices {
-        blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
-        }
-    }
-    
     var ctxSigHH = ContextModel()
     var ctxSignHH = ContextModel()
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
@@ -269,6 +265,8 @@ func encodePlaneSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: Int)
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
+            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
+            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
             blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
     }
@@ -306,6 +304,18 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
     var ctxSignLL = ContextModel()
     var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 8)
     
+    var ctxSigHL = ContextModel()
+    var ctxSignHL = ContextModel()
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+
+    var ctxSigLH = ContextModel()
+    var ctxSignLH = ContextModel()
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+
+    var ctxSigHH = ContextModel()
+    var ctxSignHH = ContextModel()
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    
     var lastVal: Int16 = 0
     let nonZeroSet = Set(nonZeroIndices)
     for i in blocks.indices {
@@ -313,42 +323,12 @@ func encodePlaneBaseSubbands(blocks: inout [Block2D], size: Int, zeroThreshold: 
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
                 blockEncodeDPCM(encoder: &encoder, block: subs.ll, size: subs.size, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
+                blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
+                blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
+                blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
             }
         } else {
             lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
-        }
-    }
-    
-    var ctxSigHL = ContextModel()
-    var ctxSignHL = ContextModel()
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
-
-    for i in nonZeroIndices {
-        blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
-        }
-    }
-    
-    var ctxSigLH = ContextModel()
-    var ctxSignLH = ContextModel()
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
-
-    for i in nonZeroIndices {
-        blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
-        }
-    }
-    
-    var ctxSigHH = ContextModel()
-    var ctxSignHH = ContextModel()
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
-
-    for i in nonZeroIndices {
-        blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
     }
     
@@ -362,31 +342,38 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
     var sumDiffAbs = 0
     let count = size * size
     
-    for y in 0..<size {
+    let ptr0 = block.rowPointer(y: 0)
+    
+    // y = 0, x = 0
+    sumDiffAbs += abs(Int(ptr0[0] - lastVal))
+    
+    // y = 0, x > 0
+    for x in 1..<size {
+        sumDiffAbs += abs(Int(ptr0[x] - ptr0[x - 1]))
+    }
+    
+    // y > 0
+    for y in 1..<size {
         let ptr = block.rowPointer(y: y)
-        for x in 0..<size {
-            let val = ptr[x]
+        let ptrPrev = block.rowPointer(y: y - 1)
+        
+        // x = 0
+        sumDiffAbs += abs(Int(ptr[0] - ptrPrev[0]))
+        
+        // x > 0
+        for x in 1..<size {
+            let a = Int(ptr[x - 1])
+            let b = Int(ptrPrev[x])
+            let c = Int(ptrPrev[x - 1])
             let predicted: Int16
-            if x == 0 && y == 0 {
-                predicted = lastVal
-            } else if y == 0 {
-                predicted = ptr[x - 1]
-            } else if x == 0 {
-                predicted = block.rowPointer(y: y - 1)[x]
+            if c >= a && c >= b {
+                predicted = Int16(min(a, b))
+            } else if c <= a && c <= b {
+                predicted = Int16(max(a, b))
             } else {
-                let a = Int(ptr[x - 1])
-                let b = Int(block.rowPointer(y: y - 1)[x])
-                let c = Int(block.rowPointer(y: y - 1)[x - 1])
-                if c >= max(a, b) {
-                    predicted = Int16(min(a, b))
-                } else if c <= min(a, b) {
-                    predicted = Int16(max(a, b))
-                } else {
-                    predicted = Int16(a + b - c)
-                }
+                predicted = Int16(a + b - c)
             }
-            let diff = abs(Int(val - predicted))
-            sumDiffAbs += diff
+            sumDiffAbs += abs(Int(ptr[x] - predicted))
         }
     }
     lastVal = block.rowPointer(y: size - 1)[size - 1]

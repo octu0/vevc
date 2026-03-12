@@ -95,31 +95,43 @@ func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int,
 
 @inline(__always)
 func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
-    for y in 0..<size {
+    let ptr0 = block.rowPointer(y: 0)
+    
+    // y = 0, x = 0
+    let diff00 = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+    ptr0[0] = diff00 + lastVal
+    
+    // y = 0, x > 0
+    for x in 1..<size {
+        let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        ptr0[x] = diff + ptr0[x - 1]
+    }
+    
+    // y > 0
+    for y in 1..<size {
         let ptr = block.rowPointer(y: y)
-        for x in 0..<size {
+        let ptrPrev = block.rowPointer(y: y - 1)
+        
+        // x = 0
+        let diffY0 = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        ptr[0] = diffY0 + ptrPrev[0]
+        
+        // x > 0
+        for x in 1..<size {
             let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+            
+            let a = Int(ptr[x - 1])
+            let b = Int(ptrPrev[x])
+            let c = Int(ptrPrev[x - 1])
             let predicted: Int16
-            if x == 0 && y == 0 {
-                predicted = lastVal
-            } else if y == 0 {
-                predicted = ptr[x - 1]
-            } else if x == 0 {
-                predicted = block.rowPointer(y: y - 1)[x]
+            if c >= a && c >= b {
+                predicted = Int16(min(a, b))
+            } else if c <= a && c <= b {
+                predicted = Int16(max(a, b))
             } else {
-                let a = Int(ptr[x - 1])
-                let b = Int(block.rowPointer(y: y - 1)[x])
-                let c = Int(block.rowPointer(y: y - 1)[x - 1])
-                if c >= max(a, b) {
-                    predicted = Int16(min(a, b))
-                } else if c <= min(a, b) {
-                    predicted = Int16(max(a, b))
-                } else {
-                    predicted = Int16(a + b - c)
-                }
+                predicted = Int16(a + b - c)
             }
-            let val = diff + predicted
-            ptr[x] = val
+            ptr[x] = diff + predicted
         }
     }
     lastVal = block.rowPointer(y: size - 1)[size - 1]
@@ -153,28 +165,23 @@ func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [B
     var ctxSigHL = ContextModel()
     var ctxSignHL = ContextModel()
     var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
-        }
-    }
     
     var ctxSigLH = ContextModel()
     var ctxSignLH = ContextModel()
     var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
-        }
-    }
     
     var ctxSigHH = ContextModel()
     var ctxSignHH = ContextModel()
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+
     for i in nonZeroIndices {
         try blocks[i].withView { view in
+            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
+            
+            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
+            
             var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
             try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
@@ -212,6 +219,18 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
     var ctxSignLL = ContextModel()
     var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 8)
 
+    var ctxSigHL = ContextModel()
+    var ctxSignHL = ContextModel()
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    
+    var ctxSigLH = ContextModel()
+    var ctxSignLH = ContextModel()
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    
+    var ctxSigHH = ContextModel()
+    var ctxSignHH = ContextModel()
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+
     var lastVal: Int16 = 0
     let nonZeroSet = Set(nonZeroIndices)
     for i in 0..<blockCount {
@@ -219,39 +238,18 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
             try blocks[i].withView { view in
                 var llView = BlockView(base: view.base, width: half, height: half, stride: size)
                 try blockDecodeDPCM(decoder: &decoder, block: &llView, size: half, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
+                
+                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
+                try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
+                
+                var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
+                try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
+                
+                var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
+                try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
             }
         } else {
             lastVal = 0 // Even for skipped blocks, LL is 0, so update lastVal
-        }
-    }
-    
-    var ctxSigHL = ContextModel()
-    var ctxSignHL = ContextModel()
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
-        }
-    }
-    
-    var ctxSigLH = ContextModel()
-    var ctxSignLH = ContextModel()
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
-        }
-    }
-    
-    var ctxSigHH = ContextModel()
-    var ctxSignHH = ContextModel()
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
-    for i in nonZeroIndices {
-        try blocks[i].withView { view in
-            var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
         }
     }
 
