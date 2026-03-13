@@ -86,9 +86,8 @@ internal func quantizeSignedMapping(_ block: inout BlockView, q: Quantizer) {
 
 @inline(__always)
 private func performQuantizeSIMD8(_ vec: SIMD8<Int16>, mul: Int32, shift: Int32, bias: Int32) -> SIMD8<Int16> {
-    let zero = SIMD8<Int16>.zero
-    let isNeg = (vec .< zero)
-    let absVec = vec.replacing(with: (-1 &* vec), where: isNeg)
+    let mask = vec &>> 15
+    let absVec = (vec ^ mask) &- mask
     
     let low32 = SIMD4<Int32>(
         Int32(absVec[0]), Int32(absVec[1]), Int32(absVec[2]), Int32(absVec[3])
@@ -109,7 +108,7 @@ private func performQuantizeSIMD8(_ vec: SIMD8<Int16>, mul: Int32, shift: Int32,
         Int16(resHigh32[0]), Int16(resHigh32[1]), Int16(resHigh32[2]), Int16(resHigh32[3])
     )
     
-    return res.replacing(with: (-1 &* res), where: isNeg)
+    return (res ^ mask) &- mask
 }
 
 @inline(__always)

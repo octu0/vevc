@@ -2,19 +2,34 @@ import Foundation
 
 @inline(__always)
 func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, currStride: Int, prevStride: Int) -> Int {
-    var sad: UInt = 0
+    var sad: Int32 = 0
     for y in 0..<32 {
         let currRow = pCurr.advanced(by: y * currStride)
         let prevRow = pPrev.advanced(by: y * prevStride)
 
-        for x in 0..<32 {
-            let diff = Int(currRow[x]) - Int(prevRow[x])
-            if diff > 0 {
-                sad &+= UInt(diff)
-            } else {
-                sad &+= UInt(-1 * diff)
-            }
-        }
+        // SIMD16を展開して高速化
+        let c0 = UnsafeRawPointer(currRow).loadUnaligned(as: SIMD16<Int16>.self)
+        let p0 = UnsafeRawPointer(prevRow).loadUnaligned(as: SIMD16<Int16>.self)
+        let c1 = UnsafeRawPointer(currRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p1 = UnsafeRawPointer(prevRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+
+        let diff0 = c0 &- p0
+        let diff1 = c1 &- p1
+
+        // 負の数を絶対値に変換 (ビット演算によるabs)
+        // mask = diff >> 15 (正: 0, 負: -1)
+        // (diff ^ mask) - mask
+        let mask0 = diff0 &>> 15
+        let abs0 = (diff0 ^ mask0) &- mask0
+
+        let mask1 = diff1 &>> 15
+        let abs1 = (diff1 ^ mask1) &- mask1
+
+        // オーバーフローを避けるためInt32に拡張してから合算
+        let sum0 = SIMD16<Int32>(clamping: abs0).wrappedSum()
+        let sum1 = SIMD16<Int32>(clamping: abs1).wrappedSum()
+
+        sad &+= sum0 &+ sum1
     }
     return Int(sad)
 }
@@ -24,14 +39,24 @@ public struct MotionVector: Sendable {
     public let dy: Int
 }
 
-func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
+public struct MotionVectors: Sendable {
+    public var dx: [Int]
+    public var dy: [Int]
+
+    public init(count: Int) {
+        self.dx = [Int](repeating: 0, count: count)
+        self.dy = [Int](repeating: 0, count: count)
+    }
+}
+
+func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
     let mbSize = 32
     let w = curr.width
     let h = curr.height
     let mbCols = (w + mbSize - 1) / mbSize
     let mbRows = (h + mbSize - 1) / mbSize
 
-    var mvs = [MotionVector](repeating: MotionVector(dx: 0, dy: 0), count: mbCols * mbRows)
+    var mvs = MotionVectors(count: mbCols * mbRows)
 
     let searchRange = 16
 
@@ -69,8 +94,9 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                             let refX = startX + dx
                             let refY = startY + dy
 
+                            let penalty = (dx >= 0 ? dx : -1 * dx) + (dy >= 0 ? dy : -1 * dy)
+                            if bestSAD <= penalty { continue }
 
-                            
                             var sad = 0
                             if refX >= 0 && refY >= 0 && refX + actW <= w && refY + actH <= h {
                                 if actW == 32 && actH == 32 {
@@ -82,15 +108,14 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                                 } else {
                                     var s: UInt = 0
                                     for y in 0..<actH {
-                                        let currRow = (startY + y) * w
-                                        let prevRow = (refY + y) * w
+                                        let currRow = (startY + y) * w + startX
+                                        let prevRow = (refY + y) * w + refX
+                                        let pCurrRow = pCurr.advanced(by: currRow)
+                                        let pPrevRow = pPrev.advanced(by: prevRow)
                                         for x in 0..<actW {
-                                            let diff = Int(pCurr[currRow + startX + x]) - Int(pPrev[prevRow + refX + x])
-                                            if diff > 0 {
-                                                s &+= UInt(diff)
-                                            } else {
-                                                s &+= UInt(-1 * diff)
-                                            }
+                                            let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
+                                            let mask = diff >> 31
+                                            s &+= UInt((diff ^ mask) - mask)
                                         }
                                     }
                                     sad = Int(s)
@@ -100,7 +125,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                             }
 
 
-                            sad += (abs(dx) + abs(dy))
+                            sad &+= penalty
 
                             if sad < bestSAD {
                                 bestSAD = sad
@@ -110,7 +135,9 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> [MotionVector] {
                         }
                     }
 
-                    mvs[mbY * mbCols + mbX] = MotionVector(dx: bestDX, dy: bestDY)
+                    let idx = mbY * mbCols + mbX
+                    mvs.dx[idx] = bestDX
+                    mvs.dy[idx] = bestDY
                 }
             }
         }
@@ -129,22 +156,24 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
         let py = max(0, min(h - 1, cy + dy))
         let prevRow = py * w
 
+        let pCurrRow = pCurr.advanced(by: currRow + startX)
+        let pPrevRow = pPrev.advanced(by: prevRow)
+
         for x in 0..<actW {
             let cx = startX + x
             let px = max(0, min(w - 1, cx + dx))
 
-            let diff = Int(pCurr[currRow + cx]) - Int(pPrev[prevRow + px])
-            if diff > 0 {
-                sad &+= UInt(diff)
-            } else {
-                sad &+= UInt(-1 * diff)
-            }
+            let diff = Int(pCurrRow[x]) - Int(pPrevRow[px])
+
+            let mask = diff >> 31
+            let absDiff = (diff ^ mask) - mask
+            sad &+= UInt(absDiff)
         }
     }
     return Int(sad)
 }
 
-func applyMBME(prev: PlaneData420, mvs: [MotionVector]) async -> PlaneData420 {
+func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
     let mbSize = 32
     let w = prev.width
     let h = prev.height
@@ -171,9 +200,9 @@ func applyMBME(prev: PlaneData420, mvs: [MotionVector]) async -> PlaneData420 {
                         let startX = mbX * pMbSize
                         let actW = min(pMbSize, pW - startX)
 
-                        let mv = mvs[mbY * localMbCols + mbX]
-                        let dx = mv.dx / div
-                        let dy = mv.dy / div
+                        let idx = mbY * localMbCols + mbX
+                        let dx = mvs.dx[idx] / div
+                        let dy = mvs.dy[idx] / div
 
                         
                         let refX = startX + dx

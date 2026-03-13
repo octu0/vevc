@@ -706,18 +706,18 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         } else if magic == [0x56, 0x45, 0x56, 0x50] {
             let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            var mvs: [MotionVector] = []
-            mvs.reserveCapacity(mvsCount)
+            var mvs = MotionVectors(count: mvsCount)
 
             let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
             var mvBr = try CABACDecoder(data: mvData)
             var ctxDx = ContextModel()
 
-            for _ in 0..<mvsCount {
+            for i in 0..<mvsCount {
                 let isSig = try mvBr.decodeBin(ctx: &ctxDx)
                 if isSig == 0 {
-                    mvs.append(MotionVector(dx: 0, dy: 0))
+                    mvs.dx[i] = 0
+                    mvs.dy[i] = 0
                 } else {
                     let sx = try mvBr.decodeBypass()
                     let mx = try decodeExpGolomb(decoder: &mvBr)
@@ -739,7 +739,8 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                         dy = Int(my)
                     }
 
-                    mvs.append(MotionVector(dx: dx, dy: dy))
+                    mvs.dx[i] = dx
+                    mvs.dy[i] = dy
                 }
             }
             

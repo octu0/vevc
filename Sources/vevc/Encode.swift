@@ -767,7 +767,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         let curr = planes[i]
         var forceIFrame = false
         var predictedPlane: PlaneData420? = nil
-        var mvs: [MotionVector] = []
+        var mvs = MotionVectors(count: 0)
         var meanSAD: Int = 0
         
         if gopCount >= gopSize || prevReconstructed == nil {
@@ -817,42 +817,44 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             var mvBw = CABACEncoder()
             var ctxDx = ContextModel()
 
-            for mv in mvs {
-                if mv.dx == 0 && mv.dy == 0 {
+            for mvIdx in 0..<mvs.dx.count {
+                let dx = mvs.dx[mvIdx]
+                let dy = mvs.dy[mvIdx]
+                if dx == 0 && dy == 0 {
                     mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
                 } else {
                     mvBw.encodeBin(binVal: 1, ctx: &ctxDx)
 
                     let sx: UInt8
-                    if mv.dx <= -1 {
+                    if dx <= -1 {
                         sx = 1
                     } else {
                         sx = 0
                     }
                     mvBw.encodeBypass(binVal: sx)
-                    let mx = UInt32(abs(mv.dx))
+                    let mx = UInt32(abs(dx))
                     encodeExpGolomb(val: mx, encoder: &mvBw)
 
                     let sy: UInt8
-                    if mv.dy <= -1 {
+                    if dy <= -1 {
                         sy = 1
                     } else {
                         sy = 0
                     }
                     mvBw.encodeBypass(binVal: sy)
-                    let my = UInt32(abs(mv.dy))
+                    let my = UInt32(abs(dy))
                     encodeExpGolomb(val: my, encoder: &mvBw)
                 }
             }
             mvBw.flush()
             let mvOut = mvBw.getData()
-            appendUInt32BE(&out, UInt32(mvs.count))
+            appendUInt32BE(&out, UInt32(mvs.dx.count))
             appendUInt32BE(&out, UInt32(mvOut.count))
             out.append(contentsOf: mvOut)
 
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
-            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) MVs=\(mvs.count) meanSAD=\(meanSAD)")
+            debugLog("[Frame \(i)] P-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB) MVs=\(mvs.dx.count) meanSAD=\(meanSAD)")
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)

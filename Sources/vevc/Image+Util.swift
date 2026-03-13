@@ -12,15 +12,17 @@ public func rgbaToYCbCr(data: [UInt8], width: Int, height: Int) -> YCbCrImage {
                           let crBase = crPtr.baseAddress else { return }
                     
                     let totalPixels = width * height
+
+                    let yBias = 1 << 15
                     for i in 0..<totalPixels {
                         let offset = i * 4
-                        let r1 = Int32(dataBase[offset + 0])
-                        let g1 = Int32(dataBase[offset + 1])
-                        let b1 = Int32(dataBase[offset + 2])
+                        let r1 = Int(dataBase[offset + 0])
+                        let g1 = Int(dataBase[offset + 1])
+                        let b1 = Int(dataBase[offset + 2])
                         
-                        let yVal = (19595 * r1 + 38470 * g1 + 7471 * b1 + (1 << 15)) >> 16
-                        let cbVal = ((-11059 * r1 - 21709 * g1 + 32768 * b1 + (1 << 15)) >> 16) + 128
-                        let crVal = ((32768 * r1 - 27439 * g1 - 5329 * b1 + (1 << 15)) >> 16) + 128
+                        let yVal = (19595 * r1 + 38470 * g1 + 7471 * b1 + yBias) >> 16
+                        let cbVal = ((-11059 * r1 - 21709 * g1 + 32768 * b1 + yBias) >> 16) + 128
+                        let crVal = ((32768 * r1 - 27439 * g1 - 5329 * b1 + yBias) >> 16) + 128
                         
                         yBase[i] = UInt8(clamping: yVal)
                         cbBase[i] = UInt8(clamping: cbVal)
@@ -66,15 +68,14 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
                             outBase[offset + 3] = 255
                         }
                     } else {
+                        let cWidth = width / 2
                         for y in 0..<height {
-                            let cPy = y / 2
-                            let cRowOffset = cPy * (width / 2)
+                            let cRowOffset = (y / 2) * cWidth
                             let yRowOffset = y * width
                             let outRowOffset = yRowOffset * 4
                             
                             for x in 0..<width {
-                                let cPx = x / 2
-                                let cOff = cRowOffset + cPx
+                                let cOff = cRowOffset + (x / 2)
                                 
                                 let yVal = Int(yBase[yRowOffset + x]) << 10
                                 let cbDiff = Int(cbBase[cOff]) - 128
