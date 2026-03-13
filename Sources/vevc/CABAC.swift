@@ -4,24 +4,16 @@ import Foundation
 
 // MARK: - Probability State and LUT
 
-let rangeLPS_table: [[UInt32]] = [
-    (0...127).map { s in
-        let p = pow(0.5, Double(s) / 10.0)
-        return UInt32(max(1, min(255, Int(p * 256.0))))
-    },
-    (0...127).map { s in
-        let p = pow(0.5, Double(s) / 10.0)
-        return UInt32(max(1, min(255, Int(p * 256.0))))
-    },
-    (0...127).map { s in
-        let p = pow(0.5, Double(s) / 10.0)
-        return UInt32(max(1, min(255, Int(p * 256.0))))
-    },
-    (0...127).map { s in
-        let p = pow(0.5, Double(s) / 10.0)
-        return UInt32(max(1, min(255, Int(p * 256.0))))
+let rangeLPS_table: [UInt32] = {
+    var table = [UInt32](repeating: 0, count: 512)
+    for q in 0..<4 {
+        for s in 0..<128 {
+            let p = pow(0.5, Double(s) / 10.0)
+            table[q * 128 + s] = UInt32(max(1, min(255, Int(p * 256.0))))
+        }
     }
-]
+    return table
+}()
 
 public struct ContextModel {
     public var pStateIdx: UInt8
@@ -134,7 +126,7 @@ public struct CABACEncoder {
     @inline(__always)
     public mutating func encodeBin(binVal: UInt8, ctx: inout ContextModel) {
         let qIdx = (range >> 6) & 3
-        let rLPS = rangeLPS_table[Int(qIdx)][Int(ctx.pStateIdx)]
+        let rLPS = rangeLPS_table[Int(qIdx) * 128 + Int(ctx.pStateIdx)]
 
         range -= rLPS
 
@@ -257,7 +249,7 @@ public struct CABACDecoder {
     @inline(__always)
     public mutating func decodeBin(ctx: inout ContextModel) throws -> UInt8 {
         let qIdx = (range >> 6) & 3
-        let rLPS = rangeLPS_table[Int(qIdx)][Int(ctx.pStateIdx)]
+        let rLPS = rangeLPS_table[Int(qIdx) * 128 + Int(ctx.pStateIdx)]
 
         range -= rLPS
 

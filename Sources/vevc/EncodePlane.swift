@@ -538,9 +538,13 @@ func encodePlaneLayer(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     for i in subBlocksCb.indices { evaluateQuantizeLayer(block: &subBlocksCb[i], size: size, qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeLayer(block: &subBlocksCr[i], size: size, qt: qtC) }
     
-    let bufY = encodePlaneSubbands(blocks: &subBlocksY, size: size, zeroThreshold: zeroThreshold)
-    let bufCb = encodePlaneSubbands(blocks: &subBlocksCb, size: size, zeroThreshold: zeroThreshold)
-    let bufCr = encodePlaneSubbands(blocks: &subBlocksCr, size: size, zeroThreshold: zeroThreshold)
+    async let taskBufY = encodePlaneSubbands(blocks: subBlocksY, size: size, zeroThreshold: zeroThreshold)
+    async let taskBufCb = encodePlaneSubbands(blocks: subBlocksCb, size: size, zeroThreshold: zeroThreshold)
+    async let taskBufCr = encodePlaneSubbands(blocks: subBlocksCr, size: size, zeroThreshold: zeroThreshold)
+
+    let bufY = await taskBufY
+    let bufCb = await taskBufCb
+    let bufCr = await taskBufCr
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
@@ -577,9 +581,13 @@ func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8,
     for i in subBlocksCb.indices { evaluateQuantizeBase(block: &subBlocksCb[i], size: size, qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeBase(block: &subBlocksCr[i], size: size, qt: qtC) }
     
-    let bufY = encodePlaneBaseSubbands(blocks: &subBlocksY, size: size, zeroThreshold: zeroThreshold)
-    let bufCb = encodePlaneBaseSubbands(blocks: &subBlocksCb, size: size, zeroThreshold: zeroThreshold)
-    let bufCr = encodePlaneBaseSubbands(blocks: &subBlocksCr, size: size, zeroThreshold: zeroThreshold)
+    async let taskBufY = encodePlaneBaseSubbands(blocks: subBlocksY, size: size, zeroThreshold: zeroThreshold)
+    async let taskBufCb = encodePlaneBaseSubbands(blocks: subBlocksCb, size: size, zeroThreshold: zeroThreshold)
+    async let taskBufCr = encodePlaneBaseSubbands(blocks: subBlocksCr, size: size, zeroThreshold: zeroThreshold)
+
+    let bufY = await taskBufY
+    let bufCb = await taskBufCb
+    let bufCr = await taskBufCr
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []

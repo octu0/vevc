@@ -66,12 +66,15 @@ func decodeCoeff(decoder: inout CABACDecoder, ctxSig: inout ContextModel, ctxSig
     let signBit = try decoder.decodeBin(ctx: &ctxSign)
 
     var mag: UInt32 = 1
-    for i in 0..<7 {
-        let bit = try decoder.decodeBin(ctx: &ctxMag[Int(i)])
-        if bit == 0 {
-            break
+    try ctxMag.withUnsafeMutableBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { return }
+        for i in 0..<7 {
+            let bit = try decoder.decodeBin(ctx: &base[Int(i)])
+            if bit == 0 {
+                break
+            }
+            mag += 1
         }
-        mag += 1
     }
 
     if mag == 8 {
@@ -88,23 +91,54 @@ func decodeCoeff(decoder: inout CABACDecoder, ctxSig: inout ContextModel, ctxSig
 
 @inline(__always)
 func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    if hasNonZero == 0 {
+        for y in 0..<size {
+            let ptr = block.rowPointer(y: y)
+            for x in 0..<size {
+                ptr[x] = 0
+            }
+        }
+        return
+    }
+
+    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
-        for x in 0..<size {
+        if y > lscpY {
+            for x in 0..<size { ptr[x] = 0 }
+            continue
+        }
+        let endX = (y == lscpY) ? lscpX : (size - 1)
+        for x in 0...endX {
             ptr[x] = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        }
+        for x in (endX + 1)..<size {
+            ptr[x] = 0
         }
     }
 }
 
 @inline(__always)
 func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    var lscpIdx = -1
+    if hasNonZero == 1 {
+        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
+        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+        lscpIdx = lscpY * size + lscpX
+    }
+
     let ptr0 = block.rowPointer(y: 0)
     
-    let diff00 = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+    let diff00 = (0 <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
     ptr0[0] = diff00 + lastVal
     
     for x in 1..<size {
-        let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        let idx = x
+        let diff = (idx <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
         ptr0[x] = diff + ptr0[x - 1]
     }
     
@@ -112,11 +146,13 @@ func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: 
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
         
-        let diffY0 = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        let idx0 = y * size
+        let diffY0 = (idx0 <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
         ptr[0] = diffY0 + ptrPrev[0]
         
         for x in 1..<size {
-            let diff = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+            let idx = y * size + x
+            let diff = (idx <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
             
             let a = Int(ptr[x - 1])
             let b = Int(ptrPrev[x])
@@ -713,34 +749,43 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             var mvBr = try CABACDecoder(data: mvData)
             var ctxDx = ContextModel()
 
+            let mbSize = 32
+            // We need width to compute mbCols. We can infer width from previous frame.
+            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
+            let mbCols = (prevWidth + mbSize - 1) / mbSize
+
             for i in 0..<mvsCount {
+                let mbX = i % mbCols
+                let mbY = i / mbCols
+                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
+
                 let isSig = try mvBr.decodeBin(ctx: &ctxDx)
                 if isSig == 0 {
-                    mvs.dx[i] = 0
-                    mvs.dy[i] = 0
+                    mvs.dx[i] = pmv.dx
+                    mvs.dy[i] = pmv.dy
                 } else {
                     let sx = try mvBr.decodeBypass()
                     let mx = try decodeExpGolomb(decoder: &mvBr)
 
-                    let dx: Int
+                    let mvdX: Int
                     if sx == 1 {
-                        dx = -1 * Int(mx)
+                        mvdX = -1 * Int(mx)
                     } else {
-                        dx = Int(mx)
+                        mvdX = Int(mx)
                     }
 
                     let sy = try mvBr.decodeBypass()
                     let my = try decodeExpGolomb(decoder: &mvBr)
 
-                    let dy: Int
+                    let mvdY: Int
                     if sy == 1 {
-                        dy = -1 * Int(my)
+                        mvdY = -1 * Int(my)
                     } else {
-                        dy = Int(my)
+                        mvdY = Int(my)
                     }
 
-                    mvs.dx[i] = dx
-                    mvs.dy[i] = dy
+                    mvs.dx[i] = mvdX + pmv.dx
+                    mvs.dy[i] = mvdY + pmv.dy
                 }
             }
             

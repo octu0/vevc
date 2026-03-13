@@ -244,3 +244,46 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
 
     return PlaneData420(width: w, height: h, y: await yTask, cb: await cbTask, cr: await crTask)
 }
+
+public func calculatePMV(mvs: MotionVectors, mbX: Int, mbY: Int, mbCols: Int) -> (dx: Int, dy: Int) {
+    let hasLeft = mbX > 0
+    let hasTop = mbY > 0
+    let hasTopRight = mbY > 0 && mbX < mbCols - 1
+
+    let idxLeft = hasLeft ? (mbY * mbCols + (mbX - 1)) : -1
+    let idxTop = hasTop ? ((mbY - 1) * mbCols + mbX) : -1
+    let idxTopRight = hasTopRight ? ((mbY - 1) * mbCols + (mbX + 1)) : -1
+
+    var count = 0
+    if hasLeft { count += 1 }
+    if hasTop { count += 1 }
+    if hasTopRight { count += 1 }
+
+    if count == 0 {
+        return (0, 0)
+    } else if count == 1 {
+        let idx = hasLeft ? idxLeft : (hasTop ? idxTop : idxTopRight)
+        return (mvs.dx[idx], mvs.dy[idx])
+    } else if count == 2 {
+        var dxSum = 0
+        var dySum = 0
+        if hasLeft { dxSum += mvs.dx[idxLeft]; dySum += mvs.dy[idxLeft] }
+        if hasTop { dxSum += mvs.dx[idxTop]; dySum += mvs.dy[idxTop] }
+        if hasTopRight { dxSum += mvs.dx[idxTopRight]; dySum += mvs.dy[idxTopRight] }
+        return (dxSum / 2, dySum / 2)
+    } else {
+        let lx = mvs.dx[idxLeft]; let ly = mvs.dy[idxLeft]
+        let tx = mvs.dx[idxTop]; let ty = mvs.dy[idxTop]
+        let rx = mvs.dx[idxTopRight]; let ry = mvs.dy[idxTopRight]
+
+        let minX = min(lx, min(tx, rx))
+        let maxX = max(lx, max(tx, rx))
+        let pmvX = lx + tx + rx - minX - maxX
+
+        let minY = min(ly, min(ty, ry))
+        let maxY = max(ly, max(ty, ry))
+        let pmvY = ly + ty + ry - minY - maxY
+
+        return (pmvX, pmvY)
+    }
+}
