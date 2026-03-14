@@ -92,20 +92,47 @@ extension PlaneData420 {
     init(img16: Image16) {
         self.width = img16.width
         self.height = img16.height
-        var yFlat = [Int16]()
-        yFlat.reserveCapacity((img16.width * img16.height))
-        for row in img16.y { yFlat.append(contentsOf: row) }
+        let yFlat = [Int16](unsafeUninitializedCapacity: (img16.width * img16.height)) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var offset = 0
+            for row in img16.y {
+                row.withUnsafeBufferPointer { (rowBuf: UnsafeBufferPointer<Int16>) in
+                    guard let base = rowBuf.baseAddress else { return }
+                    baseAddress.advanced(by: offset).initialize(from: base, count: row.count)
+                }
+                offset += row.count
+            }
+            initializedCount = offset
+        }
 
         let cWidth = ((img16.width + 1) / 2)
         let cHeight = ((img16.height + 1) / 2)
 
-        var cbFlat = [Int16]()
-        cbFlat.reserveCapacity((cWidth * cHeight))
-        for row in img16.cb { cbFlat.append(contentsOf: row) }
+        let cbFlat = [Int16](unsafeUninitializedCapacity: (cWidth * cHeight)) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var offset = 0
+            for row in img16.cb {
+                row.withUnsafeBufferPointer { (rowBuf: UnsafeBufferPointer<Int16>) in
+                    guard let base = rowBuf.baseAddress else { return }
+                    baseAddress.advanced(by: offset).initialize(from: base, count: row.count)
+                }
+                offset += row.count
+            }
+            initializedCount = offset
+        }
 
-        var crFlat = [Int16]()
-        crFlat.reserveCapacity((cWidth * cHeight))
-        for row in img16.cr { crFlat.append(contentsOf: row) }
+        let crFlat = [Int16](unsafeUninitializedCapacity: (cWidth * cHeight)) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+            guard let baseAddress = buffer.baseAddress else { return }
+            var offset = 0
+            for row in img16.cr {
+                row.withUnsafeBufferPointer { (rowBuf: UnsafeBufferPointer<Int16>) in
+                    guard let base = rowBuf.baseAddress else { return }
+                    baseAddress.advanced(by: offset).initialize(from: base, count: row.count)
+                }
+                offset += row.count
+            }
+            initializedCount = offset
+        }
 
         self.y = yFlat
         self.cb = cbFlat

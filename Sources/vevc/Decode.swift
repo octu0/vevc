@@ -369,6 +369,7 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     
     var brFlags = CABACBitReader(data: flagsData)
     var nonZeroIndices: [Int] = []
+    nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
         if try brFlags.readBit() == 0 {
             nonZeroIndices.append(i)
@@ -419,6 +420,7 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     
     var brFlags = CABACBitReader(data: flagsData)
     var nonZeroIndices: [Int] = []
+    nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
         if try brFlags.readBit() == 0 {
             nonZeroIndices.append(i)
@@ -469,6 +471,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     
     var brFlags = CABACBitReader(data: flagsData)
     var nonZeroIndices: [Int] = []
+    nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
         if try brFlags.readBit() == 0 {
             nonZeroIndices.append(i)
@@ -519,6 +522,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     
     var brFlags = CABACBitReader(data: flagsData)
     var nonZeroIndices: [Int] = []
+    nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
         if try brFlags.readBit() == 0 {
             nonZeroIndices.append(i)
