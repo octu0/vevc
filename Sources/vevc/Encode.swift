@@ -1416,16 +1416,37 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
 }
 
 @inline(__always)
-func subtractPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
-    @Sendable
+func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
+    @Sendable @inline(__always)
     func sub(c: [Int16], p: [Int16]) -> [Int16] {
         let count = c.count
         if count < 1 { return [] }
 
         var res = [Int16](repeating: 0, count: count)
-        c.withUnsafeBufferPointer { cPtr in
-            p.withUnsafeBufferPointer { pPtr in
-                for i in 0..<count { res[i] = cPtr[i] &- pPtr[i] }
+        c.withUnsafeBufferPointer { cBuf in
+            p.withUnsafeBufferPointer { pBuf in
+                res.withUnsafeMutableBufferPointer { resBuf in
+                    guard let cPtr = cBuf.baseAddress,
+                          let pPtr = pBuf.baseAddress,
+                          let resPtr = resBuf.baseAddress else { return }
+                    
+                    var i = 0
+                    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+                    let chunk = 16
+                    while i + chunk <= count {
+                        let cSimd = UnsafeRawPointer(cPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                        let pSimd = UnsafeRawPointer(pPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                        let diffSimd = cSimd &- pSimd
+                        UnsafeMutableRawPointer(resPtr.advanced(by: i)).storeBytes(of: diffSimd, as: SIMD16<Int16>.self)
+                        i += chunk
+                    }
+                    #endif
+                    
+                    while i < count {
+                        resPtr[i] = cPtr[i] &- pPtr[i]
+                        i += 1
+                    }
+                }
             }
         }
         return res
@@ -1440,15 +1461,36 @@ func subtractPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneD
 
 @inline(__always)
 func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
-    @Sendable
+    @Sendable @inline(__always)
     func add(r: [Int16], p: [Int16]) -> [Int16] {
         let count = r.count
         if count < 1 { return [] }
 
         var curr = [Int16](repeating: 0, count: count)
-        r.withUnsafeBufferPointer { rPtr in
-            p.withUnsafeBufferPointer { pPtr in
-                for i in 0..<count { curr[i] = rPtr[i] &+ pPtr[i] }
+        r.withUnsafeBufferPointer { rBuf in
+            p.withUnsafeBufferPointer { pBuf in
+                curr.withUnsafeMutableBufferPointer { cBuf in
+                    guard let rPtr = rBuf.baseAddress,
+                          let pPtr = pBuf.baseAddress,
+                          let cPtr = cBuf.baseAddress else { return }
+                    
+                    var i = 0
+                    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+                    let chunk = 16
+                    while i + chunk <= count {
+                        let rSimd = UnsafeRawPointer(rPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                        let pSimd = UnsafeRawPointer(pPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                        let sumSimd = rSimd &+ pSimd
+                        UnsafeMutableRawPointer(cPtr.advanced(by: i)).storeBytes(of: sumSimd, as: SIMD16<Int16>.self)
+                        i += chunk
+                    }
+                    #endif
+                    
+                    while i < count {
+                        cPtr[i] = rPtr[i] &+ pPtr[i]
+                        i += 1
+                    }
+                }
             }
         }
         return curr
@@ -1459,63 +1501,6 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
     async let cr = add(r: residual.cr, p: predicted.cr)
     
     return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
-}
-
-@inline(__always)
-func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
-    if dx == 0 && dy == 0 { return plane }
-    
-    @Sendable
-    func shift(data: [Int16], w: Int, h: Int, sX: Int, sY: Int) -> [Int16] {
-        if w == 0 || h == 0 { return data }
-        
-        var out = [Int16](repeating: 0, count: w * h)
-        
-        data.withUnsafeBufferPointer { dPtr in
-            guard let pData = dPtr.baseAddress else { return }
-            out.withUnsafeMutableBufferPointer { oPtr in
-                guard let pOut = oPtr.baseAddress else { return }
-                
-                for dstY in 0..<h {
-                    let srcY = min(max(dstY - sY, 0), h - 1)
-                    let dstRow = dstY * w
-                    let srcRow = srcY * w
-                    
-                    let dstXStart = max(0, sX)
-                    let dstXEnd = min(w, w + sX)
-                    
-                    if dstXStart < dstXEnd {
-                        let srcXStart = dstXStart - sX
-                        let copyLen = dstXEnd - dstXStart
-                        pOut.advanced(by: dstRow + dstXStart)
-                            .update(from: pData.advanced(by: srcRow + srcXStart), count: copyLen)
-                    }
-                    
-                    if sX > 0 {
-                        let fillVal = pData[srcRow]
-                        for x in 0..<min(sX, w) {
-                            pOut[dstRow + x] = fillVal
-                        }
-                    }
-                    
-                    if sX <= -1 {
-                        let fillVal = pData[srcRow + w - 1]
-                        for x in max(0, w + sX)..<w {
-                            pOut[dstRow + x] = fillVal
-                        }
-                    }
-                }
-            }
-        }
-        
-        return out
-    }
-    
-    async let yTask = shift(data: plane.y, w: plane.width, h: plane.height, sX: dx, sY: dy)
-    async let cbTask = shift(data: plane.cb, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-    async let crTask = shift(data: plane.cr, w: (plane.width + 1) / 2, h: (plane.height + 1) / 2, sX: dx / 2, sY: dy / 2)
-    
-    return PlaneData420(width: plane.width, height: plane.height, y: await yTask, cb: await cbTask, cr: await crTask)
 }
 
 @inline(__always)
@@ -1545,7 +1530,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             mvs = estimateMBME(curr: curr, prev: prev)
             let predicted = await applyMBME(prev: prev, mvs: mvs)
             predictedPlane = predicted
-            let res = await subtractPlanes(curr: curr, predicted: predicted)
+            let res = await subPlanes(curr: curr, predicted: predicted)
             
             var sumSAD = 0
             for y in 0..<res.height {
