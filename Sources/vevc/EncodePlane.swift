@@ -249,6 +249,84 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
     return blocks
 }
 
+#if arch(arm64) || arch(x86_64) || arch(wasm32)
+
+@inline(__always)
+func subtractCoeffs32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
+    for i in currBlocks.indices {
+        currBlocks[i].withView { vC in
+            predBlocks[i].withView { vP in
+                let cBase = vC.base
+                let pBase = vP.base
+                for y in 0..<16 {
+                    let ptrC = cBase.advanced(by: y * 32 + 16)
+                    let ptrP = pBase.advanced(by: y * 32 + 16)
+                    let vecC = UnsafeRawPointer(ptrC).loadUnaligned(as: SIMD16<Int16>.self)
+                    let vecP = UnsafeRawPointer(ptrP).loadUnaligned(as: SIMD16<Int16>.self)
+                    let res = vecC &- vecP
+                    UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD16<Int16>.self)
+                }
+                let ptrC_bot = cBase.advanced(by: 512)
+                let ptrP_bot = pBase.advanced(by: 512)
+                for offset in stride(from: 0, to: 512, by: 16) {
+                    let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let res = vecC &- vecP
+                    UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+func subtractCoeffs16(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
+    for i in currBlocks.indices {
+        currBlocks[i].withView { vC in
+            predBlocks[i].withView { vP in
+                let cBase = vC.base
+                let pBase = vP.base
+                for y in 0..<8 {
+                    let ptrC = cBase.advanced(by: y * 16 + 8)
+                    let ptrP = pBase.advanced(by: y * 16 + 8)
+                    let vecC = UnsafeRawPointer(ptrC).loadUnaligned(as: SIMD8<Int16>.self)
+                    let vecP = UnsafeRawPointer(ptrP).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = vecC &- vecP
+                    UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD8<Int16>.self)
+                }
+                let ptrC_bot = cBase.advanced(by: 128)
+                let ptrP_bot = pBase.advanced(by: 128)
+                for offset in stride(from: 0, to: 128, by: 8) {
+                    let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+                    let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = vecC &- vecP
+                    UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
+    for i in currBlocks.indices {
+        currBlocks[i].withView { vC in
+            predBlocks[i].withView { vP in
+                let ptrC = vC.base
+                let ptrP = vP.base
+                for offset in stride(from: 0, to: 64, by: 8) {
+                    let vecC = UnsafeRawPointer(ptrC.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+                    let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = vecC &- vecP
+                    UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
+                }
+            }
+        }
+    }
+}
+
+#else
+
 @inline(__always)
 func subtractCoeffs32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     let half = (32 / 2)
@@ -331,6 +409,8 @@ func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D
         }
     }
 }
+
+#endif
 
 @inline(__always)
 func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {

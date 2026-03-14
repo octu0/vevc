@@ -78,6 +78,258 @@ func encodeCoeffRun(val: Int16, encoder: inout CABACEncoder, run: Int, ctxRun: i
     }
 }
 
+#if arch(arm64) || arch(x86_64) || arch(wasm32)
+
+@inline(__always)
+func blockEncode32(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    let zero16 = SIMD16<Int16>(repeating: 0)
+    for y in stride(from: 32 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        if any(v1 .!= zero16) {
+            for x in stride(from: 31, through: 16, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        if any(v0 .!= zero16) {
+            for x in stride(from: 15, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (32 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 32
+                let startX = currentIdx % 32
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 32 + x) + 1
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blockEncode16(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    let zero8 = SIMD8<Int16>(repeating: 0)
+    for y in stride(from: 16 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
+        if any(v1 .!= zero8) {
+            for x in stride(from: 15, through: 8, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        if any(v0 .!= zero8) {
+            for x in stride(from: 7, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (16 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 16
+                let startX = currentIdx % 16
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 16 + x) + 1
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blockEncode8(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    let zero4 = SIMD4<Int16>(repeating: 0)
+    for y in stride(from: 8 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
+        if any(v1 .!= zero4) {
+            for x in stride(from: 7, through: 4, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        if any(v0 .!= zero4) {
+            for x in stride(from: 3, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (8 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 8
+                let startX = currentIdx % 8
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 8 + x) + 1
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blockEncode4(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    let zero2 = SIMD2<Int16>(repeating: 0)
+    for y in stride(from: 4 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 2)).loadUnaligned(as: SIMD2<Int16>.self)
+        if any(v1 .!= zero2) {
+            for x in stride(from: 3, through: 2, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
+        if any(v0 .!= zero2) {
+            for x in stride(from: 1, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (4 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 4
+                let startX = currentIdx % 4
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 4 + x) + 1
+            }
+        }
+    }
+}
+
+#else
+
 @inline(__always)
 func blockEncode32(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
     var lscpX = -1
@@ -261,6 +513,8 @@ func blockEncode4(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [
         }
     }
 }
+
+#endif
 
 @inline(__always)
 func getSubbands32(view: BlockView) -> Subbands {
