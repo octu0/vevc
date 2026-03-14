@@ -21,9 +21,9 @@ func invLift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: 
 
 func dwt2d(_ block: inout BlockView, size: Int) -> Subbands {
     switch size {
-    case 32: return dwt2d_32(&block)
-    case 16: return dwt2d_16(&block)
-    case 8: return dwt2d_8(&block)
+    case 32: return dwt2d_32_sb(&block)
+    case 16: return dwt2d_16_sb(&block)
+    case 8: return dwt2d_8_sb(&block)
     default: fatalError()
     }
 }
@@ -39,9 +39,9 @@ func invDwt2d(_ block: inout BlockView, size: Int) {
 
 func dwt2dScalar(_ block: inout BlockView, size: Int) -> Subbands {
     switch size {
-    case 32: return dwt2d_32(&block)
-    case 16: return dwt2d_16(&block)
-    case 8: return dwt2d_8(&block)
+    case 32: return dwt2d_32_sb(&block)
+    case 16: return dwt2d_16_sb(&block)
+    case 8: return dwt2d_8_sb(&block)
     default: fatalError()
     }
 }

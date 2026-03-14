@@ -163,11 +163,8 @@ func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
             for w in stride(from: 0, to: dx, by: 32) {
                 var block = Block2D(width: 32, height: 32)
                 block.withView { view in
-                    for line in 0..<32 {
-                        let row = rY.row(x: w, y: (h + line), size: 32)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_32(&view)
+                    rY.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                    dwt2d_32(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -230,11 +227,8 @@ func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
             for w in stride(from: 0, to: cbDx, by: 32) {
                 var block = Block2D(width: 32, height: 32)
                 block.withView { view in
-                    for line in 0..<32 {
-                        let row = rCb.row(x: w, y: (h + line), size: 32)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_32(&view)
+                    rCb.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                    dwt2d_32(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -290,11 +284,8 @@ func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
             for w in stride(from: 0, to: cbDx, by: 32) {
                 var block = Block2D(width: 32, height: 32)
                 block.withView { view in
-                    for line in 0..<32 {
-                        let row = rCr.row(x: w, y: (h + line), size: 32)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_32(&view)
+                    rCr.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                    dwt2d_32(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -365,11 +356,8 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
             for w in stride(from: 0, to: dx, by: 16) {
                 var block = Block2D(width: 16, height: 16)
                 block.withView { view in
-                    for line in 0..<16 {
-                        let row = rY.row(x: w, y: (h + line), size: 16)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_16(&view)
+                    rY.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
+                    dwt2d_16(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -432,11 +420,8 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
             for w in stride(from: 0, to: cbDx, by: 16) {
                 var block = Block2D(width: 16, height: 16)
                 block.withView { view in
-                    for line in 0..<16 {
-                        let row = rCb.row(x: w, y: (h + line), size: 16)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_16(&view)
+                    rCb.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
+                    dwt2d_16(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -492,11 +477,8 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
             for w in stride(from: 0, to: cbDx, by: 16) {
                 var block = Block2D(width: 16, height: 16)
                 block.withView { view in
-                    for line in 0..<16 {
-                        let row = rCr.row(x: w, y: (h + line), size: 16)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_16(&view)
+                    rCr.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
+                    dwt2d_16(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -564,11 +546,8 @@ func extractTransformBlocksBase8(pd: PlaneData420, qtY: QuantizationTable, qtC: 
             for w in stride(from: 0, to: dx, by: 8) {
                 var block = Block2D(width: 8, height: 8)
                 block.withView { view in
-                    for line in 0..<8 {
-                        let row = rY.row(x: w, y: (h + line), size: 8)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_8(&view)
+                    rY.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
+                    dwt2d_8(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -604,11 +583,8 @@ func extractTransformBlocksBase8(pd: PlaneData420, qtY: QuantizationTable, qtC: 
             for w in stride(from: 0, to: cbDx, by: 8) {
                 var block = Block2D(width: 8, height: 8)
                 block.withView { view in
-                    for line in 0..<8 {
-                        let row = rCb.row(x: w, y: (h + line), size: 8)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_8(&view)
+                    rCb.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
+                    dwt2d_8(&view)
                 }
                 rowResults.append((block, w, h))
             }
@@ -642,11 +618,8 @@ func extractTransformBlocksBase8(pd: PlaneData420, qtY: QuantizationTable, qtC: 
             for w in stride(from: 0, to: cbDx, by: 8) {
                 var block = Block2D(width: 8, height: 8)
                 block.withView { view in
-                    for line in 0..<8 {
-                        let row = rCr.row(x: w, y: (h + line), size: 8)
-                        view.setRow(offsetY: line, row: row)
-                    }
-                    _ = dwt2d_8(&view)
+                    rCr.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
+                    dwt2d_8(&view)
                 }
                 rowResults.append((block, w, h))
             }

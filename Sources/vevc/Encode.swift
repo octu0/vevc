@@ -763,7 +763,7 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
 @inline(__always)
 func transformLayer32(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
-        var sub = dwt2d_32(&view)
+        var sub = dwt2d_32_sb(&view)
         quantizeMidSignedMapping(&sub.hl, qt: qt)
         quantizeMidSignedMapping(&sub.lh, qt: qt)
         quantizeHighSignedMapping(&sub.hh, qt: qt)
@@ -773,7 +773,7 @@ func transformLayer32(block: inout Block2D, qt: QuantizationTable) {
 @inline(__always)
 func transformLayer16(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
-        var sub = dwt2d_16(&view)
+        var sub = dwt2d_16_sb(&view)
         quantizeMidSignedMapping(&sub.hl, qt: qt)
         quantizeMidSignedMapping(&sub.lh, qt: qt)
         quantizeHighSignedMapping(&sub.hh, qt: qt)
@@ -783,7 +783,7 @@ func transformLayer16(block: inout Block2D, qt: QuantizationTable) {
 @inline(__always)
 func transformLayer8(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
-        var sub = dwt2d_8(&view)
+        var sub = dwt2d_8_sb(&view)
         quantizeMidSignedMapping(&sub.hl, qt: qt)
         quantizeMidSignedMapping(&sub.lh, qt: qt)
         quantizeHighSignedMapping(&sub.hh, qt: qt)
@@ -793,7 +793,7 @@ func transformLayer8(block: inout Block2D, qt: QuantizationTable) {
 @inline(__always)
 func transformBase8(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
-        var sub = dwt2d_8(&view)
+        var sub = dwt2d_8_sb(&view)
         quantizeLow(&sub.ll, qt: qt)
         quantizeMidSignedMapping(&sub.hl, qt: qt)
         quantizeMidSignedMapping(&sub.lh, qt: qt)
@@ -1056,7 +1056,7 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
 @inline(__always)
 private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
-        return dwt2d_8(&view)
+        return dwt2d_8_sb(&view)
     }
     
     quantizeLow(&sub.ll, qt: qt)
@@ -1297,6 +1297,38 @@ struct Int16Reader {
         }
         
         return r
+    }
+    
+    @inline(__always)
+    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: inout BlockView) {
+        data.withUnsafeBufferPointer { srcBuf in
+            guard let srcBase = srcBuf.baseAddress else { return }
+            
+            for line in 0..<blockHeight {
+                let currentY = y + line
+                let safeY = min(currentY, self.height - 1)
+                
+                let dstPtr = view.rowPointer(y: line)
+                let limit = min(blockWidth, self.width - x)
+                
+                if 0 < limit {
+                    let srcPtr = srcBase.advanced(by: safeY * self.width + x)
+                    dstPtr.update(from: srcPtr, count: limit)
+                    
+                    if limit < blockWidth {
+                        let lastVal = dstPtr[limit - 1]
+                        for i in limit..<blockWidth {
+                            dstPtr[i] = lastVal
+                        }
+                    }
+                } else {
+                    let lastVal = srcBuf[safeY * self.width + (self.width - 1)]
+                    for i in 0..<blockWidth {
+                        dstPtr[i] = lastVal
+                    }
+                }
+            }
+        }
     }
 }
 

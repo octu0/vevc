@@ -321,7 +321,7 @@ func invLift53SIMD16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 // MARK: - 2D DWT
 
 @inline(__always)
-func dwt2d_8(_ block: inout BlockView) -> Subbands {
+func dwt2d_8(_ block: inout BlockView) {
     let size = 8
     let base = block.base
     let width = block.stride
@@ -334,11 +334,16 @@ func dwt2d_8(_ block: inout BlockView) -> Subbands {
         let colBuffer = UnsafeMutableBufferPointer(start: base + x, count: colCount)
         lift53_8(colBuffer, stride: width)
     }
-    return makeSubbands(base: base, size: size, stride: width)
 }
 
 @inline(__always)
-func dwt2d_16(_ block: inout BlockView) -> Subbands {
+func dwt2d_8_sb(_ block: inout BlockView) -> Subbands {
+    dwt2d_8(&block)
+    return makeSubbands(base: block.base, size: 8, stride: block.stride)
+}
+
+@inline(__always)
+func dwt2d_16(_ block: inout BlockView) {
     let size = 16
     let base = block.base
     let width = block.stride
@@ -351,11 +356,16 @@ func dwt2d_16(_ block: inout BlockView) -> Subbands {
         let colBuffer = UnsafeMutableBufferPointer(start: base + x, count: colCount)
         lift53_16(colBuffer, stride: width)
     }
-    return makeSubbands(base: base, size: size, stride: width)
 }
 
 @inline(__always)
-func dwt2d_32(_ block: inout BlockView) -> Subbands {
+func dwt2d_16_sb(_ block: inout BlockView) -> Subbands {
+    dwt2d_16(&block)
+    return makeSubbands(base: block.base, size: 16, stride: block.stride)
+}
+
+@inline(__always)
+func dwt2d_32(_ block: inout BlockView) {
     let size = 32
     let base = block.base
     let width = block.stride
@@ -368,7 +378,12 @@ func dwt2d_32(_ block: inout BlockView) -> Subbands {
         let colBuffer = UnsafeMutableBufferPointer(start: base + x, count: colCount)
         lift53_32(colBuffer, stride: width)
     }
-    return makeSubbands(base: base, size: size, stride: width)
+}
+
+@inline(__always)
+func dwt2d_32_sb(_ block: inout BlockView) -> Subbands {
+    dwt2d_32(&block)
+    return makeSubbands(base: block.base, size: 32, stride: block.stride)
 }
 
 @inline(__always)
