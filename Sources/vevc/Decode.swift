@@ -308,33 +308,43 @@ func blockDecodeDPCM4(decoder: inout CABACDecoder, block: inout BlockView, lastV
     }
 
     let ptr0 = block.rowPointer(y: 0)
-    ptr0[0] = ptr0[0] + lastVal
-    
-    for x in 1..<4 {
-        ptr0[x] = ptr0[x] + ptr0[x - 1]
-    }
-    
-    for y in 1..<4 {
-        let ptr = block.rowPointer(y: y)
-        let ptrPrev = block.rowPointer(y: y - 1)
-        ptr[0] = ptr[0] + ptrPrev[0]
-        
-        for x in 1..<4 {
-            let a = Int(ptr[x - 1])
-            let b = Int(ptrPrev[x])
-            let c = Int(ptrPrev[x - 1])
-            let predicted: Int16
-            if a <= c && b <= c {
-                predicted = Int16(min(a, b))
-            } else if c <= a && c <= b {
-                predicted = Int16(max(a, b))
-            } else {
-                predicted = Int16(a + b - c)
-            }
-            ptr[x] += predicted
+    let ptr1 = block.rowPointer(y: 1)
+    let ptr2 = block.rowPointer(y: 2)
+    let ptr3 = block.rowPointer(y: 3)
+
+    @inline(__always)
+    func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        if ia <= ic && ib <= ic {
+            return Int16(truncatingIfNeeded: min(ia, ib))
+        } else if ic <= ia && ic <= ib {
+            return Int16(truncatingIfNeeded: max(ia, ib))
+        } else {
+            return Int16(truncatingIfNeeded: ia + ib - ic)
         }
     }
-    lastVal = block.rowPointer(y: 4 - 1)[4 - 1]
+
+    ptr0[0] = ptr0[0] &+ lastVal
+    ptr0[1] = ptr0[1] &+ ptr0[0]
+    ptr0[2] = ptr0[2] &+ ptr0[1]
+    ptr0[3] = ptr0[3] &+ ptr0[2]
+
+    ptr1[0] = ptr1[0] &+ ptr0[0]
+    ptr1[1] = ptr1[1] &+ predictMED(ptr1[0], ptr0[1], ptr0[0])
+    ptr1[2] = ptr1[2] &+ predictMED(ptr1[1], ptr0[2], ptr0[1])
+    ptr1[3] = ptr1[3] &+ predictMED(ptr1[2], ptr0[3], ptr0[2])
+
+    ptr2[0] = ptr2[0] &+ ptr1[0]
+    ptr2[1] = ptr2[1] &+ predictMED(ptr2[0], ptr1[1], ptr1[0])
+    ptr2[2] = ptr2[2] &+ predictMED(ptr2[1], ptr1[2], ptr1[1])
+    ptr2[3] = ptr2[3] &+ predictMED(ptr2[2], ptr1[3], ptr1[2])
+
+    ptr3[0] = ptr3[0] &+ ptr2[0]
+    ptr3[1] = ptr3[1] &+ predictMED(ptr3[0], ptr2[1], ptr2[0])
+    ptr3[2] = ptr3[2] &+ predictMED(ptr3[1], ptr2[2], ptr2[1])
+    ptr3[3] = ptr3[3] &+ predictMED(ptr3[2], ptr2[3], ptr2[2])
+
+    lastVal = ptr3[3]
 }
 
 @inline(__always)

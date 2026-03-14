@@ -303,33 +303,56 @@ func getSubbands8(view: BlockView) -> Subbands {
 
 @inline(__always)
 func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
-    var lscpIdx = -1
-    
-    // Pass 1: find LSCP
     let ptr0 = block.rowPointer(y: 0)
-    if ptr0[0] - lastVal != 0 { lscpIdx = 0 }
-    for x in 1..<4 {
-        if ptr0[x] - ptr0[x - 1] != 0 { lscpIdx = max(lscpIdx, x) }
-    }
+    let ptr1 = block.rowPointer(y: 1)
+    let ptr2 = block.rowPointer(y: 2)
+    let ptr3 = block.rowPointer(y: 3)
     
-    for y in 1..<4 {
-        let ptr = block.rowPointer(y: y)
-        let ptrPrev = block.rowPointer(y: y - 1)
-        if ptr[0] - ptrPrev[0] != 0 { lscpIdx = max(lscpIdx, y * 4 + 0) }
-        
-        for x in 1..<4 {
-            let a = Int(ptr[x - 1])
-            let b = Int(ptrPrev[x])
-            let c = Int(ptrPrev[x - 1])
-            let predicted: Int16
-            if a <= c && b <= c {
-                predicted = Int16(min(a, b))
-            } else if c <= a && c <= b {
-                predicted = Int16(max(a, b))
-            } else {
-                predicted = Int16(a + b - c)
-            }
-            if ptr[x] - predicted != 0 { lscpIdx = max(lscpIdx, y * 4 + x) }
+    @inline(__always)
+    func diffMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        let predicted: Int
+        if ia <= ic && ib <= ic {
+            predicted = min(ia, ib)
+        } else if ic <= ia && ic <= ib {
+            predicted = max(ia, ib)
+        } else {
+            predicted = ia + ib - ic
+        }
+        return Int16(truncatingIfNeeded: Int(x) - predicted)
+    }
+
+    let err00 = Int16(truncatingIfNeeded: Int(ptr0[0]) - Int(lastVal))
+    let err01 = Int16(truncatingIfNeeded: Int(ptr0[1]) - Int(ptr0[0]))
+    let err02 = Int16(truncatingIfNeeded: Int(ptr0[2]) - Int(ptr0[1]))
+    let err03 = Int16(truncatingIfNeeded: Int(ptr0[3]) - Int(ptr0[2]))
+
+    let err10 = Int16(truncatingIfNeeded: Int(ptr1[0]) - Int(ptr0[0]))
+    let err11 = diffMED(ptr1[1], ptr1[0], ptr0[1], ptr0[0])
+    let err12 = diffMED(ptr1[2], ptr1[1], ptr0[2], ptr0[1])
+    let err13 = diffMED(ptr1[3], ptr1[2], ptr0[3], ptr0[2])
+
+    let err20 = Int16(truncatingIfNeeded: Int(ptr2[0]) - Int(ptr1[0]))
+    let err21 = diffMED(ptr2[1], ptr2[0], ptr1[1], ptr1[0])
+    let err22 = diffMED(ptr2[2], ptr2[1], ptr1[2], ptr1[1])
+    let err23 = diffMED(ptr2[3], ptr2[2], ptr1[3], ptr1[2])
+
+    let err30 = Int16(truncatingIfNeeded: Int(ptr3[0]) - Int(ptr2[0]))
+    let err31 = diffMED(ptr3[1], ptr3[0], ptr2[1], ptr2[0])
+    let err32 = diffMED(ptr3[2], ptr3[1], ptr2[2], ptr2[1])
+    let err33 = diffMED(ptr3[3], ptr3[2], ptr2[3], ptr2[2])
+
+    let errors = [
+        err00, err01, err02, err03,
+        err10, err11, err12, err13,
+        err20, err21, err22, err23,
+        err30, err31, err32, err33
+    ]
+    
+    var lscpIdx = -1
+    for i in 0..<16 {
+        if errors[i] != 0 {
+            lscpIdx = i
         }
     }
 
@@ -342,23 +365,12 @@ func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: in
         encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
         encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
-        // Pass 2: encode up to LSCP
         var currentIdx = 0
         var startIdxForRun = 0
         var run = 0
-        let diff00 = ptr0[0] - lastVal
-        if diff00 == 0 {
-            run += 1
-        } else {
-            encodeCoeffRun(val: diff00, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: 0)
-            run = 0
-            startIdxForRun = currentIdx + 1
-        }
 
-        for x in 1..<4 {
-            currentIdx += 1
-            if currentIdx > lscpIdx { break }
-            let diff = ptr0[x] - ptr0[x - 1]
+        for i in 0...lscpIdx {
+            let diff = errors[i]
             if diff == 0 {
                 run += 1
             } else {
@@ -369,57 +381,11 @@ func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: in
                 run = 0
                 startIdxForRun = currentIdx + 1
             }
-        }
-
-        for y in 1..<4 {
-            if currentIdx >= lscpIdx { break }
-            let ptr = block.rowPointer(y: y)
-            let ptrPrev = block.rowPointer(y: y - 1)
-
             currentIdx += 1
-            if currentIdx > lscpIdx { break }
-            let diffY0 = ptr[0] - ptrPrev[0]
-            if diffY0 == 0 {
-                run += 1
-            } else {
-                let startY = startIdxForRun / 4
-                let startX = startIdxForRun % 4
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
-                run = 0
-                startIdxForRun = currentIdx + 1
-            }
-
-            for x in 1..<4 {
-                currentIdx += 1
-                if currentIdx > lscpIdx { break }
-                let a = Int(ptr[x - 1])
-                let b = Int(ptrPrev[x])
-                let c = Int(ptrPrev[x - 1])
-                let predicted: Int16
-                if a <= c && b <= c {
-                    predicted = Int16(min(a, b))
-                } else if c <= a && c <= b {
-                    predicted = Int16(max(a, b))
-                } else {
-                    predicted = Int16(a + b - c)
-                }
-                let diff = ptr[x] - predicted
-                if diff == 0 {
-                    run += 1
-                } else {
-                    let startY = startIdxForRun / 4
-                    let startX = startIdxForRun % 4
-                    let band = min(startX + startY, 7)
-                    encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
-                    run = 0
-                    startIdxForRun = currentIdx + 1
-                }
-            }
         }
     }
 
-    lastVal = block.rowPointer(y: 4 - 1)[4 - 1]
+    lastVal = ptr3[3]
 }
 
 // MARK: - Byte Serialization Helpers
@@ -874,34 +840,46 @@ func encodePlaneBaseSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] 
 private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> Int {
     let count = 4 * 4
     let ptr0 = block.rowPointer(y: 0)
+    let ptr1 = block.rowPointer(y: 1)
+    let ptr2 = block.rowPointer(y: 2)
+    let ptr3 = block.rowPointer(y: 3)
     
-    var sumDiffAbs = abs(Int(ptr0[0] - lastVal))
-    for x in 1..<4 {
-        sumDiffAbs += abs(Int(ptr0[x] - ptr0[x - 1]))
-    }
-    
-    for y in 1..<4 {
-        let ptr = block.rowPointer(y: y)
-        let ptrPrev = block.rowPointer(y: y - 1)
-        
-        sumDiffAbs += abs(Int(ptr[0] - ptrPrev[0]))
-        
-        for x in 1..<4 {
-            let a = Int(ptr[x - 1])
-            let b = Int(ptrPrev[x])
-            let c = Int(ptrPrev[x - 1])
-            let predicted: Int16
-            if a <= c && b <= c {
-                predicted = Int16(min(a, b))
-            } else if c <= a && c <= b {
-                predicted = Int16(max(a, b))
-            } else {
-                predicted = Int16(a + b - c)
-            }
-            sumDiffAbs += abs(Int(ptr[x] - predicted))
+    @inline(__always)
+    func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        let predicted: Int
+        if ia <= ic && ib <= ic {
+            predicted = min(ia, ib)
+        } else if ic <= ia && ic <= ib {
+            predicted = max(ia, ib)
+        } else {
+            predicted = ia + ib - ic
         }
+        return abs(Int(x) - predicted)
     }
-    lastVal = block.rowPointer(y: 4 - 1)[4 - 1]
+
+    var sumDiffAbs = abs(Int(ptr0[0]) - Int(lastVal))
+    sumDiffAbs += abs(Int(ptr0[1]) - Int(ptr0[0]))
+    sumDiffAbs += abs(Int(ptr0[2]) - Int(ptr0[1]))
+    sumDiffAbs += abs(Int(ptr0[3]) - Int(ptr0[2]))
+
+    sumDiffAbs += abs(Int(ptr1[0]) - Int(ptr0[0]))
+    sumDiffAbs += errorMED(ptr1[1], ptr1[0], ptr0[1], ptr0[0])
+    sumDiffAbs += errorMED(ptr1[2], ptr1[1], ptr0[2], ptr0[1])
+    sumDiffAbs += errorMED(ptr1[3], ptr1[2], ptr0[3], ptr0[2])
+    
+    sumDiffAbs += abs(Int(ptr2[0]) - Int(ptr1[0]))
+    sumDiffAbs += errorMED(ptr2[1], ptr2[0], ptr1[1], ptr1[0])
+    sumDiffAbs += errorMED(ptr2[2], ptr2[1], ptr1[2], ptr1[1])
+    sumDiffAbs += errorMED(ptr2[3], ptr2[2], ptr1[3], ptr1[2])
+
+    sumDiffAbs += abs(Int(ptr3[0]) - Int(ptr2[0]))
+    sumDiffAbs += errorMED(ptr3[1], ptr3[0], ptr2[1], ptr2[0])
+    sumDiffAbs += errorMED(ptr3[2], ptr3[1], ptr2[2], ptr2[1])
+    sumDiffAbs += errorMED(ptr3[3], ptr3[2], ptr2[3], ptr2[2])
+
+    lastVal = ptr3[3]
+    
     let meanInt = sumDiffAbs / count
     let k: Int
     if meanInt < 1 {
@@ -1137,7 +1115,7 @@ struct Int16Reader {
         let safeY = min(y, height - 1)
         
         let limit = min(size, width - x)
-        if limit > 0 {
+        if 0 < limit {
             data.withUnsafeBufferPointer { ptr in
                 guard let basePtr = ptr.baseAddress else { return }
                 let base = basePtr.advanced(by: safeY * width + x)
