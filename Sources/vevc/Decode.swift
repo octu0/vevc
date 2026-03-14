@@ -317,11 +317,11 @@ func blockDecodeDPCM4(decoder: inout CABACDecoder, block: inout BlockView, lastV
         let ia = Int(a), ib = Int(b), ic = Int(c)
         if ia <= ic && ib <= ic {
             return Int16(truncatingIfNeeded: min(ia, ib))
-        } else if ic <= ia && ic <= ib {
-            return Int16(truncatingIfNeeded: max(ia, ib))
-        } else {
-            return Int16(truncatingIfNeeded: ia + ib - ic)
         }
+        if ic <= ia && ic <= ib {
+            return Int16(truncatingIfNeeded: max(ia, ib))
+        }
+        return Int16(truncatingIfNeeded: ia + ib - ic)
     }
 
     ptr0[0] = ptr0[0] &+ lastVal
@@ -1202,7 +1202,8 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         let magic = Array(data[offset..<(offset + 4)])
         offset += 4
         
-        if magic == [0x56, 0x45, 0x56, 0x49] {
+        switch magic {
+        case [0x56, 0x45, 0x56, 0x49]:
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let chunk = Array(data[offset..<(offset + len)])
             offset += len
@@ -1211,8 +1212,8 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             let pd = PlaneData420(img16: img16)
             out.append(pd.toYCbCr())
             prevReconstructed = pd
-            
-        } else if magic == [0x56, 0x45, 0x56, 0x50] {
+
+        case [0x56, 0x45, 0x56, 0x50]:
             let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
             var mvs = MotionVectors(count: mvsCount)
@@ -1277,7 +1278,8 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             } else {
                 out.append(residual.toYCbCr())
             }
-        } else {
+            
+        default: 
              throw DecodeError.invalidHeader
         }
     }
