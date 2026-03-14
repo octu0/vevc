@@ -139,329 +139,79 @@ func evaluateQuantizeBase8(block: inout Block2D, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: QuantizationTable) async throws -> (blocksY: [Block2D], blocksCb: [Block2D], blocksCr: [Block2D], subPlane: PlaneData420) {
-    let dx = pd.width
-    let dy = pd.height
-    
-    var subY: [Int16] = [Int16](repeating: 0, count: ((dx / 2) * (dy / 2)))
-    var subCb: [Int16] = [Int16](repeating: 0, count: (((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2)))
-    var subCr: [Int16] = [Int16](repeating: 0, count: (((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2)))
-    
-    let rY = pd.rY
-    let rowCountY = ((dy + 32 - 1) / 32)
-    let resultsY = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountY))
+func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
+    let subWidth = (width / 2)
+    let subHeight = (height / 2)
+    var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
+    let rowCount = ((height + 32 - 1) / 32)
+    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
     let chunkSize = 4
-    let taskCountY = ((rowCountY + chunkSize - 1) / chunkSize)
+    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
-    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
+    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
         let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountY)
+        let endRow = min((startRow + chunkSize), rowCount)
         
         for i in startRow..<endRow {
             let h = (i * 32)
             var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: dx, by: 32) {
+            for w in stride(from: 0, to: width, by: 32) {
                 var block = Block2D(width: 32, height: 32)
                 block.withView { view in
-                    rY.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                    r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
                     dwt2d_32(&view)
                 }
                 rowResults.append((block, w, h))
             }
-            resultsY.value[i] = (h, rowResults)
+            results.value[i] = (h, rowResults)
         }
     }
     
-    var blocksY: [Block2D] = []
-    blocksY.reserveCapacity((rowCountY * ((dx + 32 - 1) / 32)))
-    subY.withUnsafeMutableBufferPointer { dstBuf in
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
+    subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
-        for i in 0..<rowCountY {
-            guard let res = resultsY.value[i] else { continue }
+        for i in 0..<rowCount {
+            guard let res = results.value[i] else { continue }
             for j in res.1.indices {
                 var (llBlock, w, h) = res.1[j]
-                blocksY.append(llBlock)
-
-                let subDxWidth = (dx / 2)
-                let subDyHeight = (dy / 2)
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (32 / 2)
-
-                llBlock.withView { view in
-                    let subs = getSubbands32(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subDxWidth - destStartX))
-
-                    guard 0 < limit else { return }
-
-                    if limit == subSize && (destStartY + subSize) <= subDyHeight {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subDxWidth) + destStartX)
-                        dstBasePtr.advanced(by: subDxWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                        dstBasePtr.advanced(by: subDxWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subDyHeight <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 32))
-                            let dstIdx = ((dstY * subDxWidth) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    let rCb = pd.rCb
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-    let subCbDx = (cbDx / 2)
-    let subCbDy = (cbDy / 2)
-    let rowCountCb = ((cbDy + 32 - 1) / 32)
-    let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
-    let taskCountCb = ((rowCountCb + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountCb)
-        
-        for i in startRow..<endRow {
-            let h = (i * 32)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: cbDx, by: 32) {
-                var block = Block2D(width: 32, height: 32)
-                block.withView { view in
-                    rCb.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                    dwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsCb.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksCb: [Block2D] = []
-    blocksCb.reserveCapacity((rowCountCb * ((cbDx + 32 - 1) / 32)))
-    subCb.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
-        for i in 0..<rowCountCb {
-            guard let res = resultsCb.value[i] else { continue }
-            for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
-                blocksCb.append(llBlock)
-
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (32 / 2)
-
-                llBlock.withView { view in
-                    let subs = getSubbands32(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subCbDx - destStartX))
-
-                    guard 0 < limit else { return }
-
-                    if limit == subSize && (destStartY + subSize) <= subCbDy {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
-                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subCbDy <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 32))
-                            let dstIdx = ((dstY * subCbDx) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    let rCr = pd.rCr
-    let rowCountCr = ((cbDy + 32 - 1) / 32)
-    let resultsCr = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCr))
-    let taskCountCr = ((rowCountCr + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountCr)
-        
-        for i in startRow..<endRow {
-            let h = (i * 32)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: cbDx, by: 32) {
-                var block = Block2D(width: 32, height: 32)
-                block.withView { view in
-                    rCr.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                    dwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsCr.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksCr: [Block2D] = []
-    blocksCr.reserveCapacity((rowCountCr * ((cbDx + 32 - 1) / 32)))
-    subCr.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
-        for i in 0..<rowCountCr {
-            guard let res = resultsCr.value[i] else { continue }
-            for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
-                blocksCr.append(llBlock)
-
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (32 / 2)
-
-                llBlock.withView { view in
-                    let subs = getSubbands32(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subCbDx - destStartX))
-
-                    guard 0 < limit else { return }
-
-                    if limit == subSize && (destStartY + subSize) <= subCbDy {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
-                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                        dstBasePtr.advanced(by: subCbDx * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subCbDy <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 32))
-                            let dstIdx = ((dstY * subCbDx) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    let subPlane = PlaneData420(width: (dx / 2), height: (dy / 2), y: subY, cb: subCb, cr: subCr)
-    return (blocksY, blocksCb, blocksCr, subPlane)
-}
-
-@inline(__always)
-func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: QuantizationTable) async throws -> (blocksY: [Block2D], blocksCb: [Block2D], blocksCr: [Block2D], subPlane: PlaneData420) {
-    let dx = pd.width
-    let dy = pd.height
-    
-    var subY: [Int16] = [Int16](repeating: 0, count: ((dx / 2) * (dy / 2)))
-    var subCb: [Int16] = [Int16](repeating: 0, count: (((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2)))
-    var subCr: [Int16] = [Int16](repeating: 0, count: (((dx + 1) / 2 / 2) * ((dy + 1) / 2 / 2)))
-    
-    let rY = pd.rY
-    let rowCountY = ((dy + 16 - 1) / 16)
-    let resultsY = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountY))
-    let chunkSize = 4
-    let taskCountY = ((rowCountY + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountY)
-        
-        for i in startRow..<endRow {
-            let h = (i * 16)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: dx, by: 16) {
-                var block = Block2D(width: 16, height: 16)
-                block.withView { view in
-                    rY.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
-                    dwt2d_16(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsY.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksY: [Block2D] = []
-    blocksY.reserveCapacity((rowCountY * ((dx + 16 - 1) / 16)))
-    subY.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
-        for i in 0..<rowCountY {
-            guard let res = resultsY.value[i] else { continue }
-            for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
-                blocksY.append(llBlock)
+                blocks.append(llBlock)
                 
-                let subDxWidth = (dx / 2)
-                let subDyHeight = (dy / 2)
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
-                let subSize = (16 / 2)
+                let subSize = (32 / 2)
 
                 llBlock.withView { view in
-                    let subs = getSubbands16(view: view)
+                    let subs = getSubbands32(view: view)
                     let srcBase = subs.ll.base
-                    let limit = min(subSize, (subDxWidth - destStartX))
-                    
+                    let limit = min(subSize, (subWidth - destStartX))
+
                     guard 0 < limit else { return }
 
-                    if limit == subSize && (destStartY + subSize) <= subDyHeight {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subDxWidth) + destStartX)
-                        dstBasePtr.advanced(by: subDxWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
-                        dstBasePtr.advanced(by: subDxWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
+                    if limit == subSize && (destStartY + subSize) <= subHeight {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                        dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                        dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
                     } else {
                         for blockY in 0..<subSize {
                             let dstY = (destStartY + blockY)
-                            if subDyHeight <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 16))
-                            let dstIdx = ((dstY * subDxWidth) + destStartX)
+                            if subHeight <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 32))
+                            let dstIdx = ((dstY * subWidth) + destStartX)
                             dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                         }
                     }
@@ -470,267 +220,123 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
         }
     }
     
-    let rCb = pd.rCb
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-    let subCbDx = (cbDx / 2)
-    let subCbDy = (cbDy / 2)
-    let rowCountCb = ((cbDy + 16 - 1) / 16)
-    let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
-    let taskCountCb = ((rowCountCb + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountCb)
-        
-        for i in startRow..<endRow {
-            let h = (i * 16)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: cbDx, by: 16) {
-                var block = Block2D(width: 16, height: 16)
-                block.withView { view in
-                    rCb.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
-                    dwt2d_16(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsCb.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksCb: [Block2D] = []
-    blocksCb.reserveCapacity((rowCountCb * ((cbDx + 16 - 1) / 16)))
-    subCb.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
-        for i in 0..<rowCountCb {
-            guard let res = resultsCb.value[i] else { continue }
-            for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
-                blocksCb.append(llBlock)
-
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (16 / 2)
-
-                llBlock.withView { view in
-                    let subs = getSubbands16(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subCbDx - destStartX))
-                    
-                    guard 0 < limit else { return }
-
-                    if limit == subSize && (destStartY + subSize) <= subCbDy {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
-                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subCbDy <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 16))
-                            let dstIdx = ((dstY * subCbDx) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    let rCr = pd.rCr
-    let rowCountCr = ((cbDy + 16 - 1) / 16)
-    let resultsCr = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCr))
-    let taskCountCr = ((rowCountCr + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountCr)
-        
-        for i in startRow..<endRow {
-            let h = (i * 16)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: cbDx, by: 16) {
-                var block = Block2D(width: 16, height: 16)
-                block.withView { view in
-                    rCr.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
-                    dwt2d_16(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsCr.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksCr: [Block2D] = []
-    blocksCr.reserveCapacity((rowCountCr * ((cbDx + 16 - 1) / 16)))
-    subCr.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
-        for i in 0..<rowCountCr {
-            guard let res = resultsCr.value[i] else { continue }
-            for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
-                blocksCr.append(llBlock)
-
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (16 / 2)
-
-                llBlock.withView { view in
-                    let subs = getSubbands16(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subCbDx - destStartX))
-                    
-                    guard 0 < limit else { return }
-
-                    if limit == subSize && (destStartY + subSize) <= subCbDy {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
-                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
-                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subCbDy <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 16))
-                            let dstIdx = ((dstY * subCbDx) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    let subPlane = PlaneData420(width: (dx / 2), height: (dy / 2), y: subY, cb: subCb, cr: subCr)
-    return (blocksY, blocksCb, blocksCr, subPlane)
+    return (blocks, subband)
 }
 
 @inline(__always)
-func extractTransformBlocksBase8(pd: PlaneData420, qtY: QuantizationTable, qtC: QuantizationTable) async throws -> (blocksY: [Block2D], blocksCb: [Block2D], blocksCr: [Block2D]) {
-    let dx = pd.width
-    let dy = pd.height
-    
-    
-    let rY = pd.rY
-    let rowCountY = ((dy + 8 - 1) / 8)
-    let resultsY = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountY))
+func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
+    let subWidth = (width / 2)
+    let subHeight = (height / 2)
+    var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
+    let rowCount = ((height + 16 - 1) / 16)
+    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
     let chunkSize = 4
-    let taskCountY = ((rowCountY + chunkSize - 1) / chunkSize)
+    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
-    DispatchQueue.concurrentPerform(iterations: taskCountY) { taskIdx in
+    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
         let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountY)
+        let endRow = min((startRow + chunkSize), rowCount)
+        
+        for i in startRow..<endRow {
+            let h = (i * 16)
+            var rowResults: [(Block2D, Int, Int)] = []
+            for w in stride(from: 0, to: width, by: 16) {
+                var block = Block2D(width: 16, height: 16)
+                block.withView { view in
+                    r.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
+                    dwt2d_16(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+            results.value[i] = (h, rowResults)
+        }
+    }
+    
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity((rowCount * ((width + 16 - 1) / 16)))
+    subband.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCount {
+            guard let res = results.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocks.append(llBlock)
+                
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (16 / 2)
+
+                llBlock.withView { view in
+                    let subs = getSubbands16(view: view)
+                    let srcBase = subs.ll.base
+                    let limit = min(subSize, (subWidth - destStartX))
+
+                    guard 0 < limit else { return }
+
+                    if limit == subSize && (destStartY + subSize) <= subHeight {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                        dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
+                        dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subHeight <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 16))
+                            let dstIdx = ((dstY * subWidth) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    return (blocks, subband)
+}
+
+@inline(__always)
+func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) -> [Block2D] {
+    let rowCount = ((height + 8 - 1) / 8)
+    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
+    let chunkSize = 4
+    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
+    
+    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
+        let startRow = (taskIdx * chunkSize)
+        let endRow = min((startRow + chunkSize), rowCount)
         
         for i in startRow..<endRow {
             let h = (i * 8)
             var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: dx, by: 8) {
+            for w in stride(from: 0, to: width, by: 8) {
                 var block = Block2D(width: 8, height: 8)
                 block.withView { view in
-                    rY.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
+                    r.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
                     dwt2d_8(&view)
                 }
                 rowResults.append((block, w, h))
             }
-            resultsY.value[i] = (h, rowResults)
+            results.value[i] = (h, rowResults)
         }
     }
     
-    var blocksY: [Block2D] = []
-    blocksY.reserveCapacity((rowCountY * ((dx + 8 - 1) / 8)))
-    for i in 0..<rowCountY {
-        guard let res = resultsY.value[i] else { continue }
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity((rowCount * ((width + 8 - 1) / 8)))
+    for i in 0..<rowCount {
+        guard let res = results.value[i] else { continue }
         for j in res.1.indices {
             let (llBlock, _, _) = res.1[j]
-            blocksY.append(llBlock)
-
+            blocks.append(llBlock)
         }
     }
     
-    let rCb = pd.rCb
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-    let rowCountCb = ((cbDy + 8 - 1) / 8)
-    let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
-    let taskCountCb = ((rowCountCb + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountCb)
-        
-        for i in startRow..<endRow {
-            let h = (i * 8)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: cbDx, by: 8) {
-                var block = Block2D(width: 8, height: 8)
-                block.withView { view in
-                    rCb.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
-                    dwt2d_8(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsCb.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksCb: [Block2D] = []
-    blocksCb.reserveCapacity((rowCountCb * ((cbDx + 8 - 1) / 8)))
-    for i in 0..<rowCountCb {
-        guard let res = resultsCb.value[i] else { continue }
-        for j in res.1.indices {
-            let (llBlock, _, _) = res.1[j]
-            blocksCb.append(llBlock)
-
-        }
-    }
-    
-    let rCr = pd.rCr
-    let rowCountCr = ((cbDy + 8 - 1) / 8)
-    let resultsCr = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCr))
-    let taskCountCr = ((rowCountCr + chunkSize - 1) / chunkSize)
-    
-    DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCountCr)
-        
-        for i in startRow..<endRow {
-            let h = (i * 8)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: cbDx, by: 8) {
-                var block = Block2D(width: 8, height: 8)
-                block.withView { view in
-                    rCr.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
-                    dwt2d_8(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-            resultsCr.value[i] = (h, rowResults)
-        }
-    }
-    
-    var blocksCr: [Block2D] = []
-    blocksCr.reserveCapacity((rowCountCr * ((cbDx + 8 - 1) / 8)))
-    for i in 0..<rowCountCr {
-        guard let res = resultsCr.value[i] else { continue }
-        for j in res.1.indices {
-            let (llBlock, _, _) = res.1[j]
-            blocksCr.append(llBlock)
-
-        }
-    }
-    
-    return (blocksY, blocksCb, blocksCr)
+    return blocks
 }
 
 @inline(__always)
@@ -820,28 +426,58 @@ func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D
 func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {
     let dx = pd.width
     let dy = pd.height
-    var (subBlocksY, subBlocksCb, subBlocksCr, subPlane) = try await extractTransformBlocks32(pd: pd, qtY: qtY, qtC: qtC)
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
     
-    var subPredPlane: PlaneData420? = nil
-    if let pPd = predictedPd {
-        var (pY, pCb, pCr, pSub) = try await extractTransformBlocks32(pd: pPd, qtY: qtY, qtC: qtC)
-        subtractCoeffs32(currBlocks: &subBlocksY, predBlocks: &pY)
-        subtractCoeffs32(currBlocks: &subBlocksCb, predBlocks: &pCb)
-        subtractCoeffs32(currBlocks: &subBlocksCr, predBlocks: &pCr)
-        subPredPlane = pSub
-    }
+    async let taskBufY = {
+        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy)
+        var predSubband: [Int16]? = nil
+        if let pPd = predictedPd {
+            var (pBlocks, pSubband) = extractSingleTransformBlocks32(r: pPd.rY, width: dx, height: dy)
+            subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
+            predSubband = pSubband
+        }
+        for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtY) }
+        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
+        return (buf, subband, predSubband)
+    }()
     
-    for i in subBlocksY.indices { evaluateQuantizeLayer32(block: &subBlocksY[i], qt: qtY) }
-    for i in subBlocksCb.indices { evaluateQuantizeLayer32(block: &subBlocksCb[i], qt: qtC) }
-    for i in subBlocksCr.indices { evaluateQuantizeLayer32(block: &subBlocksCr[i], qt: qtC) }
+    async let taskBufCb = {
+        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
+        var predSubband: [Int16]? = nil
+        if let pPd = predictedPd {
+            var (pBlocks, pSubband) = extractSingleTransformBlocks32(r: pPd.rCb, width: cbDx, height: cbDy)
+            subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
+            predSubband = pSubband
+        }
+        for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtC) }
+        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
+        return (buf, subband, predSubband)
+    }()
     
-    async let taskBufY = encodePlaneSubbands32(blocks: &subBlocksY, zeroThreshold: zeroThreshold)
-    async let taskBufCb = encodePlaneSubbands32(blocks: &subBlocksCb, zeroThreshold: zeroThreshold)
-    async let taskBufCr = encodePlaneSubbands32(blocks: &subBlocksCr, zeroThreshold: zeroThreshold)
+    async let taskBufCr = {
+        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
+        var predSubband: [Int16]? = nil
+        if let pPd = predictedPd {
+            var (pBlocks, pSubband) = extractSingleTransformBlocks32(r: pPd.rCr, width: cbDx, height: cbDy)
+            subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
+            predSubband = pSubband
+        }
+        for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtC) }
+        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
+        return (buf, subband, predSubband)
+    }()
 
-    let bufY = await taskBufY
-    let bufCb = await taskBufCb
-    let bufCr = await taskBufCr
+    let (bufY, subY, pSubY) = await taskBufY
+    let (bufCb, subCb, pSubCb) = await taskBufCb
+    let (bufCr, subCr, pSubCr) = await taskBufCr
+
+    let subPlane = PlaneData420(width: dx / 2, height: dy / 2, y: subY, cb: subCb, cr: subCr)
+    var subPredPlane: PlaneData420? = nil
+    if let pY = pSubY, let pCb = pSubCb, let pCr = pSubCr {
+        subPredPlane = PlaneData420(width: dx / 2, height: dy / 2, y: pY, cb: pCb, cr: pCr)
+    }
+
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
@@ -867,28 +503,58 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
 func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {
     let dx = pd.width
     let dy = pd.height
-    var (subBlocksY, subBlocksCb, subBlocksCr, subPlane) = try await extractTransformBlocks16(pd: pd, qtY: qtY, qtC: qtC)
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
     
-    var subPredPlane: PlaneData420? = nil
-    if let pPd = predictedPd {
-        var (pY, pCb, pCr, pSub) = try await extractTransformBlocks16(pd: pPd, qtY: qtY, qtC: qtC)
-        subtractCoeffs16(currBlocks: &subBlocksY, predBlocks: &pY)
-        subtractCoeffs16(currBlocks: &subBlocksCb, predBlocks: &pCb)
-        subtractCoeffs16(currBlocks: &subBlocksCr, predBlocks: &pCr)
-        subPredPlane = pSub
-    }
+    async let taskBufY = {
+        var (blocks, subband) = extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy)
+        var predSubband: [Int16]? = nil
+        if let pPd = predictedPd {
+            var (pBlocks, pSubband) = extractSingleTransformBlocks16(r: pPd.rY, width: dx, height: dy)
+            subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
+            predSubband = pSubband
+        }
+        for i in blocks.indices { evaluateQuantizeLayer16(block: &blocks[i], qt: qtY) }
+        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold)
+        return (buf, subband, predSubband)
+    }()
     
-    for i in subBlocksY.indices { evaluateQuantizeLayer16(block: &subBlocksY[i], qt: qtY) }
-    for i in subBlocksCb.indices { evaluateQuantizeLayer16(block: &subBlocksCb[i], qt: qtC) }
-    for i in subBlocksCr.indices { evaluateQuantizeLayer16(block: &subBlocksCr[i], qt: qtC) }
+    async let taskBufCb = {
+        var (blocks, subband) = extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
+        var predSubband: [Int16]? = nil
+        if let pPd = predictedPd {
+            var (pBlocks, pSubband) = extractSingleTransformBlocks16(r: pPd.rCb, width: cbDx, height: cbDy)
+            subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
+            predSubband = pSubband
+        }
+        for i in blocks.indices { evaluateQuantizeLayer16(block: &blocks[i], qt: qtC) }
+        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold)
+        return (buf, subband, predSubband)
+    }()
     
-    async let taskBufY = encodePlaneSubbands16(blocks: &subBlocksY, zeroThreshold: zeroThreshold)
-    async let taskBufCb = encodePlaneSubbands16(blocks: &subBlocksCb, zeroThreshold: zeroThreshold)
-    async let taskBufCr = encodePlaneSubbands16(blocks: &subBlocksCr, zeroThreshold: zeroThreshold)
+    async let taskBufCr = {
+        var (blocks, subband) = extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
+        var predSubband: [Int16]? = nil
+        if let pPd = predictedPd {
+            var (pBlocks, pSubband) = extractSingleTransformBlocks16(r: pPd.rCr, width: cbDx, height: cbDy)
+            subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
+            predSubband = pSubband
+        }
+        for i in blocks.indices { evaluateQuantizeLayer16(block: &blocks[i], qt: qtC) }
+        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold)
+        return (buf, subband, predSubband)
+    }()
 
-    let bufY = await taskBufY
-    let bufCb = await taskBufCb
-    let bufCr = await taskBufCr
+    let (bufY, subY, pSubY) = await taskBufY
+    let (bufCb, subCb, pSubCb) = await taskBufCb
+    let (bufCr, subCr, pSubCr) = await taskBufCr
+
+    let subPlane = PlaneData420(width: dx / 2, height: dy / 2, y: subY, cb: subCb, cr: subCr)
+    var subPredPlane: PlaneData420? = nil
+    if let pY = pSubY, let pCb = pSubCb, let pCr = pSubCr {
+        subPredPlane = PlaneData420(width: dx / 2, height: dy / 2, y: pY, cb: pCb, cr: pCr)
+    }
+
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
@@ -914,25 +580,43 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
 func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
     let dx = pd.width
     let dy = pd.height
-    var (subBlocksY, subBlocksCb, subBlocksCr) = try await extractTransformBlocksBase8(pd: pd, qtY: qtY, qtC: qtC)
-    if let pPd = predictedPd {
-        var (pY, pCb, pCr) = try await extractTransformBlocksBase8(pd: pPd, qtY: qtY, qtC: qtC)
-        subtractCoeffsBase8(currBlocks: &subBlocksY, predBlocks: &pY)
-        subtractCoeffsBase8(currBlocks: &subBlocksCb, predBlocks: &pCb)
-        subtractCoeffsBase8(currBlocks: &subBlocksCr, predBlocks: &pCr)
-    }
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
     
-    for i in subBlocksY.indices { evaluateQuantizeBase8(block: &subBlocksY[i], qt: qtY) }
-    for i in subBlocksCb.indices { evaluateQuantizeBase8(block: &subBlocksCb[i], qt: qtC) }
-    for i in subBlocksCr.indices { evaluateQuantizeBase8(block: &subBlocksCr[i], qt: qtC) }
+    async let taskBufY = {
+        var blocks = extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
+        if let pPd = predictedPd {
+            var pBlocks = extractSingleTransformBlocksBase8(r: pPd.rY, width: dx, height: dy)
+            subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
+        }
+        for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtY) }
+        return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+    }()
     
-    async let taskBufY = encodePlaneBaseSubbands8(blocks: &subBlocksY, zeroThreshold: zeroThreshold)
-    async let taskBufCb = encodePlaneBaseSubbands8(blocks: &subBlocksCb, zeroThreshold: zeroThreshold)
-    async let taskBufCr = encodePlaneBaseSubbands8(blocks: &subBlocksCr, zeroThreshold: zeroThreshold)
+    async let taskBufCb = {
+        var blocks = extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
+        if let pPd = predictedPd {
+            var pBlocks = extractSingleTransformBlocksBase8(r: pPd.rCb, width: cbDx, height: cbDy)
+            subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
+        }
+        for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtC) }
+        return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+    }()
+    
+    async let taskBufCr = {
+        var blocks = extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
+        if let pPd = predictedPd {
+            var pBlocks = extractSingleTransformBlocksBase8(r: pPd.rCr, width: cbDx, height: cbDy)
+            subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
+        }
+        for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtC) }
+        return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+    }()
 
     let bufY = await taskBufY
     let bufCb = await taskBufCb
     let bufCr = await taskBufCr
+    
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
