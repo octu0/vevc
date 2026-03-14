@@ -18,13 +18,13 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
     
     var current = try await decodeBase(r: layer0Data, layer: 0, size: 8)
     
-    if maxLayer >= 1 {
+    if 1 <= maxLayer {
         let len1 = try readUInt32BEFromBytes(r, offset: &offset)
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
         current = try await decodeLayer(r: layer1Data, layer: 1, prev: current, size: 16)
     }
-    if maxLayer >= 2 {
+    if 2 <= maxLayer {
         let len2 = try readUInt32BEFromBytes(r, offset: &offset)
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
@@ -191,7 +191,6 @@ func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: 
     for y in 1..<size {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
-        
         ptr[0] = ptr[0] + ptrPrev[0]
         
         for x in 1..<size {
@@ -199,7 +198,7 @@ func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: 
             let b = Int(ptrPrev[x])
             let c = Int(ptrPrev[x - 1])
             let predicted: Int16
-            if c >= a && c >= b {
+            if a <= c && b <= c {
                 predicted = Int16(min(a, b))
             } else if c <= a && c <= b {
                 predicted = Int16(max(a, b))

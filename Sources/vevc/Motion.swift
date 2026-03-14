@@ -7,7 +7,6 @@ func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
         let currRow = pCurr.advanced(by: y * currStride)
         let prevRow = pPrev.advanced(by: y * prevStride)
 
-        // SIMD16を展開して高速化
         let c0 = UnsafeRawPointer(currRow).loadUnaligned(as: SIMD16<Int16>.self)
         let p0 = UnsafeRawPointer(prevRow).loadUnaligned(as: SIMD16<Int16>.self)
         let c1 = UnsafeRawPointer(currRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
@@ -16,16 +15,12 @@ func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
         let diff0 = c0 &- p0
         let diff1 = c1 &- p1
 
-        // 負の数を絶対値に変換 (ビット演算によるabs)
-        // mask = diff >> 15 (正: 0, 負: -1)
-        // (diff ^ mask) - mask
         let mask0 = diff0 &>> 15
         let abs0 = (diff0 ^ mask0) &- mask0
 
         let mask1 = diff1 &>> 15
         let abs1 = (diff1 ^ mask1) &- mask1
 
-        // オーバーフローを避けるためInt32に拡張してから合算
         let sum0 = SIMD16<Int32>(clamping: abs0).wrappedSum()
         let sum1 = SIMD16<Int32>(clamping: abs1).wrappedSum()
 
@@ -88,8 +83,8 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                         bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
                     }
 
-                    for dy in -searchRange...searchRange {
-                        for dx in -searchRange...searchRange {
+                    for dy in (-1 * searchRange)...searchRange {
+                        for dx in (-1 * searchRange)...searchRange {
                             if dx == 0 && dy == 0 { continue }
 
                             let refX = startX + dx
@@ -99,7 +94,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                             if bestSAD <= penalty { continue }
 
                             var sad = 0
-                            if refX >= 0 && refY >= 0 && refX + actW <= w && refY + actH <= h {
+                            if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
                                 if actW == 32 && actH == 32 {
                                     sad = calculateSAD32x32(
                                         pCurr: pCurr.advanced(by: startY * w + startX),
@@ -163,7 +158,6 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
         for x in 0..<actW {
             let cx = startX + x
             let px = max(0, min(w - 1, cx + dx))
-
             let diff = Int(pCurrRow[x]) - Int(pPrevRow[px])
 
             let mask = diff >> 31
@@ -210,7 +204,7 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                         let refX = startX + dx
                         let refY = startY + dy
                         
-                        if refX >= 0 && refY >= 0 && refX + actW <= pW && refY + actH <= pH {
+                        if 0 <= refX && 0 <= refY && (refX + actW) <= pW && (refY + actH) <= pH {
                             for y in 0..<actH {
                                 let dstRow = (startY + y) * pW
                                 let srcRow = (refY + y) * pW
@@ -264,29 +258,31 @@ func calculatePMV(mvs: MotionVectors, mbX: Int, mbY: Int, mbCols: Int) -> (dx: I
 
     if count == 0 {
         return (0, 0)
-    } else if count == 1 {
+    }
+    if count == 1 {
         let idx = hasLeft ? idxLeft : (hasTop ? idxTop : idxTopRight)
         return (mvs.dx[idx], mvs.dy[idx])
-    } else if count == 2 {
+    }
+    if count == 2 {
         var dxSum = 0
         var dySum = 0
         if hasLeft { dxSum += mvs.dx[idxLeft]; dySum += mvs.dy[idxLeft] }
         if hasTop { dxSum += mvs.dx[idxTop]; dySum += mvs.dy[idxTop] }
         if hasTopRight { dxSum += mvs.dx[idxTopRight]; dySum += mvs.dy[idxTopRight] }
         return (dxSum / 2, dySum / 2)
-    } else {
-        let lx = mvs.dx[idxLeft]; let ly = mvs.dy[idxLeft]
-        let tx = mvs.dx[idxTop]; let ty = mvs.dy[idxTop]
-        let rx = mvs.dx[idxTopRight]; let ry = mvs.dy[idxTopRight]
-
-        let minX = min(lx, min(tx, rx))
-        let maxX = max(lx, max(tx, rx))
-        let pmvX = lx + tx + rx - minX - maxX
-
-        let minY = min(ly, min(ty, ry))
-        let maxY = max(ly, max(ty, ry))
-        let pmvY = ly + ty + ry - minY - maxY
-
-        return (pmvX, pmvY)
     }
+    
+    let lx = mvs.dx[idxLeft]; let ly = mvs.dy[idxLeft]
+    let tx = mvs.dx[idxTop]; let ty = mvs.dy[idxTop]
+    let rx = mvs.dx[idxTopRight]; let ry = mvs.dy[idxTopRight]
+
+    let minX = min(lx, min(tx, rx))
+    let maxX = max(lx, max(tx, rx))
+    let pmvX = lx + tx + rx - minX - maxX
+
+    let minY = min(ly, min(ty, ry))
+    let maxY = max(ly, max(ty, ry))
+    let pmvY = ly + ty + ry - minY - maxY
+
+    return (pmvX, pmvY)
 }

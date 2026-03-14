@@ -31,7 +31,7 @@ struct ContextModel {
                 pStateIdx += 1
             }
         } else {
-            if pStateIdx > 0 {
+            if 0 < pStateIdx {
                 pStateIdx -= 1
             } else {
                 valMPS = 1 - valMPS
@@ -49,9 +49,7 @@ struct CABACBitWriter {
 
     init(capacity: Int = 0) {
         self.data = []
-        if capacity > 0 {
-            self.data.reserveCapacity(capacity)
-        }
+        self.data.reserveCapacity(capacity)
         self.cache = 0
         self.bits = 0
     }
@@ -100,7 +98,7 @@ struct CABACEncoder {
             if low < 256 {
                 putBit(0)
                 putPendingBits(1)
-            } else if low >= 512 {
+            } else if 512 <= low {
                 low -= 512
                 putBit(1)
                 putPendingBits(0)
@@ -277,7 +275,7 @@ struct CABACDecoder {
         value = ((value << 1) | UInt32(b)) & 0x3FF
 
         let binVal: UInt8
-        if value >= range {
+        if range <= value {
             binVal = 1
             value -= range
         } else {

@@ -69,7 +69,7 @@ extension PlaneData420 {
         }
 
         let countCbCr = img.cbPlane.count
-        if countCbCr > 0 {
+        if 0 < countCbCr {
             for i in 0..<countCbCr {
                 let cbVal = self.cb[i]
                 switch cbVal {
@@ -125,6 +125,7 @@ func evaluateQuantizeBase(block: inout Block2D, size: Int, qt: QuantizationTable
     }
 }
 
+@inline(__always)
 func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable, qtC: QuantizationTable) async throws -> (blocksY: [Block2D], blocksCb: [Block2D], blocksCr: [Block2D], subPlane: PlaneData420) {
     let dx = pd.width
     let dy = pd.height
@@ -136,7 +137,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     let rY = pd.rY
     let rowCountY = ((dy + size - 1) / size)
     let resultsY = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountY))
-    let errorY = ConcurrentBox<Error?>(nil)
     let chunkSize = 4
     let taskCountY = ((rowCountY + chunkSize - 1) / chunkSize)
     
@@ -161,7 +161,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
             resultsY.value[i] = (h, rowResults)
         }
     }
-    if let err = errorY.value { throw err }
     
     var blocksY: [Block2D] = []
     blocksY.reserveCapacity((rowCountY * ((dx + size - 1) / size)))
@@ -206,7 +205,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     let subCbDy = (cbDy / 2)
     let rowCountCb = ((cbDy + size - 1) / size)
     let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
-    let errorCb = ConcurrentBox<Error?>(nil)
     let taskCountCb = ((rowCountCb + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
@@ -230,7 +228,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
             resultsCb.value[i] = (h, rowResults)
         }
     }
-    if let err = errorCb.value { throw err }
     
     var blocksCb: [Block2D] = []
     blocksCb.reserveCapacity((rowCountCb * ((cbDx + size - 1) / size)))
@@ -268,7 +265,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     let rCr = pd.rCr
     let rowCountCr = ((cbDy + size - 1) / size)
     let resultsCr = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCr))
-    let errorCr = ConcurrentBox<Error?>(nil)
     let taskCountCr = ((rowCountCr + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
@@ -292,7 +288,6 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
             resultsCr.value[i] = (h, rowResults)
         }
     }
-    if let err = errorCr.value { throw err }
     
     var blocksCr: [Block2D] = []
     blocksCr.reserveCapacity((rowCountCr * ((cbDx + size - 1) / size)))
@@ -332,6 +327,7 @@ func extractTransformBlocks(pd: PlaneData420, size: Int, qtY: QuantizationTable,
     return (blocksY, blocksCb, blocksCr, subPlane)
 }
 
+@inline(__always)
 func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTable, qtC: QuantizationTable) async throws -> (blocksY: [Block2D], blocksCb: [Block2D], blocksCr: [Block2D]) {
     let dx = pd.width
     let dy = pd.height
@@ -340,7 +336,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
     let rY = pd.rY
     let rowCountY = ((dy + size - 1) / size)
     let resultsY = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountY))
-    let errorY = ConcurrentBox<Error?>(nil)
     let chunkSize = 4
     let taskCountY = ((rowCountY + chunkSize - 1) / chunkSize)
     
@@ -365,7 +360,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
             resultsY.value[i] = (h, rowResults)
         }
     }
-    if let err = errorY.value { throw err }
     
     var blocksY: [Block2D] = []
     blocksY.reserveCapacity((rowCountY * ((dx + size - 1) / size)))
@@ -383,7 +377,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
     let cbDy = ((dy + 1) / 2)
     let rowCountCb = ((cbDy + size - 1) / size)
     let resultsCb = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCb))
-    let errorCb = ConcurrentBox<Error?>(nil)
     let taskCountCb = ((rowCountCb + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountCb) { taskIdx in
@@ -407,7 +400,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
             resultsCb.value[i] = (h, rowResults)
         }
     }
-    if let err = errorCb.value { throw err }
     
     var blocksCb: [Block2D] = []
     blocksCb.reserveCapacity((rowCountCb * ((cbDx + size - 1) / size)))
@@ -423,7 +415,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
     let rCr = pd.rCr
     let rowCountCr = ((cbDy + size - 1) / size)
     let resultsCr = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCountCr))
-    let errorCr = ConcurrentBox<Error?>(nil)
     let taskCountCr = ((rowCountCr + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCountCr) { taskIdx in
@@ -447,7 +438,6 @@ func extractTransformBlocksBase(pd: PlaneData420, size: Int, qtY: QuantizationTa
             resultsCr.value[i] = (h, rowResults)
         }
     }
-    if let err = errorCr.value { throw err }
     
     var blocksCr: [Block2D] = []
     blocksCr.reserveCapacity((rowCountCr * ((cbDx + size - 1) / size)))
@@ -520,6 +510,7 @@ func subtractCoeffsBase(currBlocks: inout [Block2D], predBlocks: inout [Block2D]
     }
 }
 
+@inline(__always)
 func encodePlaneLayer(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, size: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {
     let dx = pd.width
     let dy = pd.height
@@ -566,7 +557,8 @@ func encodePlaneLayer(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     return (out, subPlane, subPredPlane)
 }
 
-func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, size: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isIFrame: Bool) async throws -> [UInt8] {
+@inline(__always)
+func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, size: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
     let dx = pd.width
     let dy = pd.height
     var (subBlocksY, subBlocksCb, subBlocksCr) = try await extractTransformBlocksBase(pd: pd, size: size, qtY: qtY, qtC: qtC)
@@ -609,15 +601,15 @@ func encodePlaneBase(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8,
     return out
 }
 
-func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isIFrame: Bool) async throws -> [UInt8] {
+@inline(__always)
+func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
     let (layer2, sub2, subPred2) = try await encodePlaneLayer(pd: pd, predictedPd: predictedPd, layer: 2, size: 32, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
     let (layer1, sub1, subPred1) = try await encodePlaneLayer(pd: sub2, predictedPd: subPred2, layer: 1, size: 16, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-    let layer0 = try await encodePlaneBase(pd: sub1, predictedPd: subPred1, layer: 0, size: 8, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: isIFrame)
+    let layer0 = try await encodePlaneBase(pd: sub1, predictedPd: subPred1, layer: 0, size: 8, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
     
     debugLog("  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
     
     var out: [UInt8] = []
-    
     appendUInt32BE(&out, UInt32(layer0.count))
     out.append(contentsOf: layer0)
     

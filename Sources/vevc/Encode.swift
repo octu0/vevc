@@ -158,7 +158,7 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
             let b = Int(ptrPrev[x])
             let c = Int(ptrPrev[x - 1])
             let predicted: Int16
-            if c >= a && c >= b {
+            if a <= c && b <= c {
                 predicted = Int16(min(a, b))
             } else if c <= a && c <= b {
                 predicted = Int16(max(a, b))
@@ -233,7 +233,7 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
                 let b = Int(ptrPrev[x])
                 let c = Int(ptrPrev[x - 1])
                 let predicted: Int16
-                if c >= a && c >= b {
+                if a <= c && b <= c {
                     predicted = Int16(min(a, b))
                 } else if c <= a && c <= b {
                     predicted = Int16(max(a, b))
@@ -258,7 +258,6 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
     lastVal = block.rowPointer(y: size - 1)[size - 1]
 }
 
-
 // MARK: - Byte Serialization Helpers
 
 @inline(__always)
@@ -279,12 +278,20 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 
 @inline(__always)
 func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
+    let thPos = threshold
+    let thNeg = -1 * threshold
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
         for x in 0..<size {
-            if abs(Int(ptrHL[x])) > threshold || abs(Int(ptrLH[x])) > threshold || abs(Int(ptrHH[x])) > threshold {
+            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
+                return false
+            }
+            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
+                return false
+            }
+            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
                 return false
             }
         }
@@ -315,12 +322,20 @@ func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockVi
         }
     }
     
+    let thPos = threshold
+    let thNeg = -1 * threshold
     for y in 0..<size {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
         for x in 0..<size {
-            if abs(Int(ptrHL[x])) > threshold || abs(Int(ptrLH[x])) > threshold || abs(Int(ptrHH[x])) > threshold {
+            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
+                return false
+            }
+            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
+                return false
+            }
+            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
                 return false
             }
         }
@@ -474,13 +489,10 @@ func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -
 private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout Int16) -> Int {
     if size < 1 { return 0 }
 
-    var sumDiffAbs = 0
-    let count = (size * size)
-    
+    let count = size * size
     let ptr0 = block.rowPointer(y: 0)
     
-    sumDiffAbs += abs(Int(ptr0[0] - lastVal))
-    
+    var sumDiffAbs = abs(Int(ptr0[0] - lastVal))
     for x in 1..<size {
         sumDiffAbs += abs(Int(ptr0[x] - ptr0[x - 1]))
     }
@@ -496,7 +508,7 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
             let b = Int(ptrPrev[x])
             let c = Int(ptrPrev[x - 1])
             let predicted: Int16
-            if c >= a && c >= b {
+            if a <= c && b <= c {
                 predicted = Int16(min(a, b))
             } else if c <= a && c <= b {
                 predicted = Int16(max(a, b))
@@ -522,7 +534,7 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
     return bodyBits + headerBits
 }
 
-
+@inline(__always)
 private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
         return dwt2d(&view, size: size)
@@ -550,6 +562,7 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     return bits
 }
 
+@inline(__always)
 private func estimateRiceBits(block: BlockView, size: Int) -> Int {
     if size < 1 { return 0 }
 
@@ -822,10 +835,6 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
     return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
 }
 
-
-
-
-
 @inline(__always)
 func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
@@ -902,7 +911,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         var mvs = MotionVectors(count: 0)
         var meanSAD: Int = 0
         
-        if gopCount >= gopSize || prevReconstructed == nil {
+        if gopSize <= gopCount || prevReconstructed == nil {
             forceIFrame = true
         } else {
             guard let prev = prevReconstructed else { continue }
@@ -920,7 +929,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             }
             meanSAD = sumSAD / (res.width * res.height)
             
-            if meanSAD > sceneChangeThreshold {
+            if sceneChangeThreshold < meanSAD {
                 forceIFrame = true
                 debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high SAD (\(meanSAD) > \(sceneChangeThreshold))")
             }
@@ -929,7 +938,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         if forceIFrame {
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
-            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: true)
+            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
             appendUInt32BE(&out, UInt32(bytes.count))
@@ -942,7 +951,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         } else {
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
-            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, isIFrame: false)
+            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
