@@ -23,11 +23,19 @@ final class DWTTests: XCTestCase {
         let originalData: [Int16] = block.data
 
         block.withView { (view: inout BlockView) in
-            _ = dwt2d(&view, size: size)
-        }
-
-        block.withView { (view: inout BlockView) in
-            invDwt2d(&view, size: size)
+            switch size {
+            case 8:
+                dwt2d_8(&view)
+                invDwt2d_8(&view)
+            case 16:
+                dwt2d_16(&view)
+                invDwt2d_16(&view)
+            case 32:
+                dwt2d_32(&view)
+                invDwt2d_32(&view)
+            default:
+                XCTFail("Unsupported size: \(size)")
+            }
         }
 
         XCTAssertEqual(block.data, originalData, "Roundtrip failed for size \(size)")
@@ -94,4 +102,150 @@ final class DWTTests: XCTestCase {
         }
         #endif
     }
+
+    func testSpatialDWTRoundTrip8() {
+        runRoundTripTest(size: 8)
+    }
+
+    func testSpatialDWTRoundTrip16() {
+        runRoundTripTest(size: 16)
+    }
+
+    func testSpatialDWTRoundTrip32() {
+        runRoundTripTest(size: 32)
+    }
+
+    private func runRoundTripTest(size: Int) {
+        var block = Block2D(width: size, height: size)
+        for i in 0..<block.data.count {
+            block.data[i] = Int16.random(in: (-1 * 1000)...1000)
+        }
+
+        let originalData = block.data
+
+        block.withView { view in
+            switch size {
+            case 8:
+                dwt2d_8(&view)
+            case 16:
+                dwt2d_16(&view)
+            case 32:
+                dwt2d_32(&view)
+            default:
+                XCTFail("Unsupported size: \(size)")
+            }
+        }
+
+        block.withView { view in
+            switch size {
+            case 8:
+                invDwt2d_8(&view)
+            case 16:
+                invDwt2d_16(&view)
+            case 32:
+                invDwt2d_32(&view)
+            default:
+                XCTFail("Unsupported size: \(size)")
+            }
+        }
+
+        XCTAssertEqual(block.data, originalData, "Roundtrip failed for size \(size)")
+    }
+
+    func testLift53Lossless() {
+        let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
+
+        for size in sizes {
+            var data = [Int16](repeating: 0, count: size)
+            for i in 0..<size {
+                data[i] = Int16.random(in: -1000...1000)
+            }
+
+            let original = data
+
+            data.withUnsafeMutableBufferPointer { ptr in
+                switch size {
+                case 8:
+                    lift53_8(ptr, stride: 1)
+                    invLift53_8(ptr, stride: 1)
+                case 16:
+                    lift53_16(ptr, stride: 1)
+                    invLift53_16(ptr, stride: 1)
+                case 32:
+                    lift53_32(ptr, stride: 1)
+                    invLift53_32(ptr, stride: 1)
+                default:
+                    XCTFail("Unsupported size: \(size)")
+                }
+            }
+
+            XCTAssertEqual(data, original, "Failed for size \(size)")
+        }
+    }
+
+    func testDWT2DLossless() {
+        let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
+
+        for size in sizes {
+            var block = Block2D(width: size, height: size)
+            for y in 0..<size {
+                for x in 0..<size {
+                    block.data[(y * size) + x] = Int16.random(in: -1000...1000)
+                }
+            }
+
+            let originalData = block.data
+
+            block.withView { view in
+                switch size {
+                case 8:
+                    dwt2d_8(&view)
+                    invDwt2d_8(&view)
+                case 16:
+                    dwt2d_16(&view)
+                    invDwt2d_16(&view)
+                case 32:
+                    dwt2d_32(&view)
+                    invDwt2d_32(&view)
+                default:
+                    XCTFail("Unsupported size: \(size)")
+                }
+            }
+
+            XCTAssertEqual(block.data, originalData, "Failed for block size \(size)")
+        }
+    }
+    
+    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+    func testLift53SIMDLossless() {
+        let sizes: [Int] = [8, 16, 32]
+
+        for size in sizes {
+            var data = [Int16](repeating: 0, count: size)
+            for i in 0..<size {
+                data[i + 0] = Int16.random(in: (-1 * 1000)...1000)
+            }
+
+            let original = data
+
+            data.withUnsafeMutableBufferPointer { ptr in
+                switch size {
+                case 8:
+                    lift53_8(ptr, stride: 1)
+                    invLift53_8(ptr, stride: 1)
+                case 16:
+                    lift53_16(ptr, stride: 1)
+                    invLift53_16(ptr, stride: 1)
+                case 32:
+                    lift53_32(ptr, stride: 1)
+                    invLift53_32(ptr, stride: 1)
+                default:
+                    XCTFail("Unsupported size: \(size)")
+                }
+            }
+
+            XCTAssertEqual(data, original, "SIMD failed for size \(size)")
+        }
+    }
+    #endif
 }
