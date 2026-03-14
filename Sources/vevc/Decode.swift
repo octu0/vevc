@@ -7,6 +7,7 @@ public enum DecodeError: Error {
     case invalidHeader
     case invalidLayerNumber
     case noDataProvided
+    case unsupportedArchitecture
 }
 
 @inline(__always)
@@ -1194,6 +1195,11 @@ public struct DecodeOptions: Sendable {
 
 @inline(__always)
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
+    #if !(arch(arm64) || arch(x86_64) || arch(wasm32))
+    throw DecodeError.unsupportedArchitecture
+    #endif
+    
+    if data.isEmpty { return [] }
     var out: [YCbCrImage] = []
     var offset = 0
     var prevReconstructed: PlaneData420? = nil

@@ -249,8 +249,6 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
     return blocks
 }
 
-#if arch(arm64) || arch(x86_64) || arch(wasm32)
-
 @inline(__always)
 func subtractCoeffs32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     for i in currBlocks.indices {
@@ -324,93 +322,6 @@ func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D
         }
     }
 }
-
-#else
-
-@inline(__always)
-func subtractCoeffs32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
-    let half = (32 / 2)
-    for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                for y in 0..<half {
-                    let ptrC = vC.rowPointer(y: y).advanced(by: half)
-                    let ptrP = vP.rowPointer(y: y).advanced(by: half)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in half..<32 {
-                    let ptrC = vC.rowPointer(y: y)
-                    let ptrP = vP.rowPointer(y: y)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in half..<32 {
-                    let ptrC = vC.rowPointer(y: y).advanced(by: half)
-                    let ptrP = vP.rowPointer(y: y).advanced(by: half)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func subtractCoeffs16(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
-    let half = (16 / 2)
-    for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                for y in 0..<half {
-                    let ptrC = vC.rowPointer(y: y).advanced(by: half)
-                    let ptrP = vP.rowPointer(y: y).advanced(by: half)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in half..<16 {
-                    let ptrC = vC.rowPointer(y: y)
-                    let ptrP = vP.rowPointer(y: y)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in half..<16 {
-                    let ptrC = vC.rowPointer(y: y).advanced(by: half)
-                    let ptrP = vP.rowPointer(y: y).advanced(by: half)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
-    let half = (8 / 2)
-    for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                for y in 0..<half {
-                    let ptrC = vC.rowPointer(y: y)
-                    let ptrP = vP.rowPointer(y: y)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in 0..<half {
-                    let ptrC = vC.rowPointer(y: y).advanced(by: half)
-                    let ptrP = vP.rowPointer(y: y).advanced(by: half)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in half..<8 {
-                    let ptrC = vC.rowPointer(y: y)
-                    let ptrP = vP.rowPointer(y: y)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-                for y in half..<8 {
-                    let ptrC = vC.rowPointer(y: y).advanced(by: half)
-                    let ptrP = vP.rowPointer(y: y).advanced(by: half)
-                    for x in 0..<half { ptrC[x] &-= ptrP[x] }
-                }
-            }
-        }
-    }
-}
-
-#endif
 
 @inline(__always)
 func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {

@@ -64,25 +64,15 @@ func quantizeHighSignedMapping(_ block: inout BlockView, qt: QuantizationTable) 
 
 @inline(__always)
 internal func quantize(_ block: inout BlockView, q: Quantizer) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
     quantizeSIMD(&block, q: q)
-    #else
-    quantizeScalar(&block, q: q)
-    #endif
 }
 
 @inline(__always)
 internal func quantizeSignedMapping(_ block: inout BlockView, q: Quantizer) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
     quantizeSIMDSignedMapping(&block, q: q)
-    #else
-    quantizeScalarSignedMapping(&block, q: q)
-    #endif
 }
 
 // MARK: - Quantization SIMD
-
-#if arch(arm64) || arch(x86_64) || arch(wasm32)
 
 @inline(__always)
 private func performQuantizeSIMD8(_ vec: SIMD8<Int16>, mul: Int32, shift: Int32, bias: Int32) -> SIMD8<Int16> {
@@ -308,52 +298,6 @@ private func quantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Quant
     }
 }
 
-#endif
-
-// MARK: - Quantization Scalar (fallback)
-
-@inline(__always)
-internal func quantizeScalar(_ block: inout BlockView, q: Quantizer) {
-    let mul = q.mul
-    let shift = Int32(q.shift)
-    let bias = q.bias
-    
-    for y in 0..<block.height {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<block.width {
-            let val = Int32(ptr[x])
-            let absVal = abs(val)
-            let qVal = (((absVal &* mul) &+ bias) &>> shift)
-            var res: Int32 = qVal
-            if val <= -1 {
-                res = (-1 * qVal)
-            }
-            ptr[x] = Int16(res)
-        }
-    }
-}
-
-@inline(__always)
-internal func quantizeScalarSignedMapping(_ block: inout BlockView, q: Quantizer) {
-    let mul = q.mul
-    let shift = Int32(q.shift)
-    let bias = q.bias
-    
-    for y in 0..<block.height {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<block.width {
-            let val = Int32(ptr[x])
-            let absVal = abs(val)
-            let qVal = (((absVal &* mul) &+ bias) &>> shift)
-            var res: Int32 = qVal
-            if val <= -1 {
-                res = (-1 * qVal)
-            }
-            let v = Int16(res)
-            ptr[x] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
-        }
-    }
-}
 
 // MARK: - Dequantization
 
@@ -389,25 +333,15 @@ func dequantizeHighSignedMapping(_ block: inout BlockView, qt: QuantizationTable
 
 @inline(__always)
 internal func dequantize(_ block: inout BlockView, q: Quantizer) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
     dequantizeSIMD(&block, q: q)
-    #else
-    dequantizeScalar(&block, q: q)
-    #endif
 }
 
 @inline(__always)
 internal func dequantizeSignedMapping(_ block: inout BlockView, q: Quantizer) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
     dequantizeSIMDSignedMapping(&block, q: q)
-    #else
-    dequantizeScalarSignedMapping(&block, q: q)
-    #endif
 }
 
 // MARK: - Dequantization SIMD
-
-#if arch(arm64) || arch(x86_64) || arch(wasm32)
 
 @inline(__always)
 private func performDequantizeSIMD8(_ vec: SIMD8<Int16>, step: Int32) -> SIMD8<Int16> {
@@ -627,35 +561,4 @@ private func dequantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Qua
     }
 }
 
-#endif
-
-// MARK: - Dequantization Scalar (fallback)
-
-@inline(__always)
-internal func dequantizeScalar(_ block: inout BlockView, q: Quantizer) {
-    let step = Int32(q.step)
-    
-    for y in 0..<block.height {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<block.width {
-            let val = Int32(ptr[x])
-            ptr[x] = Int16(clamping: (val &* step))
-        }
-    }
-}
-
-@inline(__always)
-internal func dequantizeScalarSignedMapping(_ block: inout BlockView, q: Quantizer) {
-    let step = Int32(q.step)
-    
-    for y in 0..<block.height {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<block.width {
-            let uVal = UInt16(bitPattern: ptr[x])
-            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-            let decoded = Int16(bitPattern: decodedUInt)
-            ptr[x] = Int16(clamping: (Int32(decoded) &* step))
-        }
-    }
-}
 

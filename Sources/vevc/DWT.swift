@@ -26,134 +26,6 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 
 @inline(__always)
 func lift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    lift53SIMD4(buffer, stride: stride)
-    #else
-    lift53Scalar(buffer, count: 8, stride: stride)
-    #endif
-}
-
-@inline(__always)
-func lift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    lift53SIMD8(buffer, stride: stride)
-    #else
-    lift53Scalar(buffer, count: 16, stride: stride)
-    #endif
-}
-
-@inline(__always)
-func lift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    lift53SIMD16(buffer, stride: stride)
-    #else
-    lift53Scalar(buffer, count: 32, stride: stride)
-    #endif
-}
-
-@inline(__always)
-func invLift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    invLift53SIMD4(buffer, stride: stride)
-    #else
-    invLift53Scalar(buffer, count: 8, stride: stride)
-    #endif
-}
-
-@inline(__always)
-func invLift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    invLift53SIMD8(buffer, stride: stride)
-    #else
-    invLift53Scalar(buffer, count: 16, stride: stride)
-    #endif
-}
-
-@inline(__always)
-func invLift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    invLift53SIMD16(buffer, stride: stride)
-    #else
-    invLift53Scalar(buffer, count: 32, stride: stride)
-    #endif
-}
-
-// MARK: - Lifting Scalar (fallback)
-
-internal func lift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: Int) {
-    let half = (count / 2)
-    var low = [Int16](repeating: 0, count: half)
-    var high = [Int16](repeating: 0, count: half)
-    
-    for i in 0..<half {
-        low[i] = buffer[2 * i * stride]
-        high[i] = buffer[(2 * i + 1) * stride]
-    }
-    
-    for i in 0..<half {
-        let l = Int32(low[i])
-        var r = Int32(low[i])
-        if (i + 1) < half {
-            r = Int32(low[i + 1])
-        }
-        high[i] -= Int16((l + r) >> 1)
-    }
-    
-    for i in 0..<half {
-        let d = Int32(high[i])
-        var dp = Int32(high[i])
-        if 0 <= (i - 1) {
-            dp = Int32(high[i - 1])
-        }
-        low[i] += Int16(((dp + d) + 2) >> 2)
-    }
-    
-    for i in 0..<half {
-        buffer[i * stride] = low[i]
-        buffer[(half + i) * stride] = high[i]
-    }
-}
-
-internal func invLift53Scalar(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: Int) {
-    let half = (count / 2)
-    var low = [Int16](repeating: 0, count: half)
-    var high = [Int16](repeating: 0, count: half)
-    
-    for i in 0..<half {
-        low[i] = buffer[i * stride]
-        high[i] = buffer[(half + i) * stride]
-    }
-    
-    for i in 0..<half {
-        let d = Int32(high[i])
-        var dp = Int32(high[i])
-        if 0 <= (i - 1) {
-            dp = Int32(high[i - 1])
-        }
-        low[i] -= Int16(((dp + d) + 2) >> 2)
-    }
-    
-    for i in 0..<half {
-        let l = Int32(low[i])
-        var r = Int32(low[i])
-        if (i + 1) < half {
-            r = Int32(low[i + 1])
-        }
-        high[i] += Int16((l + r) >> 1)
-    }
-    
-    for i in 0..<half {
-        buffer[2 * i * stride] = low[i]
-        buffer[(2 * i + 1) * stride] = high[i]
-    }
-}
-
-// MARK: - Lifting SIMD
-
-#if arch(arm64) || arch(x86_64) || arch(wasm32)
-
-@inline(__always)
-func lift53SIMD4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD4<Int16>(buffer[0 * stride], buffer[2 * stride], buffer[4 * stride], buffer[6 * stride])
     var high = SIMD4<Int16>(buffer[1 * stride], buffer[3 * stride], buffer[5 * stride], buffer[7 * stride])
 
@@ -168,7 +40,7 @@ func lift53SIMD4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func lift53SIMD8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func lift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD8<Int16>(
         buffer[0 * stride], buffer[2 * stride], buffer[4 * stride], buffer[6 * stride],
         buffer[8 * stride], buffer[10 * stride], buffer[12 * stride], buffer[14 * stride]
@@ -191,7 +63,7 @@ func lift53SIMD8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func lift53SIMD16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func lift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD16<Int16>(
         buffer[0 * stride], buffer[2 * stride], buffer[4 * stride], buffer[6 * stride],
         buffer[8 * stride], buffer[10 * stride], buffer[12 * stride], buffer[14 * stride],
@@ -228,7 +100,7 @@ func lift53SIMD16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53SIMD4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func invLift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD4<Int16>(buffer[0 * stride], buffer[1 * stride], buffer[2 * stride], buffer[3 * stride])
     var high = SIMD4<Int16>(buffer[4 * stride], buffer[5 * stride], buffer[6 * stride], buffer[7 * stride])
 
@@ -245,7 +117,7 @@ func invLift53SIMD4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53SIMD8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func invLift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD8<Int16>(
         buffer[0 * stride], buffer[1 * stride], buffer[2 * stride], buffer[3 * stride],
         buffer[4 * stride], buffer[5 * stride], buffer[6 * stride], buffer[7 * stride]
@@ -272,7 +144,7 @@ func invLift53SIMD8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53SIMD16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func invLift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD16<Int16>(
         buffer[0 * stride], buffer[1 * stride], buffer[2 * stride], buffer[3 * stride],
         buffer[4 * stride], buffer[5 * stride], buffer[6 * stride], buffer[7 * stride],
@@ -315,8 +187,6 @@ func invLift53SIMD16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     buffer[28 * stride] = low[14]; buffer[29 * stride] = high[14]
     buffer[30 * stride] = low[15]; buffer[31 * stride] = high[15]
 }
-
-#endif
 
 // MARK: - 2D DWT
 
