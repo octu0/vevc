@@ -12,11 +12,6 @@ func debugLog(_ msg: String) {
 }
 
 @inline(__always)
-func toUint16(_ n: Int16) -> UInt16 {
-    return UInt16(bitPattern: ((n &<< 1) ^ (n >> 15)))
-}
-
-@inline(__always)
 func encodeExpGolomb(val: UInt32, encoder: inout CABACEncoder) {
     var q: Int = 0
     var temp = val &+ 1
@@ -377,51 +372,58 @@ func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: in
     let ptr3 = block.rowPointer(y: 3)
     
     @inline(__always)
-    func diffMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
-        let ia = Int(a), ib = Int(b), ic = Int(c)
-        let predicted: Int
-        if ia <= ic && ib <= ic {
-            predicted = min(ia, ib)
-        } else if ic <= ia && ic <= ib {
-            predicted = max(ia, ib)
-        } else {
-            predicted = ia + ib - ic
-        }
-        return Int16(truncatingIfNeeded: Int(x) - predicted)
+    func diffMED(_ x: SIMD4<Int16>, _ a: SIMD4<Int16>, _ b: SIMD4<Int16>, _ c: SIMD4<Int16>) -> SIMD4<Int16> {
+        let pMin = SIMD4<Int16>(min(a[0], b[0]), min(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3]))
+        let pMax = SIMD4<Int16>(max(a[0], b[0]), max(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3]))
+        let rawPred = a &+ b &- c
+        let pred = SIMD4<Int16>(
+            min(max(rawPred[0], pMin[0]), pMax[0]),
+            min(max(rawPred[1], pMin[1]), pMax[1]),
+            min(max(rawPred[2], pMin[2]), pMax[2]),
+            min(max(rawPred[3], pMin[3]), pMax[3])
+        )
+        return x &- pred
     }
 
-    let err00 = Int16(truncatingIfNeeded: Int(ptr0[0]) - Int(lastVal))
-    let err01 = Int16(truncatingIfNeeded: Int(ptr0[1]) - Int(ptr0[0]))
-    let err02 = Int16(truncatingIfNeeded: Int(ptr0[2]) - Int(ptr0[1]))
-    let err03 = Int16(truncatingIfNeeded: Int(ptr0[3]) - Int(ptr0[2]))
+    let x0 = SIMD4<Int16>(ptr0[0], ptr0[1], ptr0[2], ptr0[3])
+    let b0 = SIMD4<Int16>(lastVal, x0[0], x0[1], x0[2])
+    let errSIMD0 = x0 &- b0
 
-    let err10 = Int16(truncatingIfNeeded: Int(ptr1[0]) - Int(ptr0[0]))
-    let err11 = diffMED(ptr1[1], ptr1[0], ptr0[1], ptr0[0])
-    let err12 = diffMED(ptr1[2], ptr1[1], ptr0[2], ptr0[1])
-    let err13 = diffMED(ptr1[3], ptr1[2], ptr0[3], ptr0[2])
+    let x1 = SIMD4<Int16>(ptr1[0], ptr1[1], ptr1[2], ptr1[3])
+    let a1 = SIMD4<Int16>(x0[0], x1[0], x1[1], x1[2])
+    let b1 = x0
+    let c1 = SIMD4<Int16>(lastVal, b1[0], b1[1], b1[2])
+    let errSIMD1 = diffMED(x1, a1, b1, c1)
 
-    let err20 = Int16(truncatingIfNeeded: Int(ptr2[0]) - Int(ptr1[0]))
-    let err21 = diffMED(ptr2[1], ptr2[0], ptr1[1], ptr1[0])
-    let err22 = diffMED(ptr2[2], ptr2[1], ptr1[2], ptr1[1])
-    let err23 = diffMED(ptr2[3], ptr2[2], ptr1[3], ptr1[2])
+    let x2 = SIMD4<Int16>(ptr2[0], ptr2[1], ptr2[2], ptr2[3])
+    let a2 = SIMD4<Int16>(x1[0], x2[0], x2[1], x2[2])
+    let b2 = x1
+    let c2 = SIMD4<Int16>(x0[0], b2[0], b2[1], b2[2])
+    let errSIMD2 = diffMED(x2, a2, b2, c2)
 
-    let err30 = Int16(truncatingIfNeeded: Int(ptr3[0]) - Int(ptr2[0]))
-    let err31 = diffMED(ptr3[1], ptr3[0], ptr2[1], ptr2[0])
-    let err32 = diffMED(ptr3[2], ptr3[1], ptr2[2], ptr2[1])
-    let err33 = diffMED(ptr3[3], ptr3[2], ptr2[3], ptr2[2])
+    let x3 = SIMD4<Int16>(ptr3[0], ptr3[1], ptr3[2], ptr3[3])
+    let a3 = SIMD4<Int16>(x2[0], x3[0], x3[1], x3[2])
+    let b3 = x2
+    let c3 = SIMD4<Int16>(x1[0], b3[0], b3[1], b3[2])
+    let errSIMD3 = diffMED(x3, a3, b3, c3)
 
     let errors = [
-        err00, err01, err02, err03,
-        err10, err11, err12, err13,
-        err20, err21, err22, err23,
-        err30, err31, err32, err33
+        errSIMD0[0], errSIMD0[1], errSIMD0[2], errSIMD0[3],
+        errSIMD1[0], errSIMD1[1], errSIMD1[2], errSIMD1[3],
+        errSIMD2[0], errSIMD2[1], errSIMD2[2], errSIMD2[3],
+        errSIMD3[0], errSIMD3[1], errSIMD3[2], errSIMD3[3]
     ]
     
     var lscpIdx = -1
-    for i in 0..<16 {
-        if errors[i] != 0 {
-            lscpIdx = i
-        }
+    let zero4 = SIMD4<Int16>(repeating: 0)
+    if any(errSIMD3 .!= zero4) {
+        lscpIdx = errSIMD3[3] != 0 ? 15 : (errSIMD3[2] != 0 ? 14 : (errSIMD3[1] != 0 ? 13 : 12))
+    } else if any(errSIMD2 .!= zero4) {
+        lscpIdx = errSIMD2[3] != 0 ? 11 : (errSIMD2[2] != 0 ? 10 : (errSIMD2[1] != 0 ? 9 : 8))
+    } else if any(errSIMD1 .!= zero4) {
+        lscpIdx = errSIMD1[3] != 0 ? 7 : (errSIMD1[2] != 0 ? 6 : (errSIMD1[1] != 0 ? 5 : 4))
+    } else if any(errSIMD0 .!= zero4) {
+        lscpIdx = errSIMD0[3] != 0 ? 3 : (errSIMD0[2] != 0 ? 2 : (errSIMD0[1] != 0 ? 1 : (errSIMD0[0] != 0 ? 0 : -1)))
     }
 
     if lscpIdx == -1 {
