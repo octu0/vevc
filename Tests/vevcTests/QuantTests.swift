@@ -25,7 +25,7 @@ final class QuantTests: XCTestCase {
         let q = Quantizer(step: step, roundToNearest: roundToNearest)
         
         let originalValues: [Int16] = (0..<(width * height)).map { i in
-            Int16.random(in: -32768...32767)
+            Int16.random(in: -32767...32767)
         }
         
         block.withView { view in

@@ -63,36 +63,56 @@ func estimateMBMEBlock32x32(
     let minSafeDY = max(-1 * searchRange, -startY)
     let maxSafeDY = min(searchRange, h - 32 - startY)
 
-    for dy in (-1 * searchRange)...searchRange {
-        let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
-        let refYRowOffset = (startY + dy) * w
-        let diffY = dy >= 0 ? dy : -1 * dy
+    let negSearchRange = -1 * searchRange
+    let posSearchRange = searchRange
 
-        for dx in (-1 * searchRange)...searchRange {
-            if dx == 0 && dy == 0 { continue }
+    var step = searchRange / 2
+    while step >= 1 {
+        var currentBestDX = bestDX
+        var currentBestDY = bestDY
+        var currentBestSAD = bestSAD
 
-            let diffX = dx >= 0 ? dx : -1 * dx
-            let penalty = diffX + diffY
-            if bestSAD <= penalty { continue }
+        for j in -1...1 {
+            for i in -1...1 {
+                if i == 0 && j == 0 { continue }
+                
+                let dx = bestDX + i * step
+                let dy = bestDY + j * step
 
-            let sad: Int
-            if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
-                sad = calculateSAD32x32(
-                    pCurr: pCurr.advanced(by: startY * w + startX),
-                    pPrev: pPrev.advanced(by: refYRowOffset + startX + dx),
-                    currStride: w, prevStride: w
-                )
-            } else {
-                sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 32, actH: 32, dx: dx, dy: dy)
-            }
+                if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
 
-            let totalSad = sad &+ penalty
-            if totalSad < bestSAD {
-                bestSAD = totalSad
-                bestDX = dx
-                bestDY = dy
+                let diffX = dx >= 0 ? dx : -1 * dx
+                let diffY = dy >= 0 ? dy : -1 * dy
+                let penalty = diffX + diffY
+                if currentBestSAD <= penalty { continue }
+
+                let sad: Int
+                let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
+                if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
+                    let refYRowOffset = (startY + dy) * w
+                    sad = calculateSAD32x32(
+                        pCurr: pCurr.advanced(by: startY * w + startX),
+                        pPrev: pPrev.advanced(by: refYRowOffset + startX + dx),
+                        currStride: w, prevStride: w
+                    )
+                } else {
+                    sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 32, actH: 32, dx: dx, dy: dy)
+                }
+
+                let totalSad = sad &+ penalty
+                if totalSad < currentBestSAD {
+                    currentBestSAD = totalSad
+                    currentBestDX = dx
+                    currentBestDY = dy
+                }
             }
         }
+
+        bestDX = currentBestDX
+        bestDY = currentBestDY
+        bestSAD = currentBestSAD
+
+        step /= 2
     }
 
     mvs.dx[mvIdx] = bestDX
@@ -109,45 +129,65 @@ func estimateMBMEBlockEdge(
     var bestDX = 0
     var bestDY = 0
 
-    for dy in (-1 * searchRange)...searchRange {
-        let diffY = dy >= 0 ? dy : -1 * dy
-        let refY = startY + dy
+    let negSearchRange = -1 * searchRange
+    let posSearchRange = searchRange
 
-        for dx in (-1 * searchRange)...searchRange {
-            if dx == 0 && dy == 0 { continue }
+    var step = searchRange / 2
+    while step >= 1 {
+        var currentBestDX = bestDX
+        var currentBestDY = bestDY
+        var currentBestSAD = bestSAD
 
-            let diffX = dx >= 0 ? dx : -1 * dx
-            let penalty = diffX + diffY
-            if bestSAD <= penalty { continue }
+        for j in -1...1 {
+            for i in -1...1 {
+                if i == 0 && j == 0 { continue }
 
-            let refX = startX + dx
-            let sad: Int
+                let dx = bestDX + i * step
+                let dy = bestDY + j * step
 
-            if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
-                var s: UInt = 0
-                for y in 0..<actH {
-                    let currRow = (startY + y) * w + startX
-                    let prevRow = (refY + y) * w + refX
-                    let pCurrRow = pCurr.advanced(by: currRow)
-                    let pPrevRow = pPrev.advanced(by: prevRow)
-                    for x in 0..<actW {
-                        let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
-                        let mask = diff >> 31
-                        s &+= UInt((diff ^ mask) - mask)
+                if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
+
+                let diffX = dx >= 0 ? dx : -1 * dx
+                let diffY = dy >= 0 ? dy : -1 * dy
+                let penalty = diffX + diffY
+                if currentBestSAD <= penalty { continue }
+
+                let refX = startX + dx
+                let refY = startY + dy
+                let sad: Int
+
+                if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
+                    var s: UInt = 0
+                    for y in 0..<actH {
+                        let currRow = (startY + y) * w + startX
+                        let prevRow = (refY + y) * w + refX
+                        let pCurrRow = pCurr.advanced(by: currRow)
+                        let pPrevRow = pPrev.advanced(by: prevRow)
+                        for x in 0..<actW {
+                            let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
+                            let mask = diff >> 31
+                            s &+= UInt((diff ^ mask) - mask)
+                        }
                     }
+                    sad = Int(s)
+                } else {
+                    sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
                 }
-                sad = Int(s)
-            } else {
-                sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
-            }
 
-            let totalSad = sad &+ penalty
-            if totalSad < bestSAD {
-                bestSAD = totalSad
-                bestDX = dx
-                bestDY = dy
+                let totalSAD = sad &+ penalty
+                if totalSAD < currentBestSAD {
+                    currentBestSAD = totalSAD
+                    currentBestDX = dx
+                    currentBestDY = dy
+                }
             }
         }
+
+        bestDX = currentBestDX
+        bestDY = currentBestDY
+        bestSAD = currentBestSAD
+
+        step /= 2
     }
 
     mvs.dx[mvIdx] = bestDX
