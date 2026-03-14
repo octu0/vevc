@@ -45,6 +45,116 @@ struct MotionVectors: Sendable {
 }
 
 @inline(__always)
+func estimateMBMEBlock32x32(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, searchRange: Int,
+    mvs: inout MotionVectors, mvIdx: Int
+) {
+    var bestSAD = calculateSAD32x32(
+        pCurr: pCurr.advanced(by: startY * w + startX),
+        pPrev: pPrev.advanced(by: startY * w + startX),
+        currStride: w, prevStride: w
+    )
+    var bestDX = 0
+    var bestDY = 0
+
+    let minSafeDX = max(-1 * searchRange, -startX)
+    let maxSafeDX = min(searchRange, w - 32 - startX)
+    let minSafeDY = max(-1 * searchRange, -startY)
+    let maxSafeDY = min(searchRange, h - 32 - startY)
+
+    for dy in (-1 * searchRange)...searchRange {
+        let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
+        let refYRowOffset = (startY + dy) * w
+        let diffY = dy >= 0 ? dy : -1 * dy
+
+        for dx in (-1 * searchRange)...searchRange {
+            if dx == 0 && dy == 0 { continue }
+
+            let diffX = dx >= 0 ? dx : -1 * dx
+            let penalty = diffX + diffY
+            if bestSAD <= penalty { continue }
+
+            let sad: Int
+            if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
+                sad = calculateSAD32x32(
+                    pCurr: pCurr.advanced(by: startY * w + startX),
+                    pPrev: pPrev.advanced(by: refYRowOffset + startX + dx),
+                    currStride: w, prevStride: w
+                )
+            } else {
+                sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 32, actH: 32, dx: dx, dy: dy)
+            }
+
+            let totalSad = sad &+ penalty
+            if totalSad < bestSAD {
+                bestSAD = totalSad
+                bestDX = dx
+                bestDY = dy
+            }
+        }
+    }
+
+    mvs.dx[mvIdx] = bestDX
+    mvs.dy[mvIdx] = bestDY
+}
+
+@inline(__always)
+func estimateMBMEBlockEdge(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, actW: Int, actH: Int, searchRange: Int,
+    mvs: inout MotionVectors, mvIdx: Int
+) {
+    var bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
+    var bestDX = 0
+    var bestDY = 0
+
+    for dy in (-1 * searchRange)...searchRange {
+        let diffY = dy >= 0 ? dy : -1 * dy
+        let refY = startY + dy
+
+        for dx in (-1 * searchRange)...searchRange {
+            if dx == 0 && dy == 0 { continue }
+
+            let diffX = dx >= 0 ? dx : -1 * dx
+            let penalty = diffX + diffY
+            if bestSAD <= penalty { continue }
+
+            let refX = startX + dx
+            let sad: Int
+
+            if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
+                var s: UInt = 0
+                for y in 0..<actH {
+                    let currRow = (startY + y) * w + startX
+                    let prevRow = (refY + y) * w + refX
+                    let pCurrRow = pCurr.advanced(by: currRow)
+                    let pPrevRow = pPrev.advanced(by: prevRow)
+                    for x in 0..<actW {
+                        let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
+                        let mask = diff >> 31
+                        s &+= UInt((diff ^ mask) - mask)
+                    }
+                }
+                sad = Int(s)
+            } else {
+                sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
+            }
+
+            let totalSad = sad &+ penalty
+            if totalSad < bestSAD {
+                bestSAD = totalSad
+                bestDX = dx
+                bestDY = dy
+            }
+        }
+    }
+
+    mvs.dx[mvIdx] = bestDX
+    mvs.dy[mvIdx] = bestDY
+}
+
+@inline(__always)
 func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
     let mbSize = 32
     let w = curr.width
@@ -61,80 +171,63 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
         prev.y.withUnsafeBufferPointer { prevPtr in
             guard let pPrev = prevPtr.baseAddress else { return }
 
-            for mbY in 0..<mbRows {
+            let fullMbCols = w / mbSize
+            let fullMbRows = h / mbSize
+            let remW = w % mbSize
+            let remH = h % mbSize
+
+            for mbY in 0..<fullMbRows {
                 let startY = mbY * mbSize
-                let actH = min(mbSize, h - startY)
-
-                for mbX in 0..<mbCols {
+                for mbX in 0..<fullMbCols {
                     let startX = mbX * mbSize
-                    let actW = min(mbSize, w - startX)
-
-                    var bestSAD = Int.max
-                    var bestDX = 0
-                    var bestDY = 0
-
-                    if actW == 32 && actH == 32 {
-                        bestSAD = calculateSAD32x32(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: startY * w + startX),
-                            currStride: w, prevStride: w
-                        )
-                    } else {
-                        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
-                    }
-
-                    for dy in (-1 * searchRange)...searchRange {
-                        for dx in (-1 * searchRange)...searchRange {
-                            if dx == 0 && dy == 0 { continue }
-
-                            let refX = startX + dx
-                            let refY = startY + dy
-
-                            let penalty = (dx >= 0 ? dx : -1 * dx) + (dy >= 0 ? dy : -1 * dy)
-                            if bestSAD <= penalty { continue }
-
-                            var sad = 0
-                            if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
-                                if actW == 32 && actH == 32 {
-                                    sad = calculateSAD32x32(
-                                        pCurr: pCurr.advanced(by: startY * w + startX),
-                                        pPrev: pPrev.advanced(by: refY * w + refX),
-                                        currStride: w, prevStride: w
-                                    )
-                                } else {
-                                    var s: UInt = 0
-                                    for y in 0..<actH {
-                                        let currRow = (startY + y) * w + startX
-                                        let prevRow = (refY + y) * w + refX
-                                        let pCurrRow = pCurr.advanced(by: currRow)
-                                        let pPrevRow = pPrev.advanced(by: prevRow)
-                                        for x in 0..<actW {
-                                            let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
-                                            let mask = diff >> 31
-                                            s &+= UInt((diff ^ mask) - mask)
-                                        }
-                                    }
-                                    sad = Int(s)
-                                }
-                            } else {
-                                sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
-                            }
-
-
-                            sad &+= penalty
-
-                            if sad < bestSAD {
-                                bestSAD = sad
-                                bestDX = dx
-                                bestDY = dy
-                            }
-                        }
-                    }
-
                     let idx = mbY * mbCols + mbX
-                    mvs.dx[idx] = bestDX
-                    mvs.dy[idx] = bestDY
+                    estimateMBMEBlock32x32(
+                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                        startX: startX, startY: startY, searchRange: searchRange,
+                        mvs: &mvs, mvIdx: idx
+                    )
                 }
+            }
+
+            if 0 < remW {
+                let mbX = fullMbCols
+                let startX = mbX * mbSize
+                for mbY in 0..<fullMbRows {
+                    let startY = mbY * mbSize
+                    let idx = mbY * mbCols + mbX
+                    estimateMBMEBlockEdge(
+                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                        startX: startX, startY: startY, actW: remW, actH: mbSize, searchRange: searchRange,
+                        mvs: &mvs, mvIdx: idx
+                    )
+                }
+            }
+
+            if 0 < remH {
+                let mbY = fullMbRows
+                let startY = mbY * mbSize
+                for mbX in 0..<fullMbCols {
+                    let startX = mbX * mbSize
+                    let idx = mbY * mbCols + mbX
+                    estimateMBMEBlockEdge(
+                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                        startX: startX, startY: startY, actW: mbSize, actH: remH, searchRange: searchRange,
+                        mvs: &mvs, mvIdx: idx
+                    )
+                }
+            }
+
+            if 0 < remW && 0 < remH {
+                let mbX = fullMbCols
+                let mbY = fullMbRows
+                let startX = mbX * mbSize
+                let startY = mbY * mbSize
+                let idx = mbY * mbCols + mbX
+                estimateMBMEBlockEdge(
+                    pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                    startX: startX, startY: startY, actW: remW, actH: remH, searchRange: searchRange,
+                    mvs: &mvs, mvIdx: idx
+                )
             }
         }
     }
@@ -183,51 +276,89 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
         let localMbCols = mbCols
         let pMbSize = mbSize / div
 
+        let fullMbCols = pW / pMbSize
+        let fullMbRows = pH / pMbSize
+        let remW = pW % pMbSize
+        let remH = pH % pMbSize
+
         data.withUnsafeBufferPointer { pPtr in
             guard let pData = pPtr.baseAddress else { return }
             out.withUnsafeMutableBufferPointer { oPtr in
                 guard let pOut = oPtr.baseAddress else { return }
 
-                for mbY in 0..<((pH + pMbSize - 1) / pMbSize) {
+                @inline(__always)
+                func applyBlock(mbX: Int, mbY: Int, actW: Int, actH: Int) {
+                    let startX = mbX * pMbSize
                     let startY = mbY * pMbSize
-                    let actH = min(pMbSize, pH - startY)
+                    let idx = mbY * localMbCols + mbX
+                    let dx = mvs.dx[idx] / div
+                    let dy = mvs.dy[idx] / div
 
-                    for mbX in 0..<((pW + pMbSize - 1) / pMbSize) {
-                        let startX = mbX * pMbSize
-                        let actW = min(pMbSize, pW - startX)
+                    let refX = startX + dx
+                    let refY = startY + dy
+                    
+                    if 0 <= refX && 0 <= refY && (refX + actW) <= pW && (refY + actH) <= pH {
+                        for y in 0..<actH {
+                            let dstRow = (startY + y) * pW
+                            let srcRow = (refY + y) * pW
+                            pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
+                        }
+                    } else {
+                        let minSafeX = max(0, min(actW, -refX))
+                        let maxSafeX = max(0, min(actW, pW - refX))
 
-                        let idx = mbY * localMbCols + mbX
-                        let dx = mvs.dx[idx] / div
-                        let dy = mvs.dy[idx] / div
+                        for y in 0..<actH {
+                            let dstY = startY + y
+                            let srcY = max(0, min(pH - 1, dstY + dy))
+                            let dstRow = dstY * pW
+                            let srcRow = srcY * pW
 
-                        
-                        let refX = startX + dx
-                        let refY = startY + dy
-                        
-                        if 0 <= refX && 0 <= refY && (refX + actW) <= pW && (refY + actH) <= pH {
-                            for y in 0..<actH {
-                                let dstRow = (startY + y) * pW
-                                let srcRow = (refY + y) * pW
-                                for x in 0..<actW {
-                                    pOut[dstRow + startX + x] = pData[srcRow + refX + x]
+                            if 0 < minSafeX {
+                                let leftEdgeVal = pData[srcRow]
+                                for x in 0..<minSafeX {
+                                    pOut[dstRow + startX + x] = leftEdgeVal
                                 }
                             }
-                        } else {
-                            for y in 0..<actH {
-                                let dstY = startY + y
-                                let srcY = max(0, min(pH - 1, dstY + dy))
-                                let dstRow = dstY * pW
-                                let srcRow = srcY * pW
-
-                                for x in 0..<actW {
-                                    let dstX = startX + x
-                                    let srcX = max(0, min(pW - 1, dstX + dx))
-                                    pOut[dstRow + dstX] = pData[srcRow + srcX]
+                            
+                            let copyCount = maxSafeX - minSafeX
+                            if 0 < copyCount {
+                                pOut.advanced(by: dstRow + startX + minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
+                            }
+                            
+                            if maxSafeX < actW {
+                                let rightEdgeVal = pData[srcRow + pW - 1]
+                                for x in maxSafeX..<actW {
+                                    pOut[dstRow + startX + x] = rightEdgeVal
                                 }
                             }
                         }
-
                     }
+                }
+
+                for mbY in 0..<fullMbRows {
+                    for mbX in 0..<fullMbCols {
+                        applyBlock(mbX: mbX, mbY: mbY, actW: pMbSize, actH: pMbSize)
+                    }
+                }
+
+                if 0 < remW {
+                    let mbX = fullMbCols
+                    for mbY in 0..<fullMbRows {
+                        applyBlock(mbX: mbX, mbY: mbY, actW: remW, actH: pMbSize)
+                    }
+                }
+
+                if 0 < remH {
+                    let mbY = fullMbRows
+                    for mbX in 0..<fullMbCols {
+                        applyBlock(mbX: mbX, mbY: mbY, actW: pMbSize, actH: remH)
+                    }
+                }
+
+                if 0 < remW && 0 < remH {
+                    let mbX = fullMbCols
+                    let mbY = fullMbRows
+                    applyBlock(mbX: mbX, mbY: mbY, actW: remW, actH: remH)
                 }
             }
         }
