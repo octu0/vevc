@@ -36,6 +36,14 @@ var packageTargets: [Target] = [
             "vevc",
             .product(name: "PNG", package: "swift-png")
         ]
+    ),
+    .executableTarget(
+        name: "compare",
+        dependencies: [
+            "vevc",
+            .product(name: "PNG", package: "swift-png")
+        ],
+        path: "Sources/example"
     )
 ]
 

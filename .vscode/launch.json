@@ -39,6 +39,26 @@
             "target": "vevc-dec",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release vevc-dec"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug compare",
+            "target": "compare",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug compare"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release compare",
+            "target": "compare",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release compare"
         }
     ]
 }
