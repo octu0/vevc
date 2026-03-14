@@ -1393,6 +1393,7 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
                 initializedCount = cCount
             }
         } else {
+            print("\t\tUsing full planes for CbCr----------------------------------------------------------")
             cb = [Int16](unsafeUninitializedCapacity: img.cbPlane.count) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
                 img.cbPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
                     for i in 0..<src.count {
