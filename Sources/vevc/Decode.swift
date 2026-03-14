@@ -1250,8 +1250,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
                 let isSig = try mvBr.decodeBin(ctx: &ctxDx)
                 if isSig == 0 {
-                    mvs.dx[i] = pmv.dx
-                    mvs.dy[i] = pmv.dy
+                    mvs.vectors[i] = SIMD2(Int16(pmv.dx), Int16(pmv.dy))
                 } else {
                     let sx = try mvBr.decodeBypass()
                     let mx = try decodeExpGolomb(decoder: &mvBr)
@@ -1273,8 +1272,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                         mvdY = Int(my)
                     }
 
-                    mvs.dx[i] = mvdX + pmv.dx
-                    mvs.dy[i] = mvdY + pmv.dy
+                    mvs.vectors[i] = SIMD2(Int16(mvdX + pmv.dx), Int16(mvdY + pmv.dy))
                 }
             }
             

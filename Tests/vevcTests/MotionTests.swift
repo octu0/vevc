@@ -19,9 +19,8 @@ final class MotionTests: XCTestCase {
         let mbCols = (w + mbSize - 1) / mbSize
         let mbRows = (h + mbSize - 1) / mbSize
         var mvsMutable = MotionVectors(count: mbCols * mbRows)
-        for i in 0..<mvsMutable.dx.count {
-            mvsMutable.dx[i] = Int.random(in: -16...16)
-            mvsMutable.dy[i] = Int.random(in: -16...16)
+        for i in 0..<mvsMutable.vectors.count {
+            mvsMutable.vectors[i] = SIMD2(Int16.random(in: -16...16), Int16.random(in: -16...16))
         }
         let mvs = mvsMutable
         

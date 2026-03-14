@@ -1102,12 +1102,9 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     return QuantizationTable(baseStep: q)
 }
 
+#if (arch(arm64) || arch(x86_64) || arch(wasm32))
 @inline(__always)
-public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
-    #if !(arch(arm64) || arch(x86_64) || arch(wasm32))
-    throw EncodeError.unsupportedArchitecture
-    #endif
-    
+public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {    
     if images.isEmpty { return [] }
     
     let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
@@ -1174,12 +1171,13 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
 
             let mbSize = 32
             let mbCols = (curr.width + mbSize - 1) / mbSize
-            for mvIdx in 0..<mvs.dx.count {
+            for mvIdx in 0..<mvs.vectors.count {
                 let mbX = mvIdx % mbCols
                 let mbY = mvIdx / mbCols
                 let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                let mvdX = mvs.dx[mvIdx] - pmv.dx
-                let mvdY = mvs.dy[mvIdx] - pmv.dy
+                let vec = mvs.vectors[mvIdx]
+                let mvdX = Int(vec.x) - pmv.dx
+                let mvdY = Int(vec.y) - pmv.dy
 
                 if mvdX == 0 && mvdY == 0 {
                     mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
@@ -1209,14 +1207,14 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             }
             mvBw.flush()
             let mvOut = mvBw.getData()
-            appendUInt32BE(&out, UInt32(mvs.dx.count))
+            appendUInt32BE(&out, UInt32(mvs.vectors.count))
             appendUInt32BE(&out, UInt32(mvOut.count))
             out.append(contentsOf: mvOut)
 
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
             let totalBytes = bytes.count + mvOut.count
-            debugLog("[Frame \(i)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.dx.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
+            debugLog("[Frame \(i)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
             
             let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
             let reconstructedResidual = PlaneData420(img16: img16)
@@ -1232,3 +1230,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
     
     return out
 }
+
+#else
+public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
+    throw EncodeError.unsupportedArchitecture
+}
+#endif

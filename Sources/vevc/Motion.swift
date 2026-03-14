@@ -2,7 +2,9 @@ import Foundation
 
 @inline(__always)
 func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, currStride: Int, prevStride: Int) -> Int {
-    var sad: Int32 = 0
+    var sumVec0 = SIMD16<UInt16>()
+    var sumVec1 = SIMD16<UInt16>()
+    
     for y in 0..<32 {
         let currRow = pCurr.advanced(by: y * currStride)
         let prevRow = pPrev.advanced(by: y * prevStride)
@@ -13,20 +15,20 @@ func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
         let p1 = UnsafeRawPointer(prevRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
 
         let diff0 = c0 &- p0
-        let diff1 = c1 &- p1
-
         let mask0 = diff0 &>> 15
         let abs0 = (diff0 ^ mask0) &- mask0
 
+        let diff1 = c1 &- p1
         let mask1 = diff1 &>> 15
         let abs1 = (diff1 ^ mask1) &- mask1
 
-        let sum0 = SIMD16<Int32>(clamping: abs0).wrappedSum()
-        let sum1 = SIMD16<Int32>(clamping: abs1).wrappedSum()
-
-        sad &+= sum0 &+ sum1
+        sumVec0 &+= SIMD16<UInt16>(truncatingIfNeeded: abs0)
+        sumVec1 &+= SIMD16<UInt16>(truncatingIfNeeded: abs1)
     }
-    return Int(sad)
+    
+    let total0 = SIMD16<UInt32>(truncatingIfNeeded: sumVec0).wrappedSum()
+    let total1 = SIMD16<UInt32>(truncatingIfNeeded: sumVec1).wrappedSum()
+    return Int(total0 &+ total1)
 }
 
 struct MotionVector: Sendable {
@@ -35,12 +37,10 @@ struct MotionVector: Sendable {
 }
 
 struct MotionVectors: Sendable {
-    var dx: [Int]
-    var dy: [Int]
+    var vectors: [SIMD2<Int16>]
 
     init(count: Int) {
-        self.dx = [Int](repeating: 0, count: count)
-        self.dy = [Int](repeating: 0, count: count)
+        self.vectors = [SIMD2<Int16>](repeating: .zero, count: count)
     }
 }
 
@@ -115,8 +115,7 @@ func estimateMBMEBlock32x32(
         step /= 2
     }
 
-    mvs.dx[mvIdx] = bestDX
-    mvs.dy[mvIdx] = bestDY
+    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
 }
 
 @inline(__always)
@@ -190,8 +189,7 @@ func estimateMBMEBlockEdge(
         step /= 2
     }
 
-    mvs.dx[mvIdx] = bestDX
-    mvs.dy[mvIdx] = bestDY
+    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
 }
 
 @inline(__always)
@@ -355,8 +353,9 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                     let startX = mbX * pMbSize
                     let startY = mbY * pMbSize
                     let idx = mbY * localMbCols + mbX
-                    let dx = mvs.dx[idx] / div
-                    let dy = mvs.dy[idx] / div
+                    let vec = mvs.vectors[idx]
+                    let dx = Int(vec.x) / div
+                    let dy = Int(vec.y) / div
 
                     let refX = startX + dx
                     let refY = startY + dy
@@ -478,21 +477,21 @@ func calculatePMV(mvs: MotionVectors, mbX: Int, mbY: Int, mbCols: Int) -> (dx: I
         return (0, 0)
     }
     if count == 1 {
-        let idx = hasLeft ? idxLeft : (hasTop ? idxTop : idxTopRight)
-        return (mvs.dx[idx], mvs.dy[idx])
+        let vec = mvs.vectors[hasLeft ? idxLeft : (hasTop ? idxTop : idxTopRight)]
+        return (Int(vec.x), Int(vec.y))
     }
     if count == 2 {
         var dxSum = 0
         var dySum = 0
-        if hasLeft { dxSum += mvs.dx[idxLeft]; dySum += mvs.dy[idxLeft] }
-        if hasTop { dxSum += mvs.dx[idxTop]; dySum += mvs.dy[idxTop] }
-        if hasTopRight { dxSum += mvs.dx[idxTopRight]; dySum += mvs.dy[idxTopRight] }
+        if hasLeft { let v = mvs.vectors[idxLeft]; dxSum += Int(v.x); dySum += Int(v.y) }
+        if hasTop { let v = mvs.vectors[idxTop]; dxSum += Int(v.x); dySum += Int(v.y) }
+        if hasTopRight { let v = mvs.vectors[idxTopRight]; dxSum += Int(v.x); dySum += Int(v.y) }
         return (dxSum / 2, dySum / 2)
     }
     
-    let lx = mvs.dx[idxLeft]; let ly = mvs.dy[idxLeft]
-    let tx = mvs.dx[idxTop]; let ty = mvs.dy[idxTop]
-    let rx = mvs.dx[idxTopRight]; let ry = mvs.dy[idxTopRight]
+    let lVec = mvs.vectors[idxLeft]; let lx = Int(lVec.x); let ly = Int(lVec.y)
+    let tVec = mvs.vectors[idxTop]; let tx = Int(tVec.x); let ty = Int(tVec.y)
+    let rVec = mvs.vectors[idxTopRight]; let rx = Int(rVec.x); let ry = Int(rVec.y)
 
     let minX = min(lx, min(tx, rx))
     let maxX = max(lx, max(tx, rx))
