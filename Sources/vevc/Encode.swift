@@ -406,188 +406,358 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 
 // MARK: - Transform Functions
 
-@inline(__always)
-func isEffectivelyZero32(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
-    let thPos = threshold
-    let thNeg = -1 * threshold
-    for y in 0..<32 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<32 {
-            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
-                return false
-            }
-            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
-                return false
-            }
-            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
-                return false
-            }
-        }
-    }
-    
-    for y in 0..<32 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<32 {
-            ptrHL[x] = 0
-            ptrLH[x] = 0
-            ptrHH[x] = 0
-        }
-    }
-    
-    return true
-}
+#if arch(arm64) || arch(x86_64) || arch(wasm32)
 
 @inline(__always)
-func isEffectivelyZero16(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
-    let thPos = threshold
-    let thNeg = -1 * threshold
+func isEffectivelyZero32_SIMD(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    let thPos = SIMD16<Int16>(repeating: threshold)
+    let thNeg = SIMD16<Int16>(repeating: -threshold)
+
+    let lowerHalfBase = base + 16 * 32
+    for i in stride(from: 0, to: 512, by: 16) {
+        let vec = SIMD16<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 16))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+    }
     for y in 0..<16 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<16 {
-            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
-                return false
-            }
-            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
-                return false
-            }
-            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
-                return false
-            }
-        }
+        let ptr = base + y * 32 + 16
+        let vec = SIMD16<Int16>(UnsafeBufferPointer(start: ptr, count: 16))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
     }
-    
+
+    let zeroVec = SIMD16<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 512, by: 16) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD16<Int16>.self)
+        ptr.pointee = zeroVec
+    }
     for y in 0..<16 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
+        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16).assumingMemoryBound(to: SIMD16<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZero16_SIMD(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    let thPos = SIMD8<Int16>(repeating: threshold)
+    let thNeg = SIMD8<Int16>(repeating: -threshold)
+
+    let lowerHalfBase = base + 8 * 16
+    for i in stride(from: 0, to: 128, by: 8) {
+        let vec = SIMD8<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 8))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] { return false }
+    }
+    for y in 0..<8 {
+        let ptr = base + y * 16 + 8
+        let vec = SIMD8<Int16>(UnsafeBufferPointer(start: ptr, count: 8))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] { return false }
+    }
+
+    let zeroVec = SIMD8<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 128, by: 8) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD8<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<8 {
+        let ptr = UnsafeMutableRawPointer(base + y * 16 + 8).assumingMemoryBound(to: SIMD8<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZero8_SIMD(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    let thPos = SIMD4<Int16>(repeating: threshold)
+    let thNeg = SIMD4<Int16>(repeating: -threshold)
+
+    let lowerHalfBase = base + 4 * 8
+    for i in stride(from: 0, to: 32, by: 4) {
+        let vec = SIMD4<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 4))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] { return false }
+    }
+    for y in 0..<4 {
+        let ptr = base + y * 8 + 4
+        let vec = SIMD4<Int16>(UnsafeBufferPointer(start: ptr, count: 4))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] { return false }
+    }
+
+    let zeroVec = SIMD4<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 32, by: 4) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD4<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<4 {
+        let ptr = UnsafeMutableRawPointer(base + y * 8 + 4).assumingMemoryBound(to: SIMD4<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZero4_SIMD(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    let thPos = SIMD2<Int16>(repeating: threshold)
+    let thNeg = SIMD2<Int16>(repeating: -threshold)
+
+    let lowerHalfBase = base + 2 * 4
+    for i in stride(from: 0, to: 8, by: 2) {
+        let vec = SIMD2<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 2))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] { return false }
+    }
+    for y in 0..<2 {
+        let ptr = base + y * 4 + 2
+        let vec = SIMD2<Int16>(UnsafeBufferPointer(start: ptr, count: 2))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] { return false }
+    }
+
+    let zeroVec = SIMD2<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 8, by: 2) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD2<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<2 {
+        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZeroBase4_SIMD(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    // Check LL
+    for y in 0..<2 {
+        let ptr = base + y * 4
+        let vec = SIMD2<Int16>(UnsafeBufferPointer(start: ptr, count: 2))
+        if vec[0] != 0 || vec[1] != 0 { return false }
+    }
+    
+    // Check Subbands
+    let thPos = SIMD2<Int16>(repeating: threshold)
+    let thNeg = SIMD2<Int16>(repeating: -threshold)
+
+    let lowerHalfBase = base + 2 * 4
+    for i in stride(from: 0, to: 8, by: 2) {
+        let vec = SIMD2<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 2))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] { return false }
+    }
+    for y in 0..<2 {
+        let ptr = base + y * 4 + 2
+        let vec = SIMD2<Int16>(UnsafeBufferPointer(start: ptr, count: 2))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] { return false }
+    }
+
+    let zeroVec = SIMD2<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 8, by: 2) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD2<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<2 {
+        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    return true
+}
+
+#endif
+
+// Scalar fallbacks (also used directly when SIMD is unavailable)
+@inline(__always)
+func isEffectivelyZero32_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    let thPos = threshold
+    let thNeg = -threshold
+    
+    let lowerHalfBase = base + 16 * 32
+    for i in 0..<512 {
+        let val = lowerHalfBase[i]
+        if thPos < val || val < thNeg { return false }
+    }
+    for y in 0..<16 {
+        let rowPtr = base + y * 32 + 16
         for x in 0..<16 {
-            ptrHL[x] = 0
-            ptrLH[x] = 0
-            ptrHH[x] = 0
+            let val = rowPtr[x]
+            if thPos < val || val < thNeg { return false }
         }
     }
     
+    for i in 0..<512 { lowerHalfBase[i] = 0 }
+    for y in 0..<16 {
+        let rowPtr = base + y * 32 + 16
+        for x in 0..<16 { rowPtr[x] = 0 }
+    }
     return true
 }
 
 @inline(__always)
-func isEffectivelyZero8(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
+func isEffectivelyZero16_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -1 * threshold
+    let thNeg = -threshold
+    
+    let lowerHalfBase = base + 8 * 16
+    for i in 0..<128 {
+        let val = lowerHalfBase[i]
+        if thPos < val || val < thNeg { return false }
+    }
     for y in 0..<8 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
+        let rowPtr = base + y * 16 + 8
         for x in 0..<8 {
-            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
-                return false
-            }
-            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
-                return false
-            }
-            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
-                return false
-            }
+            let val = rowPtr[x]
+            if thPos < val || val < thNeg { return false }
         }
     }
     
+    for i in 0..<128 { lowerHalfBase[i] = 0 }
     for y in 0..<8 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<8 {
-            ptrHL[x] = 0
-            ptrLH[x] = 0
-            ptrHH[x] = 0
-        }
+        let rowPtr = base + y * 16 + 8
+        for x in 0..<8 { rowPtr[x] = 0 }
     }
-    
     return true
 }
 
 @inline(__always)
-func isEffectivelyZero4(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
+func isEffectivelyZero8_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -1 * threshold
+    let thNeg = -threshold
+    
+    let lowerHalfBase = base + 4 * 8
+    for i in 0..<32 {
+        let val = lowerHalfBase[i]
+        if thPos < val || val < thNeg { return false }
+    }
     for y in 0..<4 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
+        let rowPtr = base + y * 8 + 4
         for x in 0..<4 {
-            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
-                return false
-            }
-            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
-                return false
-            }
-            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
-                return false
-            }
+            let val = rowPtr[x]
+            if thPos < val || val < thNeg { return false }
         }
     }
     
+    for i in 0..<32 { lowerHalfBase[i] = 0 }
     for y in 0..<4 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<4 {
-            ptrHL[x] = 0
-            ptrLH[x] = 0
-            ptrHH[x] = 0
-        }
+        let rowPtr = base + y * 8 + 4
+        for x in 0..<4 { rowPtr[x] = 0 }
     }
-    
     return true
 }
 
 @inline(__always)
-func isEffectivelyZeroBase4(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
-    for y in 0..<4 {
-        let ptrLL = ll.rowPointer(y: y)
-        for x in 0..<4 {
-            if ptrLL[x] != 0 {
-                return false
-            }
-        }
-    }
-    
+func isEffectivelyZero4_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -1 * threshold
-    for y in 0..<4 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<4 {
-            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
-                return false
-            }
-            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
-                return false
-            }
-            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
-                return false
-            }
+    let thNeg = -threshold
+    
+    let lowerHalfBase = base + 2 * 4
+    for i in 0..<8 {
+        let val = lowerHalfBase[i]
+        if thPos < val || val < thNeg { return false }
+    }
+    for y in 0..<2 {
+        let rowPtr = base + y * 4 + 2
+        for x in 0..<2 {
+            let val = rowPtr[x]
+            if thPos < val || val < thNeg { return false }
         }
     }
     
-    for y in 0..<4 {
-        let ptrHL = hl.rowPointer(y: y)
-        let ptrLH = lh.rowPointer(y: y)
-        let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<4 {
-            ptrHL[x] = 0
-            ptrLH[x] = 0
-            ptrHH[x] = 0
-        }
+    for i in 0..<8 { lowerHalfBase[i] = 0 }
+    for y in 0..<2 {
+        let rowPtr = base + y * 4 + 2
+        for x in 0..<2 { rowPtr[x] = 0 }
     }
-    
     return true
+}
+
+@inline(__always)
+func isEffectivelyZeroBase4_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    for y in 0..<2 {
+        let rowPtr = base + y * 4
+        for x in 0..<2 {
+            if rowPtr[x] != 0 { return false }
+        }
+    }
+
+    let thPos = threshold
+    let thNeg = -threshold
+    let lowerHalfBase = base + 2 * 4
+    for i in 0..<8 {
+        let val = lowerHalfBase[i]
+        if thPos < val || val < thNeg { return false }
+    }
+    for y in 0..<2 {
+        let rowPtr = base + y * 4 + 2
+        for x in 0..<2 {
+            let val = rowPtr[x]
+            if thPos < val || val < thNeg { return false }
+        }
+    }
+    
+    for i in 0..<8 { lowerHalfBase[i] = 0 }
+    for y in 0..<2 {
+        let rowPtr = base + y * 4 + 2
+        for x in 0..<2 { rowPtr[x] = 0 }
+    }
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZero32(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+    return isEffectivelyZero32_SIMD(data: data, threshold: Int16(threshold))
+    #else
+    return isEffectivelyZero32_Scalar(data: data, threshold: Int16(threshold))
+    #endif
+}
+
+@inline(__always)
+func isEffectivelyZero16(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+    return isEffectivelyZero16_SIMD(data: data, threshold: Int16(threshold))
+    #else
+    return isEffectivelyZero16_Scalar(data: data, threshold: Int16(threshold))
+    #endif
+}
+
+@inline(__always)
+func isEffectivelyZero8(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+    return isEffectivelyZero8_SIMD(data: data, threshold: Int16(threshold))
+    #else
+    return isEffectivelyZero8_Scalar(data: data, threshold: Int16(threshold))
+    #endif
+}
+
+@inline(__always)
+func isEffectivelyZero4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+    return isEffectivelyZero4_SIMD(data: data, threshold: Int16(threshold))
+    #else
+    return isEffectivelyZero4_Scalar(data: data, threshold: Int16(threshold))
+    #endif
+}
+
+@inline(__always)
+func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+    #if arch(arm64) || arch(x86_64) || arch(wasm32)
+    return isEffectivelyZeroBase4_SIMD(data: data, threshold: Int16(threshold))
+    #else
+    return isEffectivelyZeroBase4_Scalar(data: data, threshold: Int16(threshold))
+    #endif
 }
 
 @inline(__always)
@@ -638,17 +808,14 @@ func encodePlaneSubbands32(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
-        blocks[i].withView { view in
-            let subs = getSubbands32(view: view)
-            var hl = subs.hl
-            var lh = subs.lh
-            var hh = subs.hh
-            if isEffectivelyZero16(hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
-                bwFlags.writeBit(1)
-            } else {
-                bwFlags.writeBit(0)
-                nonZeroIndices.append(i)
-            }
+        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            return isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
+        }
+        if isZero {
+            bwFlags.writeBit(1)
+        } else {
+            bwFlags.writeBit(0)
+            nonZeroIndices.append(i)
         }
     }
     bwFlags.flush()
@@ -686,17 +853,14 @@ func encodePlaneSubbands16(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
-        blocks[i].withView { view in
-            let subs = getSubbands16(view: view)
-            var hl = subs.hl
-            var lh = subs.lh
-            var hh = subs.hh
-            if isEffectivelyZero8(hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
-                bwFlags.writeBit(1)
-            } else {
-                bwFlags.writeBit(0)
-                nonZeroIndices.append(i)
-            }
+        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            return isEffectivelyZero16(data: ptr, threshold: zeroThreshold)
+        }
+        if isZero {
+            bwFlags.writeBit(1)
+        } else {
+            bwFlags.writeBit(0)
+            nonZeroIndices.append(i)
         }
     }
     bwFlags.flush()
@@ -734,17 +898,14 @@ func encodePlaneSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
-        blocks[i].withView { view in
-            let subs = getSubbands8(view: view)
-            var hl = subs.hl
-            var lh = subs.lh
-            var hh = subs.hh
-            if isEffectivelyZero4(hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
-                bwFlags.writeBit(1)
-            } else {
-                bwFlags.writeBit(0)
-                nonZeroIndices.append(i)
-            }
+        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            return isEffectivelyZero8(data: ptr, threshold: zeroThreshold)
+        }
+        if isZero {
+            bwFlags.writeBit(1)
+        } else {
+            bwFlags.writeBit(0)
+            nonZeroIndices.append(i)
         }
     }
     bwFlags.flush()
@@ -782,17 +943,14 @@ func encodePlaneBaseSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] 
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
-        blocks[i].withView { view in
-            let subs = getSubbands8(view: view)
-            var hl = subs.hl
-            var lh = subs.lh
-            var hh = subs.hh
-            if isEffectivelyZeroBase4(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
-                bwFlags.writeBit(1)
-            } else {
-                bwFlags.writeBit(0)
-                nonZeroIndices.append(i)
-            }
+        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold)
+        }
+        if isZero {
+            bwFlags.writeBit(1)
+        } else {
+            bwFlags.writeBit(0)
+            nonZeroIndices.append(i)
         }
     }
     bwFlags.flush()
@@ -906,10 +1064,10 @@ private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> I
     quantizeMid(&sub.lh, qt: qt)
     quantizeHigh(&sub.hh, qt: qt)
     
-    var hl = sub.hl
-    var lh = sub.lh
-    var hh = sub.hh
-    if isEffectivelyZeroBase4(ll: sub.ll, hl: &hl, lh: &lh, hh: &hh, threshold: 0) {
+    let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
+        return isEffectivelyZeroBase4(data: ptr, threshold: 0)
+    }
+    if isZero {
         return 1
     }
     
