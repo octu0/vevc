@@ -278,6 +278,10 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
 @inline(__always)
 func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int, startX: Int, startY: Int, actW: Int, actH: Int, dx: Int, dy: Int) -> Int {
     var sad: UInt = 0
+    let refX = startX + dx
+    let minSafeX = max(0, min(actW, -refX))
+    let maxSafeX = max(0, min(actW, w - refX))
+
     for y in 0..<actH {
         let cy = startY + y
         let currRow = cy * w
@@ -288,14 +292,34 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
         let pCurrRow = pCurr.advanced(by: currRow + startX)
         let pPrevRow = pPrev.advanced(by: prevRow)
 
-        for x in 0..<actW {
-            let cx = startX + x
-            let px = max(0, min(w - 1, cx + dx))
-            let diff = Int(pCurrRow[x]) - Int(pPrevRow[px])
+        if 0 < minSafeX {
+            let leftEdgeVal = pPrevRow[0]
+            for x in 0..<minSafeX {
+                let diff = Int(pCurrRow[x]) - Int(leftEdgeVal)
+                let mask = diff >> 31
+                sad &+= UInt((diff ^ mask) - mask)
+            }
+        }
+        
+        let copyCount = maxSafeX - minSafeX
+        if 0 < copyCount {
+            let pPrevSafe = pPrevRow.advanced(by: refX + minSafeX)
+            let pCurrSafe = pCurrRow.advanced(by: minSafeX)
+            
+            for x in 0..<copyCount {
+                let diff = Int(pCurrSafe[x]) - Int(pPrevSafe[x])
+                let mask = diff >> 31
+                sad &+= UInt((diff ^ mask) - mask)
+            }
+        }
 
-            let mask = diff >> 31
-            let absDiff = (diff ^ mask) - mask
-            sad &+= UInt(absDiff)
+        if maxSafeX < actW {
+            let rightEdgeVal = pPrevRow[w - 1]
+            for x in maxSafeX..<actW {
+                let diff = Int(pCurrRow[x]) - Int(rightEdgeVal)
+                let mask = diff >> 31
+                sad &+= UInt((diff ^ mask) - mask)
+            }
         }
     }
     return Int(sad)
@@ -338,10 +362,31 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                     let refY = startY + dy
                     
                     if 0 <= refX && 0 <= refY && (refX + actW) <= pW && (refY + actH) <= pH {
-                        for y in 0..<actH {
-                            let dstRow = (startY + y) * pW
-                            let srcRow = (refY + y) * pW
-                            pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
+                        switch actW {
+                        case 32:
+                            for y in 0..<actH {
+                                let dstRow = (startY + y) * pW
+                                let srcRow = (refY + y) * pW
+                                let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                                pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                                pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
+                            }
+                        case 16:
+                            for y in 0..<actH {
+                                let dstRow = (startY + y) * pW
+                                let srcRow = (refY + y) * pW
+                                let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                                pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                            }
+                        default:
+                            for y in 0..<actH {
+                                let dstRow = (startY + y) * pW
+                                let srcRow = (refY + y) * pW
+                                pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
+                            }
                         }
                     } else {
                         let minSafeX = max(0, min(actW, -refX))
@@ -352,23 +397,25 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                             let srcY = max(0, min(pH - 1, dstY + dy))
                             let dstRow = dstY * pW
                             let srcRow = srcY * pW
+                            
+                            let pDstBase = pOut.advanced(by: dstRow + startX)
 
                             if 0 < minSafeX {
                                 let leftEdgeVal = pData[srcRow]
                                 for x in 0..<minSafeX {
-                                    pOut[dstRow + startX + x] = leftEdgeVal
+                                    pDstBase[x] = leftEdgeVal
                                 }
                             }
                             
                             let copyCount = maxSafeX - minSafeX
                             if 0 < copyCount {
-                                pOut.advanced(by: dstRow + startX + minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
+                                pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
                             }
                             
                             if maxSafeX < actW {
                                 let rightEdgeVal = pData[srcRow + pW - 1]
                                 for x in maxSafeX..<actW {
-                                    pOut[dstRow + startX + x] = rightEdgeVal
+                                    pDstBase[x] = rightEdgeVal
                                 }
                             }
                         }
