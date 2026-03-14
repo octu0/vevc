@@ -802,8 +802,7 @@ func transformBase8(block: inout Block2D, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var blocks = blocks
+func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
@@ -847,8 +846,7 @@ func encodePlaneSubbands32(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var blocks = blocks
+func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
@@ -892,8 +890,7 @@ func encodePlaneSubbands16(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
 }
 
 @inline(__always)
-func encodePlaneSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var blocks = blocks
+func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
@@ -937,8 +934,7 @@ func encodePlaneSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var blocks = blocks
+func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     

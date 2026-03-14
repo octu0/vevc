@@ -743,9 +743,9 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     for i in subBlocksCb.indices { evaluateQuantizeLayer32(block: &subBlocksCb[i], qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeLayer32(block: &subBlocksCr[i], qt: qtC) }
     
-    async let taskBufY = encodePlaneSubbands32(blocks: subBlocksY, zeroThreshold: zeroThreshold)
-    async let taskBufCb = encodePlaneSubbands32(blocks: subBlocksCb, zeroThreshold: zeroThreshold)
-    async let taskBufCr = encodePlaneSubbands32(blocks: subBlocksCr, zeroThreshold: zeroThreshold)
+    async let taskBufY = encodePlaneSubbands32(blocks: &subBlocksY, zeroThreshold: zeroThreshold)
+    async let taskBufCb = encodePlaneSubbands32(blocks: &subBlocksCb, zeroThreshold: zeroThreshold)
+    async let taskBufCr = encodePlaneSubbands32(blocks: &subBlocksCr, zeroThreshold: zeroThreshold)
 
     let bufY = await taskBufY
     let bufCb = await taskBufCb
@@ -790,9 +790,9 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     for i in subBlocksCb.indices { evaluateQuantizeLayer16(block: &subBlocksCb[i], qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeLayer16(block: &subBlocksCr[i], qt: qtC) }
     
-    async let taskBufY = encodePlaneSubbands16(blocks: subBlocksY, zeroThreshold: zeroThreshold)
-    async let taskBufCb = encodePlaneSubbands16(blocks: subBlocksCb, zeroThreshold: zeroThreshold)
-    async let taskBufCr = encodePlaneSubbands16(blocks: subBlocksCr, zeroThreshold: zeroThreshold)
+    async let taskBufY = encodePlaneSubbands16(blocks: &subBlocksY, zeroThreshold: zeroThreshold)
+    async let taskBufCb = encodePlaneSubbands16(blocks: &subBlocksCb, zeroThreshold: zeroThreshold)
+    async let taskBufCr = encodePlaneSubbands16(blocks: &subBlocksCr, zeroThreshold: zeroThreshold)
 
     let bufY = await taskBufY
     let bufCb = await taskBufCb
@@ -834,9 +834,9 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     for i in subBlocksCb.indices { evaluateQuantizeBase8(block: &subBlocksCb[i], qt: qtC) }
     for i in subBlocksCr.indices { evaluateQuantizeBase8(block: &subBlocksCr[i], qt: qtC) }
     
-    async let taskBufY = encodePlaneBaseSubbands8(blocks: subBlocksY, zeroThreshold: zeroThreshold)
-    async let taskBufCb = encodePlaneBaseSubbands8(blocks: subBlocksCb, zeroThreshold: zeroThreshold)
-    async let taskBufCr = encodePlaneBaseSubbands8(blocks: subBlocksCr, zeroThreshold: zeroThreshold)
+    async let taskBufY = encodePlaneBaseSubbands8(blocks: &subBlocksY, zeroThreshold: zeroThreshold)
+    async let taskBufCb = encodePlaneBaseSubbands8(blocks: &subBlocksCb, zeroThreshold: zeroThreshold)
+    async let taskBufCr = encodePlaneBaseSubbands8(blocks: &subBlocksCr, zeroThreshold: zeroThreshold)
 
     let bufY = await taskBufY
     let bufCb = await taskBufCb
