@@ -33,12 +33,22 @@ func encodeExpGolomb(val: UInt32, encoder: inout CABACEncoder) {
 }
 
 @inline(__always)
-func encodeCoeff(val: Int16, encoder: inout CABACEncoder, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
-    if val == 0 {
-        encoder.encodeBin(binVal: 0, ctx: &ctxSig)
-        return
+func encodeCoeffRun(val: Int16, encoder: inout CABACEncoder, run: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel], band: Int) {
+    let rIdx = min(run, 7)
+    let ctxBandOffset = min(band, 7) * 8
+    ctxRun.withUnsafeMutableBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { return }
+        for i in 0..<rIdx {
+            encoder.encodeBin(binVal: 1, ctx: &base[ctxBandOffset + Int(i)])
+        }
+        if run < 7 {
+            encoder.encodeBin(binVal: 0, ctx: &base[ctxBandOffset + Int(rIdx)])
+        }
     }
-    encoder.encodeBin(binVal: 1, ctx: &ctxSig)
+    if run >= 7 {
+        let rem = UInt32(run - 7)
+        encodeExpGolomb(val: rem, encoder: &encoder)
+    }
 
     let signBit: UInt8
     if val <= -1 {
@@ -48,17 +58,17 @@ func encodeCoeff(val: Int16, encoder: inout CABACEncoder, ctxSig: inout ContextM
     }
     let absVal = UInt32(abs(Int(val)))
 
-    encoder.encodeBin(binVal: signBit, ctx: &ctxSign)
+    encoder.encodeBypass(binVal: signBit)
 
     let magMinus1 = absVal &- 1
     let numBins = min(magMinus1, 7)
     ctxMag.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
         for i in 0..<numBins {
-            encoder.encodeBin(binVal: 1, ctx: &base[Int(i)])
+            encoder.encodeBin(binVal: 1, ctx: &base[ctxBandOffset + Int(i)])
         }
         if magMinus1 < 7 {
-            encoder.encodeBin(binVal: 0, ctx: &base[Int(numBins)])
+            encoder.encodeBin(binVal: 0, ctx: &base[ctxBandOffset + Int(numBins)])
         }
     }
 
@@ -69,7 +79,7 @@ func encodeCoeff(val: Int16, encoder: inout CABACEncoder, ctxSig: inout ContextM
 }
 
 @inline(__always)
-func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
+func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
     var lscpX = -1
     var lscpY = -1
     for y in stride(from: size - 1, through: 0, by: -1) {
@@ -93,11 +103,23 @@ func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxSi
     encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
+    var run = 0
+    var currentIdx = 0
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (size - 1)
         for x in 0...endX {
-            encodeCoeff(val: ptr[x], encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / size
+                let startX = currentIdx % size
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * size + x) + 1
+            }
         }
     }
 }
@@ -116,7 +138,7 @@ func getSubbands(view: BlockView, size: Int) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) {
+func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
     var lscpIdx = -1
     
     // Pass 1: find LSCP
@@ -158,14 +180,31 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
 
         // Pass 2: encode up to LSCP
         var currentIdx = 0
+        var startIdxForRun = 0
+        var run = 0
         let diff00 = ptr0[0] - lastVal
-        encodeCoeff(val: diff00, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+        if diff00 == 0 {
+            run += 1
+        } else {
+            encodeCoeffRun(val: diff00, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: 0)
+            run = 0
+            startIdxForRun = currentIdx + 1
+        }
 
         for x in 1..<size {
             currentIdx += 1
             if currentIdx > lscpIdx { break }
             let diff = ptr0[x] - ptr0[x - 1]
-            encodeCoeff(val: diff, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+            if diff == 0 {
+                run += 1
+            } else {
+                let startY = startIdxForRun / size
+                let startX = startIdxForRun % size
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                startIdxForRun = currentIdx + 1
+            }
         }
 
         for y in 1..<size {
@@ -176,7 +215,16 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
             currentIdx += 1
             if currentIdx > lscpIdx { break }
             let diffY0 = ptr[0] - ptrPrev[0]
-            encodeCoeff(val: diffY0, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+            if diffY0 == 0 {
+                run += 1
+            } else {
+                let startY = startIdxForRun / size
+                let startX = startIdxForRun % size
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                startIdxForRun = currentIdx + 1
+            }
 
             for x in 1..<size {
                 currentIdx += 1
@@ -193,7 +241,16 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
                     predicted = Int16(a + b - c)
                 }
                 let diff = ptr[x] - predicted
-                encodeCoeff(val: diff, encoder: &encoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+                if diff == 0 {
+                    run += 1
+                } else {
+                    let startY = startIdxForRun / size
+                    let startX = startIdxForRun % size
+                    let band = min(startX + startY, 7)
+                    encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                    run = 0
+                    startIdxForRun = currentIdx + 1
+                }
             }
         }
     }
@@ -307,7 +364,7 @@ func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
 @inline(__always)
 func encodePlaneSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
     var blocks = blocks
-    var bwFlags = CABACBitWriter()
+    var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
@@ -328,24 +385,21 @@ func encodePlaneSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [U
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
     var encoder = CABACEncoder()
-    var ctxSigHL = ContextModel()
-    var ctxSignHL = ContextModel()
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
     
-    var ctxSigLH = ContextModel()
-    var ctxSignLH = ContextModel()
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
 
-    var ctxSigHH = ContextModel()
-    var ctxSignHH = ContextModel()
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
 
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
-            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
-            blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
+            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+            blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
         }
     }
     
@@ -358,7 +412,7 @@ func encodePlaneSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [U
 @inline(__always)
 func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
     var blocks = blocks
-    var bwFlags = CABACBitWriter()
+    var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
@@ -379,21 +433,17 @@ func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
     var encoder = CABACEncoder()
-    var ctxSigLL = ContextModel()
-    var ctxSignLL = ContextModel()
-    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunLL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 64)
     
-    var ctxSigHL = ContextModel()
-    var ctxSignHL = ContextModel()
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
 
-    var ctxSigLH = ContextModel()
-    var ctxSignLH = ContextModel()
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
 
-    var ctxSigHH = ContextModel()
-    var ctxSignHH = ContextModel()
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
     
     var lastVal: Int16 = 0
     
@@ -405,10 +455,10 @@ func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -
 
             blocks[i].withView { view in
                 let subs = getSubbands(view: view, size: size)
-                blockEncodeDPCM(encoder: &encoder, block: subs.ll, size: subs.size, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
-                blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
-                blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
-                blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
+                blockEncodeDPCM(encoder: &encoder, block: subs.ll, size: subs.size, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
             }
         } else {
             lastVal = 0
@@ -527,6 +577,7 @@ private func estimateRiceBits(block: BlockView, size: Int) -> Int {
     return bodyBits + headerBits
 }
 
+@inline(__always)
 func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
     let probeStep = 64
     let qt = QuantizationTable(baseStep: probeStep)
@@ -775,6 +826,7 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
 
 
 
+@inline(__always)
 func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     if dx == 0 && dy == 0 { return plane }
     
@@ -831,6 +883,7 @@ func shiftPlane(_ plane: PlaneData420, dx: Int, dy: Int) async -> PlaneData420 {
     return PlaneData420(width: plane.width, height: plane.height, y: await yTask, cb: await cbTask, cr: await crTask)
 }
 
+@inline(__always)
 public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     

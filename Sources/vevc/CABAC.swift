@@ -15,17 +15,17 @@ let rangeLPS_table: [UInt32] = {
     return table
 }()
 
-public struct ContextModel {
-    public var pStateIdx: UInt8
-    public var valMPS: UInt8
+struct ContextModel {
+    var pStateIdx: UInt8
+    var valMPS: UInt8
 
-    public init() {
+    init() {
         self.pStateIdx = 0
         self.valMPS = 0
     }
 
     @inline(__always)
-    public mutating func update(binVal: UInt8) {
+    mutating func update(binVal: UInt8) {
         if binVal == valMPS {
             if pStateIdx < 127 {
                 pStateIdx += 1
@@ -42,19 +42,22 @@ public struct ContextModel {
 
 // MARK: - BitWriter for CABAC
 
-public struct CABACBitWriter {
-    public var data: [UInt8]
+struct CABACBitWriter {
+    var data: [UInt8]
     private var cache: UInt8
     private var bits: UInt8
 
-    public init() {
+    init(capacity: Int = 0) {
         self.data = []
+        if capacity > 0 {
+            self.data.reserveCapacity(capacity)
+        }
         self.cache = 0
         self.bits = 0
     }
 
     @inline(__always)
-    public mutating func writeBit(_ bit: UInt8) {
+    mutating func writeBit(_ bit: UInt8) {
         if 0 < bit {
             cache |= (1 << (7 - bits))
         }
@@ -67,7 +70,7 @@ public struct CABACBitWriter {
     }
 
     @inline(__always)
-    public mutating func flush() {
+    mutating func flush() {
         if 0 < bits {
             data.append(cache)
             bits = 0
@@ -78,14 +81,14 @@ public struct CABACBitWriter {
 
 // MARK: - CABAC Encoder
 
-public struct CABACEncoder {
+struct CABACEncoder {
     private var bw: CABACBitWriter
     private var low: UInt32
     private var range: UInt32
     private var bitsPending: Int
 
-    public init() {
-        self.bw = CABACBitWriter()
+    init(capacity: Int = 0) {
+        self.bw = CABACBitWriter(capacity: capacity)
         self.low = 0
         self.range = 510
         self.bitsPending = 0
@@ -124,7 +127,7 @@ public struct CABACEncoder {
     }
 
     @inline(__always)
-    public mutating func encodeBin(binVal: UInt8, ctx: inout ContextModel) {
+    mutating func encodeBin(binVal: UInt8, ctx: inout ContextModel) {
         let qIdx = (range >> 6) & 3
         let rLPS = rangeLPS_table[Int(qIdx) * 128 + Int(ctx.pStateIdx)]
 
@@ -140,7 +143,7 @@ public struct CABACEncoder {
     }
 
     @inline(__always)
-    public mutating func encodeBypass(binVal: UInt8) {
+    mutating func encodeBypass(binVal: UInt8) {
         low <<= 1
         if binVal != 0 {
             low += range
@@ -159,7 +162,7 @@ public struct CABACEncoder {
     }
 
     @inline(__always)
-    public mutating func encodeTerminal(binVal: UInt8) {
+    mutating func encodeTerminal(binVal: UInt8) {
         range -= 2
         if binVal != 0 {
             low += range
@@ -169,7 +172,7 @@ public struct CABACEncoder {
     }
 
     @inline(__always)
-    public mutating func flush() {
+    mutating func flush() {
         bitsPending += 1
         let bit = UInt8((low >> 9) & 1)
         putBit(bit)
@@ -185,20 +188,20 @@ public struct CABACEncoder {
     }
 
     @inline(__always)
-    public func getData() -> [UInt8] {
+    func getData() -> [UInt8] {
         return bw.data
     }
 }
 
 // MARK: - CABAC Decoder
 
-public struct CABACBitReader {
+struct CABACBitReader {
     private let data: [UInt8]
     private var offset: Int
     private var cache: UInt8
     private var bits: UInt8
 
-    public init(data: [UInt8]) {
+    init(data: [UInt8]) {
         self.data = data
         self.offset = 0
         self.cache = 0
@@ -206,7 +209,7 @@ public struct CABACBitReader {
     }
 
     @inline(__always)
-    public mutating func readBit() throws -> UInt8 {
+    mutating func readBit() throws -> UInt8 {
         if bits == 0 {
             if offset >= data.count {
                 return 0
@@ -221,12 +224,12 @@ public struct CABACBitReader {
     }
 }
 
-public struct CABACDecoder {
+struct CABACDecoder {
     private var br: CABACBitReader
     private var range: UInt32
     private var value: UInt32
 
-    public init(data: [UInt8]) throws {
+    init(data: [UInt8]) throws {
         self.br = CABACBitReader(data: data)
         self.range = 510
         self.value = 0
@@ -247,7 +250,7 @@ public struct CABACDecoder {
     }
 
     @inline(__always)
-    public mutating func decodeBin(ctx: inout ContextModel) throws -> UInt8 {
+    mutating func decodeBin(ctx: inout ContextModel) throws -> UInt8 {
         let qIdx = (range >> 6) & 3
         let rLPS = rangeLPS_table[Int(qIdx) * 128 + Int(ctx.pStateIdx)]
 
@@ -269,7 +272,7 @@ public struct CABACDecoder {
     }
 
     @inline(__always)
-    public mutating func decodeBypass() throws -> UInt8 {
+    mutating func decodeBypass() throws -> UInt8 {
         let b = try br.readBit()
         value = ((value << 1) | UInt32(b)) & 0x3FF
 

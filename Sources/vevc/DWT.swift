@@ -2,12 +2,12 @@
 
 // MARK: - DWT Structures
 
-public struct Subbands {
-    public var ll: BlockView
-    public var hl: BlockView
-    public var lh: BlockView
-    public var hh: BlockView
-    public let size: Int
+struct Subbands {
+    var ll: BlockView
+    var hl: BlockView
+    var lh: BlockView
+    var hh: BlockView
+    let size: Int
 }
 
 @inline(__always)
@@ -25,7 +25,7 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 // MARK: - LeGall 5/3 Lifting
 
 @inline(__always)
-public func lift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: Int) {
+func lift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: Int) {
     #if arch(arm64) || arch(x86_64) || arch(wasm32)
     switch count {
     case 8:
@@ -43,7 +43,7 @@ public func lift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stri
 }
 
 @inline(__always)
-public func invLift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: Int) {
+func invLift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: Int) {
     #if arch(arm64) || arch(x86_64) || arch(wasm32)
     switch count {
     case 8:
@@ -404,7 +404,7 @@ func invDwt2dSIMD16(_ block: inout BlockView) {
 // MARK: - 2D DWT
 
 @inline(__always)
-public func dwt2d(_ block: inout BlockView, size: Int) -> Subbands {
+func dwt2d(_ block: inout BlockView, size: Int) -> Subbands {
     #if arch(arm64) || arch(x86_64) || arch(wasm32)
     switch size {
     case 8:
@@ -438,7 +438,7 @@ internal func dwt2dScalar(_ block: inout BlockView, size: Int) -> Subbands {
 }
 
 @inline(__always)
-public func invDwt2d(_ block: inout BlockView, size: Int) {
+func invDwt2d(_ block: inout BlockView, size: Int) {
     #if arch(arm64) || arch(x86_64) || arch(wasm32)
     switch size {
     case 8:

@@ -57,19 +57,31 @@ func decodeExpGolomb(decoder: inout CABACDecoder) throws -> UInt32 {
 }
 
 @inline(__always)
-func decodeCoeff(decoder: inout CABACDecoder, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws -> Int16 {
-    let sig = try decoder.decodeBin(ctx: &ctxSig)
-    if sig == 0 {
-        return 0
+func decodeCoeffRun(decoder: inout CABACDecoder, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel], band: Int) throws -> (Int, Int16) {
+    var run = 0
+    let ctxBandOffset = min(band, 7) * 8
+    try ctxRun.withUnsafeMutableBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { return }
+        for i in 0..<7 {
+            let bit = try decoder.decodeBin(ctx: &base[ctxBandOffset + Int(i)])
+            if bit == 0 {
+                break
+            }
+            run += 1
+        }
+    }
+    if run == 7 {
+        let rem = try decodeExpGolomb(decoder: &decoder)
+        run += Int(rem)
     }
 
-    let signBit = try decoder.decodeBin(ctx: &ctxSign)
+    let signBit = try decoder.decodeBypass()
 
     var mag: UInt32 = 1
     try ctxMag.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
         for i in 0..<7 {
-            let bit = try decoder.decodeBin(ctx: &base[Int(i)])
+            let bit = try decoder.decodeBin(ctx: &base[ctxBandOffset + Int(i)])
             if bit == 0 {
                 break
             }
@@ -83,14 +95,18 @@ func decodeCoeff(decoder: inout CABACDecoder, ctxSig: inout ContextModel, ctxSig
     }
 
     let sVal = Int16(mag)
+    let finalVal: Int16
     if signBit == 1 {
-        return -1 * sVal
+        finalVal = -1 * sVal
+    } else {
+        finalVal = sVal
     }
-    return sVal
+
+    return (run, finalVal)
 }
 
 @inline(__always)
-func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
+func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         for y in 0..<size {
@@ -107,22 +123,32 @@ func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int,
 
     for y in 0..<size {
         let ptr = block.rowPointer(y: y)
-        if y > lscpY {
-            for x in 0..<size { ptr[x] = 0 }
-            continue
+        for x in 0..<size { ptr[x] = 0 }
+    }
+
+    var currentIdx = 0
+    let lscpIdx = lscpY * size + lscpX
+
+    while currentIdx <= lscpIdx {
+        let startY = currentIdx / size
+        let startX = currentIdx % size
+        let band = min(startX + startY, 7)
+
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            let y = currentIdx / size
+            let x = currentIdx % size
+            let ptr = block.rowPointer(y: y)
+            ptr[x] = val
         }
-        let endX = (y == lscpY) ? lscpX : (size - 1)
-        for x in 0...endX {
-            ptr[x] = try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
-        }
-        for x in (endX + 1)..<size {
-            ptr[x] = 0
-        }
+        currentIdx += 1
     }
 }
 
 @inline(__always)
-func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: Int, lastVal: inout Int16, ctxSig: inout ContextModel, ctxSign: inout ContextModel, ctxMag: inout [ContextModel]) throws {
+func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: Int, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -131,29 +157,44 @@ func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: 
         lscpIdx = lscpY * size + lscpX
     }
 
-    let ptr0 = block.rowPointer(y: 0)
+    for y in 0..<size {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<size { ptr[x] = 0 }
+    }
+
+    var currentIdx = 0
     
-    let diff00 = (0 <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
-    ptr0[0] = diff00 + lastVal
+    while currentIdx <= lscpIdx {
+        let startY = currentIdx / size
+        let startX = currentIdx % size
+        let band = min(startX + startY, 7)
+
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            let y = currentIdx / size
+            let x = currentIdx % size
+            let ptr = block.rowPointer(y: y)
+            ptr[x] = val
+        }
+        currentIdx += 1
+    }
+
+    let ptr0 = block.rowPointer(y: 0)
+    ptr0[0] = ptr0[0] + lastVal
     
     for x in 1..<size {
-        let idx = x
-        let diff = (idx <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
-        ptr0[x] = diff + ptr0[x - 1]
+        ptr0[x] = ptr0[x] + ptr0[x - 1]
     }
     
     for y in 1..<size {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
         
-        let idx0 = y * size
-        let diffY0 = (idx0 <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
-        ptr[0] = diffY0 + ptrPrev[0]
+        ptr[0] = ptr[0] + ptrPrev[0]
         
         for x in 1..<size {
-            let idx = y * size + x
-            let diff = (idx <= lscpIdx) ? try decodeCoeff(decoder: &decoder, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag) : 0
-            
             let a = Int(ptr[x - 1])
             let b = Int(ptrPrev[x])
             let c = Int(ptrPrev[x - 1])
@@ -165,7 +206,7 @@ func blockDecodeDPCM(decoder: inout CABACDecoder, block: inout BlockView, size: 
             } else {
                 predicted = Int16(a + b - c)
             }
-            ptr[x] = diff + predicted
+            ptr[x] += predicted
         }
     }
     lastVal = block.rowPointer(y: size - 1)[size - 1]
@@ -196,28 +237,25 @@ func decodePlaneSubbands(data: [UInt8], size: Int, blockCount: Int) throws -> [B
     
     let half = size / 2
     
-    var ctxSigHL = ContextModel()
-    var ctxSignHL = ContextModel()
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
     
-    var ctxSigLH = ContextModel()
-    var ctxSignLH = ContextModel()
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
     
-    var ctxSigHH = ContextModel()
-    var ctxSignHH = ContextModel()
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
 
     for i in nonZeroIndices {
         try blocks[i].withView { view in
             var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
+            try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
             
             var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
+            try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
             
             var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-            try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
+            try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
         }
     }
 
@@ -249,21 +287,17 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
     
     let half = size / 2
     
-    var ctxSigLL = ContextModel()
-    var ctxSignLL = ContextModel()
-    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunLL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 64)
 
-    var ctxSigHL = ContextModel()
-    var ctxSignHL = ContextModel()
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
     
-    var ctxSigLH = ContextModel()
-    var ctxSignLH = ContextModel()
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
     
-    var ctxSigHH = ContextModel()
-    var ctxSignHH = ContextModel()
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 8)
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
 
     var lastVal: Int16 = 0
     var nzCur = 0
@@ -273,16 +307,16 @@ func decodePlaneBaseSubbands(data: [UInt8], size: Int, blockCount: Int) throws -
             nzCur += 1
             try blocks[i].withView { view in
                 var llView = BlockView(base: view.base, width: half, height: half, stride: size)
-                try blockDecodeDPCM(decoder: &decoder, block: &llView, size: half, lastVal: &lastVal, ctxSig: &ctxSigLL, ctxSign: &ctxSignLL, ctxMag: &ctxMagLL)
+                try blockDecodeDPCM(decoder: &decoder, block: &llView, size: half, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
                 
                 var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: size)
-                try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxSig: &ctxSigHL, ctxSign: &ctxSignHL, ctxMag: &ctxMagHL)
+                try blockDecode(decoder: &decoder, block: &hlView, size: half, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
                 
                 var lhView = BlockView(base: view.base.advanced(by: half * size), width: half, height: half, stride: size)
-                try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxSig: &ctxSigLH, ctxSign: &ctxSignLH, ctxMag: &ctxMagLH)
+                try blockDecode(decoder: &decoder, block: &lhView, size: half, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
                 
                 var hhView = BlockView(base: view.base.advanced(by: half * size + half), width: half, height: half, stride: size)
-                try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxSig: &ctxSigHH, ctxSign: &ctxSignHH, ctxMag: &ctxMagHH)
+                try blockDecode(decoder: &decoder, block: &hhView, size: half, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
             }
         } else {
             lastVal = 0
@@ -711,8 +745,8 @@ func decodeBase(r: [UInt8], layer: UInt8, size: Int) async throws -> Image16 {
 }
 
 public struct DecodeOptions: Sendable {
-    public var maxLayer: Int = 2
-    public var maxFrames: Int = 4
+    public var maxLayer: Int
+    public var maxFrames: Int
     
     public init(maxLayer: Int = 2, maxFrames: Int = 4) {
         self.maxLayer = maxLayer
@@ -720,6 +754,7 @@ public struct DecodeOptions: Sendable {
     }
 }
 
+@inline(__always)
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
     var out: [YCbCrImage] = []
     var offset = 0

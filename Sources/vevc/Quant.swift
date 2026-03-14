@@ -1,12 +1,12 @@
 // MARK: - Quantization
 
 struct Quantizer: Sendable {
-    public let step: Int16
-    public let mul: Int32
-    public let bias: Int32
-    public let shift: Int16 = 16
+    let step: Int16
+    let mul: Int32
+    let bias: Int32
+    let shift: Int16 = 16
     
-    public init(step: Int, roundToNearest: Bool = false) {
+    init(step: Int, roundToNearest: Bool = false) {
         self.step = Int16(step)
         self.mul = Int32((1 << 16) / step)
         var b: Int32 = 0
@@ -18,12 +18,12 @@ struct Quantizer: Sendable {
 }
 
 struct QuantizationTable: Sendable {
-    public let step: Int16
-    public let qLow: Quantizer
-    public let qMid: Quantizer
-    public let qHigh: Quantizer
+    let step: Int16
+    let qLow: Quantizer
+    let qMid: Quantizer
+    let qHigh: Quantizer
     
-    public init(baseStep: Int) {
+    init(baseStep: Int) {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
         self.qLow  = Quantizer(step: s, roundToNearest: true)

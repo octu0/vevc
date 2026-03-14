@@ -1,12 +1,12 @@
 // MARK: - BlockView
 
-public struct BlockView {
-    public var base: UnsafeMutablePointer<Int16>
-    public let width: Int
-    public let height: Int
-    public let stride: Int
+struct BlockView {
+    var base: UnsafeMutablePointer<Int16>
+    let width: Int
+    let height: Int
+    let stride: Int
 
-    public init(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, stride: Int) {
+    init(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, stride: Int) {
         self.base = base
         self.width = width
         self.height = height
@@ -14,18 +14,18 @@ public struct BlockView {
     }
 
     @inline(__always)
-    public subscript(y: Int, x: Int) -> Int16 {
+    subscript(y: Int, x: Int) -> Int16 {
         get { base[(y * stride) + x] }
         set { base[(y * stride) + x] = newValue }
     }
 
     @inline(__always)
-    public func rowPointer(y: Int) -> UnsafeMutablePointer<Int16> {
+    func rowPointer(y: Int) -> UnsafeMutablePointer<Int16> {
         return base.advanced(by: y * stride)
     }
 
     @inline(__always)
-    public func setRow(offsetY: Int, row: [Int16]) {
+    func setRow(offsetY: Int, row: [Int16]) {
         let ptr = rowPointer(y: offsetY)
         row.withUnsafeBufferPointer { src in
             guard let srcBase = src.baseAddress else { return }
@@ -36,19 +36,19 @@ public struct BlockView {
 
 // MARK: - Block2D
 
-public struct Block2D: Sendable {
-    public var data: [Int16]
-    public let width: Int
-    public let height: Int
+struct Block2D: Sendable {
+    var data: [Int16]
+    let width: Int
+    let height: Int
 
-    public init(width: Int, height: Int) {
+    init(width: Int, height: Int) {
         self.width = width
         self.height = height
         self.data = [Int16](repeating: 0, count: (width * height))
     }
     
     @inline(__always)
-    public mutating func withView<R>(_ body: (inout BlockView) throws -> R) rethrows -> R {
+    mutating func withView<R>(_ body: (inout BlockView) throws -> R) rethrows -> R {
         return try data.withUnsafeMutableBufferPointer { ptr in
             guard let base = ptr.baseAddress else { 
                 fatalError("Block2D buffer is empty")

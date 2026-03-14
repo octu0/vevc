@@ -34,21 +34,22 @@ func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
     return Int(sad)
 }
 
-public struct MotionVector: Sendable {
-    public let dx: Int
-    public let dy: Int
+struct MotionVector: Sendable {
+    let dx: Int
+    let dy: Int
 }
 
-public struct MotionVectors: Sendable {
-    public var dx: [Int]
-    public var dy: [Int]
+struct MotionVectors: Sendable {
+    var dx: [Int]
+    var dy: [Int]
 
-    public init(count: Int) {
+    init(count: Int) {
         self.dx = [Int](repeating: 0, count: count)
         self.dy = [Int](repeating: 0, count: count)
     }
 }
 
+@inline(__always)
 func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
     let mbSize = 32
     let w = curr.width
@@ -173,6 +174,7 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
     return Int(sad)
 }
 
+@inline(__always)
 func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
     let mbSize = 32
     let w = prev.width
@@ -245,7 +247,8 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
     return PlaneData420(width: w, height: h, y: await yTask, cb: await cbTask, cr: await crTask)
 }
 
-public func calculatePMV(mvs: MotionVectors, mbX: Int, mbY: Int, mbCols: Int) -> (dx: Int, dy: Int) {
+@inline(__always)
+func calculatePMV(mvs: MotionVectors, mbX: Int, mbY: Int, mbCols: Int) -> (dx: Int, dy: Int) {
     let hasLeft = mbX > 0
     let hasTop = mbY > 0
     let hasTopRight = mbY > 0 && mbX < mbCols - 1

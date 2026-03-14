@@ -53,12 +53,11 @@ final class CompressionFeatureTests: XCTestCase {
             }
         }
 
-        var ctxSig = ContextModel()
-        var ctxSign = ContextModel()
-        var ctxMag = [ContextModel](repeating: ContextModel(), count: 8)
+        var ctxRun = [ContextModel](repeating: ContextModel(), count: 64)
+        var ctxMag = [ContextModel](repeating: ContextModel(), count: 64)
 
         block.withView { view in
-            blockEncode(encoder: &encoder, block: view, size: size, ctxSig: &ctxSig, ctxSign: &ctxSign, ctxMag: &ctxMag)
+            blockEncode(encoder: &encoder, block: view, size: size, ctxRun: &ctxRun, ctxMag: &ctxMag)
         }
         encoder.flush()
 
@@ -67,12 +66,11 @@ final class CompressionFeatureTests: XCTestCase {
 
         var outBlock = Block2D(width: size, height: size)
 
-        var decCtxSig = ContextModel()
-        var decCtxSign = ContextModel()
-        var decCtxMag = [ContextModel](repeating: ContextModel(), count: 8)
+        var decCtxRun = [ContextModel](repeating: ContextModel(), count: 64)
+        var decCtxMag = [ContextModel](repeating: ContextModel(), count: 64)
 
         try outBlock.withView { view in
-            try blockDecode(decoder: &decoder, block: &view, size: size, ctxSig: &decCtxSig, ctxSign: &decCtxSign, ctxMag: &decCtxMag)
+            try blockDecode(decoder: &decoder, block: &view, size: size, ctxRun: &decCtxRun, ctxMag: &decCtxMag)
         }
 
         outBlock.withView { view in

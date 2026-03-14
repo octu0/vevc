@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 
 // MARK: - Image Conversion Helper
 
+@inline(__always)
 public func pngToYCbCr(data: Data) throws -> YCbCrImage {
     guard let source = CGImageSourceCreateWithData(data as CFData, nil),
           let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
@@ -69,6 +70,7 @@ public func pngToYCbCr(data: Data) throws -> YCbCrImage {
     return ycbcr
 }
 
+@inline(__always)
 public func saveImage(img: YCbCrImage, url: URL) throws {
     let width = img.width
     let height = img.height
