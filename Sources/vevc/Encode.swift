@@ -578,7 +578,7 @@ func isEffectivelyZeroBase4_SIMD(data: UnsafeMutableBufferPointer<Int16>, thresh
 func isEffectivelyZero32_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
     guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -threshold
+    let thNeg = -1 * threshold
     
     let lowerHalfBase = base + 16 * 32
     for i in 0..<512 {
@@ -605,7 +605,7 @@ func isEffectivelyZero32_Scalar(data: UnsafeMutableBufferPointer<Int16>, thresho
 func isEffectivelyZero16_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
     guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -threshold
+    let thNeg = -1 * threshold
     
     let lowerHalfBase = base + 8 * 16
     for i in 0..<128 {
@@ -632,7 +632,7 @@ func isEffectivelyZero16_Scalar(data: UnsafeMutableBufferPointer<Int16>, thresho
 func isEffectivelyZero8_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
     guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -threshold
+    let thNeg = -1 * threshold
     
     let lowerHalfBase = base + 4 * 8
     for i in 0..<32 {
@@ -659,7 +659,7 @@ func isEffectivelyZero8_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshol
 func isEffectivelyZero4_Scalar(data: UnsafeMutableBufferPointer<Int16>, threshold: Int16) -> Bool {
     guard let base = data.baseAddress else { return false }
     let thPos = threshold
-    let thNeg = -threshold
+    let thNeg = -1 * threshold
     
     let lowerHalfBase = base + 2 * 4
     for i in 0..<8 {
@@ -991,6 +991,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
     return out
 }
 
+@inline(__always)
 private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> Int {
     let count = 4 * 4
     let ptr0 = block.rowPointer(y: 0)
