@@ -174,34 +174,53 @@ func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
     
     var blocksY: [Block2D] = []
     blocksY.reserveCapacity((rowCountY * ((dx + 32 - 1) / 32)))
-    for i in 0..<rowCountY {
-        guard let res = resultsY.value[i] else { continue }
-        for j in res.1.indices {
-            var (llBlock, w, h) = res.1[j]
-            blocksY.append(llBlock)
+    subY.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCountY {
+            guard let res = resultsY.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocksY.append(llBlock)
 
-            
-            let subDxWidth = (dx / 2)
-            let subDyHeight = (dy / 2)
-            let destStartX = (w / 2)
-            let destStartY = (h / 2)
-            let subSize = (32 / 2)
+                let subDxWidth = (dx / 2)
+                let subDyHeight = (dy / 2)
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (32 / 2)
 
-            llBlock.withView { view in
-                let subs = getSubbands32(view: view)
-                let srcBase = subs.ll.base
-                for blockY in 0..<subSize {
-                    let dstY = (destStartY + blockY)
-                    if subDyHeight <= dstY { continue }
-                    let srcPtr = srcBase.advanced(by: (blockY * 32))
+                llBlock.withView { view in
+                    let subs = getSubbands32(view: view)
+                    let srcBase = subs.ll.base
                     let limit = min(subSize, (subDxWidth - destStartX))
 
-                    guard 0 < limit else { continue }
+                    guard 0 < limit else { return }
 
-                    let dstIdx = ((dstY * subDxWidth) + destStartX)
-                    subY.withUnsafeMutableBufferPointer { dstPtr in
-                        guard let base = dstPtr.baseAddress else { return }
-                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                    if limit == subSize && (destStartY + subSize) <= subDyHeight {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subDxWidth) + destStartX)
+                        dstBasePtr.advanced(by: subDxWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                        dstBasePtr.advanced(by: subDxWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subDyHeight <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 32))
+                            let dstIdx = ((dstY * subDxWidth) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
                     }
                 }
             }
@@ -238,31 +257,51 @@ func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
     
     var blocksCb: [Block2D] = []
     blocksCb.reserveCapacity((rowCountCb * ((cbDx + 32 - 1) / 32)))
-    for i in 0..<rowCountCb {
-        guard let res = resultsCb.value[i] else { continue }
-        for j in res.1.indices {
-            var (llBlock, w, h) = res.1[j]
-            blocksCb.append(llBlock)
+    subCb.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCountCb {
+            guard let res = resultsCb.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocksCb.append(llBlock)
 
-            let destStartX = (w / 2)
-            let destStartY = (h / 2)
-            let subSize = (32 / 2)
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (32 / 2)
 
-            llBlock.withView { view in
-                let subs = getSubbands32(view: view)
-                let srcBase = subs.ll.base
-                for blockY in 0..<subSize {
-                    let dstY = (destStartY + blockY)
-                    if subCbDy <= dstY { continue }
-                    let srcPtr = srcBase.advanced(by: (blockY * 32))
+                llBlock.withView { view in
+                    let subs = getSubbands32(view: view)
+                    let srcBase = subs.ll.base
                     let limit = min(subSize, (subCbDx - destStartX))
 
-                    guard 0 < limit else { continue }
+                    guard 0 < limit else { return }
 
-                    let dstIdx = ((dstY * subCbDx) + destStartX)
-                    subCb.withUnsafeMutableBufferPointer { dstPtr in
-                        guard let base = dstPtr.baseAddress else { return }
-                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                    if limit == subSize && (destStartY + subSize) <= subCbDy {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
+                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subCbDy <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 32))
+                            let dstIdx = ((dstY * subCbDx) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
                     }
                 }
             }
@@ -295,32 +334,51 @@ func extractTransformBlocks32(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
     
     var blocksCr: [Block2D] = []
     blocksCr.reserveCapacity((rowCountCr * ((cbDx + 32 - 1) / 32)))
-    for i in 0..<rowCountCr {
-        guard let res = resultsCr.value[i] else { continue }
-        for j in res.1.indices {
-            var (llBlock, w, h) = res.1[j]
-            blocksCr.append(llBlock)
+    subCr.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCountCr {
+            guard let res = resultsCr.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocksCr.append(llBlock)
 
-            
-            let destStartX = (w / 2)
-            let destStartY = (h / 2)
-            let subSize = (32 / 2)
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (32 / 2)
 
-            llBlock.withView { view in
-                let subs = getSubbands32(view: view)
-                let srcBase = subs.ll.base
-                for blockY in 0..<subSize {
-                    let dstY = (destStartY + blockY)
-                    if subCbDy <= dstY { continue }
-                    let srcPtr = srcBase.advanced(by: (blockY * 32))
+                llBlock.withView { view in
+                    let subs = getSubbands32(view: view)
+                    let srcBase = subs.ll.base
                     let limit = min(subSize, (subCbDx - destStartX))
 
-                    guard 0 < limit else { continue }
+                    guard 0 < limit else { return }
 
-                    let dstIdx = ((dstY * subCbDx) + destStartX)
-                    subCr.withUnsafeMutableBufferPointer { dstPtr in
-                        guard let base = dstPtr.baseAddress else { return }
-                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                    if limit == subSize && (destStartY + subSize) <= subCbDy {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
+                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                        dstBasePtr.advanced(by: subCbDx * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subCbDy <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 32))
+                            let dstIdx = ((dstY * subCbDx) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
                     }
                 }
             }
@@ -367,34 +425,45 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
     
     var blocksY: [Block2D] = []
     blocksY.reserveCapacity((rowCountY * ((dx + 16 - 1) / 16)))
-    for i in 0..<rowCountY {
-        guard let res = resultsY.value[i] else { continue }
-        for j in res.1.indices {
-            var (llBlock, w, h) = res.1[j]
-            blocksY.append(llBlock)
+    subY.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCountY {
+            guard let res = resultsY.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocksY.append(llBlock)
+                
+                let subDxWidth = (dx / 2)
+                let subDyHeight = (dy / 2)
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (16 / 2)
 
-            
-            let subDxWidth = (dx / 2)
-            let subDyHeight = (dy / 2)
-            let destStartX = (w / 2)
-            let destStartY = (h / 2)
-            let subSize = (16 / 2)
-
-            llBlock.withView { view in
-                let subs = getSubbands16(view: view)
-                let srcBase = subs.ll.base
-                for blockY in 0..<subSize {
-                    let dstY = (destStartY + blockY)
-                    if subDyHeight <= dstY { continue }
-                    let srcPtr = srcBase.advanced(by: (blockY * 16))
+                llBlock.withView { view in
+                    let subs = getSubbands16(view: view)
+                    let srcBase = subs.ll.base
                     let limit = min(subSize, (subDxWidth - destStartX))
+                    
+                    guard 0 < limit else { return }
 
-                    guard 0 < limit else { continue }
-
-                    let dstIdx = ((dstY * subDxWidth) + destStartX)
-                    subY.withUnsafeMutableBufferPointer { dstPtr in
-                        guard let base = dstPtr.baseAddress else { return }
-                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                    if limit == subSize && (destStartY + subSize) <= subDyHeight {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subDxWidth) + destStartX)
+                        dstBasePtr.advanced(by: subDxWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
+                        dstBasePtr.advanced(by: subDxWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subDyHeight <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 16))
+                            let dstIdx = ((dstY * subDxWidth) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
                     }
                 }
             }
@@ -431,31 +500,43 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
     
     var blocksCb: [Block2D] = []
     blocksCb.reserveCapacity((rowCountCb * ((cbDx + 16 - 1) / 16)))
-    for i in 0..<rowCountCb {
-        guard let res = resultsCb.value[i] else { continue }
-        for j in res.1.indices {
-            var (llBlock, w, h) = res.1[j]
-            blocksCb.append(llBlock)
+    subCb.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCountCb {
+            guard let res = resultsCb.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocksCb.append(llBlock)
 
-            let destStartX = (w / 2)
-            let destStartY = (h / 2)
-            let subSize = (16 / 2)
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (16 / 2)
 
-            llBlock.withView { view in
-                let subs = getSubbands16(view: view)
-                let srcBase = subs.ll.base
-                for blockY in 0..<subSize {
-                    let dstY = (destStartY + blockY)
-                    if subCbDy <= dstY { continue }
-                    let srcPtr = srcBase.advanced(by: (blockY * 16))
+                llBlock.withView { view in
+                    let subs = getSubbands16(view: view)
+                    let srcBase = subs.ll.base
                     let limit = min(subSize, (subCbDx - destStartX))
+                    
+                    guard 0 < limit else { return }
 
-                    guard 0 < limit else { continue }
-
-                    let dstIdx = ((dstY * subCbDx) + destStartX)
-                    subCb.withUnsafeMutableBufferPointer { dstPtr in
-                        guard let base = dstPtr.baseAddress else { return }
-                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                    if limit == subSize && (destStartY + subSize) <= subCbDy {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
+                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subCbDy <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 16))
+                            let dstIdx = ((dstY * subCbDx) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
                     }
                 }
             }
@@ -488,32 +569,43 @@ func extractTransformBlocks16(pd: PlaneData420, qtY: QuantizationTable, qtC: Qua
     
     var blocksCr: [Block2D] = []
     blocksCr.reserveCapacity((rowCountCr * ((cbDx + 16 - 1) / 16)))
-    for i in 0..<rowCountCr {
-        guard let res = resultsCr.value[i] else { continue }
-        for j in res.1.indices {
-            var (llBlock, w, h) = res.1[j]
-            blocksCr.append(llBlock)
+    subCr.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for i in 0..<rowCountCr {
+            guard let res = resultsCr.value[i] else { continue }
+            for j in res.1.indices {
+                var (llBlock, w, h) = res.1[j]
+                blocksCr.append(llBlock)
 
-            
-            let destStartX = (w / 2)
-            let destStartY = (h / 2)
-            let subSize = (16 / 2)
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (16 / 2)
 
-            llBlock.withView { view in
-                let subs = getSubbands16(view: view)
-                let srcBase = subs.ll.base
-                for blockY in 0..<subSize {
-                    let dstY = (destStartY + blockY)
-                    if subCbDy <= dstY { continue }
-                    let srcPtr = srcBase.advanced(by: (blockY * 16))
+                llBlock.withView { view in
+                    let subs = getSubbands16(view: view)
+                    let srcBase = subs.ll.base
                     let limit = min(subSize, (subCbDx - destStartX))
+                    
+                    guard 0 < limit else { return }
 
-                    guard 0 < limit else { continue }
-
-                    let dstIdx = ((dstY * subCbDx) + destStartX)
-                    subCr.withUnsafeMutableBufferPointer { dstPtr in
-                        guard let base = dstPtr.baseAddress else { return }
-                        base.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                    if limit == subSize && (destStartY + subSize) <= subCbDy {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subCbDx) + destStartX)
+                        dstBasePtr.advanced(by: subCbDx * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
+                        dstBasePtr.advanced(by: subCbDx * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if subCbDy <= dstY { continue }
+                            let srcPtr = srcBase.advanced(by: (blockY * 16))
+                            let dstIdx = ((dstY * subCbDx) + destStartX)
+                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                        }
                     }
                 }
             }

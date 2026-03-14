@@ -1344,48 +1344,66 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
         let cHeight = ((img.height + 1) / 2)
         let cCount = (cWidth * cHeight)
 
-        let cb = [Int16](unsafeUninitializedCapacity: cCount) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
-            img.cbPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
-                for cy in 0..<cHeight {
-                    let py = (cy * 2)
-                    let srcRowOffset = (py * img.width)
-                    let dstRowOffset = (cy * cWidth)
-                    for cx in 0..<cWidth {
-                        let px = (cx * 2)
-                        let srcOffset = (srcRowOffset + px)
-                        let dstOffset = (dstRowOffset + cx)
-                        if srcOffset < src.count {
-                            buffer[dstOffset] = (Int16(src[srcOffset]) - 128)
-                        } else {
-                            buffer[dstOffset] = 0
+        if img.ratio == .ratio444 {
+            let cb = [Int16](unsafeUninitializedCapacity: cCount) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+                img.cbPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
+                    for cy in 0..<cHeight {
+                        let py = (cy * 2)
+                        let srcRowOffset = (py * img.width)
+                        let dstRowOffset = (cy * cWidth)
+                        for cx in 0..<cWidth {
+                            let px = (cx * 2)
+                            let srcOffset = (srcRowOffset + px)
+                            let dstOffset = (dstRowOffset + cx)
+                            if srcOffset < src.count {
+                                buffer[dstOffset] = (Int16(src[srcOffset]) - 128)
+                            } else {
+                                buffer[dstOffset] = 0
+                            }
                         }
                     }
                 }
+                initializedCount = cCount
             }
-            initializedCount = cCount
-        }
-        let cr = [Int16](unsafeUninitializedCapacity: cCount) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
-            img.crPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
-                for cy in 0..<cHeight {
-                    let py = (cy * 2)
-                    let srcRowOffset = (py * img.width)
-                    let dstRowOffset = (cy * cWidth)
-                    for cx in 0..<cWidth {
-                        let px = (cx * 2)
-                        let srcOffset = (srcRowOffset + px)
-                        let dstOffset = (dstRowOffset + cx)
-                        if srcOffset < src.count {
-                            buffer[dstOffset] = (Int16(src[srcOffset]) - 128)
-                        } else {
-                            buffer[dstOffset] = 0
+            let cr = [Int16](unsafeUninitializedCapacity: cCount) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+                img.crPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
+                    for cy in 0..<cHeight {
+                        let py = (cy * 2)
+                        let srcRowOffset = (py * img.width)
+                        let dstRowOffset = (cy * cWidth)
+                        for cx in 0..<cWidth {
+                            let px = (cx * 2)
+                            let srcOffset = (srcRowOffset + px)
+                            let dstOffset = (dstRowOffset + cx)
+                            if srcOffset < src.count {
+                                buffer[dstOffset] = (Int16(src[srcOffset]) - 128)
+                            } else {
+                                buffer[dstOffset] = 0
+                            }
                         }
                     }
                 }
+                initializedCount = cCount
             }
-            initializedCount = cCount
+            return PlaneData420(width: img.width, height: img.height, y: y, cb: cb, cr: cr)
         }
 
-        
+        let cb = [Int16](unsafeUninitializedCapacity: img.cbPlane.count) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+            img.cbPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
+                for i in 0..<src.count {
+                    buffer[i] = (Int16(src[i]) - 128)
+                }
+            }
+            initializedCount = img.cbPlane.count
+        }
+        let cr = [Int16](unsafeUninitializedCapacity: img.crPlane.count) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
+            img.crPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
+                for i in 0..<src.count {
+                    buffer[i] = (Int16(src[i]) - 128)
+                }
+            }
+            initializedCount = img.crPlane.count
+        }
         return PlaneData420(width: img.width, height: img.height, y: y, cb: cb, cr: cr)
     }
 }
