@@ -55,7 +55,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> 
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 32 - 1) / 32)
     let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
-    let chunkSize = 4
+    let chunkSize = 8
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
@@ -140,7 +140,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 16 - 1) / 16)
     let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
-    let chunkSize = 4
+    let chunkSize = 8
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
     DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in

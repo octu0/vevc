@@ -643,46 +643,6 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
     }
     return true
 }
-@inline(__always)
-func transformLayer32(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        var sub = dwt2d_32_sb(&view)
-        quantizeMidSignedMapping(&sub.hl, qt: qt)
-        quantizeMidSignedMapping(&sub.lh, qt: qt)
-        quantizeHighSignedMapping(&sub.hh, qt: qt)
-    }
-}
-
-@inline(__always)
-func transformLayer16(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        var sub = dwt2d_16_sb(&view)
-        quantizeMidSignedMapping(&sub.hl, qt: qt)
-        quantizeMidSignedMapping(&sub.lh, qt: qt)
-        quantizeHighSignedMapping(&sub.hh, qt: qt)
-    }
-}
-
-@inline(__always)
-func transformLayer8(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        var sub = dwt2d_8_sb(&view)
-        quantizeMidSignedMapping(&sub.hl, qt: qt)
-        quantizeMidSignedMapping(&sub.lh, qt: qt)
-        quantizeHighSignedMapping(&sub.hh, qt: qt)
-    }
-}
-
-@inline(__always)
-func transformBase8(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        var sub = dwt2d_8_sb(&view)
-        quantizeLow(&sub.ll, qt: qt)
-        quantizeMidSignedMapping(&sub.hl, qt: qt)
-        quantizeMidSignedMapping(&sub.lh, qt: qt)
-        quantizeHighSignedMapping(&sub.hh, qt: qt)
-    }
-}
 
 @inline(__always)
 func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
