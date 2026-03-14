@@ -79,12 +79,12 @@ func encodeCoeffRun(val: Int16, encoder: inout CABACEncoder, run: Int, ctxRun: i
 }
 
 @inline(__always)
-func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncode32(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
     var lscpX = -1
     var lscpY = -1
-    for y in stride(from: size - 1, through: 0, by: -1) {
+    for y in stride(from: 32 - 1, through: 0, by: -1) {
         let ptr = block.rowPointer(y: y)
-        for x in stride(from: size - 1, through: 0, by: -1) {
+        for x in stride(from: 32 - 1, through: 0, by: -1) {
             if ptr[x] != 0 {
                 lscpX = x
                 lscpY = y
@@ -107,53 +107,217 @@ func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxRu
     var currentIdx = 0
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (size - 1)
+        let endX = (y == lscpY) ? lscpX : (32 - 1)
         for x in 0...endX {
             let val = ptr[x]
             if val == 0 {
                 run += 1
             } else {
-                let startY = currentIdx / size
-                let startX = currentIdx % size
+                let startY = currentIdx / 32
+                let startX = currentIdx % 32
                 let band = min(startX + startY, 7)
                 encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
                 run = 0
-                currentIdx = (y * size + x) + 1
+                currentIdx = (y * 32 + x) + 1
             }
         }
     }
 }
 
 @inline(__always)
-func getSubbands(view: BlockView, size: Int) -> Subbands {
-    let half = size / 2
+func blockEncode16(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    for y in stride(from: 16 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        for x in stride(from: 16 - 1, through: 0, by: -1) {
+            if ptr[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (16 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 16
+                let startX = currentIdx % 16
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 16 + x) + 1
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blockEncode8(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    for y in stride(from: 8 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        for x in stride(from: 8 - 1, through: 0, by: -1) {
+            if ptr[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (8 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 8
+                let startX = currentIdx % 8
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 8 + x) + 1
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blockEncode4(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    var lscpX = -1
+    var lscpY = -1
+    for y in stride(from: 4 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        for x in stride(from: 4 - 1, through: 0, by: -1) {
+            if ptr[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (4 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = currentIdx / 4
+                let startX = currentIdx % 4
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                currentIdx = (y * 4 + x) + 1
+            }
+        }
+    }
+}
+
+@inline(__always)
+func getSubbands32(view: BlockView) -> Subbands {
+    let half = 32 / 2
     let base = view.base
     return Subbands(
-        ll: BlockView(base: base, width: half, height: half, stride: size),
-        hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: size),
-        lh: BlockView(base: base.advanced(by: half * size), width: half, height: half, stride: size),
-        hh: BlockView(base: base.advanced(by: half * size + half), width: half, height: half, stride: size),
+        ll: BlockView(base: base, width: half, height: half, stride: 32),
+        hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32),
+        lh: BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32),
+        hh: BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32),
         size: half
     )
 }
 
 @inline(__always)
-func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func getSubbands16(view: BlockView) -> Subbands {
+    let half = 16 / 2
+    let base = view.base
+    return Subbands(
+        ll: BlockView(base: base, width: half, height: half, stride: 16),
+        hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16),
+        lh: BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16),
+        hh: BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16),
+        size: half
+    )
+}
+
+@inline(__always)
+func getSubbands8(view: BlockView) -> Subbands {
+    let half = 8 / 2
+    let base = view.base
+    return Subbands(
+        ll: BlockView(base: base, width: half, height: half, stride: 8),
+        hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8),
+        lh: BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8),
+        hh: BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8),
+        size: half
+    )
+}
+
+@inline(__always)
+func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
     var lscpIdx = -1
     
     // Pass 1: find LSCP
     let ptr0 = block.rowPointer(y: 0)
     if ptr0[0] - lastVal != 0 { lscpIdx = 0 }
-    for x in 1..<size {
+    for x in 1..<4 {
         if ptr0[x] - ptr0[x - 1] != 0 { lscpIdx = max(lscpIdx, x) }
     }
     
-    for y in 1..<size {
+    for y in 1..<4 {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
-        if ptr[0] - ptrPrev[0] != 0 { lscpIdx = max(lscpIdx, y * size + 0) }
+        if ptr[0] - ptrPrev[0] != 0 { lscpIdx = max(lscpIdx, y * 4 + 0) }
         
-        for x in 1..<size {
+        for x in 1..<4 {
             let a = Int(ptr[x - 1])
             let b = Int(ptrPrev[x])
             let c = Int(ptrPrev[x - 1])
@@ -165,7 +329,7 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
             } else {
                 predicted = Int16(a + b - c)
             }
-            if ptr[x] - predicted != 0 { lscpIdx = max(lscpIdx, y * size + x) }
+            if ptr[x] - predicted != 0 { lscpIdx = max(lscpIdx, y * 4 + x) }
         }
     }
 
@@ -173,8 +337,8 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
         encoder.encodeBypass(binVal: 0)
     } else {
         encoder.encodeBypass(binVal: 1)
-        let lscpX = lscpIdx % size
-        let lscpY = lscpIdx / size
+        let lscpX = lscpIdx % 4
+        let lscpY = lscpIdx / 4
         encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
         encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
@@ -191,15 +355,15 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
             startIdxForRun = currentIdx + 1
         }
 
-        for x in 1..<size {
+        for x in 1..<4 {
             currentIdx += 1
             if currentIdx > lscpIdx { break }
             let diff = ptr0[x] - ptr0[x - 1]
             if diff == 0 {
                 run += 1
             } else {
-                let startY = startIdxForRun / size
-                let startX = startIdxForRun % size
+                let startY = startIdxForRun / 4
+                let startX = startIdxForRun % 4
                 let band = min(startX + startY, 7)
                 encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
                 run = 0
@@ -207,7 +371,7 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
             }
         }
 
-        for y in 1..<size {
+        for y in 1..<4 {
             if currentIdx >= lscpIdx { break }
             let ptr = block.rowPointer(y: y)
             let ptrPrev = block.rowPointer(y: y - 1)
@@ -218,15 +382,15 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
             if diffY0 == 0 {
                 run += 1
             } else {
-                let startY = startIdxForRun / size
-                let startX = startIdxForRun % size
+                let startY = startIdxForRun / 4
+                let startX = startIdxForRun % 4
                 let band = min(startX + startY, 7)
                 encodeCoeffRun(val: diffY0, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
                 run = 0
                 startIdxForRun = currentIdx + 1
             }
 
-            for x in 1..<size {
+            for x in 1..<4 {
                 currentIdx += 1
                 if currentIdx > lscpIdx { break }
                 let a = Int(ptr[x - 1])
@@ -244,8 +408,8 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
                 if diff == 0 {
                     run += 1
                 } else {
-                    let startY = startIdxForRun / size
-                    let startX = startIdxForRun % size
+                    let startY = startIdxForRun / 4
+                    let startX = startIdxForRun % 4
                     let band = min(startX + startY, 7)
                     encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
                     run = 0
@@ -255,7 +419,7 @@ func blockEncodeDPCM(encoder: inout CABACEncoder, block: BlockView, size: Int, l
         }
     }
 
-    lastVal = block.rowPointer(y: size - 1)[size - 1]
+    lastVal = block.rowPointer(y: 4 - 1)[4 - 1]
 }
 
 // MARK: - Byte Serialization Helpers
@@ -277,14 +441,14 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 // MARK: - Transform Functions
 
 @inline(__always)
-func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
+func isEffectivelyZero32(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
     let thPos = threshold
     let thNeg = -1 * threshold
-    for y in 0..<size {
+    for y in 0..<32 {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<size {
+        for x in 0..<32 {
             if thPos < ptrHL[x] || ptrHL[x] < thNeg {
                 return false
             }
@@ -297,11 +461,11 @@ func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout Block
         }
     }
     
-    for y in 0..<size {
+    for y in 0..<32 {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<size {
+        for x in 0..<32 {
             ptrHL[x] = 0
             ptrLH[x] = 0
             ptrHH[x] = 0
@@ -312,10 +476,115 @@ func isEffectivelyZero(hl: inout BlockView, lh: inout BlockView, hh: inout Block
 }
 
 @inline(__always)
-func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, size: Int, threshold: Int) -> Bool {
-    for y in 0..<size {
+func isEffectivelyZero16(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
+    let thPos = threshold
+    let thNeg = -1 * threshold
+    for y in 0..<16 {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<16 {
+            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
+                return false
+            }
+            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
+                return false
+            }
+            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
+                return false
+            }
+        }
+    }
+    
+    for y in 0..<16 {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<16 {
+            ptrHL[x] = 0
+            ptrLH[x] = 0
+            ptrHH[x] = 0
+        }
+    }
+    
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZero8(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
+    let thPos = threshold
+    let thNeg = -1 * threshold
+    for y in 0..<8 {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<8 {
+            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
+                return false
+            }
+            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
+                return false
+            }
+            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
+                return false
+            }
+        }
+    }
+    
+    for y in 0..<8 {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<8 {
+            ptrHL[x] = 0
+            ptrLH[x] = 0
+            ptrHH[x] = 0
+        }
+    }
+    
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZero4(hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
+    let thPos = threshold
+    let thNeg = -1 * threshold
+    for y in 0..<4 {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<4 {
+            if thPos < ptrHL[x] || ptrHL[x] < thNeg {
+                return false
+            }
+            if thPos < ptrLH[x] || ptrLH[x] < thNeg {
+                return false
+            }
+            if thPos < ptrHH[x] || ptrHH[x] < thNeg {
+                return false
+            }
+        }
+    }
+    
+    for y in 0..<4 {
+        let ptrHL = hl.rowPointer(y: y)
+        let ptrLH = lh.rowPointer(y: y)
+        let ptrHH = hh.rowPointer(y: y)
+        for x in 0..<4 {
+            ptrHL[x] = 0
+            ptrLH[x] = 0
+            ptrHH[x] = 0
+        }
+    }
+    
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZeroBase4(ll: BlockView, hl: inout BlockView, lh: inout BlockView, hh: inout BlockView, threshold: Int) -> Bool {
+    for y in 0..<4 {
         let ptrLL = ll.rowPointer(y: y)
-        for x in 0..<size {
+        for x in 0..<4 {
             if ptrLL[x] != 0 {
                 return false
             }
@@ -324,11 +593,11 @@ func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockVi
     
     let thPos = threshold
     let thNeg = -1 * threshold
-    for y in 0..<size {
+    for y in 0..<4 {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<size {
+        for x in 0..<4 {
             if thPos < ptrHL[x] || ptrHL[x] < thNeg {
                 return false
             }
@@ -341,11 +610,11 @@ func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockVi
         }
     }
     
-    for y in 0..<size {
+    for y in 0..<4 {
         let ptrHL = hl.rowPointer(y: y)
         let ptrLH = lh.rowPointer(y: y)
         let ptrHH = hh.rowPointer(y: y)
-        for x in 0..<size {
+        for x in 0..<4 {
             ptrHL[x] = 0
             ptrLH[x] = 0
             ptrHH[x] = 0
@@ -356,9 +625,9 @@ func isEffectivelyZeroBase(ll: BlockView, hl: inout BlockView, lh: inout BlockVi
 }
 
 @inline(__always)
-func transformLayer(block: inout Block2D, size: Int, qt: QuantizationTable) {
+func transformLayer32(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
-        var sub = dwt2d(&view, size: size)
+        var sub = dwt2d_32(&view)
         quantizeMidSignedMapping(&sub.hl, qt: qt)
         quantizeMidSignedMapping(&sub.lh, qt: qt)
         quantizeHighSignedMapping(&sub.hh, qt: qt)
@@ -366,9 +635,29 @@ func transformLayer(block: inout Block2D, size: Int, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
+func transformLayer16(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
-        var sub = dwt2d(&view, size: size)
+        var sub = dwt2d_16(&view)
+        quantizeMidSignedMapping(&sub.hl, qt: qt)
+        quantizeMidSignedMapping(&sub.lh, qt: qt)
+        quantizeHighSignedMapping(&sub.hh, qt: qt)
+    }
+}
+
+@inline(__always)
+func transformLayer8(block: inout Block2D, qt: QuantizationTable) {
+    block.withView { view in
+        var sub = dwt2d_8(&view)
+        quantizeMidSignedMapping(&sub.hl, qt: qt)
+        quantizeMidSignedMapping(&sub.lh, qt: qt)
+        quantizeHighSignedMapping(&sub.hh, qt: qt)
+    }
+}
+
+@inline(__always)
+func transformBase8(block: inout Block2D, qt: QuantizationTable) {
+    block.withView { view in
+        var sub = dwt2d_8(&view)
         quantizeLow(&sub.ll, qt: qt)
         quantizeMidSignedMapping(&sub.hl, qt: qt)
         quantizeMidSignedMapping(&sub.lh, qt: qt)
@@ -377,18 +666,18 @@ func transformBase(block: inout Block2D, size: Int, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func encodePlaneSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
+func encodePlaneSubbands32(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
     var blocks = blocks
     var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
         blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
+            let subs = getSubbands32(view: view)
             var hl = subs.hl
             var lh = subs.lh
             var hh = subs.hh
-            if isEffectivelyZero(hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
+            if isEffectivelyZero16(hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
                 bwFlags.writeBit(1)
             } else {
                 bwFlags.writeBit(0)
@@ -411,10 +700,10 @@ func encodePlaneSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [U
 
     for i in nonZeroIndices {
         blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
-            blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-            blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-            blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            let subs = getSubbands32(view: view)
+            blockEncode16(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+            blockEncode16(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+            blockEncode16(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
         }
     }
     
@@ -425,18 +714,114 @@ func encodePlaneSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [U
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -> [UInt8] {
+func encodePlaneSubbands16(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
     var blocks = blocks
     var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
         blocks[i].withView { view in
-            let subs = getSubbands(view: view, size: size)
+            let subs = getSubbands16(view: view)
             var hl = subs.hl
             var lh = subs.lh
             var hh = subs.hh
-            if isEffectivelyZeroBase(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, size: subs.size, threshold: zeroThreshold) {
+            if isEffectivelyZero8(hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
+                bwFlags.writeBit(1)
+            } else {
+                bwFlags.writeBit(0)
+                nonZeroIndices.append(i)
+            }
+        }
+    }
+    bwFlags.flush()
+    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
+    
+    var encoder = CABACEncoder()
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
+    
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
+
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands16(view: view)
+            blockEncode8(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+            blockEncode8(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+            blockEncode8(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+        }
+    }
+    
+    encoder.flush()
+    var out = bwFlags.data
+    out.append(contentsOf: encoder.getData())
+    return out
+}
+
+@inline(__always)
+func encodePlaneSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
+    var blocks = blocks
+    var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
+    var nonZeroIndices: [Int] = []
+    
+    for i in blocks.indices {
+        blocks[i].withView { view in
+            let subs = getSubbands8(view: view)
+            var hl = subs.hl
+            var lh = subs.lh
+            var hh = subs.hh
+            if isEffectivelyZero4(hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
+                bwFlags.writeBit(1)
+            } else {
+                bwFlags.writeBit(0)
+                nonZeroIndices.append(i)
+            }
+        }
+    }
+    bwFlags.flush()
+    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
+    
+    var encoder = CABACEncoder()
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
+    
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
+
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
+
+    for i in nonZeroIndices {
+        blocks[i].withView { view in
+            let subs = getSubbands8(view: view)
+            blockEncode4(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+            blockEncode4(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+            blockEncode4(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+        }
+    }
+    
+    encoder.flush()
+    var out = bwFlags.data
+    out.append(contentsOf: encoder.getData())
+    return out
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8(blocks: [Block2D], zeroThreshold: Int) -> [UInt8] {
+    var blocks = blocks
+    var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
+    var nonZeroIndices: [Int] = []
+    
+    for i in blocks.indices {
+        blocks[i].withView { view in
+            let subs = getSubbands8(view: view)
+            var hl = subs.hl
+            var lh = subs.lh
+            var hh = subs.hh
+            if isEffectivelyZeroBase4(ll: subs.ll, hl: &hl, lh: &lh, hh: &hh, threshold: zeroThreshold) {
                 bwFlags.writeBit(1)
             } else {
                 bwFlags.writeBit(0)
@@ -469,11 +854,11 @@ func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -
             nzCur += 1
 
             blocks[i].withView { view in
-                let subs = getSubbands(view: view, size: size)
-                blockEncodeDPCM(encoder: &encoder, block: subs.ll, size: subs.size, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                blockEncode(encoder: &encoder, block: subs.hl, size: subs.size, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                blockEncode(encoder: &encoder, block: subs.lh, size: subs.size, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                blockEncode(encoder: &encoder, block: subs.hh, size: subs.size, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                let subs = getSubbands8(view: view)
+                blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                blockEncode4(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                blockEncode4(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                blockEncode4(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
             }
         } else {
             lastVal = 0
@@ -486,24 +871,22 @@ func encodePlaneBaseSubbands(blocks: [Block2D], size: Int, zeroThreshold: Int) -
     return out
 }
 
-private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout Int16) -> Int {
-    if size < 1 { return 0 }
-
-    let count = size * size
+private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> Int {
+    let count = 4 * 4
     let ptr0 = block.rowPointer(y: 0)
     
     var sumDiffAbs = abs(Int(ptr0[0] - lastVal))
-    for x in 1..<size {
+    for x in 1..<4 {
         sumDiffAbs += abs(Int(ptr0[x] - ptr0[x - 1]))
     }
     
-    for y in 1..<size {
+    for y in 1..<4 {
         let ptr = block.rowPointer(y: y)
         let ptrPrev = block.rowPointer(y: y - 1)
         
         sumDiffAbs += abs(Int(ptr[0] - ptrPrev[0]))
         
-        for x in 1..<size {
+        for x in 1..<4 {
             let a = Int(ptr[x - 1])
             let b = Int(ptrPrev[x])
             let c = Int(ptrPrev[x - 1])
@@ -518,7 +901,7 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
             sumDiffAbs += abs(Int(ptr[x] - predicted))
         }
     }
-    lastVal = block.rowPointer(y: size - 1)[size - 1]
+    lastVal = block.rowPointer(y: 4 - 1)[4 - 1]
     let meanInt = sumDiffAbs / count
     let k: Int
     if meanInt < 1 {
@@ -535,9 +918,9 @@ private func estimateRiceBitsDPCM(block: BlockView, size: Int, lastVal: inout In
 }
 
 @inline(__always)
-private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationTable) -> Int {
+private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
-        return dwt2d(&view, size: size)
+        return dwt2d_8(&view)
     }
     
     quantizeLow(&sub.ll, qt: qt)
@@ -548,30 +931,106 @@ private func measureBlockBits(block: inout Block2D, size: Int, qt: QuantizationT
     var hl = sub.hl
     var lh = sub.lh
     var hh = sub.hh
-    if isEffectivelyZeroBase(ll: sub.ll, hl: &hl, lh: &lh, hh: &hh, size: sub.size, threshold: 0) {
+    if isEffectivelyZeroBase4(ll: sub.ll, hl: &hl, lh: &lh, hh: &hh, threshold: 0) {
         return 1
     }
     
     var bits = 1
     var lastVal: Int16 = 0
-    bits += estimateRiceBitsDPCM(block: sub.ll, size: sub.size, lastVal: &lastVal)
-    bits += estimateRiceBits(block: sub.hl, size: sub.size)
-    bits += estimateRiceBits(block: sub.lh, size: sub.size)
-    bits += estimateRiceBits(block: sub.hh, size: sub.size)
+    bits += estimateRiceBitsDPCM4(block: sub.ll, lastVal: &lastVal)
+    bits += estimateRiceBits4(block: sub.hl)
+    bits += estimateRiceBits4(block: sub.lh)
+    bits += estimateRiceBits4(block: sub.hh)
     
     return bits
 }
 
 @inline(__always)
-private func estimateRiceBits(block: BlockView, size: Int) -> Int {
-    if size < 1 { return 0 }
-
+private func estimateRiceBits32(block: BlockView) -> Int {
     var sumAbs = 0
-    let count = (size * size)
+    let count = (32 * 32)
     
-    for y in 0..<size {
+    for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        for x in 0..<size {
+        for x in 0..<32 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBits16(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (16 * 16)
+    
+    for y in 0..<16 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<16 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBits8(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (8 * 8)
+    
+    for y in 0..<8 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<8 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBits4(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (4 * 4)
+    
+    for y in 0..<4 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<4 {
             sumAbs += abs(Int(ptr[x]))
         }
     }
@@ -595,9 +1054,8 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     let probeStep = 64
     let qt = QuantizationTable(baseStep: probeStep)
     
-    let size = 8
-    let w = (img.width / size)
-    let h = (img.height / size)
+    let w = (img.width / 8)
+    let h = (img.height / 8)
     
     let points: [(Int, Int)] = [
         (0, 0),
@@ -647,13 +1105,13 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     
     for (sx, sy) in points {
         var blockY = fetchBlockY(reader: reader, x: sx, y: sy, w: w, h: h)
-        totalSampleBits += measureBlockBits(block: &blockY, size: size, qt: qt)
+        totalSampleBits += measureBlockBits8(block: &blockY, qt: qt)
         
         var blockCb = fetchBlockCb(reader: reader, x: sx, y: sy, w: w, h: h)
-        totalSampleBits += measureBlockBits(block: &blockCb, size: size, qt: qt)
+        totalSampleBits += measureBlockBits8(block: &blockCb, qt: qt)
         
         var blockCr = fetchBlockCr(reader: reader, x: sx, y: sy, w: w, h: h)
-        totalSampleBits += measureBlockBits(block: &blockCr, size: size, qt: qt)
+        totalSampleBits += measureBlockBits8(block: &blockCr, qt: qt)
     }
     
     let samplePixels = points.count * (w * h) * 3

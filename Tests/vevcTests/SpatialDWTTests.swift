@@ -35,7 +35,7 @@ final class SpatialDWTTests: XCTestCase {
     }
 
     func testLift53Lossless() {
-        let sizes: [Int] = [8, 16, 32, 10, 24] // SIMD and scalar sizes
+        let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
 
         for size in sizes {
             var data = [Int16](repeating: 0, count: size)
@@ -55,7 +55,7 @@ final class SpatialDWTTests: XCTestCase {
     }
 
     func testDWT2DLossless() {
-        let sizes: [Int] = [8, 16, 32, 12] // SIMD and scalar sizes
+        let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
 
         for size in sizes {
             var block = Block2D(width: size, height: size)

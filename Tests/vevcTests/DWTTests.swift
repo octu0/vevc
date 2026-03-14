@@ -15,10 +15,6 @@ final class DWTTests: XCTestCase {
         self.performRoundtrip(size: 32)
     }
 
-    func testDWT2DRoundtripSize4() {
-        self.performRoundtrip(size: 4)
-    }
-
     private func performRoundtrip(size: Int) {
         var block: Block2D = Block2D(width: size, height: size)
         for i: Int in 0..<block.data.count {
@@ -38,7 +34,7 @@ final class DWTTests: XCTestCase {
     }
 
     func testDWT2DRoundtrip() {
-        let sizes = [4, 8, 16, 32]
+        let sizes = [8, 16, 32]
 
         for size in sizes {
             var block = Block2D(width: size, height: size)

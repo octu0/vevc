@@ -15,9 +15,6 @@ final class DWT2DTests: XCTestCase {
         verifyRoundtrip(size: 32)
     }
 
-    func testDWT2DRoundtripSize10() {
-        verifyRoundtrip(size: 10)
-    }
 
     private func verifyRoundtrip(size: Int) {
         var block = Block2D(width: size, height: size)
