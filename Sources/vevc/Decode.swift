@@ -14,6 +14,8 @@ public enum DecodeError: Error {
 func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
+    guard (offset + Int(len0)) <= r.count else { throw DecodeError.insufficientData }
+
     let layer0Data = Array(r[offset..<(offset + Int(len0))])
     offset += Int(len0)
     
@@ -21,12 +23,16 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
     
     if 1 <= maxLayer {
         let len1 = try readUInt32BEFromBytes(r, offset: &offset)
+        guard (offset + Int(len1)) <= r.count else { throw DecodeError.insufficientData }
+
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
         current = try await decodeLayer16(r: layer1Data, layer: 1, prev: current)
     }
     if 2 <= maxLayer {
         let len2 = try readUInt32BEFromBytes(r, offset: &offset)
+        guard (offset + Int(len2)) <= r.count else { throw DecodeError.insufficientData }
+
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         current = try await decodeLayer32(r: layer2Data, layer: 2, prev: current)
@@ -1193,12 +1199,9 @@ public struct DecodeOptions: Sendable {
     }
 }
 
+#if (arch(arm64) || arch(x86_64) || arch(wasm32))
 @inline(__always)
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
-    #if !(arch(arm64) || arch(x86_64) || arch(wasm32))
-    throw DecodeError.unsupportedArchitecture
-    #endif
-    
     if data.isEmpty { return [] }
     var out: [YCbCrImage] = []
     var offset = 0
@@ -1211,6 +1214,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         switch magic {
         case [0x56, 0x45, 0x56, 0x49]:
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
             let chunk = Array(data[offset..<(offset + len)])
             offset += len
             
@@ -1223,6 +1227,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
             var mvs = MotionVectors(count: mvsCount)
+            guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
 
             let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
@@ -1270,6 +1275,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             }
             
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
             let chunk = Array(data[offset..<(offset + len)])
             offset += len
             
@@ -1292,3 +1298,9 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
     
     return out
 }
+
+#else
+public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
+    throw DecodeError.unsupportedArchitecture
+}
+#endif

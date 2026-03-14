@@ -47,4 +47,24 @@ final class VevcTests: XCTestCase {
         // We will assert that it decodes without crashing and maintains relative detail correctness without strict exact matching of DC offset.
         XCTAssertGreaterThanOrEqual(decoded[1].yPlane[0], 0)
     }
+    func testDecodeBoundsCheck() async throws {
+        // Construct a malformed input: 
+        // 3 bytes "VEL" + 1 byte GOP + 6 * 2 bytes GMV = 16 bytes header
+        // Then readPlane() expects 4 bytes length.
+        // Total 20 bytes.
+        var malformed: [UInt8] = [0x56, 0x45, 0x4C, 0x01] // VEL, GOP=1
+        malformed += [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] // 6 GMVs (all 0)
+        
+        // Plane length field: say 100 bytes, but actual data ends here.
+        malformed += [0, 0, 0, 100] 
+        
+        do {
+            _ = try await vevc.decodeSpatialLayers(r: malformed, maxLayer: 2)
+            XCTFail("Should have thrown DecodeError.insufficientData")
+        } catch DecodeError.insufficientData {
+            // Success
+        } catch {
+            XCTFail("Threw wrong error: \(error)")
+        }
+    }
 }
