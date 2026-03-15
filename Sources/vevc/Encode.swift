@@ -14,8 +14,7 @@ func debugLog(_ msg: String) {
 }
 
 @inline(__always)
-func encodeExpGolomb(val: UInt32, encoder: inout VevcEncoder) {
-    // 従来のExpGolombは不要になるが互換性のためのBypassBitsとして記録する
+func encodeExpGolomb(val: UInt32, encoder: inout VEVCEncoder) {
     var q = val
     var bits = 0
     while q > 0 {
@@ -32,12 +31,12 @@ func encodeExpGolomb(val: UInt32, encoder: inout VevcEncoder) {
 }
 
 @inline(__always)
-func encodeCoeffRun(val: Int16, encoder: inout VevcEncoder, run: Int) {
+func encodeCoeffRun(val: Int16, encoder: inout VEVCEncoder, run: Int) {
     encoder.addPair(run: UInt32(run), val: val)
 }
 
 @inline(__always)
-func blockEncode32(encoder: inout VevcEncoder, block: BlockView) {
+func blockEncode32(encoder: inout VEVCEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero16 = SIMD16<Int16>(repeating: 0)
@@ -78,7 +77,6 @@ func blockEncode32(encoder: inout VevcEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
-    var currentIdx = 0
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (32 - 1)
@@ -87,18 +85,15 @@ func blockEncode32(encoder: inout VevcEncoder, block: BlockView) {
             if val == 0 {
                 run += 1
             } else {
-                let startY = currentIdx / 32
-                let startX = currentIdx % 32
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
-                currentIdx = (y * 32 + x) + 1
             }
         }
     }
 }
 
 @inline(__always)
-func blockEncode16(encoder: inout VevcEncoder, block: BlockView) {
+func blockEncode16(encoder: inout VEVCEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -139,7 +134,6 @@ func blockEncode16(encoder: inout VevcEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
-    var currentIdx = 0
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (16 - 1)
@@ -150,14 +144,13 @@ func blockEncode16(encoder: inout VevcEncoder, block: BlockView) {
             } else {
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
-                currentIdx = (y * 16 + x) + 1
             }
         }
     }
 }
 
 @inline(__always)
-func blockEncode8(encoder: inout VevcEncoder, block: BlockView) {
+func blockEncode8(encoder: inout VEVCEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -198,7 +191,6 @@ func blockEncode8(encoder: inout VevcEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
-    var currentIdx = 0
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (8 - 1)
@@ -209,14 +201,13 @@ func blockEncode8(encoder: inout VevcEncoder, block: BlockView) {
             } else {
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
-                currentIdx = (y * 8 + x) + 1
             }
         }
     }
 }
 
 @inline(__always)
-func blockEncode4(encoder: inout VevcEncoder, block: BlockView) {
+func blockEncode4(encoder: inout VEVCEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero2 = SIMD2<Int16>(repeating: 0)
@@ -257,7 +248,6 @@ func blockEncode4(encoder: inout VevcEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
-    var currentIdx = 0
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (4 - 1)
@@ -268,7 +258,6 @@ func blockEncode4(encoder: inout VevcEncoder, block: BlockView) {
             } else {
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
-                currentIdx = (y * 4 + x) + 1
             }
         }
     }
@@ -314,7 +303,7 @@ func getSubbands8(view: BlockView) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM4(encoder: inout VevcEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM4(encoder: inout VEVCEncoder, block: BlockView, lastVal: inout Int16) {
     let ptr0 = block.rowPointer(y: 0)
     let ptr1 = block.rowPointer(y: 1)
     let ptr2 = block.rowPointer(y: 2)
@@ -384,10 +373,7 @@ func blockEncodeDPCM4(encoder: inout VevcEncoder, block: BlockView, lastVal: ino
         encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
         encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
-        var currentIdx = 0
-        var startIdxForRun = 0
         var run = 0
-
         for i in 0...lscpIdx {
             let diff = errors[i]
             if diff == 0 {
@@ -395,9 +381,7 @@ func blockEncodeDPCM4(encoder: inout VevcEncoder, block: BlockView, lastVal: ino
             } else {
                 encodeCoeffRun(val: diff, encoder: &encoder, run: run)
                 run = 0
-                startIdxForRun = currentIdx + 1
             }
-            currentIdx += 1
         }
     }
 
@@ -405,7 +389,7 @@ func blockEncodeDPCM4(encoder: inout VevcEncoder, block: BlockView, lastVal: ino
 }
 
 @inline(__always)
-func blockEncodeDPCM8(encoder: inout VevcEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM8(encoder: inout VEVCEncoder, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -472,10 +456,7 @@ func blockEncodeDPCM8(encoder: inout VevcEncoder, block: BlockView, lastVal: ino
         
         lastVal = last
         
-        var currentIdx = 0
-        var startIdxForRun = 0
         var run = 0
-
         for i in 0...lscpIdx {
             let diff = baseErr[i]
             if diff == 0 {
@@ -483,15 +464,13 @@ func blockEncodeDPCM8(encoder: inout VevcEncoder, block: BlockView, lastVal: ino
             } else {
                 encodeCoeffRun(val: diff, encoder: &encoder, run: run)
                 run = 0
-                startIdxForRun = currentIdx + 1
             }
-            currentIdx += 1
         }
     }
 }
 
 @inline(__always)
-func blockEncodeDPCM16(encoder: inout VevcEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM16(encoder: inout VEVCEncoder, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -558,10 +537,7 @@ func blockEncodeDPCM16(encoder: inout VevcEncoder, block: BlockView, lastVal: in
         
         lastVal = last
         
-        var currentIdx = 0
-        var startIdxForRun = 0
         var run = 0
-
         for i in 0...lscpIdx {
             let diff = baseErr[i]
             if diff == 0 {
@@ -569,9 +545,7 @@ func blockEncodeDPCM16(encoder: inout VevcEncoder, block: BlockView, lastVal: in
             } else {
                 encodeCoeffRun(val: diff, encoder: &encoder, run: run)
                 run = 0
-                startIdxForRun = currentIdx + 1
             }
-            currentIdx += 1
         }
     }
 }
@@ -949,7 +923,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VevcEncoder()
+    var encoder = VEVCEncoder()
     
     for (i, task) in tasks {
         blocks[i].withView { view in
@@ -1051,7 +1025,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VevcEncoder()
+    var encoder = VEVCEncoder()
     
     for (i, task) in tasks {
         blocks[i].withView { view in
@@ -1125,7 +1099,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VevcEncoder()
+    var encoder = VEVCEncoder()
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
@@ -1163,7 +1137,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
     bwFlags.flush()
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VevcEncoder()
+    var encoder = VEVCEncoder()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -1241,7 +1215,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     bwFlags.flush()
     debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VevcEncoder()
+    var encoder = VEVCEncoder()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {
@@ -1730,7 +1704,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
-            var mvBw = VevcEncoder()
+            var mvBw = VEVCEncoder()
 
             let mbSize = 64
             let mbCols = (curr.width + mbSize - 1) / mbSize
@@ -1863,7 +1837,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             
             out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
 
-            var mvBw = VevcEncoder()
+            var mvBw = VEVCEncoder()
 
             let mbSize = 64
             let mbCols = (curr.width + mbSize - 1) / mbSize

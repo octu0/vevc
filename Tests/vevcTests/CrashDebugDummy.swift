@@ -11,7 +11,7 @@ final class CrashDebugTests: XCTestCase {
         print("\n\n--- [DEBUG] TEST START ---")
         fflush(stdout)
         
-        var encoder = VevcEncoder()
+        var encoder = VEVCEncoder()
         let size = 8
         var blockData = [Int16](repeating: 0, count: size * size)
         blockData[0] = 5
@@ -46,7 +46,7 @@ final class CrashDebugTests: XCTestCase {
         print("--- [DEBUG] 4. Decoder Init ---")
         fflush(stdout)
         do {
-            var decoder = try VevcDecoder(data: encodedData)
+            var decoder = try VEVCDecoder(data: encodedData)
             print("--- [DEBUG] Decoder initialized with pairs count: \(decoder.pairs.count) ---")
             fflush(stdout)
             

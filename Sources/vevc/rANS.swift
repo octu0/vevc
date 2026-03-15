@@ -278,7 +278,7 @@ public struct BypassWriter {
     
     @inline(__always)
     public mutating func writeBits(_ value: UInt16, count: Int) {
-        guard count > 0 else { return }
+        guard 0 < count else { return }
         buffer = (buffer << count) | UInt32(value & ((1 << count) - 1))
         bitsInBuffer += count
         while bitsInBuffer >= 8 {
@@ -293,7 +293,7 @@ public struct BypassWriter {
     }
     
     public mutating func flush() {
-        guard bitsInBuffer > 0 else { return }
+        guard 0 < bitsInBuffer else { return }
         while bitsInBuffer >= 8 {
             bitsInBuffer -= 8
             bytes.append(UInt8(truncatingIfNeeded: buffer >> bitsInBuffer))
@@ -303,7 +303,7 @@ public struct BypassWriter {
                 buffer = 0
             }
         }
-        if bitsInBuffer > 0 {
+        if 0 < bitsInBuffer {
             let shifted = buffer << (8 - bitsInBuffer)
             bytes.append(UInt8(truncatingIfNeeded: shifted))
             buffer = 0
@@ -321,7 +321,6 @@ public struct BypassReader {
     private var bitsInBuffer: Int
     
     public init(data: [UInt8]) {
-        // 8バイトのゼロパディングを追加してboundsチェックを排除
         var padded = data
         padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
         self.bytes = padded
@@ -332,7 +331,6 @@ public struct BypassReader {
     
     @inline(__always)
     private mutating func ensureBits(_ needed: Int) {
-        // パディング済み (8バイトのゼロ) が保証されるためboundsチェック不要
         while bitsInBuffer < needed {
             buffer = (buffer << 8) | UInt32(bytes[byteOffset])
             byteOffset += 1
@@ -345,7 +343,7 @@ public struct BypassReader {
         ensureBits(1)
         bitsInBuffer -= 1
         let bit = (buffer >> bitsInBuffer) & 1
-        if bitsInBuffer > 0 {
+        if 0 < bitsInBuffer {
             buffer &= (1 << bitsInBuffer) - 1
         } else {
             buffer = 0
@@ -355,11 +353,11 @@ public struct BypassReader {
     
     @inline(__always)
     public mutating func readBits(count: Int) -> UInt16 {
-        guard count > 0 else { return 0 }
+        guard 0 < count else { return 0 }
         ensureBits(count)
         bitsInBuffer -= count
         let value = (buffer >> bitsInBuffer) & ((1 << count) - 1)
-        if bitsInBuffer > 0 {
+        if 0 < bitsInBuffer {
             buffer &= (1 << bitsInBuffer) - 1
         } else {
             buffer = 0

@@ -50,14 +50,13 @@ func toInt16(_ u: UInt16) -> Int16 {
 }
 
 @inline(__always)
-func decodeExpGolomb(decoder: inout VevcDecoder) throws -> UInt32 {
-    // 古いExpGolombのフォーマットはBypassBit(1の出現)と残りのBitを読むだけ
+func decodeExpGolomb(decoder: inout VEVCDecoder) throws -> UInt32 {
     var bits = 0
     while try decoder.decodeBypass() == 0 {
         bits += 1
     }
     guard 0 < bits else { return 0 }
-    if 31 < bits { return 0 } // 防止措置
+    if 31 < bits { return 0 } // guard
     var val: UInt32 = 0
     for i in stride(from: bits - 1, through: 0, by: -1) {
         val |= UInt32(try decoder.decodeBypass()) << i
@@ -66,13 +65,13 @@ func decodeExpGolomb(decoder: inout VevcDecoder) throws -> UInt32 {
 }
 
 @inline(__always)
-func decodeCoeffRun(decoder: inout VevcDecoder) throws -> (Int, Int16) {
+func decodeCoeffRun(decoder: inout VEVCDecoder) throws -> (Int, Int16) {
     let pair = decoder.readPair()
     return (pair.run, pair.val)
 }
 
 @inline(__always)
-func blockDecode32(decoder: inout VevcDecoder, block: inout BlockView) throws {
+func blockDecode32(decoder: inout VEVCDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         for y in 0..<32 {
@@ -96,10 +95,6 @@ func blockDecode32(decoder: inout VevcDecoder, block: inout BlockView) throws {
     let lscpIdx = lscpY * 32 + lscpX
 
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 32
-        let startX = currentIdx % 32
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -114,7 +109,7 @@ func blockDecode32(decoder: inout VevcDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode16(decoder: inout VevcDecoder, block: inout BlockView) throws {
+func blockDecode16(decoder: inout VEVCDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         for y in 0..<16 {
@@ -139,10 +134,6 @@ func blockDecode16(decoder: inout VevcDecoder, block: inout BlockView) throws {
     let lscpIdx = lscpY * 16 + lscpX
 
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 16
-        let startX = currentIdx % 16
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -157,7 +148,7 @@ func blockDecode16(decoder: inout VevcDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode8(decoder: inout VevcDecoder, block: inout BlockView) throws {
+func blockDecode8(decoder: inout VEVCDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         for y in 0..<8 {
@@ -181,10 +172,6 @@ func blockDecode8(decoder: inout VevcDecoder, block: inout BlockView) throws {
     let lscpIdx = lscpY * 8 + lscpX
 
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 8
-        let startX = currentIdx % 8
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -199,7 +186,7 @@ func blockDecode8(decoder: inout VevcDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode4(decoder: inout VevcDecoder, block: inout BlockView) throws {
+func blockDecode4(decoder: inout VEVCDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         for y in 0..<4 {
@@ -224,10 +211,6 @@ func blockDecode4(decoder: inout VevcDecoder, block: inout BlockView) throws {
     let lscpIdx = lscpY * 4 + lscpX
 
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 4
-        let startX = currentIdx % 4
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -242,7 +225,7 @@ func blockDecode4(decoder: inout VevcDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecodeDPCM4(decoder: inout VevcDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM4(decoder: inout VEVCDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -260,10 +243,6 @@ func blockDecodeDPCM4(decoder: inout VevcDecoder, block: inout BlockView, lastVa
     var currentIdx = 0
     
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 4
-        let startX = currentIdx % 4
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -317,7 +296,7 @@ func blockDecodeDPCM4(decoder: inout VevcDecoder, block: inout BlockView, lastVa
 }
 
 @inline(__always)
-func blockDecodeDPCM8(decoder: inout VevcDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM8(decoder: inout VEVCDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -335,10 +314,6 @@ func blockDecodeDPCM8(decoder: inout VevcDecoder, block: inout BlockView, lastVa
     var currentIdx = 0
     
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 8
-        let startX = currentIdx % 8
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -390,7 +365,7 @@ func blockDecodeDPCM8(decoder: inout VevcDecoder, block: inout BlockView, lastVa
 }
 
 @inline(__always)
-func blockDecodeDPCM16(decoder: inout VevcDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM16(decoder: inout VEVCDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -408,10 +383,6 @@ func blockDecodeDPCM16(decoder: inout VevcDecoder, block: inout BlockView, lastV
     var currentIdx = 0
     
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 16
-        let startX = currentIdx % 16
-        let band = min(startX + startY, 7)
-
         let (run, val) = try decodeCoeffRun(decoder: &decoder)
 
         currentIdx += run
@@ -509,7 +480,7 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VevcDecoder(data: dataSlice)
+    var decoder = try VEVCDecoder(data: dataSlice)
     
     let half = 32 / 2
     
@@ -618,7 +589,7 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VevcDecoder(data: dataSlice)
+    var decoder = try VEVCDecoder(data: dataSlice)
     
     let half = 16 / 2
 
@@ -703,7 +674,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VevcDecoder(data: dataSlice)
+    var decoder = try VEVCDecoder(data: dataSlice)
     
     let half = 8 / 2
 
@@ -746,7 +717,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VevcDecoder(data: dataSlice)
+    var decoder = try VEVCDecoder(data: dataSlice)
     
     let half = 8 / 2
 
@@ -824,7 +795,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VevcDecoder(data: dataSlice)
+    var decoder = try VEVCDecoder(data: dataSlice)
     
     let half = 32 / 2
 
@@ -1562,7 +1533,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
             let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
-            var mvBr = try VevcDecoder(data: mvData)
+            var mvBr = try VEVCDecoder(data: mvData)
 
             let mbSize = 64
             // We need width to compute mbCols. We can infer width from previous frame.
@@ -1638,7 +1609,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
             let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
-            var mvBr = try VevcDecoder(data: mvData)
+            var mvBr = try VEVCDecoder(data: mvData)
 
             let mbSize = 64
             // We need width to compute mbCols. We can infer width from previous frame.
