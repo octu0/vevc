@@ -32,8 +32,9 @@ public struct rANSEncoder {
             stream.append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
-        // State update
-        state = ((state / freq) << RANS_SCALE_BITS) + (state % freq) + cumFreq
+        // State update: 除算1回のみ (q*freq を引いて剰余を計算)
+        let q = state / freq
+        state = (q << RANS_SCALE_BITS) + (state - q * freq) + cumFreq
     }
     
     /// ストリームをフラッシュし、最終状態を書き込む
@@ -42,13 +43,18 @@ public struct rANSEncoder {
         stream.append(UInt16(truncatingIfNeeded: state >> 16))
     }
     
-    /// 生成されたバイトストリーム（逆順）を反転させて正しいByte配列を返す
+    /// 生成されたバイトストリーム（逆順）を反転させてByte配列を返す
     public func getBitstream() -> [UInt8] {
-        var bytes = [UInt8]()
-        bytes.reserveCapacity(stream.count * 2)
-        for word in stream.reversed() {
-            bytes.append(UInt8(truncatingIfNeeded: word >> 8))
-            bytes.append(UInt8(truncatingIfNeeded: word & 0xFF))
+        let count = stream.count
+        var bytes = [UInt8](repeating: 0, count: count * 2)
+        bytes.withUnsafeMutableBufferPointer { ptr in
+            var idx = 0
+            for i in stride(from: count - 1, through: 0, by: -1) {
+                let word = stream[i]
+                ptr[idx] = UInt8(truncatingIfNeeded: word >> 8)
+                ptr[idx + 1] = UInt8(truncatingIfNeeded: word & 0xFF)
+                idx += 2
+            }
         }
         return bytes
     }
@@ -99,6 +105,172 @@ public struct rANSDecoder {
             } else {
                 state = (state << 16)
             }
+        }
+    }
+}
+
+// MARK: - Interleaved 4-way rANS Encoder
+
+/// 4つの独立した rANS state をインターリーブしてエンコードする。
+/// シンボル i は state[i % 4] に割り当てられる。
+/// エンコードは逆順で行われ、renormalization words は共有ストリームに書き込まれる。
+public struct Interleaved4rANSEncoder {
+    public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
+    public private(set) var stream: [UInt16]
+    
+    public init() {
+        self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
+        self.stream = []
+        self.stream.reserveCapacity(4096)
+    }
+    
+    /// 指定された lane (0-3) のシンボルをエンコード
+    @inline(__always)
+    public mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
+        let xMax = RANS_XMAX / RANS_SCALE * freq
+        
+        switch lane {
+        case 0:
+            while states.0 > xMax {
+                stream.append(UInt16(truncatingIfNeeded: states.0))
+                states.0 >>= 16
+            }
+            let q = states.0 / freq
+            states.0 = (q << RANS_SCALE_BITS) + (states.0 - q * freq) + cumFreq
+        case 1:
+            while states.1 > xMax {
+                stream.append(UInt16(truncatingIfNeeded: states.1))
+                states.1 >>= 16
+            }
+            let q = states.1 / freq
+            states.1 = (q << RANS_SCALE_BITS) + (states.1 - q * freq) + cumFreq
+        case 2:
+            while states.2 > xMax {
+                stream.append(UInt16(truncatingIfNeeded: states.2))
+                states.2 >>= 16
+            }
+            let q = states.2 / freq
+            states.2 = (q << RANS_SCALE_BITS) + (states.2 - q * freq) + cumFreq
+        case 3:
+            while states.3 > xMax {
+                stream.append(UInt16(truncatingIfNeeded: states.3))
+                states.3 >>= 16
+            }
+            let q = states.3 / freq
+            states.3 = (q << RANS_SCALE_BITS) + (states.3 - q * freq) + cumFreq
+        default:
+            break
+        }
+    }
+    
+    /// 4つの state をフラッシュ (state3, state2, state1, state0 の順で書き込み)
+    public mutating func flush() {
+        // デコード側は state0, state1, state2, state3 の順で読むため逆順書き込み
+        stream.append(UInt16(truncatingIfNeeded: states.3))
+        stream.append(UInt16(truncatingIfNeeded: states.3 >> 16))
+        stream.append(UInt16(truncatingIfNeeded: states.2))
+        stream.append(UInt16(truncatingIfNeeded: states.2 >> 16))
+        stream.append(UInt16(truncatingIfNeeded: states.1))
+        stream.append(UInt16(truncatingIfNeeded: states.1 >> 16))
+        stream.append(UInt16(truncatingIfNeeded: states.0))
+        stream.append(UInt16(truncatingIfNeeded: states.0 >> 16))
+    }
+    
+    /// 共有ストリームを逆順にしてバイト配列を返す
+    public func getBitstream() -> [UInt8] {
+        let count = stream.count
+        var bytes = [UInt8](repeating: 0, count: count * 2)
+        bytes.withUnsafeMutableBufferPointer { ptr in
+            var idx = 0
+            for i in stride(from: count - 1, through: 0, by: -1) {
+                let word = stream[i]
+                ptr[idx] = UInt8(truncatingIfNeeded: word >> 8)
+                ptr[idx + 1] = UInt8(truncatingIfNeeded: word & 0xFF)
+                idx += 2
+            }
+        }
+        return bytes
+    }
+}
+
+// MARK: - Interleaved 4-way rANS Decoder
+
+/// 4つの独立した rANS state をインターリーブしてデコードする。
+/// 共有ストリームから renormalization words を読み込み、各 state で交互にデコードする。
+public struct Interleaved4rANSDecoder {
+    public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
+    private let stream: [UInt8]
+    private var offset: Int
+    
+    public init(bitstream: [UInt8]) {
+        self.stream = bitstream
+        self.offset = 0
+        self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
+        
+        // 4つの state を読み込み (state0, state1, state2, state3 の順)
+        guard bitstream.count >= 16 else { return }
+        
+        @inline(__always)
+        func readState(_ off: Int) -> UInt32 {
+            let b0 = UInt32(bitstream[off])
+            let b1 = UInt32(bitstream[off + 1])
+            let b2 = UInt32(bitstream[off + 2])
+            let b3 = UInt32(bitstream[off + 3])
+            return ((b0 << 8) | b1) << 16 | ((b2 << 8) | b3)
+        }
+        
+        self.states.0 = readState(0)
+        self.states.1 = readState(4)
+        self.states.2 = readState(8)
+        self.states.3 = readState(12)
+        self.offset = 16
+    }
+    
+    /// 指定 lane の累積頻度を取得
+    @inline(__always)
+    public func getCumulativeFreq(lane: Int) -> UInt32 {
+        let mask = RANS_SCALE - 1
+        switch lane {
+        case 0: return states.0 & mask
+        case 1: return states.1 & mask
+        case 2: return states.2 & mask
+        case 3: return states.3 & mask
+        default: return 0
+        }
+    }
+    
+    /// renormalization のための16ビットワード読み込み
+    @inline(__always)
+    private mutating func readWord() -> UInt32 {
+        if offset + 1 < stream.count {
+            let b0 = UInt32(stream[offset])
+            let b1 = UInt32(stream[offset + 1])
+            offset += 2
+            return (b0 << 8) | b1
+        }
+        return 0
+    }
+    
+    /// 指定 lane のシンボルをアドバンス
+    @inline(__always)
+    public mutating func advanceSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
+        let mask = RANS_SCALE - 1
+        
+        switch lane {
+        case 0:
+            states.0 = freq * (states.0 >> RANS_SCALE_BITS) + (states.0 & mask) - cumFreq
+            while states.0 < RANS_L { states.0 = (states.0 << 16) | readWord() }
+        case 1:
+            states.1 = freq * (states.1 >> RANS_SCALE_BITS) + (states.1 & mask) - cumFreq
+            while states.1 < RANS_L { states.1 = (states.1 << 16) | readWord() }
+        case 2:
+            states.2 = freq * (states.2 >> RANS_SCALE_BITS) + (states.2 & mask) - cumFreq
+            while states.2 < RANS_L { states.2 = (states.2 << 16) | readWord() }
+        case 3:
+            states.3 = freq * (states.3 >> RANS_SCALE_BITS) + (states.3 & mask) - cumFreq
+            while states.3 < RANS_L { states.3 = (states.3 << 16) | readWord() }
+        default:
+            break
         }
     }
 }
@@ -300,18 +472,20 @@ public struct rANSModel {
                 sum += self.tokenFreqs[i]
             }
             
-            while sum < RANS_SCALE {
-                let maxIdx = self.tokenFreqs.firstIndex(of: self.tokenFreqs.max()!)!
-                self.tokenFreqs[maxIdx] += 1
-                sum += 1
-            }
-            while sum > RANS_SCALE {
-                let maxIdx = self.tokenFreqs.firstIndex(of: self.tokenFreqs.max()!)!
-                if self.tokenFreqs[maxIdx] > 1 {
-                    self.tokenFreqs[maxIdx] -= 1
-                    sum -= 1
-                } else {
-                    break
+            // 合計をRANS_SCALEに調整: 最大頻度のインデックスを直接追跡
+            if sum != RANS_SCALE {
+                var maxIdx = 0
+                var maxVal = self.tokenFreqs[0]
+                for i in 1..<16 {
+                    if self.tokenFreqs[i] > maxVal {
+                        maxVal = self.tokenFreqs[i]
+                        maxIdx = i
+                    }
+                }
+                if sum < RANS_SCALE {
+                    self.tokenFreqs[maxIdx] += (RANS_SCALE - sum)
+                } else if self.tokenFreqs[maxIdx] > (sum - RANS_SCALE) + 1 {
+                    self.tokenFreqs[maxIdx] -= (sum - RANS_SCALE)
                 }
             }
         }

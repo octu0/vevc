@@ -135,28 +135,40 @@ public struct VevcEncoder {
         appendUInt32BE(&out, UInt32(coeffBypassData.count))
         out.append(contentsOf: coeffBypassData)
         
-        // ---- Phase 5: rANS エンコード（逆順） ----
-        var enc = rANSEncoder()
+        // ---- Phase 5: Interleaved 4-way rANS エンコード（逆順） ----
+        var enc = Interleaved4rANSEncoder()
+        
+        // シンボル総数: 通常ペアは runToken + valToken = 2シンボル/ペア
+        // 末尾ゼロランがある場合は +1 シンボル
+        let totalSymbols = pairCount * 2 + (hasTrailingZeros ? 1 : 0)
         
         // 末尾ゼロラン（ペアの最後のrunTokenのみ、対応するvalTokenなし）
         if hasTrailingZeros {
+            let symIdx = totalSymbols - 1
+            let lane = symIdx & 3
             let runToken = pairRunTokens[pairCount]
             let rtFreq = runModel.tokenFreqs[Int(runToken)]
             let rtCumFreq = runModel.tokenCumFreqs[Int(runToken)]
-            enc.encodeSymbol(cumFreq: rtCumFreq, freq: rtFreq)
+            enc.encodeSymbol(lane: lane, cumFreq: rtCumFreq, freq: rtFreq)
         }
         
         // 通常ペア: (runToken, valToken) を逆順でエンコード
         for i in stride(from: pairCount - 1, through: 0, by: -1) {
+            // valToken のシンボルインデックス: i*2 + 1
+            let valSymIdx = i * 2 + 1
+            let valLane = valSymIdx & 3
             let valToken = pairValTokens[i]
             let vtFreq = valModel.tokenFreqs[Int(valToken)]
             let vtCumFreq = valModel.tokenCumFreqs[Int(valToken)]
-            enc.encodeSymbol(cumFreq: vtCumFreq, freq: vtFreq)
+            enc.encodeSymbol(lane: valLane, cumFreq: vtCumFreq, freq: vtFreq)
             
+            // runToken のシンボルインデックス: i*2
+            let runSymIdx = i * 2
+            let runLane = runSymIdx & 3
             let runToken = pairRunTokens[i]
             let rtFreq = runModel.tokenFreqs[Int(runToken)]
             let rtCumFreq = runModel.tokenCumFreqs[Int(runToken)]
-            enc.encodeSymbol(cumFreq: rtCumFreq, freq: rtFreq)
+            enc.encodeSymbol(lane: runLane, cumFreq: rtCumFreq, freq: rtFreq)
         }
         
         enc.flush()
@@ -243,19 +255,20 @@ public struct VevcDecoder {
         var coeffBypassReader = BypassReader(data: coeffBypassData)
         offset += coeffBypassLen
         
-        // 8. rANS ストリーム
+        // 8. Interleaved 4-way rANS ストリーム
         let ransData = Array(data[offset...])
-        var ransDecoder = rANSDecoder(bitstream: ransData)
+        var ransDecoder = Interleaved4rANSDecoder(bitstream: ransData)
         
         // 9. デコード: 事前確保した配列に直接書き込み (修正3: append排除)
         var outCoeffs = [Int16](repeating: 0, count: coeffCount)
         var writeIdx = 0
         
-        for _ in 0..<pairCount {
-            // runToken をデコード
-            let cfRun = ransDecoder.getCumulativeFreq()
+        for pairIdx in 0..<pairCount {
+            // runToken のシンボルインデックス: pairIdx*2
+            let runLane = (pairIdx * 2) & 3
+            let cfRun = ransDecoder.getCumulativeFreq(lane: runLane)
             let rtInfo = runModel.findToken(cf: cfRun)
-            ransDecoder.advanceSymbol(cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+            ransDecoder.advanceSymbol(lane: runLane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
             
             let runBypassBits = coeffBypassReader.readBits(count: max(0, Int(rtInfo.token) - 1))
             let zeroRun = Int(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
@@ -263,10 +276,11 @@ public struct VevcDecoder {
             // ゼロ分インデックスを進める (既に0で初期化済み)
             writeIdx += zeroRun
             
-            // valToken をデコード
-            let cfVal = ransDecoder.getCumulativeFreq()
+            // valToken のシンボルインデックス: pairIdx*2 + 1
+            let valLane = (pairIdx * 2 + 1) & 3
+            let cfVal = ransDecoder.getCumulativeFreq(lane: valLane)
             let vtInfo = valModel.findToken(cf: cfVal)
-            ransDecoder.advanceSymbol(cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
+            ransDecoder.advanceSymbol(lane: valLane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
             
             let sign = coeffBypassReader.readBit()
             let valBypassBits = coeffBypassReader.readBits(count: ValueTokenizer.bypassLength(for: vtInfo.token))
@@ -280,9 +294,12 @@ public struct VevcDecoder {
         
         // 末尾ゼロラン
         if hasTrailingZeros {
-            let cfRun = ransDecoder.getCumulativeFreq()
+            let totalSymbols = pairCount * 2 + 1
+            let symIdx = totalSymbols - 1
+            let lane = symIdx & 3
+            let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
             let rtInfo = runModel.findToken(cf: cfRun)
-            ransDecoder.advanceSymbol(cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+            ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
             
             let _ = coeffBypassReader.readBits(count: max(0, Int(rtInfo.token) - 1))
             // 末尾ゼロは outCoeffs が既に 0 初期化済みのため進めるだけ
