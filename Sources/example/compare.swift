@@ -219,8 +219,8 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int) asyn
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: config.framerate))
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanFalse)
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_High_AutoLevel)
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_H264_Baseline_AutoLevel)
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanTrue)
 
     VTCompressionSessionPrepareToEncodeFrames(compressionSession)
@@ -342,7 +342,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int) asyn
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: config.framerate))
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanFalse)
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ProfileLevel, value: kVTProfileLevel_HEVC_Main_AutoLevel)
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AllowFrameReordering, value: kCFBooleanTrue)
 
@@ -423,6 +423,124 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int) asyn
     return (encTime, decTime, compSize)
 }
 
+// MARK: - MJPEG Encode / Decode (VideoToolbox)
+func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+    var encTime: Double = 0
+    var compSize: Int = 0
+    
+    class FrameBox {
+        var frames: [CMSampleBuffer] = []
+    }
+    let frameBox = FrameBox()
+    
+    // 1. Setup Compression Session
+    var compressionSessionOut: VTCompressionSession?
+    let status = VTCompressionSessionCreate(
+        allocator: kCFAllocatorDefault,
+        width: Int32(width),
+        height: Int32(height),
+        codecType: kCMVideoCodecType_JPEG,
+        encoderSpecification: nil,
+        imageBufferAttributes: nil,
+        compressedDataAllocator: nil,
+        outputCallback: { (outputCallbackRefCon, _, status, infoFlags, sampleBuffer) in
+            guard status == noErr, let sampleBuffer = sampleBuffer else { return }
+            
+            let box = Unmanaged<FrameBox>.fromOpaque(outputCallbackRefCon!).takeUnretainedValue()
+            box.frames.append(sampleBuffer)
+        },
+        refcon: Unmanaged.passUnretained(frameBox).toOpaque(),
+        compressionSessionOut: &compressionSessionOut,
+    )
+    
+    guard status == noErr, let compressionSession = compressionSessionOut else {
+        throw NSError(domain: "VTCompressionSessionCreate (MJPEG)", code: Int(status), userInfo: nil)
+    }
+    
+    // Properties
+    let bitRateBps = config.bitrate * 1000
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: config.framerate))
+    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
+
+    VTCompressionSessionPrepareToEncodeFrames(compressionSession)
+    
+    // Encode loop
+    let encStart = Date()
+    for (idx, imgInput) in images.enumerated() {
+        guard let pixelBuffer = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) else { continue }
+        
+        let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
+        var flags: VTEncodeInfoFlags = []
+        VTCompressionSessionEncodeFrame(
+            compressionSession,
+            imageBuffer: pixelBuffer,
+            presentationTimeStamp: presentationTimeStamp,
+            duration: .invalid,
+            frameProperties: nil,
+            sourceFrameRefcon: nil,
+            infoFlagsOut: &flags,
+        )
+    }
+    
+    VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
+    encTime = Date().timeIntervalSince(encStart)
+    
+    // Calculate size
+    for sample in frameBox.frames {
+        if let dataBuffer = CMSampleBufferGetDataBuffer(sample) {
+            compSize += CMBlockBufferGetDataLength(dataBuffer)
+        }
+    }
+    
+    // 2. Setup Decompression Session
+    var decTime: Double = 0
+    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize) }
+    
+    guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
+        throw NSError(domain: "CMSampleBufferGetFormatDescription (MJPEG)", code: -1, userInfo: nil)
+    }
+    
+    let destPixelBufferAttributes: [String: Any] = [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferMetalCompatibilityKey as String: true
+    ]
+    
+    var decompressionSessionOut: VTDecompressionSession?
+    let decStatus = VTDecompressionSessionCreate(
+        allocator: kCFAllocatorDefault,
+        formatDescription: formatDesc,
+        decoderSpecification: nil,
+        imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
+        outputCallback: nil,
+        decompressionSessionOut: &decompressionSessionOut,
+    )
+                                                
+    guard decStatus == noErr, let decompressionSession = decompressionSessionOut else {
+        throw NSError(domain: "VTDecompressionSessionCreate (MJPEG)", code: Int(decStatus), userInfo: nil)
+    }
+
+    // Decode loop
+    let decStart = Date()
+    for sample in frameBox.frames {
+        var flags: VTDecodeInfoFlags = []
+        VTDecompressionSessionDecodeFrame(
+            decompressionSession,
+            sampleBuffer: sample,
+            flags: [],
+            infoFlagsOut: &flags,
+            outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
+                // nop
+            },
+        )
+    }
+    VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
+    decTime = Date().timeIntervalSince(decStart)
+
+    return (encTime, decTime, compSize)
+}
+
 // MARK: - Main Execution
 Task {
     // Top-level variables captured inside Task locally to avoid isolation errors
@@ -445,6 +563,9 @@ Task {
         print("Running HEVC (VideoToolbox)...")
         let hevcResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight)
         
+        print("Running MJPEG (VideoToolbox)...")
+        let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+        
         func printStats(name: String, result: (encTime: Double, decTime: Double, compSize: Int), count: Int, rawSizeKB: Double) {
             let encMs = result.encTime * 1000
             let decMs = result.decTime * 1000
@@ -463,6 +584,7 @@ Task {
         printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         printStats(name: "H.264", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         printStats(name: "HEVC", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         print("---------------")
         
     } catch {
