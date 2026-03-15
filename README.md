@@ -14,6 +14,7 @@
 1. **Pixel-Domain Prediction & 2D-DWT**
    - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
    - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 16x16 blocks, followed by highly-optimized CABAC entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
+   - **Quadtree Variable Macroblocks**: Dynamically splits blocks (e.g., from 32x32 down to 8x8) based on localized subband coefficient variance and SAD, selectively skipping flat regions to significantly optimize CABAC processing speed and file size.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -82,6 +83,7 @@ $ swift run -c release vevc-enc -o out.vevc docs/sample_frames/frame_0*.png
 ```
 
 - `-bitrate`: Specifies the target bitrate (desired compression ratio/quality).
+- `-one`: Enables single-layer (Layer 0) mode, bypassing multi-resolution overhead for maximum encoding/decoding speed and optimal compression for fixed-resolution targets.
 - `-o`: Specifies the output `.vevc` file path.
 
 ### Decode (`vevc-dec`)
@@ -94,6 +96,7 @@ $ swift run -c release vevc-dec -i output.vevc -o .out/
 
 **Multi-Resolution / Multi-Framerate Options**:
 
+- `-one`: Decodes the stream assuming it was encoded with the single-layer (Layer 0) mode.
 - `-maxLayer <0-2>`: Specifies the maximum level of spatial layers to decode.
   - `0`: 1/4 size (for rough thumbnails)
   - `1`: 1/2 size (for previews)

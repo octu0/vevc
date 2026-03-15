@@ -220,6 +220,11 @@ struct CABACBitReader {
         let bit = (cache >> bits) & 1
         return bit
     }
+    
+    @inline(__always)
+    var consumedBytes: Int {
+        return offset
+    }
 }
 
 struct CABACDecoder {

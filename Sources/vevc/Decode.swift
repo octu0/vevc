@@ -356,6 +356,79 @@ func blockDecodeDPCM4(decoder: inout CABACDecoder, block: inout BlockView, lastV
 }
 
 @inline(__always)
+func blockDecodeDPCM8(decoder: inout CABACDecoder, block: inout BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    var lscpIdx = -1
+    if hasNonZero == 1 {
+        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
+        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+        guard lscpX < 8 && lscpY < 8 else { throw DecodeError.invalidBlockData }
+        lscpIdx = lscpY * 8 + lscpX
+    }
+
+    for y in 0..<8 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<8 { ptr[x] = 0 }
+    }
+
+    var currentIdx = 0
+    
+    while currentIdx <= lscpIdx {
+        let startY = currentIdx / 8
+        let startX = currentIdx % 8
+        let band = min(startX + startY, 7)
+
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            let y = currentIdx / 8
+            let x = currentIdx % 8
+            let ptr = block.rowPointer(y: y)
+            ptr[x] = val
+        }
+        currentIdx += 1
+    }
+
+    @inline(__always)
+    func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        if ia <= ic && ib <= ic {
+            return Int16(truncatingIfNeeded: min(ia, ib))
+        }
+        if ic <= ia && ic <= ib {
+            return Int16(truncatingIfNeeded: max(ia, ib))
+        }
+        return Int16(truncatingIfNeeded: ia + ib - ic)
+    }
+
+    var last: Int16 = lastVal
+    for y in 0..<8 {
+        let ptrY = block.rowPointer(y: y)
+        if y == 0 {
+            for x in 0..<8 {
+                if x == 0 {
+                    ptrY[0] = ptrY[0] &+ last
+                } else {
+                    ptrY[x] = ptrY[x] &+ ptrY[x - 1]
+                }
+            }
+        } else {
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            for x in 0..<8 {
+                if x == 0 {
+                    ptrY[0] = ptrY[0] &+ ptrPrevY[0]
+                } else {
+                    ptrY[x] = ptrY[x] &+ predictMED(ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                }
+            }
+        }
+        last = ptrY[7]
+    }
+    lastVal = last
+}
+
+@inline(__always)
 func blockDecodeDPCM16(decoder: inout CABACDecoder, block: inout BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
@@ -428,6 +501,12 @@ func blockDecodeDPCM16(decoder: inout CABACDecoder, block: inout BlockView, last
     lastVal = last
 }
 
+enum DecodeTask32 {
+    case skip
+    case decode16
+    case split8(Bool, Bool, Bool, Bool)
+}
+
 @inline(__always)
 func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
@@ -436,19 +515,38 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
         blocks.append(Block2D(width: 32, height: 32))
     }
     
-    let flagsByteCount = (blockCount + 7) / 8
-    guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
-    let flagsData = Array(data[0..<flagsByteCount])
-    let dataSlice = Array(data[flagsByteCount...])
-    
-    var brFlags = CABACBitReader(data: flagsData)
-    var nonZeroIndices: [Int] = []
-    nonZeroIndices.reserveCapacity(blockCount)
+    var brFlags = CABACBitReader(data: data)
+    var tasks: [(Int, DecodeTask32)] = []
+    tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
-        if try brFlags.readBit() == 0 {
-            nonZeroIndices.append(i)
+        let isZero = try brFlags.readBit()
+        if isZero == 1 {
+            tasks.append((i, .skip))
+        } else {
+            let mbType = try brFlags.readBit()
+            if mbType == 1 {
+                let tlZero = try brFlags.readBit()
+                if tlZero == 0 { let _ = try brFlags.readBit() }
+                
+                let trZero = try brFlags.readBit()
+                if trZero == 0 { let _ = try brFlags.readBit() }
+                
+                let blZero = try brFlags.readBit()
+                if blZero == 0 { let _ = try brFlags.readBit() }
+                
+                let brZero = try brFlags.readBit()
+                if brZero == 0 { let _ = try brFlags.readBit() }
+                
+                tasks.append((i, .split8(tlZero == 0, trZero == 0, blZero == 0, brZero == 0)))
+            } else {
+                tasks.append((i, .decode16))
+            }
         }
     }
+    
+    let consumed = brFlags.consumedBytes
+    guard consumed <= data.count else { throw DecodeError.insufficientData }
+    let dataSlice = Array(data[consumed...])
     
     var decoder = try CABACDecoder(data: dataSlice)
     
@@ -463,20 +561,68 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
 
-    for i in nonZeroIndices {
+    for (i, task) in tasks {
         try blocks[i].withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 32)
-            try blockDecode16(decoder: &decoder, block: &hlView, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+            let hlBase = view.base.advanced(by: half)
+            let lhBase = view.base.advanced(by: half * 32)
+            let hhBase = view.base.advanced(by: half * 32 + half)
             
-            var lhView = BlockView(base: view.base.advanced(by: half * 32), width: half, height: half, stride: 32)
-            try blockDecode16(decoder: &decoder, block: &lhView, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-            
-            var hhView = BlockView(base: view.base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-            try blockDecode16(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            switch task {
+            case .skip:
+                break
+            case .decode16:
+                var hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
+                try blockDecode16(decoder: &decoder, block: &hlView, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                
+                var lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
+                try blockDecode16(decoder: &decoder, block: &lhView, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                
+                var hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
+                try blockDecode16(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            case .split8(let tl, let tr, let bl, let br):
+                if tl {
+                    var hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if tr {
+                    var hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if bl {
+                    var hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if br {
+                    var hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+            }
         }
     }
 
     return blocks
+}
+
+enum DecodeTask16 {
+    case skip
+    case decode8
+    case split4(Bool, Bool, Bool, Bool)
 }
 
 @inline(__always)
@@ -487,19 +633,38 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
         blocks.append(Block2D(width: 16, height: 16))
     }
     
-    let flagsByteCount = (blockCount + 7) / 8
-    guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
-    let flagsData = Array(data[0..<flagsByteCount])
-    let dataSlice = Array(data[flagsByteCount...])
-    
-    var brFlags = CABACBitReader(data: flagsData)
-    var nonZeroIndices: [Int] = []
-    nonZeroIndices.reserveCapacity(blockCount)
+    var brFlags = CABACBitReader(data: data)
+    var tasks: [(Int, DecodeTask16)] = []
+    tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
-        if try brFlags.readBit() == 0 {
-            nonZeroIndices.append(i)
+        let isZero = try brFlags.readBit()
+        if isZero == 1 {
+            tasks.append((i, .skip))
+        } else {
+            let mbType = try brFlags.readBit()
+            if mbType == 1 {
+                let tlZero = try brFlags.readBit()
+                if tlZero == 0 { let _ = try brFlags.readBit() }
+                
+                let trZero = try brFlags.readBit()
+                if trZero == 0 { let _ = try brFlags.readBit() }
+                
+                let blZero = try brFlags.readBit()
+                if blZero == 0 { let _ = try brFlags.readBit() }
+                
+                let brZero = try brFlags.readBit()
+                if brZero == 0 { let _ = try brFlags.readBit() }
+                
+                tasks.append((i, .split4(tlZero == 0, trZero == 0, blZero == 0, brZero == 0)))
+            } else {
+                tasks.append((i, .decode8))
+            }
         }
     }
+    
+    let consumed = brFlags.consumedBytes
+    guard consumed <= data.count else { throw DecodeError.insufficientData }
+    let dataSlice = Array(data[consumed...])
     
     var decoder = try CABACDecoder(data: dataSlice)
     
@@ -514,16 +679,58 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
 
-    for i in nonZeroIndices {
+    for (i, task) in tasks {
         try blocks[i].withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 16)
-            try blockDecode8(decoder: &decoder, block: &hlView, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+            let hlBase = view.base.advanced(by: half)
+            let lhBase = view.base.advanced(by: half * 16)
+            let hhBase = view.base.advanced(by: half * 16 + half)
             
-            var lhView = BlockView(base: view.base.advanced(by: half * 16), width: half, height: half, stride: 16)
-            try blockDecode8(decoder: &decoder, block: &lhView, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-            
-            var hhView = BlockView(base: view.base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-            try blockDecode8(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            switch task {
+            case .skip:
+                break
+            case .decode8:
+                var hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
+                try blockDecode8(decoder: &decoder, block: &hlView, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                
+                var lhView = BlockView(base: lhBase, width: half, height: half, stride: 16)
+                try blockDecode8(decoder: &decoder, block: &lhView, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                
+                var hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
+                try blockDecode8(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            case .split4(let tl, let tr, let bl, let br):
+                if tl {
+                    var hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
+                    var lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
+                    var hh = BlockView(base: hhBase, width: 4, height: 4, stride: 16)
+                    try blockDecode4(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if tr {
+                    var hl = BlockView(base: hlBase.advanced(by: 4), width: 4, height: 4, stride: 16)
+                    var lh = BlockView(base: lhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
+                    var hh = BlockView(base: hhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
+                    try blockDecode4(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if bl {
+                    var hl = BlockView(base: hlBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                    var lh = BlockView(base: lhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                    var hh = BlockView(base: hhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                    try blockDecode4(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if br {
+                    var hl = BlockView(base: hlBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                    var lh = BlockView(base: lhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                    var hh = BlockView(base: hhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                    try blockDecode4(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+            }
         }
     }
 
@@ -538,7 +745,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
         blocks.append(Block2D(width: 8, height: 8))
     }
     
-    let flagsByteCount = (blockCount + 7) / 8
+    let flagsByteCount = (blockCount * 2 + 7) / 8
     guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
     let flagsData = Array(data[0..<flagsByteCount])
     let dataSlice = Array(data[flagsByteCount...])
@@ -547,7 +754,9 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var nonZeroIndices: [Int] = []
     nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
-        if try brFlags.readBit() == 0 {
+        let isZero = try brFlags.readBit()
+        let _ = try brFlags.readBit()
+        if isZero == 0 {
             nonZeroIndices.append(i)
         }
     }
@@ -589,7 +798,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
         blocks.append(Block2D(width: 8, height: 8))
     }
     
-    let flagsByteCount = (blockCount + 7) / 8
+    let flagsByteCount = (blockCount * 2 + 7) / 8
     guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
     let flagsData = Array(data[0..<flagsByteCount])
     let dataSlice = Array(data[flagsByteCount...])
@@ -598,7 +807,9 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     var nonZeroIndices: [Int] = []
     nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
-        if try brFlags.readBit() == 0 {
+        let isZero = try brFlags.readBit()
+        let _ = try brFlags.readBit()
+        if isZero == 0 {
             nonZeroIndices.append(i)
         }
     }
@@ -646,6 +857,12 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     return blocks
 }
 
+enum DecodeTaskBase32 {
+    case skip
+    case decode16
+    case split8(Bool, Bool, Bool, Bool)
+}
+
 @inline(__always)
 func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
@@ -654,19 +871,38 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
         blocks.append(Block2D(width: 32, height: 32))
     }
     
-    let flagsByteCount = (blockCount + 7) / 8
-    guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
-    let flagsData = Array(data[0..<flagsByteCount])
-    let dataSlice = Array(data[flagsByteCount...])
-    
-    var brFlags = CABACBitReader(data: flagsData)
-    var nonZeroIndices: [Int] = []
-    nonZeroIndices.reserveCapacity(blockCount)
+    var brFlags = CABACBitReader(data: data)
+    var tasks: [(Int, DecodeTaskBase32)] = []
+    tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
-        if try brFlags.readBit() == 0 {
-            nonZeroIndices.append(i)
+        let isZero = try brFlags.readBit()
+        if isZero == 1 {
+            tasks.append((i, .skip))
+        } else {
+            let mbType = try brFlags.readBit()
+            if mbType == 1 {
+                let tlZero = try brFlags.readBit()
+                if tlZero == 0 { let _ = try brFlags.readBit() }
+                
+                let trZero = try brFlags.readBit()
+                if trZero == 0 { let _ = try brFlags.readBit() }
+                
+                let blZero = try brFlags.readBit()
+                if blZero == 0 { let _ = try brFlags.readBit() }
+                
+                let brZero = try brFlags.readBit()
+                if brZero == 0 { let _ = try brFlags.readBit() }
+                
+                tasks.append((i, .split8(tlZero == 0, trZero == 0, blZero == 0, brZero == 0)))
+            } else {
+                tasks.append((i, .decode16))
+            }
         }
     }
+    
+    let consumed = brFlags.consumedBytes
+    guard consumed <= data.count else { throw DecodeError.insufficientData }
+    let dataSlice = Array(data[consumed...])
     
     var decoder = try CABACDecoder(data: dataSlice)
     
@@ -685,26 +921,70 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
     var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
 
     var lastVal: Int16 = 0
-    var nzCur = 0
-    let nzCount = nonZeroIndices.count
-    for i in 0..<blockCount {
-        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
-            nzCur += 1
-            try blocks[i].withView { view in
-                var llView = BlockView(base: view.base, width: half, height: half, stride: 32)
+    for (i, task) in tasks {
+        try blocks[i].withView { view in
+            let llBase = view.base
+            let hlBase = view.base.advanced(by: half)
+            let lhBase = view.base.advanced(by: half * 32)
+            let hhBase = view.base.advanced(by: half * 32 + half)
+            
+            switch task {
+            case .skip:
+                lastVal = 0
+            case .decode16:
+                var llView = BlockView(base: llBase, width: half, height: half, stride: 32)
                 try blockDecodeDPCM16(decoder: &decoder, block: &llView, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
                 
-                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 32)
+                var hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
                 try blockDecode16(decoder: &decoder, block: &hlView, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
                 
-                var lhView = BlockView(base: view.base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                var lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
                 try blockDecode16(decoder: &decoder, block: &lhView, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
                 
-                var hhView = BlockView(base: view.base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                var hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
                 try blockDecode16(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            case .split8(let tl, let tr, let bl, let br):
+                if tl {
+                    var ll = BlockView(base: llBase, width: 8, height: 8, stride: 32)
+                    var hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: &ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if tr {
+                    var ll = BlockView(base: llBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: &ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if bl {
+                    var ll = BlockView(base: llBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: &ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
+                if br {
+                    var ll = BlockView(base: llBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: &ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                    try blockDecode8(decoder: &decoder, block: &hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                    try blockDecode8(decoder: &decoder, block: &lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                    try blockDecode8(decoder: &decoder, block: &hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                }
             }
-        } else {
-            lastVal = 0
         }
     }
 
