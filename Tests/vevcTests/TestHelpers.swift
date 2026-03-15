@@ -55,20 +55,20 @@ func invDwt2dScalar(_ block: inout BlockView, size: Int) {
     }
 }
 
-func blockEncode(encoder: inout CABACEncoder, block: BlockView, size: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncode(encoder: inout VevcEncoder, block: BlockView, size: Int) {
     switch size {
-    case 32: blockEncode32(encoder: &encoder, block: block, ctxRun: &ctxRun, ctxMag: &ctxMag)
-    case 16: blockEncode16(encoder: &encoder, block: block, ctxRun: &ctxRun, ctxMag: &ctxMag)
-    case 8: blockEncode8(encoder: &encoder, block: block, ctxRun: &ctxRun, ctxMag: &ctxMag)
+    case 32: blockEncode32(encoder: &encoder, block: block)
+    case 16: blockEncode16(encoder: &encoder, block: block)
+    case 8: blockEncode8(encoder: &encoder, block: block)
     default: fatalError()
     }
 }
 
-func blockDecode(decoder: inout CABACDecoder, block: inout BlockView, size: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) throws {
+func blockDecode(decoder: inout VevcDecoder, block: inout BlockView, size: Int) throws {
     switch size {
-    case 32: try blockDecode32(decoder: &decoder, block: &block, ctxRun: &ctxRun, ctxMag: &ctxMag)
-    case 16: try blockDecode16(decoder: &decoder, block: &block, ctxRun: &ctxRun, ctxMag: &ctxMag)
-    case 8: try blockDecode8(decoder: &decoder, block: &block, ctxRun: &ctxRun, ctxMag: &ctxMag)
+    case 32: try blockDecode32(decoder: &decoder, block: &block)
+    case 16: try blockDecode16(decoder: &decoder, block: &block)
+    case 8: try blockDecode8(decoder: &decoder, block: &block)
     default: fatalError()
     }
 }

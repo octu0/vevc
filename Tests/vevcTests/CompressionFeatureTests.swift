@@ -34,7 +34,7 @@ final class CompressionFeatureTests: XCTestCase {
 
     func testLSCPRoundTrip() throws {
         // We will encode and decode a block with many trailing zeros to test LSCP logic
-        var encoder = CABACEncoder()
+        var encoder = VevcEncoder()
 
         let size = 8
         var blockData = [Int16](repeating: 0, count: size * size)
@@ -53,24 +53,18 @@ final class CompressionFeatureTests: XCTestCase {
             }
         }
 
-        var ctxRun = [ContextModel](repeating: ContextModel(), count: 64)
-        var ctxMag = [ContextModel](repeating: ContextModel(), count: 64)
-
         block.withView { view in
-            blockEncode(encoder: &encoder, block: view, size: size, ctxRun: &ctxRun, ctxMag: &ctxMag)
+            blockEncode(encoder: &encoder, block: view, size: size)
         }
         encoder.flush()
 
         let encodedData = encoder.getData()
-        var decoder = try CABACDecoder(data: encodedData)
+        var decoder = try VevcDecoder(data: encodedData)
 
         var outBlock = Block2D(width: size, height: size)
 
-        var decCtxRun = [ContextModel](repeating: ContextModel(), count: 64)
-        var decCtxMag = [ContextModel](repeating: ContextModel(), count: 64)
-
         try outBlock.withView { view in
-            try blockDecode(decoder: &decoder, block: &view, size: size, ctxRun: &decCtxRun, ctxMag: &decCtxMag)
+            try blockDecode(decoder: &decoder, block: &view, size: size)
         }
 
         outBlock.withView { view in

@@ -1,4 +1,6 @@
-// MARK: - Encode
+// MARK: - Encode Context
+
+import Foundation
 
 import Foundation
 
@@ -12,73 +14,33 @@ func debugLog(_ msg: String) {
 }
 
 @inline(__always)
-func encodeExpGolomb(val: UInt32, encoder: inout CABACEncoder) {
-    var q: Int = 0
-    var temp = val &+ 1
-    while 1 < temp {
-        q += 1
-        temp >>= 1
+func encodeExpGolomb(val: UInt32, encoder: inout VevcEncoder) {
+    // 従来のExpGolombは不要になるが互換性のためのBypassBitsとして記録する
+    var q = val
+    var bits = 0
+    while q > 0 {
+        bits += 1
+        q >>= 1
     }
-    for _ in 0..<q {
-        encoder.encodeBypass(binVal: 1)
+    for _ in 0..<bits {
+        encoder.encodeBypass(binVal: 0)
     }
-    encoder.encodeBypass(binVal: 0)
-    if 0 < q {
-        for i in stride(from: q - 1, through: 0, by: -1) {
-            let bit = UInt8(((val &+ 1) >> i) & 1)
-            encoder.encodeBypass(binVal: bit)
-        }
+    encoder.encodeBypass(binVal: 1)
+    for i in stride(from: bits - 1, through: 0, by: -1) {
+        encoder.encodeBypass(binVal: UInt8((val >> i) & 1))
     }
 }
 
 @inline(__always)
-func encodeCoeffRun(val: Int16, encoder: inout CABACEncoder, run: Int, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel], band: Int) {
-    let rIdx = min(run, 7)
-    let ctxBandOffset = min(band, 7) * 8
-    ctxRun.withUnsafeMutableBufferPointer { ptr in
-        guard let base = ptr.baseAddress else { return }
-        for i in 0..<rIdx {
-            encoder.encodeBin(binVal: 1, ctx: &base[ctxBandOffset + Int(i)])
-        }
-        if run < 7 {
-            encoder.encodeBin(binVal: 0, ctx: &base[ctxBandOffset + Int(rIdx)])
-        }
+func encodeCoeffRun(val: Int16, encoder: inout VevcEncoder, run: Int) {
+    for _ in 0..<run {
+        encoder.addCoeff(0)
     }
-    if run >= 7 {
-        let rem = UInt32(run - 7)
-        encodeExpGolomb(val: rem, encoder: &encoder)
-    }
-
-    let signBit: UInt8
-    if val <= -1 {
-        signBit = 1
-    } else {
-        signBit = 0
-    }
-    let absVal = UInt32(abs(Int(val)))
-
-    encoder.encodeBypass(binVal: signBit)
-
-    let magMinus1 = absVal &- 1
-    let numBins = min(magMinus1, 7)
-    ctxMag.withUnsafeMutableBufferPointer { ptr in
-        guard let base = ptr.baseAddress else { return }
-        for i in 0..<numBins {
-            encoder.encodeBin(binVal: 1, ctx: &base[ctxBandOffset + Int(i)])
-        }
-        if magMinus1 < 7 {
-            encoder.encodeBin(binVal: 0, ctx: &base[ctxBandOffset + Int(numBins)])
-        }
-    }
-
-    if magMinus1 >= 7 {
-        let rem = magMinus1 &- 7
-        encodeExpGolomb(val: rem, encoder: &encoder)
-    }
+    encoder.addCoeff(val)
 }
 
 @inline(__always)
-func blockEncode32(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncode32(encoder: inout VevcEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero16 = SIMD16<Int16>(repeating: 0)
@@ -130,8 +92,7 @@ func blockEncode32(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout 
             } else {
                 let startY = currentIdx / 32
                 let startX = currentIdx % 32
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
                 currentIdx = (y * 32 + x) + 1
             }
@@ -140,7 +101,7 @@ func blockEncode32(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout 
 }
 
 @inline(__always)
-func blockEncode16(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncode16(encoder: inout VevcEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -190,10 +151,7 @@ func blockEncode16(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout 
             if val == 0 {
                 run += 1
             } else {
-                let startY = currentIdx / 16
-                let startX = currentIdx % 16
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
                 currentIdx = (y * 16 + x) + 1
             }
@@ -202,7 +160,7 @@ func blockEncode16(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout 
 }
 
 @inline(__always)
-func blockEncode8(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncode8(encoder: inout VevcEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -252,10 +210,7 @@ func blockEncode8(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [
             if val == 0 {
                 run += 1
             } else {
-                let startY = currentIdx / 8
-                let startX = currentIdx % 8
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
                 currentIdx = (y * 8 + x) + 1
             }
@@ -264,7 +219,7 @@ func blockEncode8(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [
 }
 
 @inline(__always)
-func blockEncode4(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncode4(encoder: inout VevcEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero2 = SIMD2<Int16>(repeating: 0)
@@ -314,10 +269,7 @@ func blockEncode4(encoder: inout CABACEncoder, block: BlockView, ctxRun: inout [
             if val == 0 {
                 run += 1
             } else {
-                let startY = currentIdx / 4
-                let startX = currentIdx % 4
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
                 currentIdx = (y * 4 + x) + 1
             }
@@ -365,7 +317,7 @@ func getSubbands8(view: BlockView) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncodeDPCM4(encoder: inout VevcEncoder, block: BlockView, lastVal: inout Int16) {
     let ptr0 = block.rowPointer(y: 0)
     let ptr1 = block.rowPointer(y: 1)
     let ptr2 = block.rowPointer(y: 2)
@@ -444,10 +396,7 @@ func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: in
             if diff == 0 {
                 run += 1
             } else {
-                let startY = startIdxForRun / 4
-                let startX = startIdxForRun % 4
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
                 run = 0
                 startIdxForRun = currentIdx + 1
             }
@@ -459,7 +408,7 @@ func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: in
 }
 
 @inline(__always)
-func blockEncodeDPCM8(encoder: inout CABACEncoder, block: BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncodeDPCM8(encoder: inout VevcEncoder, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -535,10 +484,7 @@ func blockEncodeDPCM8(encoder: inout CABACEncoder, block: BlockView, lastVal: in
             if diff == 0 {
                 run += 1
             } else {
-                let startY = startIdxForRun / 8
-                let startX = startIdxForRun % 8
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
                 run = 0
                 startIdxForRun = currentIdx + 1
             }
@@ -548,7 +494,7 @@ func blockEncodeDPCM8(encoder: inout CABACEncoder, block: BlockView, lastVal: in
 }
 
 @inline(__always)
-func blockEncodeDPCM16(encoder: inout CABACEncoder, block: BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+func blockEncodeDPCM16(encoder: inout VevcEncoder, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -624,10 +570,7 @@ func blockEncodeDPCM16(encoder: inout CABACEncoder, block: BlockView, lastVal: i
             if diff == 0 {
                 run += 1
             } else {
-                let startY = startIdxForRun / 16
-                let startX = startIdxForRun % 16
-                let band = min(startX + startY, 7)
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
                 run = 0
                 startIdxForRun = currentIdx + 1
             }
@@ -966,7 +909,7 @@ enum EncodeTask32 {
 
 @inline(__always)
 func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = CABACBitWriter(capacity: (blocks.count * 10 + 7) / 8)
+    var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
     
@@ -976,32 +919,32 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
             return isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
-            bwFlags.writeBit(1)
+            bwFlags.writeBit(true)
             zeroCount += 1
         } else {
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(false)
             
             let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
                 return shouldSplit32(data: ptr, skipLL: true)
             }
             if forceSplit {
-                bwFlags.writeBit(1)
+                bwFlags.writeBit(true)
                 
-                bwFlags.writeBit(0) // TL isZero = 0
-                bwFlags.writeBit(0) // TL MB_Type = 0 (No further split)
+                bwFlags.writeBit(false) // TL isZero = false
+                bwFlags.writeBit(false) // TL MB_Type = false (No further split)
                 
-                bwFlags.writeBit(0) // TR isZero = 0
-                bwFlags.writeBit(0) // TR MB_Type = 0
+                bwFlags.writeBit(false) // TR isZero = false
+                bwFlags.writeBit(false) // TR MB_Type = false
                 
-                bwFlags.writeBit(0) // BL isZero = 0
-                bwFlags.writeBit(0) // BL MB_Type = 0
+                bwFlags.writeBit(false) // BL isZero = false
+                bwFlags.writeBit(false) // BL MB_Type = false
                 
-                bwFlags.writeBit(0) // BR isZero = 0
-                bwFlags.writeBit(0) // BR MB_Type = 0
+                bwFlags.writeBit(false) // BR isZero = false
+                bwFlags.writeBit(false) // BR MB_Type = false
                 
                 tasks.append((i, .split8(true, true, true, true)))
             } else {
-                bwFlags.writeBit(0) // MB_Type = 0
+                bwFlags.writeBit(false) // MB_Type = false
                 tasks.append((i, .encode16))
             }
         }
@@ -1009,64 +952,55 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = CABACEncoder()
+    var encoder = VevcEncoder()
     
-    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
-    
-    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
-
     for (i, task) in tasks {
         blocks[i].withView { view in
             let subs = getSubbands32(view: view)
             switch task {
             case .encode16:
-                blockEncode16(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                blockEncode16(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                blockEncode16(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                blockEncode16(encoder: &encoder, block: subs.hl)
+                blockEncode16(encoder: &encoder, block: subs.lh)
+                blockEncode16(encoder: &encoder, block: subs.hh)
             case .split8(let tl, let tr, let bl, let br):
                 if tl {
                     let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
                 if tr {
                     let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
                 if bl {
                     let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
                 if br {
                     let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
             }
         }
     }
     
     encoder.flush()
-    var out = bwFlags.data
+    var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData())
     return out
 }
@@ -1078,7 +1012,7 @@ enum EncodeTask16 {
 
 @inline(__always)
 func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = CABACBitWriter(capacity: (blocks.count * 10 + 7) / 8)
+    var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
     
@@ -1088,31 +1022,31 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
             return isEffectivelyZero16(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
-            bwFlags.writeBit(1)
+            bwFlags.writeBit(true)
             zeroCount += 1
         } else {
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(false)
             let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
                 return shouldSplit16(data: ptr, skipLL: true)
             }
             if forceSplit {
-                bwFlags.writeBit(1)
+                bwFlags.writeBit(true)
                 
-                bwFlags.writeBit(0)
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
                 
-                bwFlags.writeBit(0)
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
                 
-                bwFlags.writeBit(0)
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
                 
-                bwFlags.writeBit(0)
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
                 
                 tasks.append((i, .split4(true, true, true, true)))
             } else {
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false)
                 tasks.append((i, .encode8))
             }
         }
@@ -1120,71 +1054,62 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = CABACEncoder()
+    var encoder = VevcEncoder()
     
-    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
-    
-    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
-
     for (i, task) in tasks {
         blocks[i].withView { view in
             let subs = getSubbands16(view: view)
             switch task {
             case .encode8:
-                blockEncode8(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                blockEncode8(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                blockEncode8(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                blockEncode8(encoder: &encoder, block: subs.hl)
+                blockEncode8(encoder: &encoder, block: subs.lh)
+                blockEncode8(encoder: &encoder, block: subs.hh)
             case .split4(let tl, let tr, let bl, let br):
                 if tl {
                     let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode4(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode4(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode4(encoder: &encoder, block: hl)
+                    blockEncode4(encoder: &encoder, block: lh)
+                    blockEncode4(encoder: &encoder, block: hh)
                 }
                 if tr {
                     let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode4(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode4(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode4(encoder: &encoder, block: hl)
+                    blockEncode4(encoder: &encoder, block: lh)
+                    blockEncode4(encoder: &encoder, block: hh)
                 }
                 if bl {
                     let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode4(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode4(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode4(encoder: &encoder, block: hl)
+                    blockEncode4(encoder: &encoder, block: lh)
+                    blockEncode4(encoder: &encoder, block: hh)
                 }
                 if br {
                     let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode4(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode4(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncode4(encoder: &encoder, block: hl)
+                    blockEncode4(encoder: &encoder, block: lh)
+                    blockEncode4(encoder: &encoder, block: hh)
                 }
             }
         }
     }
     
     encoder.flush()
-    var out = bwFlags.data
+    var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData())
     return out
 }
 
 @inline(__always)
 func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = CABACBitWriter(capacity: (blocks.count * 2 + 7) / 8)
+    var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
@@ -1192,45 +1117,37 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
             return isEffectivelyZero8(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
-            bwFlags.writeBit(1)
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(true)
+            bwFlags.writeBit(false)
         } else {
-            bwFlags.writeBit(0)
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(false)
+            bwFlags.writeBit(false)
             nonZeroIndices.append(i)
         }
     }
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = CABACEncoder()
-    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var encoder = VevcEncoder()
     
-    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
-
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands8(view: view)
-            blockEncode4(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-            blockEncode4(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-            blockEncode4(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            blockEncode4(encoder: &encoder, block: subs.hl)
+            blockEncode4(encoder: &encoder, block: subs.lh)
+            blockEncode4(encoder: &encoder, block: subs.hh)
         }
     }
     
     encoder.flush()
-    var out = bwFlags.data
+    var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData())
     return out
 }
 
 @inline(__always)
 func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = CABACBitWriter(capacity: (blocks.count * 2 + 7) / 8)
+    var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
@@ -1238,30 +1155,18 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
             return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
-            bwFlags.writeBit(1)
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(true)
+            bwFlags.writeBit(false)
         } else {
-            bwFlags.writeBit(0)
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(false)
+            bwFlags.writeBit(false)
             nonZeroIndices.append(i)
         }
     }
     bwFlags.flush()
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = CABACEncoder()
-    var ctxRunLL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 64)
-    
-    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
-    
+    var encoder = VevcEncoder()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -1272,10 +1177,10 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
 
             blocks[i].withView { view in
                 let subs = getSubbands8(view: view)
-                blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                blockEncode4(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                blockEncode4(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                blockEncode4(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
+                blockEncode4(encoder: &encoder, block: subs.hl)
+                blockEncode4(encoder: &encoder, block: subs.lh)
+                blockEncode4(encoder: &encoder, block: subs.hh)
             }
         } else {
             lastVal = 0
@@ -1283,7 +1188,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
     }
     
     encoder.flush()
-    var out = bwFlags.data
+    var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData())
     return out
 }
@@ -1296,7 +1201,7 @@ enum EncodeTaskBase32 {
 
 @inline(__always)
 func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
-    var bwFlags = CABACBitWriter(capacity: (blocks.count * 10 + 7) / 8)
+    var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTaskBase32)] = []
     tasks.reserveCapacity(blocks.count)
     
@@ -1306,32 +1211,32 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
             return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
-            bwFlags.writeBit(1)
+            bwFlags.writeBit(true)
             tasks.append((i, .skip))
             zeroCount += 1
         } else {
-            bwFlags.writeBit(0)
+            bwFlags.writeBit(false)
             let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
                 return shouldSplit32(data: ptr, skipLL: false)
             }
             if forceSplit {
-                bwFlags.writeBit(1)
+                bwFlags.writeBit(true)
                 
-                bwFlags.writeBit(0) // TL
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false) // TL
+                bwFlags.writeBit(false)
                 
-                bwFlags.writeBit(0) // TR
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false) // TR
+                bwFlags.writeBit(false)
                 
-                bwFlags.writeBit(0) // BL
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false) // BL
+                bwFlags.writeBit(false)
                 
-                bwFlags.writeBit(0) // BR
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false) // BR
+                bwFlags.writeBit(false)
                 
                 tasks.append((i, .split8(true, true, true, true)))
             } else {
-                bwFlags.writeBit(0)
+                bwFlags.writeBit(false)
                 tasks.append((i, .encode16))
             }
         }
@@ -1339,19 +1244,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     bwFlags.flush()
     debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = CABACEncoder()
-    var ctxRunLL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 64)
-    
-    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
-
-    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
-    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
-    
+    var encoder = VevcEncoder()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {
@@ -1362,10 +1255,10 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
         case .encode16:
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)
-                blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                blockEncode16(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                blockEncode16(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                blockEncode16(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
+                blockEncode16(encoder: &encoder, block: subs.hl)
+                blockEncode16(encoder: &encoder, block: subs.lh)
+                blockEncode16(encoder: &encoder, block: subs.hh)
             }
 
         case .split8(let tl, let tr, let bl, let br):
@@ -1376,47 +1269,47 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
                     let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
                 if tr {
                     let ll = BlockView(base: subs.ll.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
                 if bl {
                     let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
                 if br {
                     let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
-                    blockEncode8(encoder: &encoder, block: hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
-                    blockEncode8(encoder: &encoder, block: lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
-                    blockEncode8(encoder: &encoder, block: hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+                    blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
+                    blockEncode8(encoder: &encoder, block: hl)
+                    blockEncode8(encoder: &encoder, block: lh)
+                    blockEncode8(encoder: &encoder, block: hh)
                 }
             }
         }
     }
     
     encoder.flush()
-    var out = bwFlags.data
+    var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData())
     return out
 }
@@ -1840,8 +1733,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
-            var mvBw = CABACEncoder()
-            var ctxDx = ContextModel()
+            var mvBw = VevcEncoder()
 
             let mbSize = 64
             let mbCols = (curr.width + mbSize - 1) / mbSize
@@ -1854,9 +1746,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
                 let mvdY = Int(vec.y) - pmv.dy
 
                 if mvdX == 0 && mvdY == 0 {
-                    mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
+                    mvBw.encodeBypass(binVal: 0)
                 } else {
-                    mvBw.encodeBin(binVal: 1, ctx: &ctxDx)
+                    mvBw.encodeBypass(binVal: 1)
 
                     let sx: UInt8
                     if mvdX <= -1 {
@@ -1974,8 +1866,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             
             out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
 
-            var mvBw = CABACEncoder()
-            var ctxDx = ContextModel()
+            var mvBw = VevcEncoder()
 
             let mbSize = 64
             let mbCols = (curr.width + mbSize - 1) / mbSize
@@ -1988,9 +1879,9 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
                 let mvdY = Int(vec.y) - pmv.dy
 
                 if mvdX == 0 && mvdY == 0 {
-                    mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
+                    mvBw.encodeBypass(binVal: 0)
                 } else {
-                    mvBw.encodeBin(binVal: 1, ctx: &ctxDx)
+                    mvBw.encodeBypass(binVal: 1)
 
                     let sx: UInt8
                     if mvdX <= -1 {
