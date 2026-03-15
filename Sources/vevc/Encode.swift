@@ -1843,7 +1843,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             var mvBw = CABACEncoder()
             var ctxDx = ContextModel()
 
-            let mbSize = 32
+            let mbSize = 64
             let mbCols = (curr.width + mbSize - 1) / mbSize
             for mvIdx in 0..<mvs.vectors.count {
                 let mbX = mvIdx % mbCols
@@ -1977,7 +1977,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             var mvBw = CABACEncoder()
             var ctxDx = ContextModel()
 
-            let mbSize = 32
+            let mbSize = 64
             let mbCols = (curr.width + mbSize - 1) / mbSize
             for mvIdx in 0..<mvs.vectors.count {
                 let mbX = mvIdx % mbCols

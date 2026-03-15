@@ -31,6 +31,56 @@ func calculateSAD32x32(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
     return Int(total0 &+ total1)
 }
 
+@inline(__always)
+func calculateSAD64x64(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, currStride: Int, prevStride: Int) -> Int {
+    var sumVec0 = SIMD16<UInt16>()
+    var sumVec1 = SIMD16<UInt16>()
+    var sumVec2 = SIMD16<UInt16>()
+    var sumVec3 = SIMD16<UInt16>()
+    
+    for y in 0..<64 {
+        let currRow = pCurr.advanced(by: y * currStride)
+        let prevRow = pPrev.advanced(by: y * prevStride)
+
+        let c0 = UnsafeRawPointer(currRow).loadUnaligned(as: SIMD16<Int16>.self)
+        let p0 = UnsafeRawPointer(prevRow).loadUnaligned(as: SIMD16<Int16>.self)
+        let c1 = UnsafeRawPointer(currRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p1 = UnsafeRawPointer(prevRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let c2 = UnsafeRawPointer(currRow.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p2 = UnsafeRawPointer(prevRow.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let c3 = UnsafeRawPointer(currRow.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p3 = UnsafeRawPointer(prevRow.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+
+        let diff0 = c0 &- p0
+        let mask0 = diff0 &>> 15
+        let abs0 = (diff0 ^ mask0) &- mask0
+
+        let diff1 = c1 &- p1
+        let mask1 = diff1 &>> 15
+        let abs1 = (diff1 ^ mask1) &- mask1
+
+        let diff2 = c2 &- p2
+        let mask2 = diff2 &>> 15
+        let abs2 = (diff2 ^ mask2) &- mask2
+
+        let diff3 = c3 &- p3
+        let mask3 = diff3 &>> 15
+        let abs3 = (diff3 ^ mask3) &- mask3
+
+        sumVec0 &+= SIMD16<UInt16>(truncatingIfNeeded: abs0)
+        sumVec1 &+= SIMD16<UInt16>(truncatingIfNeeded: abs1)
+        sumVec2 &+= SIMD16<UInt16>(truncatingIfNeeded: abs2)
+        sumVec3 &+= SIMD16<UInt16>(truncatingIfNeeded: abs3)
+    }
+    
+    let total0 = SIMD16<UInt32>(truncatingIfNeeded: sumVec0).wrappedSum()
+    let total1 = SIMD16<UInt32>(truncatingIfNeeded: sumVec1).wrappedSum()
+    let total2 = SIMD16<UInt32>(truncatingIfNeeded: sumVec2).wrappedSum()
+    let total3 = SIMD16<UInt32>(truncatingIfNeeded: sumVec3).wrappedSum()
+    
+    return Int(total0 &+ total1 &+ total2 &+ total3)
+}
+
 struct MotionVector: Sendable {
     let dx: Int
     let dy: Int
@@ -42,6 +92,83 @@ struct MotionVectors: Sendable {
     init(count: Int) {
         self.vectors = [SIMD2<Int16>](repeating: .zero, count: count)
     }
+}
+
+@inline(__always)
+func estimateMBMEBlock64x64(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, searchRange: Int,
+    mvs: inout MotionVectors, mvIdx: Int
+) {
+    var bestSAD = calculateSAD64x64(
+        pCurr: pCurr.advanced(by: startY * w + startX),
+        pPrev: pPrev.advanced(by: startY * w + startX),
+        currStride: w, prevStride: w
+    )
+    var bestDX = 0
+    var bestDY = 0
+
+    let earlyExitThreshold = 64 * 64 * 2
+    if earlyExitThreshold < bestSAD {
+        let minSafeDX = max(-1 * searchRange, -startX)
+        let maxSafeDX = min(searchRange, w - 64 - startX)
+        let minSafeDY = max(-1 * searchRange, -startY)
+        let maxSafeDY = min(searchRange, h - 64 - startY)
+
+        let negSearchRange = -1 * searchRange
+        let posSearchRange = searchRange
+
+        var step = searchRange / 2
+        while step >= 1 {
+            var currentBestDX = bestDX
+            var currentBestDY = bestDY
+            var currentBestSAD = bestSAD
+
+            for j in -1...1 {
+                for i in -1...1 {
+                    if i == 0 && j == 0 { continue }
+                    
+                    let dx = bestDX + i * step
+                    let dy = bestDY + j * step
+
+                    if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
+
+                    let diffX = dx >= 0 ? dx : -1 * dx
+                    let diffY = dy >= 0 ? dy : -1 * dy
+                    let penalty = diffX + diffY
+                    if currentBestSAD <= penalty { continue }
+
+                    let sad: Int
+                    let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
+                    if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
+                        let refYRowOffset = (startY + dy) * w
+                        sad = calculateSAD64x64(
+                            pCurr: pCurr.advanced(by: startY * w + startX),
+                            pPrev: pPrev.advanced(by: refYRowOffset + startX + dx),
+                            currStride: w, prevStride: w
+                        )
+                    } else {
+                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: dx, dy: dy)
+                    }
+
+                    let totalSad = sad &+ penalty
+                    if totalSad < currentBestSAD {
+                        currentBestSAD = totalSad
+                        currentBestDX = dx
+                        currentBestDY = dy
+                    }
+                }
+            }
+
+            bestDX = currentBestDX
+            bestDY = currentBestDY
+            bestSAD = currentBestSAD
+
+            step /= 2
+        }
+    }
+
+    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
 }
 
 @inline(__always)
@@ -58,61 +185,64 @@ func estimateMBMEBlock32x32(
     var bestDX = 0
     var bestDY = 0
 
-    let minSafeDX = max(-1 * searchRange, -startX)
-    let maxSafeDX = min(searchRange, w - 32 - startX)
-    let minSafeDY = max(-1 * searchRange, -startY)
-    let maxSafeDY = min(searchRange, h - 32 - startY)
+    let earlyExitThreshold = 32 * 32 * 2
+    if earlyExitThreshold < bestSAD {
+        let minSafeDX = max(-1 * searchRange, -startX)
+        let maxSafeDX = min(searchRange, w - 32 - startX)
+        let minSafeDY = max(-1 * searchRange, -startY)
+        let maxSafeDY = min(searchRange, h - 32 - startY)
 
-    let negSearchRange = -1 * searchRange
-    let posSearchRange = searchRange
+        let negSearchRange = -1 * searchRange
+        let posSearchRange = searchRange
 
-    var step = searchRange / 2
-    while step >= 1 {
-        var currentBestDX = bestDX
-        var currentBestDY = bestDY
-        var currentBestSAD = bestSAD
+        var step = searchRange / 2
+        while 1 <= step {
+            var currentBestDX = bestDX
+            var currentBestDY = bestDY
+            var currentBestSAD = bestSAD
 
-        for j in -1...1 {
-            for i in -1...1 {
-                if i == 0 && j == 0 { continue }
-                
-                let dx = bestDX + i * step
-                let dy = bestDY + j * step
+            for j in -1...1 {
+                for i in -1...1 {
+                    if i == 0 && j == 0 { continue }
+                    
+                    let dx = bestDX + i * step
+                    let dy = bestDY + j * step
 
-                if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
+                    if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
 
-                let diffX = dx >= 0 ? dx : -1 * dx
-                let diffY = dy >= 0 ? dy : -1 * dy
-                let penalty = diffX + diffY
-                if currentBestSAD <= penalty { continue }
+                    let diffX = dx >= 0 ? dx : -1 * dx
+                    let diffY = dy >= 0 ? dy : -1 * dy
+                    let penalty = diffX + diffY
+                    if currentBestSAD <= penalty { continue }
 
-                let sad: Int
-                let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
-                if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
-                    let refYRowOffset = (startY + dy) * w
-                    sad = calculateSAD32x32(
-                        pCurr: pCurr.advanced(by: startY * w + startX),
-                        pPrev: pPrev.advanced(by: refYRowOffset + startX + dx),
-                        currStride: w, prevStride: w
-                    )
-                } else {
-                    sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 32, actH: 32, dx: dx, dy: dy)
-                }
+                    let sad: Int
+                    let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
+                    if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
+                        let refYRowOffset = (startY + dy) * w
+                        sad = calculateSAD32x32(
+                            pCurr: pCurr.advanced(by: startY * w + startX),
+                            pPrev: pPrev.advanced(by: refYRowOffset + startX + dx),
+                            currStride: w, prevStride: w
+                        )
+                    } else {
+                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 32, actH: 32, dx: dx, dy: dy)
+                    }
 
-                let totalSad = sad &+ penalty
-                if totalSad < currentBestSAD {
-                    currentBestSAD = totalSad
-                    currentBestDX = dx
-                    currentBestDY = dy
+                    let totalSad = sad &+ penalty
+                    if totalSad < currentBestSAD {
+                        currentBestSAD = totalSad
+                        currentBestDX = dx
+                        currentBestDY = dy
+                    }
                 }
             }
+
+            bestDX = currentBestDX
+            bestDY = currentBestDY
+            bestSAD = currentBestSAD
+
+            step /= 2
         }
-
-        bestDX = currentBestDX
-        bestDY = currentBestDY
-        bestSAD = currentBestSAD
-
-        step /= 2
     }
 
     mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
@@ -128,65 +258,68 @@ func estimateMBMEBlockEdge(
     var bestDX = 0
     var bestDY = 0
 
-    let negSearchRange = -1 * searchRange
-    let posSearchRange = searchRange
+    let earlyExitThreshold = actW * actH * 2
+    if earlyExitThreshold < bestSAD {
+        let negSearchRange = -1 * searchRange
+        let posSearchRange = searchRange
 
-    var step = searchRange / 2
-    while step >= 1 {
-        var currentBestDX = bestDX
-        var currentBestDY = bestDY
-        var currentBestSAD = bestSAD
+        var step = searchRange / 2
+        while 1 <= step {
+            var currentBestDX = bestDX
+            var currentBestDY = bestDY
+            var currentBestSAD = bestSAD
 
-        for j in -1...1 {
-            for i in -1...1 {
-                if i == 0 && j == 0 { continue }
+            for j in -1...1 {
+                for i in -1...1 {
+                    if i == 0 && j == 0 { continue }
 
-                let dx = bestDX + i * step
-                let dy = bestDY + j * step
+                    let dx = bestDX + i * step
+                    let dy = bestDY + j * step
 
-                if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
+                    if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
 
-                let diffX = dx >= 0 ? dx : -1 * dx
-                let diffY = dy >= 0 ? dy : -1 * dy
-                let penalty = diffX + diffY
-                if currentBestSAD <= penalty { continue }
+                    let diffX = dx >= 0 ? dx : -1 * dx
+                    let diffY = dy >= 0 ? dy : -1 * dy
+                    let penalty = diffX + diffY
+                    if currentBestSAD <= penalty { continue }
 
-                let refX = startX + dx
-                let refY = startY + dy
-                let sad: Int
+                    let refX = startX + dx
+                    let refY = startY + dy
+                    let sad: Int
 
-                if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
-                    var s: UInt = 0
-                    for y in 0..<actH {
-                        let currRow = (startY + y) * w + startX
-                        let prevRow = (refY + y) * w + refX
-                        let pCurrRow = pCurr.advanced(by: currRow)
-                        let pPrevRow = pPrev.advanced(by: prevRow)
-                        for x in 0..<actW {
-                            let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
-                            let mask = diff >> 31
-                            s &+= UInt((diff ^ mask) - mask)
+                    if 0 <= refX && 0 <= refY && refX + actW <= w && refY + actH <= h {
+                        var s: UInt = 0
+                        for y in 0..<actH {
+                            let currRow = (startY + y) * w + startX
+                            let prevRow = (refY + y) * w + refX
+                            let pCurrRow = pCurr.advanced(by: currRow)
+                            let pPrevRow = pPrev.advanced(by: prevRow)
+                            for x in 0..<actW {
+                                let diff = Int(pCurrRow[x]) - Int(pPrevRow[x])
+                                let mask = diff >> 31
+                                s &+= UInt((diff ^ mask) - mask)
+                            }
                         }
+                        sad = Int(s)
+                    } else {
+                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
                     }
-                    sad = Int(s)
-                } else {
-                    sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
-                }
 
-                let totalSAD = sad &+ penalty
-                if totalSAD < currentBestSAD {
-                    currentBestSAD = totalSAD
-                    currentBestDX = dx
-                    currentBestDY = dy
+                    let totalSAD = sad &+ penalty
+                    if totalSAD < currentBestSAD {
+                        currentBestSAD = totalSAD
+                        currentBestDX = dx
+                        currentBestDY = dy
+                    }
                 }
             }
+
+            bestDX = currentBestDX
+            bestDY = currentBestDY
+            bestSAD = currentBestSAD
+
+            step /= 2
         }
-
-        bestDX = currentBestDX
-        bestDY = currentBestDY
-        bestSAD = currentBestSAD
-
-        step /= 2
     }
 
     mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
@@ -194,7 +327,7 @@ func estimateMBMEBlockEdge(
 
 @inline(__always)
 func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
-    let mbSize = 32
+    let mbSize = 64
     let w = curr.width
     let h = curr.height
     let mbCols = (w + mbSize - 1) / mbSize
@@ -219,7 +352,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                 for mbX in 0..<fullMbCols {
                     let startX = mbX * mbSize
                     let idx = mbY * mbCols + mbX
-                    estimateMBMEBlock32x32(
+                    estimateMBMEBlock64x64(
                         pCurr: pCurr, pPrev: pPrev, w: w, h: h,
                         startX: startX, startY: startY, searchRange: searchRange,
                         mvs: &mvs, mvIdx: idx
@@ -304,10 +437,26 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
             let pPrevSafe = pPrevRow.advanced(by: refX + minSafeX)
             let pCurrSafe = pCurrRow.advanced(by: minSafeX)
             
-            for x in 0..<copyCount {
+            var x = 0
+            if 16 <= copyCount {
+                var sumVec = SIMD16<UInt16>()
+                while x <= copyCount - 16 {
+                    let c0 = UnsafeRawPointer(pCurrSafe.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let p0 = UnsafeRawPointer(pPrevSafe.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let diff0 = c0 &- p0
+                    let mask0 = diff0 &>> 15
+                    let abs0 = (diff0 ^ mask0) &- mask0
+                    sumVec &+= SIMD16<UInt16>(truncatingIfNeeded: abs0)
+                    x += 16
+                }
+                sad &+= UInt(SIMD16<UInt32>(truncatingIfNeeded: sumVec).wrappedSum())
+            }
+            
+            while x < copyCount {
                 let diff = Int(pCurrSafe[x]) - Int(pPrevSafe[x])
                 let mask = diff >> 31
                 sad &+= UInt((diff ^ mask) - mask)
+                x += 1
             }
         }
 
@@ -325,7 +474,7 @@ func calculateSADEdge(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, 
 
 @inline(__always)
 func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
-    let mbSize = 32
+    let mbSize = 64
     let w = prev.width
     let h = prev.height
     let mbCols = (w + mbSize - 1) / mbSize
@@ -362,6 +511,20 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                     
                     if 0 <= refX && 0 <= refY && (refX + actW) <= pW && (refY + actH) <= pH {
                         switch actW {
+                        case 64:
+                            for y in 0..<actH {
+                                let dstRow = (startY + y) * pW
+                                let srcRow = (refY + y) * pW
+                                let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let c2 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let c3 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                                pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                                pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
+                                pDst.advanced(by: 64).storeBytes(of: c2, as: SIMD16<Int16>.self)
+                                pDst.advanced(by: 96).storeBytes(of: c3, as: SIMD16<Int16>.self)
+                            }
                         case 32:
                             for y in 0..<actH {
                                 let dstRow = (startY + y) * pW
@@ -371,14 +534,6 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                                 let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
                                 pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
                                 pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
-                            }
-                        case 16:
-                            for y in 0..<actH {
-                                let dstRow = (startY + y) * pW
-                                let srcRow = (refY + y) * pW
-                                let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
-                                pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
                             }
                         default:
                             for y in 0..<actH {

@@ -1657,7 +1657,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             var mvBr = try CABACDecoder(data: mvData)
             var ctxDx = ContextModel()
 
-            let mbSize = 32
+            let mbSize = 64
             // We need width to compute mbCols. We can infer width from previous frame.
             guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
             let mbCols = (prevWidth + mbSize - 1) / mbSize
@@ -1734,7 +1734,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             var mvBr = try CABACDecoder(data: mvData)
             var ctxDx = ContextModel()
 
-            let mbSize = 32
+            let mbSize = 64
             // We need width to compute mbCols. We can infer width from previous frame.
             guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
             let mbCols = (prevWidth + mbSize - 1) / mbSize
