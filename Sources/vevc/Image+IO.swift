@@ -129,7 +129,7 @@ public func saveImage(img: YCbCrImage, url: URL) throws {
     }
     
     CGImageDestinationAddImage(destination, cgImage, nil)
-    if CGImageDestinationFinalize(destination) == false {
+    if CGImageDestinationFinalize(destination) != true {
         throw NSError(domain: "ImageError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to finalize image destination"])
     }
 }

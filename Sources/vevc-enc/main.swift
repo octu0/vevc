@@ -86,7 +86,13 @@ do {
     }
     let elapsed = Date().timeIntervalSince(startTime)
     
-    let dataSize = images.reduce(0) { $0 + ($1.width * $1.height * 3) }
+    let dataSize: Int
+    if images.isEmpty != true {
+        let first = images[0]
+        dataSize = images.count * first.width * first.height * 3
+    } else {
+        dataSize = 0
+    }
     
     print(String(
         format:"elapse= %.4fms (%.4fms/frame) %3.2fKB -> %3.2fKB compressed %3.2f%%",

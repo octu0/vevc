@@ -24,7 +24,7 @@ public enum ValueTokenizer {
     
     @inline(__always)
     public static func detokenize(isSignificant: Bool, sign: Bool, token: UInt8, bypassBits: UInt16) -> Int16 {
-        if !isSignificant {
+        if isSignificant != true {
             return 0
         }
         

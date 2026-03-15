@@ -217,7 +217,7 @@ final class InterleavedrANSTests: XCTestCase {
                     }
                 }
             }
-            if !allTokensMatches {
+            if allTokensMatches != true {
                 break
             }
         }

@@ -458,18 +458,23 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if !tlZero { let _ = brFlags.readBit() }
+                if tlZero != true { let _ = brFlags.readBit() }
                 
                 let trZero = brFlags.readBit()
-                if !trZero { let _ = brFlags.readBit() }
+                if trZero != true { let _ = brFlags.readBit() }
                 
                 let blZero = brFlags.readBit()
-                if !blZero { let _ = brFlags.readBit() }
+                if blZero != true { let _ = brFlags.readBit() }
                 
                 let brZero = brFlags.readBit()
-                if !brZero { let _ = brFlags.readBit() }
+                if brZero != true { let _ = brFlags.readBit() }
                 
-                tasks.append((i, .split8(!tlZero, !trZero, !blZero, !brZero)))
+                tasks.append((i, .split8(
+                    tlZero != true, 
+                    trZero != true, 
+                    blZero != true, 
+                    brZero != true,
+                )))
             } else {
                 tasks.append((i, .decode16))
             }
@@ -567,18 +572,23 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if !tlZero { let _ = brFlags.readBit() }
+                if tlZero != true { let _ = brFlags.readBit() }
                 
                 let trZero = brFlags.readBit()
-                if !trZero { let _ = brFlags.readBit() }
+                if trZero != true { let _ = brFlags.readBit() }
                 
                 let blZero = brFlags.readBit()
-                if !blZero { let _ = brFlags.readBit() }
+                if blZero != true { let _ = brFlags.readBit() }
                 
                 let brZero = brFlags.readBit()
-                if !brZero { let _ = brFlags.readBit() }
+                if brZero != true { let _ = brFlags.readBit() }
                 
-                tasks.append((i, .split4(!tlZero, !trZero, !blZero, !brZero)))
+                tasks.append((i, .split4(
+                    tlZero != true, 
+                    trZero != true, 
+                    blZero != true, 
+                    brZero != true,
+                )))
             } else {
                 tasks.append((i, .decode8))
             }
@@ -708,7 +718,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     for i in 0..<blockCount {
         let isZero = brFlags.readBit()
         let _ = brFlags.readBit()
-        if !isZero {
+        if isZero != true {
             nonZeroIndices.append(i)
         }
     }
@@ -773,18 +783,23 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if !tlZero { let _ = brFlags.readBit() }
+                if tlZero != true { let _ = brFlags.readBit() }
                 
                 let trZero = brFlags.readBit()
-                if !trZero { let _ = brFlags.readBit() }
+                if trZero != true { let _ = brFlags.readBit() }
                 
                 let blZero = brFlags.readBit()
-                if !blZero { let _ = brFlags.readBit() }
+                if blZero != true { let _ = brFlags.readBit() }
                 
                 let brZero = brFlags.readBit()
-                if !brZero { let _ = brFlags.readBit() }
+                if brZero != true { let _ = brFlags.readBit() }
                 
-                tasks.append((i, .split8(!tlZero, !trZero, !blZero, !brZero)))
+                tasks.append((i, .split8(
+                    tlZero != true, 
+                    trZero != true, 
+                    blZero != true, 
+                    brZero != true,
+                )))
             } else {
                 tasks.append((i, .decode16))
             }
@@ -822,6 +837,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
                 
                 var hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
                 try blockDecode16(decoder: &decoder, block: &hhView)
+                
             case .split8(let tl, let tr, let bl, let br):
                 if tl {
                     var ll = BlockView(base: llBase, width: 8, height: 8, stride: 32)

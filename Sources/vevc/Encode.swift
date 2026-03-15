@@ -701,22 +701,22 @@ func checkQuadrants16x16(base: UnsafeMutablePointer<Int16>, stride: Int, q0: ino
     let zero8 = SIMD8<Int16>(repeating: 0)
     for y in 0..<8 {
         let ptr = base.advanced(by: y * stride)
-        if !q0 {
+        if q0 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
             if any(v .!= zero8) { q0 = true }
         }
-        if !q1 {
+        if q1 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
             if any(v .!= zero8) { q1 = true }
         }
     }
     for y in 8..<16 {
         let ptr = base.advanced(by: y * stride)
-        if !q2 {
+        if q2 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
             if any(v .!= zero8) { q2 = true }
         }
-        if !q3 {
+        if q3 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
             if any(v .!= zero8) { q3 = true }
         }
@@ -728,21 +728,21 @@ func shouldSplit32(data: UnsafeMutableBufferPointer<Int16>, skipLL: Bool) -> Boo
     guard let base = data.baseAddress else { return false }
     var q0 = false, q1 = false, q2 = false, q3 = false
     
-    if !skipLL {
+    if skipLL != true {
         checkQuadrants16x16(base: base, stride: 32, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
-    if !(q0 && q1 && q2 && q3) {
+    if (q0 && q1 && q2 && q3) != true {
         checkQuadrants16x16(base: base + 16, stride: 32, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
-    if !(q0 && q1 && q2 && q3) {
+    if (q0 && q1 && q2 && q3) != true {
         checkQuadrants16x16(base: base + 16 * 32, stride: 32, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
-    if !(q0 && q1 && q2 && q3) {
+    if (q0 && q1 && q2 && q3) != true {
         checkQuadrants16x16(base: base + 16 * 32 + 16, stride: 32, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
     
     // If not all 4 quadrants are busy, splitting avoids encoding zeros.
-    return !(q0 && q1 && q2 && q3)
+    return (q0 && q1 && q2 && q3) != true
 }
 
 @inline(__always)
@@ -750,22 +750,22 @@ func checkQuadrants8x8(base: UnsafeMutablePointer<Int16>, stride: Int, q0: inout
     let zero4 = SIMD4<Int16>(repeating: 0)
     for y in 0..<4 {
         let ptr = base.advanced(by: y * stride)
-        if !q0 {
+        if q0 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
             if any(v .!= zero4) { q0 = true }
         }
-        if !q1 {
+        if q1 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
             if any(v .!= zero4) { q1 = true }
         }
     }
     for y in 4..<8 {
         let ptr = base.advanced(by: y * stride)
-        if !q2 {
+        if q2 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
             if any(v .!= zero4) { q2 = true }
         }
-        if !q3 {
+        if q3 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
             if any(v .!= zero4) { q3 = true }
         }
@@ -777,20 +777,20 @@ func shouldSplit16(data: UnsafeMutableBufferPointer<Int16>, skipLL: Bool) -> Boo
     guard let base = data.baseAddress else { return false }
     var q0 = false, q1 = false, q2 = false, q3 = false
     
-    if !skipLL {
+    if skipLL != true {
         checkQuadrants8x8(base: base, stride: 16, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
-    if !(q0 && q1 && q2 && q3) {
+    if (q0 && q1 && q2 && q3) != true {
         checkQuadrants8x8(base: base + 8, stride: 16, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
-    if !(q0 && q1 && q2 && q3) {
+    if (q0 && q1 && q2 && q3) != true {
         checkQuadrants8x8(base: base + 8 * 16, stride: 16, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
-    if !(q0 && q1 && q2 && q3) {
+    if (q0 && q1 && q2 && q3) != true {
         checkQuadrants8x8(base: base + 8 * 16 + 8, stride: 16, q0: &q0, q1: &q1, q2: &q2, q3: &q3)
     }
     
-    return !(q0 && q1 && q2 && q3)
+    return (q0 && q1 && q2 && q3) != true
 }
 
 @inline(__always)

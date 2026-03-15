@@ -55,7 +55,7 @@ public struct VEVCEncoder {
         
         appendUInt32BE(&out, UInt32(coeffCount))
         
-        guard !pairs.isEmpty || trailingZeros > 0 else { return out }
+        guard pairs.isEmpty != true || 0 < trailingZeros else { return out }
         
         let pairCount = pairs.count
         let hasTrailingZeros = trailingZeros > 0
