@@ -13,8 +13,8 @@
 
 1. **Pixel-Domain Prediction & 2D-DWT**
    - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
-   - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 16x16 blocks, followed by highly-optimized CABAC entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
-   - **Quadtree Variable Macroblocks**: Dynamically splits blocks (e.g., from 32x32 down to 8x8) based on localized subband coefficient variance and SAD, selectively skipping flat regions to significantly optimize CABAC processing speed and file size.
+   - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 16x16 blocks, followed by Interleaved rANS entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
+   - **Quadtree Variable Macroblocks**: Dynamically splits blocks (e.g., from 32x32 down to 8x8) based on localized subband coefficient variance and SAD, selectively skipping flat regions to significantly optimize processing speed and file size.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -25,7 +25,7 @@
    | :------------------------ | :-------------------- | :----------------------- | :----------------------------- |
    | **Max Quality (Archive)** | `2` (Layer 0,1,2)     | 1080p                    | No extraction (transfer as is) |
    | **Medium (Preview)**      | `1` (Layer 0,1)       | 540p                     | Skip Layer 2                   |
-   | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p                     | Skip Layer 1, 2                |
+   | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p                     | Skip Layer 1, 2               |
 
 3. **Acceleration via Concurrency & SIMD**
    - Critical operations such as Plane matching, shifting, and difference calculations are fully parallelized and vectorized.
@@ -48,8 +48,8 @@
 
                                      Frame Structure
 +---------------------------------------------------------------------------------------------+
-|     Magic (4B)     |   CABAC Encoded MVs (P-Frame)  |           Spatial Data            |
-|  'VEVI' or 'VEVP'  | RLE-CABAC 16x16 Motion Vectors |                                   |
+|     Magic (4B)     |   rANS Encoded MVs (P-Frame) |           Spatial Data            |
+|  'VEVI' or 'VEVP'  |  RLE + rANS Motion Vectors   |                                   |
 +--------------------+--------------------------------+-----------------------------------+
                                                 |
                                                 v
@@ -64,9 +64,50 @@
 ```
 
 - **I-Frame (`VEVI`)**: The base keyframe encoded as a standalone 2D-DWT image.
-- **P-Frame (`VEVP`)**: The predicted frame, containing the CABAC RLE encoded Motion Vectors relative to the previous frame, followed by the encoded spatial layers of the **residual** (the difference after prediction).
+- **P-Frame (`VEVP`)**: The predicted frame, containing rANS encoded Motion Vectors relative to the previous frame, followed by the encoded spatial layers of the **residual** (the difference after prediction).
 
 Spatial information (image resolution) is organized hierarchically as Layer 0 to 2 (from `veif`) inside the frame data.
+
+---
+
+## Entropy Coding: Interleaved rANS
+
+`vevc` uses **Interleaved 4-way rANS (Asymmetric Numeral Systems)** for entropy coding. rANS provides near-optimal compression and enables SIMD-parallel decoding, unlike CABAC which is inherently serial.
+
+### Architecture
+
+```
+DWT Coefficients
+       │
+       ▼
+  Zero-Run RLE         ┌─── Raw Mode (≤32 non-zero coeffs)
+  (run, value) pairs ──┤
+       │               └─── rANS Mode  
+       ▼                      │
+  ValueTokenizer              ├── runModel (zero-run tokens)
+  token + bypass bits         ├── valModel (value tokens)
+       │                      └── 4-way Interleaved stream
+       ▼
+  Interleaved 4-way rANS Encoder
+  (4 independent states, shared stream)
+```
+
+### Key Components
+
+| File | Role |
+|------|------|
+| `rANS.swift` | Core rANS encoder/decoder, Interleaved 4-way variants, Bypass I/O, probability model with O(1) LUT |
+| `EntropyCodec.swift` | `VevcEncoder` / `VevcDecoder`: Zero-Run RLE, raw fallback, compressed freq tables |
+| `ValueTokenizer.swift` | Token/bypass decomposition for signed/unsigned values |
+| `rANSCompressor.swift` | Standalone rANS compression for generic byte data |
+
+### Optimizations
+
+- **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
+- **O(1) Token Lookup**: 16384-entry LUT for instant cumulative-frequency → token resolution
+- **Zero-Run RLE**: DWT zero coefficients compressed as run-length tokens
+- **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely
+- **Compressed Frequency Tables**: Bitmap-based encoding reduces table size from 32B to ~10B
 
 ---
 
@@ -109,8 +150,8 @@ $ swift run -c release vevc-dec -i output.vevc -o .out/
 The core components of the implementation consist of the following files:
 
 - `Motion`: Macroblock-based Motion Estimation (MBME) utilizing 16x16 block searches to estimate accurate localized motion vectors between frames, significantly reducing prediction residual.
-- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process I-Frames and P-Frames. P-Frames generate a residual plane which is then passed to the Spatial 2D-DWT and entropy encoded efficiently with custom CABAC spatial context derivation.
-- `CABAC`: Multi-state Context-Adaptive Binary Arithmetic Coding engine utilizing an H.264-like fast adaptive state transition to compress heavily skewed DWT and MV structures.
+- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process I-Frames and P-Frames. P-Frames generate a residual plane which is then passed to the Spatial 2D-DWT and entropy encoded via Interleaved rANS with Zero-Run RLE.
+- `rANS` / `EntropyCodec`: Interleaved 4-way rANS entropy coding engine with adaptive token-based probability modeling, O(1) LUT decoding, and raw fallback for sparse data.
 
 ## License
 

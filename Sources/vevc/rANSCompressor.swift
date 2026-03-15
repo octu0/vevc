@@ -5,9 +5,7 @@ public struct rANSCompressor {
         if data.isEmpty {
             return []
         }
-        // Write count mapping
         var outData = [UInt8]()
-        // Original data count (Int32)
         outData.append(UInt8((data.count >> 24) & 0xFF))
         outData.append(UInt8((data.count >> 16) & 0xFF))
         outData.append(UInt8((data.count >> 8) & 0xFF))
@@ -33,15 +31,12 @@ public struct rANSCompressor {
         var model = rANSModel()
         model.normalize(sigCounts: sigCounts, tokenCounts: tokenCounts)
         
-        // Write model frequencies
-        // sigCounts
         for c in sigCounts {
             outData.append(UInt8((c >> 24) & 0xFF))
             outData.append(UInt8((c >> 16) & 0xFF))
             outData.append(UInt8((c >> 8) & 0xFF))
             outData.append(UInt8(c & 0xFF))
         }
-        // tokenCounts
         for c in tokenCounts {
             outData.append(UInt8((c >> 24) & 0xFF))
             outData.append(UInt8((c >> 16) & 0xFF))
@@ -52,7 +47,6 @@ public struct rANSCompressor {
         var encoder = InterleavedrANSEncoder()
         var bypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
         
-        // 4等分してエンコード
         let baseChunkSize = data.count / 4
         let remainder = data.count % 4
         
@@ -211,7 +205,7 @@ public struct rANSCompressor {
                         sigAdvanceCumFreq[lane] = sigFreqVec[lane]
                     }
                 } else {
-                    sigAdvanceFreq[lane] = 1 // Dummy
+                    sigAdvanceFreq[lane] = 1
                     sigAdvanceCumFreq[lane] = 0
                 }
             }

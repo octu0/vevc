@@ -1,11 +1,5 @@
-//
-//  rANS.swift
-//  vevc
-//
-
 import Foundation
 
-/// rANS Parameters
 public let RANS_SCALE_BITS: UInt32 = 14
 public let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
 public let RANS_L: UInt32 = 1 << 15
@@ -23,27 +17,22 @@ public struct rANSEncoder {
         self.stream.reserveCapacity(4096)
     }
     
-    /// シンボルをエンコードして状態を更新する (LIFOなので逆から処理する)
     @inline(__always)
     public mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
-        // Renormalization
         let xMax = RANS_XMAX / RANS_SCALE * freq
         while state > xMax {
             stream.append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
-        // State update: 除算1回のみ (q*freq を引いて剰余を計算)
         let q = state / freq
         state = (q << RANS_SCALE_BITS) + (state - q * freq) + cumFreq
     }
     
-    /// ストリームをフラッシュし、最終状態を書き込む
     public mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: state))
         stream.append(UInt16(truncatingIfNeeded: state >> 16))
     }
     
-    /// 生成されたバイトストリーム（逆順）を反転させてByte配列を返す
     public func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
@@ -94,7 +83,6 @@ public struct rANSDecoder {
         let mask = RANS_SCALE - 1
         state = freq * (state >> RANS_SCALE_BITS) + (state & mask) - cumFreq
         
-        // Renormalization
         while state < RANS_L {
             if offset + 1 < stream.count {
                 let b0 = UInt32(stream[offset])
@@ -111,9 +99,6 @@ public struct rANSDecoder {
 
 // MARK: - Interleaved 4-way rANS Encoder
 
-/// 4つの独立した rANS state をインターリーブしてエンコードする。
-/// シンボル i は state[i % 4] に割り当てられる。
-/// エンコードは逆順で行われ、renormalization words は共有ストリームに書き込まれる。
 public struct Interleaved4rANSEncoder {
     public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
     public private(set) var stream: [UInt16]
@@ -124,7 +109,6 @@ public struct Interleaved4rANSEncoder {
         self.stream.reserveCapacity(4096)
     }
     
-    /// 指定された lane (0-3) のシンボルをエンコード
     @inline(__always)
     public mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         let xMax = RANS_XMAX / RANS_SCALE * freq
@@ -163,9 +147,7 @@ public struct Interleaved4rANSEncoder {
         }
     }
     
-    /// 4つの state をフラッシュ (state3, state2, state1, state0 の順で書き込み)
     public mutating func flush() {
-        // デコード側は state0, state1, state2, state3 の順で読むため逆順書き込み
         stream.append(UInt16(truncatingIfNeeded: states.3))
         stream.append(UInt16(truncatingIfNeeded: states.3 >> 16))
         stream.append(UInt16(truncatingIfNeeded: states.2))
@@ -176,7 +158,6 @@ public struct Interleaved4rANSEncoder {
         stream.append(UInt16(truncatingIfNeeded: states.0 >> 16))
     }
     
-    /// 共有ストリームを逆順にしてバイト配列を返す
     public func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
@@ -195,8 +176,6 @@ public struct Interleaved4rANSEncoder {
 
 // MARK: - Interleaved 4-way rANS Decoder
 
-/// 4つの独立した rANS state をインターリーブしてデコードする。
-/// 共有ストリームから renormalization words を読み込み、各 state で交互にデコードする。
 public struct Interleaved4rANSDecoder {
     public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
     private let stream: [UInt8]
@@ -207,7 +186,6 @@ public struct Interleaved4rANSDecoder {
         self.offset = 0
         self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
         
-        // 4つの state を読み込み (state0, state1, state2, state3 の順)
         guard bitstream.count >= 16 else { return }
         
         @inline(__always)
@@ -226,7 +204,6 @@ public struct Interleaved4rANSDecoder {
         self.offset = 16
     }
     
-    /// 指定 lane の累積頻度を取得
     @inline(__always)
     public func getCumulativeFreq(lane: Int) -> UInt32 {
         let mask = RANS_SCALE - 1
@@ -239,7 +216,6 @@ public struct Interleaved4rANSDecoder {
         }
     }
     
-    /// renormalization のための16ビットワード読み込み
     @inline(__always)
     private mutating func readWord() -> UInt32 {
         if offset + 1 < stream.count {
@@ -251,7 +227,6 @@ public struct Interleaved4rANSDecoder {
         return 0
     }
     
-    /// 指定 lane のシンボルをアドバンス
     @inline(__always)
     public mutating func advanceSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         let mask = RANS_SCALE - 1
@@ -301,14 +276,11 @@ public struct BypassWriter {
         }
     }
     
-    /// count ビットを一括で書き込む (最大16ビット)
     @inline(__always)
     public mutating func writeBits(_ value: UInt16, count: Int) {
         guard count > 0 else { return }
-        // バッファに加える
         buffer = (buffer << count) | UInt32(value & ((1 << count) - 1))
         bitsInBuffer += count
-        // 32bit以上溜まったらフラッシュ
         while bitsInBuffer >= 8 {
             bitsInBuffer -= 8
             bytes.append(UInt8(truncatingIfNeeded: buffer >> bitsInBuffer))
@@ -322,7 +294,6 @@ public struct BypassWriter {
     
     public mutating func flush() {
         guard bitsInBuffer > 0 else { return }
-        // 完全なバイト分を先に書き出す
         while bitsInBuffer >= 8 {
             bitsInBuffer -= 8
             bytes.append(UInt8(truncatingIfNeeded: buffer >> bitsInBuffer))
@@ -332,7 +303,6 @@ public struct BypassWriter {
                 buffer = 0
             }
         }
-        // 残りの端数ビットを左詰めパディングして書き出す
         if bitsInBuffer > 0 {
             let shifted = buffer << (8 - bitsInBuffer)
             bytes.append(UInt8(truncatingIfNeeded: shifted))
@@ -342,7 +312,7 @@ public struct BypassWriter {
     }
 }
 
-// MARK: - Bypass Reader (UInt32 ビットバッファ)
+// MARK: - Bypass Reader
 
 public struct BypassReader {
     private let bytes: [UInt8]
@@ -379,7 +349,6 @@ public struct BypassReader {
         return bit == 1
     }
     
-    /// count ビットを一括で読み込む (最大16ビット)
     @inline(__always)
     public mutating func readBits(count: Int) -> UInt16 {
         guard count > 0 else { return 0 }
@@ -395,20 +364,18 @@ public struct BypassReader {
     }
     
     public var consumedBytes: Int {
-        // 読み込んだビット数 = (先読みしたバイト数 × 8) - バッファに残っているビット数
-        // Writer の flush() でパディングされた端数バイトも消費済みとして扱うために切り上げ
         let totalBitsRead = byteOffset * 8 - bitsInBuffer
         return (totalBitsRead + 7) / 8
     }
 }
 
-// MARK: - rANS Probability Model (O(1) LUT付き)
+// MARK: - rANS Probability Model
 
 public struct rANSModel {
     public private(set) var sigFreq: UInt32
     public private(set) var tokenFreqs: [UInt32]
     public private(set) var tokenCumFreqs: [UInt32]
-    public private(set) var tokenLUT: [UInt8]  // O(1) 逆引きテーブル
+    public private(set) var tokenLUT: [UInt8]
     
     public init() {
         self.sigFreq = RANS_SCALE / 2
@@ -444,9 +411,7 @@ public struct rANSModel {
         }
     }
     
-    /// 生の出現回数からRANS_SCALEに合わせて正規化する
     public mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
-        // Significance
         let totalSig = sigCounts[0] + sigCounts[1]
         if totalSig == 0 {
             self.sigFreq = RANS_SCALE / 2
@@ -455,7 +420,6 @@ public struct rANSModel {
             self.sigFreq = max(1, min(RANS_SCALE - 1, f))
         }
         
-        // Tokens
         let totalTokens = tokenCounts.reduce(0, +)
         if totalTokens == 0 {
             self.tokenFreqs = Array(repeating: RANS_SCALE / 16, count: 16)
@@ -472,7 +436,6 @@ public struct rANSModel {
                 sum += self.tokenFreqs[i]
             }
             
-            // 合計をRANS_SCALEに調整: 最大頻度のインデックスを直接追跡
             if sum != RANS_SCALE {
                 var maxIdx = 0
                 var maxVal = self.tokenFreqs[0]
@@ -490,18 +453,15 @@ public struct rANSModel {
             }
         }
         
-        // 累積頻度の更新
         var cumSum: UInt32 = 0
         for i in 0..<16 {
             self.tokenCumFreqs[i] = cumSum
             cumSum += self.tokenFreqs[i]
         }
         
-        // O(1) LUT の構築
         buildLUT()
     }
     
-    /// O(1) デコード: cfからトークンをLUTで取得
     @inline(__always)
     public func findToken(cf: UInt32) -> (token: UInt8, freq: UInt32, cumFreq: UInt32) {
         let sym = Int(tokenLUT[Int(cf)])
