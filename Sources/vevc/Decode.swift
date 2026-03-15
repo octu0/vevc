@@ -169,6 +169,7 @@ func blockDecode16(decoder: inout CABACDecoder, block: inout BlockView, ctxRun: 
 
     let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
@@ -352,6 +353,79 @@ func blockDecodeDPCM4(decoder: inout CABACDecoder, block: inout BlockView, lastV
     ptr3[3] = ptr3[3] &+ predictMED(ptr3[2], ptr2[3], ptr2[2])
 
     lastVal = ptr3[3]
+}
+
+@inline(__always)
+func blockDecodeDPCM16(decoder: inout CABACDecoder, block: inout BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    var lscpIdx = -1
+    if hasNonZero == 1 {
+        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
+        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+        guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
+        lscpIdx = lscpY * 16 + lscpX
+    }
+
+    for y in 0..<16 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<16 { ptr[x] = 0 }
+    }
+
+    var currentIdx = 0
+    
+    while currentIdx <= lscpIdx {
+        let startY = currentIdx / 16
+        let startX = currentIdx % 16
+        let band = min(startX + startY, 7)
+
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            let y = currentIdx / 16
+            let x = currentIdx % 16
+            let ptr = block.rowPointer(y: y)
+            ptr[x] = val
+        }
+        currentIdx += 1
+    }
+
+    @inline(__always)
+    func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        if ia <= ic && ib <= ic {
+            return Int16(truncatingIfNeeded: min(ia, ib))
+        }
+        if ic <= ia && ic <= ib {
+            return Int16(truncatingIfNeeded: max(ia, ib))
+        }
+        return Int16(truncatingIfNeeded: ia + ib - ic)
+    }
+
+    var last: Int16 = lastVal
+    for y in 0..<16 {
+        let ptrY = block.rowPointer(y: y)
+        if y == 0 {
+            for x in 0..<16 {
+                if x == 0 {
+                    ptrY[0] = ptrY[0] &+ last
+                } else {
+                    ptrY[x] = ptrY[x] &+ ptrY[x - 1]
+                }
+            }
+        } else {
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            for x in 0..<16 {
+                if x == 0 {
+                    ptrY[0] = ptrY[0] &+ ptrPrevY[0]
+                } else {
+                    ptrY[x] = ptrY[x] &+ predictMED(ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                }
+            }
+        }
+        last = ptrY[15]
+    }
+    lastVal = last
 }
 
 @inline(__always)
@@ -563,6 +637,71 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
                 
                 var hhView = BlockView(base: view.base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
                 try blockDecode4(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            }
+        } else {
+            lastVal = 0
+        }
+    }
+
+    return blocks
+}
+
+@inline(__always)
+func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity(blockCount)
+    for _ in 0..<blockCount {
+        blocks.append(Block2D(width: 32, height: 32))
+    }
+    
+    let flagsByteCount = (blockCount + 7) / 8
+    guard flagsByteCount <= data.count else { throw DecodeError.insufficientData }
+    let flagsData = Array(data[0..<flagsByteCount])
+    let dataSlice = Array(data[flagsByteCount...])
+    
+    var brFlags = CABACBitReader(data: flagsData)
+    var nonZeroIndices: [Int] = []
+    nonZeroIndices.reserveCapacity(blockCount)
+    for i in 0..<blockCount {
+        if try brFlags.readBit() == 0 {
+            nonZeroIndices.append(i)
+        }
+    }
+    
+    var decoder = try CABACDecoder(data: dataSlice)
+    
+    let half = 32 / 2
+    
+    var ctxRunLL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 64)
+
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
+    
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
+    
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
+
+    var lastVal: Int16 = 0
+    var nzCur = 0
+    let nzCount = nonZeroIndices.count
+    for i in 0..<blockCount {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
+            try blocks[i].withView { view in
+                var llView = BlockView(base: view.base, width: half, height: half, stride: 32)
+                try blockDecodeDPCM16(decoder: &decoder, block: &llView, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                
+                var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 32)
+                try blockDecode16(decoder: &decoder, block: &hlView, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                
+                var lhView = BlockView(base: view.base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                try blockDecode16(decoder: &decoder, block: &lhView, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                
+                var hhView = BlockView(base: view.base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                try blockDecode16(decoder: &decoder, block: &hhView, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
             }
         } else {
             lastVal = 0
@@ -1293,6 +1432,83 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                 out.append(residual.toYCbCr())
             }
             
+        case [0x56, 0x45, 0x4F, 0x49]: // VEOI
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+            let chunk = Array(data[offset..<(offset + len)])
+            offset += len
+            
+            let img16 = try await decodeBase32(r: chunk, layer: 0)
+            let pd = PlaneData420(img16: img16)
+            out.append(pd.toYCbCr())
+            prevReconstructed = pd
+
+        case [0x56, 0x45, 0x4F, 0x50]: // VEOP
+            let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            var mvs = MotionVectors(count: mvsCount)
+            guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
+
+            let mvData = Array(data[offset..<(offset + mvDataLen)])
+            offset += mvDataLen
+            var mvBr = try CABACDecoder(data: mvData)
+            var ctxDx = ContextModel()
+
+            let mbSize = 32
+            // We need width to compute mbCols. We can infer width from previous frame.
+            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
+            let mbCols = (prevWidth + mbSize - 1) / mbSize
+
+            for i in 0..<mvsCount {
+                let mbX = i % mbCols
+                let mbY = i / mbCols
+                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
+
+                let isSig = try mvBr.decodeBin(ctx: &ctxDx)
+                if isSig == 0 {
+                    mvs.vectors[i] = SIMD2(Int16(pmv.dx), Int16(pmv.dy))
+                } else {
+                    let sx = try mvBr.decodeBypass()
+                    let mx = try decodeExpGolomb(decoder: &mvBr)
+
+                    let mvdX: Int
+                    if sx == 1 {
+                        mvdX = -1 * Int(mx)
+                    } else {
+                        mvdX = Int(mx)
+                    }
+
+                    let sy = try mvBr.decodeBypass()
+                    let my = try decodeExpGolomb(decoder: &mvBr)
+
+                    let mvdY: Int
+                    if sy == 1 {
+                        mvdY = -1 * Int(my)
+                    } else {
+                        mvdY = Int(my)
+                    }
+
+                    mvs.vectors[i] = SIMD2(Int16(mvdX + pmv.dx), Int16(mvdY + pmv.dy))
+                }
+            }
+            
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+            let chunk = Array(data[offset..<(offset + len)])
+            offset += len
+            
+            let img16 = try await decodeBase32(r: chunk, layer: 0)
+            let residual = PlaneData420(img16: img16)
+            
+            if let prev = prevReconstructed {
+                let predicted = await applyMBME(prev: prev, mvs: mvs)
+                let curr = await addPlanes(residual: residual, predicted: predicted)
+                out.append(curr.toYCbCr())
+                prevReconstructed = curr
+            } else {
+                out.append(residual.toYCbCr())
+            }
+            
         default: 
              throw DecodeError.invalidHeader
         }
@@ -1301,8 +1517,194 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
     return out
 }
 
+@inline(__always)
+func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
+    var offset = 0
+    guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
+    let header = Array(r[offset..<(offset + 5)])
+    offset += 5
+    
+    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
+         throw DecodeError.invalidHeader
+    }
+    guard header[4] == layer else {
+        throw DecodeError.invalidLayerNumber
+    }
+    
+    let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
+    let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    
+    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufY = Array(r[offset..<(offset + bufYLen)])
+    offset += bufYLen
+    
+    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufCb = Array(r[offset..<(offset + bufCbLen)])
+    offset += bufCbLen
+    
+    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
+    let bufCr = Array(r[offset..<(offset + bufCrLen)])
+    offset += bufCrLen
+    
+    var sub = Image16(width: dx, height: dy)
+    
+    let rowCountY = (dy + 32 - 1) / 32
+    let colCountY = (dx + 32 - 1) / 32
+    let yBlocks = try decodePlaneBaseSubbands32(data: bufY, blockCount: rowCountY * colCountY)
+    
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let rowCountCb = (cbDy + 32 - 1) / 32
+    let colCountCb = (cbDx + 32 - 1) / 32
+    let cbBlocks = try decodePlaneBaseSubbands32(data: bufCb, blockCount: rowCountCb * colCountCb)
+    
+    let rowCountCr = (cbDy + 32 - 1) / 32
+    let colCountCr = (cbDx + 32 - 1) / 32
+    let crBlocks = try decodePlaneBaseSubbands32(data: bufCr, blockCount: rowCountCr * colCountCr)
+    
+    let chunkSize = 4
+    
+    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountY {
+            group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountY)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for i in startRow..<endRow {
+                    let h = i * 32
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex = i * colCountY + xIdx
+                        var block = yBlocks[blockIndex]
+                        let half = 32 / 2
+                        block.withView { view in
+                            let base = view.base
+                            var llView = BlockView(base: base, width: half, height: half, stride: 32)
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                            var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                            var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                            dequantizeLow(&llView, qt: qtY)
+                            dequantizeMidSignedMapping(&hlView, qt: qtY)
+                            dequantizeMidSignedMapping(&lhView, qt: qtY)
+                            dequantizeHighSignedMapping(&hhView, qt: qtY)
+                            invDwt2d_32(&view)
+                        }
+                        rowResults.append((block, w, h))
+                    }
+                }
+                return rowResults
+            }
+        }
+        for try await res in group {
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateY(data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
+    }
+    
+    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountCb {
+            group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCb)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for i in startRow..<endRow {
+                    let h = i * 32
+                    for (xIdx, w) in stride(from: 0, to: cbDx, by: 32).enumerated() {
+                        let blockIndex = i * colCountCb + xIdx
+                        var block = cbBlocks[blockIndex]
+                        let half = 32 / 2
+                        block.withView { view in
+                            let base = view.base
+                            var llView = BlockView(base: base, width: half, height: half, stride: 32)
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                            var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                            var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                            dequantizeLow(&llView, qt: qtC)
+                            dequantizeMidSignedMapping(&hlView, qt: qtC)
+                            dequantizeMidSignedMapping(&lhView, qt: qtC)
+                            dequantizeHighSignedMapping(&hhView, qt: qtC)
+                            invDwt2d_32(&view)
+                        }
+                        rowResults.append((block, w, h))
+                    }
+                }
+                return rowResults
+            }
+        }
+        for try await res in group {
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateCb(data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
+    }
+    
+    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
+    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
+        for taskIdx in 0..<taskCountCr {
+            group.addTask {
+                let startRow = taskIdx * chunkSize
+                let endRow = min(startRow + chunkSize, rowCountCr)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for i in startRow..<endRow {
+                    let h = i * 32
+                    for (xIdx, w) in stride(from: 0, to: cbDx, by: 32).enumerated() {
+                        let blockIndex = i * colCountCr + xIdx
+                        var block = crBlocks[blockIndex]
+                        let half = 32 / 2
+                        block.withView { view in
+                            let base = view.base
+                            var llView = BlockView(base: base, width: half, height: half, stride: 32)
+                            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                            var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                            var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                            dequantizeLow(&llView, qt: qtC)
+                            dequantizeMidSignedMapping(&hlView, qt: qtC)
+                            dequantizeMidSignedMapping(&lhView, qt: qtC)
+                            dequantizeHighSignedMapping(&hhView, qt: qtC)
+                            invDwt2d_32(&view)
+                        }
+                        rowResults.append((block, w, h))
+                    }
+                }
+                return rowResults
+            }
+        }
+        for try await res in group {
+            for j in res.indices {
+                var blk = res[j].0
+                let w = res[j].1
+                let h = res[j].2
+                sub.updateCr(data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
+    }
+    
+    return sub
+}
+
+@inline(__always)
+public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
+    return try await decode(data: data, opts: DecodeOptions(maxLayer: 0))
+}
+
 #else
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
+    throw DecodeError.unsupportedArchitecture
+}
+public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
     throw DecodeError.unsupportedArchitecture
 }
 #endif

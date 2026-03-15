@@ -128,6 +128,22 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     return (encTime, decTime, outBytes.count)
 }
 
+func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+    let vevcImages = images.map { $0.vevcImage }
+    
+    // Encode
+    let encStart = Date()
+    let outBytes: [UInt8] = try await vevc.encodeOne(images: vevcImages, maxbitrate: config.bitrate * 1000, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
+    let encTime = Date().timeIntervalSince(encStart)
+    
+    // Decode
+    let decStart = Date()
+    let _ = try await vevc.decodeOne(data: outBytes)
+    let decTime = Date().timeIntervalSince(decStart)
+    
+    return (encTime, decTime, outBytes.count)
+}
+
 // MARK: - H264 Encode / Decode (VideoToolbox)
 func createPixelBuffer(from rgba: [PNG.RGBA<UInt8>], width: Int, height: Int) -> CVPixelBuffer? {
     let attrs = [
@@ -420,6 +436,9 @@ Task {
         print("Running vevc...")
         let vevcResult = try await runVEVC(images: localImages, config: localConfig)
         
+        print("Running vevc (One)...")
+        let vevcOneResult = try await runVEVCOne(images: localImages, config: localConfig)
+        
         print("Running H.264 (VideoToolbox)...")
         let h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
         
@@ -441,6 +460,7 @@ Task {
         
         print("\n--- Results ---")
         printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         printStats(name: "H.264", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         printStats(name: "HEVC", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         print("---------------")

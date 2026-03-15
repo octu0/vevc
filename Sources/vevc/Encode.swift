@@ -458,6 +458,95 @@ func blockEncodeDPCM4(encoder: inout CABACEncoder, block: BlockView, lastVal: in
     lastVal = ptr3[3]
 }
 
+@inline(__always)
+func blockEncodeDPCM16(encoder: inout CABACEncoder, block: BlockView, lastVal: inout Int16, ctxRun: inout [ContextModel], ctxMag: inout [ContextModel]) {
+    @inline(__always)
+    func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        let predicted: Int16
+        if ia <= ic && ib <= ic {
+            predicted = Int16(truncatingIfNeeded: min(ia, ib))
+        } else if ic <= ia && ic <= ib {
+            predicted = Int16(truncatingIfNeeded: max(ia, ib))
+        } else {
+            predicted = Int16(truncatingIfNeeded: ia + ib - ic)
+        }
+        return x &- predicted
+    }
+
+    var errors = [Int16](repeating: 0, count: 256)
+    errors.withUnsafeMutableBufferPointer { ptrErr in
+        guard let baseErr = ptrErr.baseAddress else { return }
+        
+        var last: Int16 = lastVal
+        for y in 0..<16 {
+            let ptrY = block.rowPointer(y: y)
+            let rowOffset = y * 16
+            if y == 0 {
+                for x in 0..<16 {
+                    if x == 0 {
+                        baseErr[rowOffset + 0] = ptrY[0] &- last
+                    } else {
+                        baseErr[rowOffset + x] = ptrY[x] &- ptrY[x - 1]
+                    }
+                }
+            } else {
+                let ptrPrevY = block.rowPointer(y: y - 1)
+                for x in 0..<16 {
+                    if x == 0 {
+                        baseErr[rowOffset + 0] = ptrY[0] &- ptrPrevY[0]
+                    } else {
+                        baseErr[rowOffset + x] = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                    }
+                }
+            }
+            last = ptrY[15]
+        }
+        
+        var lscpIdx = -1
+        for i in stride(from: 255, through: 0, by: -1) {
+            if baseErr[i] != 0 {
+                lscpIdx = i
+                break
+            }
+        }
+        
+        if lscpIdx == -1 {
+            encoder.encodeBypass(binVal: 0)
+            let ptrY = block.rowPointer(y: 15)
+            lastVal = ptrY[15]
+            return
+        }
+
+        encoder.encodeBypass(binVal: 1)
+        let lscpX = UInt32(lscpIdx % 16)
+        let lscpY = UInt32(lscpIdx / 16)
+        encodeExpGolomb(val: lscpX, encoder: &encoder)
+        encodeExpGolomb(val: lscpY, encoder: &encoder)
+        
+        lastVal = last
+        
+        var currentIdx = 0
+        var startIdxForRun = 0
+        var run = 0
+
+        for i in 0...lscpIdx {
+            let diff = baseErr[i]
+            if diff == 0 {
+                run += 1
+            } else {
+                let startY = startIdxForRun / 16
+                let startX = startIdxForRun % 16
+                let band = min(startX + startY, 7)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, ctxRun: &ctxRun, ctxMag: &ctxMag, band: band)
+                run = 0
+                startIdxForRun = currentIdx + 1
+            }
+            currentIdx += 1
+        }
+    }
+}
+
 // MARK: - Byte Serialization Helpers
 
 @inline(__always)
@@ -639,6 +728,46 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
     }
     for y in 0..<2 {
         let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    return true
+}
+
+@inline(__always)
+func isEffectivelyZeroBase32(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+    guard let base = data.baseAddress else { return false }
+    // Check LL
+    for y in 0..<16 {
+        let ptr = base + y * 32
+        let vec = SIMD16<Int16>(UnsafeBufferPointer(start: ptr, count: 16))
+        if vec[0] != 0 || vec[1] != 0 || vec[2] != 0 || vec[3] != 0 || vec[4] != 0 || vec[5] != 0 || vec[6] != 0 || vec[7] != 0 || vec[8] != 0 || vec[9] != 0 || vec[10] != 0 || vec[11] != 0 || vec[12] != 0 || vec[13] != 0 || vec[14] != 0 || vec[15] != 0 { return false }
+    }
+    
+    // Check Subbands
+    let th = Int16(threshold)
+    let thPos = SIMD16<Int16>(repeating: th)
+    let thNeg = SIMD16<Int16>(repeating: -th)
+
+    let lowerHalfBase = base + 16 * 32
+    for i in stride(from: 0, to: 512, by: 16) {
+        let vec = SIMD16<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 16))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+    }
+    for y in 0..<16 {
+        let ptr = base + y * 32 + 16
+        let vec = SIMD16<Int16>(UnsafeBufferPointer(start: ptr, count: 16))
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+    }
+
+    let zeroVec = SIMD16<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 512, by: 16) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD16<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<16 {
+        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16).assumingMemoryBound(to: SIMD16<Int16>.self)
         ptr.pointee = zeroVec
     }
     return true
@@ -835,6 +964,64 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
 }
 
 @inline(__always)
+func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+    var bwFlags = CABACBitWriter(capacity: (blocks.count + 7) / 8)
+    var nonZeroIndices: [Int] = []
+    
+    for i in blocks.indices {
+        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
+        }
+        if isZero {
+            bwFlags.writeBit(1)
+        } else {
+            bwFlags.writeBit(0)
+            nonZeroIndices.append(i)
+        }
+    }
+    bwFlags.flush()
+    debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
+    
+    var encoder = CABACEncoder()
+    var ctxRunLL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLL = [ContextModel](repeating: ContextModel(), count: 64)
+    
+    var ctxRunHL = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHL = [ContextModel](repeating: ContextModel(), count: 64)
+
+    var ctxRunLH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagLH = [ContextModel](repeating: ContextModel(), count: 64)
+
+    var ctxRunHH = [ContextModel](repeating: ContextModel(), count: 64)
+    var ctxMagHH = [ContextModel](repeating: ContextModel(), count: 64)
+    
+    var lastVal: Int16 = 0
+    
+    var nzCur = 0
+    let nzCount = nonZeroIndices.count
+    for i in blocks.indices {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
+
+            blocks[i].withView { view in
+                let subs = getSubbands32(view: view)
+                blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal, ctxRun: &ctxRunLL, ctxMag: &ctxMagLL)
+                blockEncode16(encoder: &encoder, block: subs.hl, ctxRun: &ctxRunHL, ctxMag: &ctxMagHL)
+                blockEncode16(encoder: &encoder, block: subs.lh, ctxRun: &ctxRunLH, ctxMag: &ctxMagLH)
+                blockEncode16(encoder: &encoder, block: subs.hh, ctxRun: &ctxRunHH, ctxMag: &ctxMagHH)
+            }
+        } else {
+            lastVal = 0
+        }
+    }
+    
+    encoder.flush()
+    var out = bwFlags.data
+    out.append(contentsOf: encoder.getData())
+    return out
+}
+
+@inline(__always)
 private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> Int {
     let count = 4 * 4
     let ptr0 = block.rowPointer(y: 0)
@@ -877,6 +1064,65 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
     sumDiffAbs += errorMED(ptr3[3], ptr3[2], ptr2[3], ptr2[2])
 
     lastVal = ptr3[3]
+    
+    let meanInt = sumDiffAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumDiffAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBitsDPCM16(block: BlockView, lastVal: inout Int16) -> Int {
+    let count = 16 * 16
+    
+    @inline(__always)
+    func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        let predicted: Int
+        if ia <= ic && ib <= ic {
+            predicted = min(ia, ib)
+        } else if ic <= ia && ic <= ib {
+            predicted = max(ia, ib)
+        } else {
+            predicted = ia + ib - ic
+        }
+        return abs(Int(x) - predicted)
+    }
+
+    var sumDiffAbs = 0
+    var last = lastVal
+    for y in 0..<16 {
+        let ptrY = block.rowPointer(y: y)
+        if y == 0 {
+            for x in 0..<16 {
+                if x == 0 {
+                    sumDiffAbs += abs(Int(ptrY[0]) - Int(last))
+                } else {
+                    sumDiffAbs += abs(Int(ptrY[x]) - Int(ptrY[x - 1]))
+                }
+            }
+        } else {
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            for x in 0..<16 {
+                if x == 0 {
+                    sumDiffAbs += abs(Int(ptrY[0]) - Int(ptrPrevY[0]))
+                } else {
+                    sumDiffAbs += errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                }
+            }
+        }
+        last = ptrY[15]
+    }
+    lastVal = last
     
     let meanInt = sumDiffAbs / count
     let k: Int
@@ -1023,6 +1269,34 @@ private func estimateRiceBits4(block: BlockView) -> Int {
     let headerBits = count * (1 + k)
     
     return bodyBits + headerBits
+}
+
+@inline(__always)
+private func measureBlockBits32(block: inout Block2D, qt: QuantizationTable) -> Int {
+    var sub = block.withView { view in
+        return dwt2d_32_sb(&view)
+    }
+    
+    quantizeLow(&sub.ll, qt: qt)
+    quantizeMid(&sub.hl, qt: qt)
+    quantizeMid(&sub.lh, qt: qt)
+    quantizeHigh(&sub.hh, qt: qt)
+    
+    let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
+        return isEffectivelyZeroBase32(data: ptr, threshold: 0)
+    }
+    if isZero {
+        return 1
+    }
+    
+    var bits = 1
+    var lastVal: Int16 = 0
+    bits += estimateRiceBitsDPCM16(block: sub.ll, lastVal: &lastVal)
+    bits += estimateRiceBits16(block: sub.hl)
+    bits += estimateRiceBits16(block: sub.lh)
+    bits += estimateRiceBits16(block: sub.hh)
+    
+    return bits
 }
 
 @inline(__always)
@@ -1231,8 +1505,148 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
     return out
 }
 
+@inline(__always)
+public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
+    if images.isEmpty { return [] }
+    
+    let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
+    var out: [UInt8] = []
+    
+    var prevReconstructed: PlaneData420? = nil
+    let planes = toPlaneData420(images: images)
+    
+    var gopCount = 0
+    
+    for i in 0..<planes.count {
+        let curr = planes[i]
+        var forceIFrame = false
+        var predictedPlane: PlaneData420? = nil
+        var mvs = MotionVectors(count: 0)
+        var meanSAD: Int = 0
+        
+        if gopSize <= gopCount || prevReconstructed == nil {
+            forceIFrame = true
+        } else {
+            guard let prev = prevReconstructed else { continue }
+            
+            mvs = estimateMBME(curr: curr, prev: prev)
+            let predicted = await applyMBME(prev: prev, mvs: mvs)
+            predictedPlane = predicted
+            let res = await subPlanes(curr: curr, predicted: predicted)
+            
+            var sumSAD = 0
+            for y in 0..<res.height {
+                for x in 0..<res.width {
+                    sumSAD += abs(Int(res.y[y * res.width + x]))
+                }
+            }
+            meanSAD = sumSAD / (res.width * res.height)
+            
+            if sceneChangeThreshold < meanSAD {
+                forceIFrame = true
+                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high SAD (\(meanSAD) > \(sceneChangeThreshold))")
+            }
+        }
+        
+        if forceIFrame {
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+            
+            let layer0 = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            
+            out.append(contentsOf: [0x56, 0x45, 0x4F, 0x49]) // VEOI
+            
+            var chunkOut: [UInt8] = []
+            chunkOut.append(contentsOf: layer0)
+            
+            appendUInt32BE(&out, UInt32(chunkOut.count))
+            out.append(contentsOf: chunkOut)
+            debugLog("[Frame \(i)] I-Frame (One): \(chunkOut.count) bytes (\(String(format: "%.2f", Double(chunkOut.count) / 1024.0)) KB)")
+            
+            let img16 = try await decodeBase32(r: layer0, layer: 0)
+            prevReconstructed = PlaneData420(img16: img16)
+            gopCount = 1
+        } else {
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
+            
+            let layer0 = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            
+            out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
+
+            var mvBw = CABACEncoder()
+            var ctxDx = ContextModel()
+
+            let mbSize = 32
+            let mbCols = (curr.width + mbSize - 1) / mbSize
+            for mvIdx in 0..<mvs.vectors.count {
+                let mbX = mvIdx % mbCols
+                let mbY = mvIdx / mbCols
+                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
+                let vec = mvs.vectors[mvIdx]
+                let mvdX = Int(vec.x) - pmv.dx
+                let mvdY = Int(vec.y) - pmv.dy
+
+                if mvdX == 0 && mvdY == 0 {
+                    mvBw.encodeBin(binVal: 0, ctx: &ctxDx)
+                } else {
+                    mvBw.encodeBin(binVal: 1, ctx: &ctxDx)
+
+                    let sx: UInt8
+                    if mvdX <= -1 {
+                        sx = 1
+                    } else {
+                        sx = 0
+                    }
+                    mvBw.encodeBypass(binVal: sx)
+                    let mx = UInt32(abs(mvdX))
+                    encodeExpGolomb(val: mx, encoder: &mvBw)
+
+                    let sy: UInt8
+                    if mvdY <= -1 {
+                        sy = 1
+                    } else {
+                        sy = 0
+                    }
+                    mvBw.encodeBypass(binVal: sy)
+                    let my = UInt32(abs(mvdY))
+                    encodeExpGolomb(val: my, encoder: &mvBw)
+                }
+            }
+            mvBw.flush()
+            let mvOut = mvBw.getData()
+            appendUInt32BE(&out, UInt32(mvs.vectors.count))
+            appendUInt32BE(&out, UInt32(mvOut.count))
+            out.append(contentsOf: mvOut)
+
+            var chunkOut: [UInt8] = []
+            chunkOut.append(contentsOf: layer0)
+            
+            appendUInt32BE(&out, UInt32(chunkOut.count))
+            out.append(contentsOf: chunkOut)
+            let totalBytes = chunkOut.count + mvOut.count
+            debugLog("[Frame \(i)] P-Frame (One): \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(chunkOut.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
+            
+            let img16 = try await decodeBase32(r: layer0, layer: 0)
+            let reconstructedResidual = PlaneData420(img16: img16)
+            if let predicted = predictedPlane {
+                let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
+                prevReconstructed = reconstructed
+            } else {
+                prevReconstructed = reconstructedResidual
+            }
+            gopCount += 1
+        }
+    }
+    
+    return out
+}
+
 #else
 public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
+    throw EncodeError.unsupportedArchitecture
+}
+public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
     throw EncodeError.unsupportedArchitecture
 }
 #endif

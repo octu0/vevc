@@ -49,6 +49,21 @@ func evaluateQuantizeBase8(block: inout Block2D, qt: QuantizationTable) {
 }
 
 @inline(__always)
+func evaluateQuantizeBase32(block: inout Block2D, qt: QuantizationTable) {
+    block.withView { view in
+        let subs = getSubbands32(view: view)
+        var ll = subs.ll
+        var hl = subs.hl
+        var lh = subs.lh
+        var hh = subs.hh
+        quantizeLow(&ll, qt: qt)
+        quantizeMidSignedMapping(&hl, qt: qt)
+        quantizeMidSignedMapping(&lh, qt: qt)
+        quantizeHighSignedMapping(&hh, qt: qt)
+    }
+}
+
+@inline(__always)
 func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
     let subWidth = (width / 2)
     let subHeight = (height / 2)
@@ -250,6 +265,45 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
 }
 
 @inline(__always)
+func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int) -> [Block2D] {
+    let rowCount = ((height + 32 - 1) / 32)
+    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
+    let chunkSize = 4
+    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
+    
+    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
+        let startRow = (taskIdx * chunkSize)
+        let endRow = min((startRow + chunkSize), rowCount)
+        
+        for i in startRow..<endRow {
+            let h = (i * 32)
+            var rowResults: [(Block2D, Int, Int)] = []
+            for w in stride(from: 0, to: width, by: 32) {
+                var block = Block2D(width: 32, height: 32)
+                block.withView { view in
+                    r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                    dwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+            results.value[i] = (h, rowResults)
+        }
+    }
+    
+    var blocks: [Block2D] = []
+    blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
+    for i in 0..<rowCount {
+        guard let res = results.value[i] else { continue }
+        for j in res.1.indices {
+            let (llBlock, _, _) = res.1[j]
+            blocks.append(llBlock)
+        }
+    }
+    
+    return blocks
+}
+
+@inline(__always)
 func subtractCoeffs32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     for i in currBlocks.indices {
         currBlocks[i].withView { vC in
@@ -317,6 +371,24 @@ func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D
                     let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
                     let res = vecC &- vecP
                     UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+func subtractCoeffsBase32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
+    for i in currBlocks.indices {
+        currBlocks[i].withView { vC in
+            predBlocks[i].withView { vP in
+                let ptrC = vC.base
+                let ptrP = vP.base
+                for offset in stride(from: 0, to: 1024, by: 16) {
+                    let vecC = UnsafeRawPointer(ptrC.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let res = vecC &- vecP
+                    UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
                 }
             }
         }
@@ -512,6 +584,68 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
         }
         for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtC) }
         return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+    }()
+
+    let bufY = await taskBufY
+    let bufCb = await taskBufCb
+    let bufCr = await taskBufCr
+    
+    debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
+    
+    var out: [UInt8] = []
+    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
+    appendUInt16BE(&out, UInt16(dx))
+    appendUInt16BE(&out, UInt16(dy))
+    out.append(UInt8(qtY.step))
+    out.append(UInt8(qtC.step))
+    
+    appendUInt32BE(&out, UInt32(bufY.count))
+    out.append(contentsOf: bufY)
+    
+    appendUInt32BE(&out, UInt32(bufCb.count))
+    out.append(contentsOf: bufCb)
+    
+    appendUInt32BE(&out, UInt32(bufCr.count))
+    out.append(contentsOf: bufCr)
+    
+    return out
+}
+
+@inline(__always)
+func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    
+    async let taskBufY = {
+        var blocks = extractSingleTransformBlocksBase32(r: pd.rY, width: dx, height: dy)
+        if let pPd = predictedPd {
+            var pBlocks = extractSingleTransformBlocksBase32(r: pPd.rY, width: dx, height: dy)
+            subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
+        }
+        for i in blocks.indices { evaluateQuantizeBase32(block: &blocks[i], qt: qtY) }
+        return encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
+    }()
+    
+    async let taskBufCb = {
+        var blocks = extractSingleTransformBlocksBase32(r: pd.rCb, width: cbDx, height: cbDy)
+        if let pPd = predictedPd {
+            var pBlocks = extractSingleTransformBlocksBase32(r: pPd.rCb, width: cbDx, height: cbDy)
+            subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
+        }
+        for i in blocks.indices { evaluateQuantizeBase32(block: &blocks[i], qt: qtC) }
+        return encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
+    }()
+    
+    async let taskBufCr = {
+        var blocks = extractSingleTransformBlocksBase32(r: pd.rCr, width: cbDx, height: cbDy)
+        if let pPd = predictedPd {
+            var pBlocks = extractSingleTransformBlocksBase32(r: pPd.rCr, width: cbDx, height: cbDy)
+            subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
+        }
+        for i in blocks.indices { evaluateQuantizeBase32(block: &blocks[i], qt: qtC) }
+        return encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
     }()
 
     let bufY = await taskBufY
