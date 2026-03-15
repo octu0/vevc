@@ -67,19 +67,8 @@ func decodeExpGolomb(decoder: inout VevcDecoder) throws -> UInt32 {
 
 @inline(__always)
 func decodeCoeffRun(decoder: inout VevcDecoder) throws -> (Int, Int16) {
-    var run = 0
-    // tryReadCoeff: EOF到達時はnilを返す（LSCPにより末尾ゼロがaddCoeffされないケースに対応）
-    guard var val = decoder.tryReadCoeff() else {
-        return (0, 0)
-    }
-    while val == 0 {
-        run += 1
-        guard let next = decoder.tryReadCoeff() else {
-            return (run, 0)
-        }
-        val = next
-    }
-    return (run, val)
+    let pair = decoder.readPair()
+    return (pair.run, pair.val)
 }
 
 @inline(__always)

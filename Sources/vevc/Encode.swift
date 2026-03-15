@@ -33,10 +33,7 @@ func encodeExpGolomb(val: UInt32, encoder: inout VevcEncoder) {
 
 @inline(__always)
 func encodeCoeffRun(val: Int16, encoder: inout VevcEncoder, run: Int) {
-    for _ in 0..<run {
-        encoder.addCoeff(0)
-    }
-    encoder.addCoeff(val)
+    encoder.addPair(run: UInt32(run), val: val)
 }
 
 @inline(__always)

@@ -12,13 +12,15 @@ public struct ContextModel {
 
 public struct VevcEncoder {
     var bypassWriter: BypassWriter
-    public var coeffs: [Int16]
-    private var rANSCompressor: rANSEncoder
+    public var pairs: [(run: UInt32, val: Int16)]
+    public var trailingZeros: UInt32
+    public private(set) var coeffCount: Int
 
     public init() {
         self.bypassWriter = BypassWriter()
-        self.coeffs = []
-        self.rANSCompressor = rANSEncoder()
+        self.pairs = []
+        self.trailingZeros = 0
+        self.coeffCount = 0
     }
 
     @inline(__always)
@@ -27,8 +29,15 @@ public struct VevcEncoder {
     }
 
     @inline(__always)
-    public mutating func addCoeff(_ val: Int16) {
-        coeffs.append(val)
+    public mutating func addPair(run: UInt32, val: Int16) {
+        pairs.append((run: run, val: val))
+        coeffCount += Int(run) + 1
+    }
+    
+    @inline(__always)
+    public mutating func addTrailingZeros(_ count: UInt32) {
+        trailingZeros += count
+        coeffCount += Int(count)
     }
 
     public mutating func flush() {
@@ -37,76 +46,41 @@ public struct VevcEncoder {
 
     public mutating func getData() -> [UInt8] {
         var out = [UInt8]()
-        out.reserveCapacity(coeffs.count + 128)
+        out.reserveCapacity(pairs.count * 4 + 128)
         
         bypassWriter.flush()
         let metaBypassData = bypassWriter.bytes
         appendUInt32BE(&out, UInt32(metaBypassData.count))
         out.append(contentsOf: metaBypassData)
         
-        let coeffCount = coeffs.count
         appendUInt32BE(&out, UInt32(coeffCount))
         
-        guard coeffCount > 0 else { return out }
+        guard !pairs.isEmpty || trailingZeros > 0 else { return out }
         
-        var coeffBypassWriter = BypassWriter()
-        var runTokenCounts = Array(repeating: 0, count: 16)
-        var valTokenCounts = Array(repeating: 0, count: 16)
+        let pairCount = pairs.count
+        let hasTrailingZeros = trailingZeros > 0
+        let nonZeroCount = pairCount
         
-        var pairRunTokens = [UInt8]()
-        pairRunTokens.reserveCapacity(coeffCount)
-        var pairValTokens = [UInt8]()
-        pairValTokens.reserveCapacity(coeffCount)
-        
-        var zeroRun: UInt32 = 0
-        var nonZeroCount = 0
-        for i in 0..<coeffCount {
-            let c = coeffs[i]
-            if c == 0 {
-                zeroRun += 1
-            } else {
-                nonZeroCount += 1
-                let runResult = ValueTokenizer.tokenizeUnsigned(zeroRun)
-                runTokenCounts[Int(runResult.token)] += 1
-                pairRunTokens.append(runResult.token)
-                coeffBypassWriter.writeBits(runResult.bypassBits, count: runResult.bypassLen)
-                
-                let valResult = ValueTokenizer.tokenize(c)
-                valTokenCounts[Int(valResult.token)] += 1
-                pairValTokens.append(valResult.token)
-                coeffBypassWriter.writeBit(valResult.sign)
-                coeffBypassWriter.writeBits(valResult.bypassBits, count: ValueTokenizer.bypassLength(for: valResult.token))
-                
-                zeroRun = 0
-            }
-        }
-        let hasTrailingZeros = zeroRun > 0
-        if hasTrailingZeros {
-            let runResult = ValueTokenizer.tokenizeUnsigned(zeroRun)
-            runTokenCounts[Int(runResult.token)] += 1
-            pairRunTokens.append(runResult.token)
-            coeffBypassWriter.writeBits(runResult.bypassBits, count: runResult.bypassLen)
-        }
-        coeffBypassWriter.flush()
-        
-        let pairCount = pairValTokens.count
-        
+        // ---- Raw フォールバック (非ゼロ ≤ 32) ----
         if nonZeroCount <= 32 {
-            // flags bit7 = 1 → Raw mode
             out.append(0x80)
             var rawBypass = BypassWriter()
-            for i in 0..<coeffCount {
-                let c = coeffs[i]
-                if c == 0 {
+            for pair in pairs {
+                // ゼロラン分
+                for _ in 0..<pair.run {
                     rawBypass.writeBit(false)
-                } else {
-                    rawBypass.writeBit(true)
-                    rawBypass.writeBit(c < 0)
-                    let absVal = UInt32(abs(Int(c))) - 1
-                    let result = ValueTokenizer.tokenizeUnsigned(absVal)
-                    rawBypass.writeBits(UInt16(result.token), count: 4)
-                    rawBypass.writeBits(result.bypassBits, count: result.bypassLen)
                 }
+                // 非ゼロ値
+                rawBypass.writeBit(true)
+                rawBypass.writeBit(pair.val < 0)
+                let absVal = UInt32(abs(Int(pair.val))) - 1
+                let result = ValueTokenizer.tokenizeUnsigned(absVal)
+                rawBypass.writeBits(UInt16(result.token), count: 4)
+                rawBypass.writeBits(result.bypassBits, count: result.bypassLen)
+            }
+            // 末尾ゼロ
+            for _ in 0..<trailingZeros {
+                rawBypass.writeBit(false)
             }
             rawBypass.flush()
             let rawData = rawBypass.bytes
@@ -115,42 +89,113 @@ public struct VevcEncoder {
             return out
         }
         
-        let totalPairCount = hasTrailingZeros ? pairCount + 1 : pairCount
+        // ---- rANS mode: 4チャンク分割 ----
         
+        // pairs を4チャンクに分割
+        let totalPairEntries = pairCount + (hasTrailingZeros ? 1 : 0)
+        let chunkBase = pairCount / 4
+        let chunkRemainder = pairCount % 4
+        
+        // チャンク境界: chunk[i] は pairs[chunkStarts[i]..<chunkStarts[i+1]] を担当
+        var chunkStarts = [Int](repeating: 0, count: 5)
+        for i in 0..<4 {
+            chunkStarts[i + 1] = chunkStarts[i] + chunkBase + (i < chunkRemainder ? 1 : 0)
+        }
+        
+        // 各チャンクのトークン化 + Bypass書き出し
+        var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
+        var chunkValTokens = [[UInt8]](repeating: [], count: 4)
+        var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
+        var runTokenCounts = Array(repeating: 0, count: 16)
+        var valTokenCounts = Array(repeating: 0, count: 16)
+        
+        for lane in 0..<4 {
+            let start = chunkStarts[lane]
+            let end = chunkStarts[lane + 1]
+            let chunkSize = end - start
+            chunkRunTokens[lane].reserveCapacity(chunkSize + 1)
+            chunkValTokens[lane].reserveCapacity(chunkSize)
+            
+            for idx in start..<end {
+                let pair = pairs[idx]
+                
+                let runResult = ValueTokenizer.tokenizeUnsigned(pair.run)
+                runTokenCounts[Int(runResult.token)] += 1
+                chunkRunTokens[lane].append(runResult.token)
+                chunkBypassWriters[lane].writeBits(runResult.bypassBits, count: runResult.bypassLen)
+                
+                let valResult = ValueTokenizer.tokenize(pair.val)
+                valTokenCounts[Int(valResult.token)] += 1
+                chunkValTokens[lane].append(valResult.token)
+                chunkBypassWriters[lane].writeBit(valResult.sign)
+                chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: ValueTokenizer.bypassLength(for: valResult.token))
+            }
+        }
+        
+        // 末尾ゼロラン: lane3 に追加
+        if hasTrailingZeros {
+            let runResult = ValueTokenizer.tokenizeUnsigned(trailingZeros)
+            runTokenCounts[Int(runResult.token)] += 1
+            chunkRunTokens[3].append(runResult.token)
+            chunkBypassWriters[3].writeBits(runResult.bypassBits, count: runResult.bypassLen)
+        }
+        
+        for lane in 0..<4 {
+            chunkBypassWriters[lane].flush()
+        }
+        
+        // rANS モデル構築
         var runModel = rANSModel()
         runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
         var valModel = rANSModel()
         valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
         
+        // ---- ヘッダ書き込み ----
         // flags: bit7=0 (rANS), bit0=hasTrailingZeros
         out.append(hasTrailingZeros ? 1 : 0)
-        appendUInt32BE(&out, UInt32(totalPairCount))
+        appendUInt32BE(&out, UInt32(totalPairEntries))
         
+        // チャンクサイズ (4B × 4)
+        for lane in 0..<4 {
+            let chunkPairCount = chunkStarts[lane + 1] - chunkStarts[lane]
+            let extraTrailing = (lane == 3 && hasTrailingZeros) ? 1 : 0
+            appendUInt32BE(&out, UInt32(chunkPairCount + extraTrailing))
+        }
+        
+        // 周波数テーブル (圧縮版)
         writeCompressedFreqTable(&out, freqs: runModel.tokenFreqs)
         writeCompressedFreqTable(&out, freqs: valModel.tokenFreqs)
         
-        let coeffBypassData = coeffBypassWriter.bytes
-        appendUInt32BE(&out, UInt32(coeffBypassData.count))
-        out.append(contentsOf: coeffBypassData)
-        
-        var enc = Interleaved4rANSEncoder()
-        let totalSymbols = pairCount * 2 + (hasTrailingZeros ? 1 : 0)
-        
-        if hasTrailingZeros {
-            let symIdx = totalSymbols - 1
-            let lane = symIdx & 3
-            let runToken = pairRunTokens[pairCount]
-            enc.encodeSymbol(lane: lane, cumFreq: runModel.tokenCumFreqs[Int(runToken)], freq: runModel.tokenFreqs[Int(runToken)])
+        // 4系統 Bypass データ
+        for lane in 0..<4 {
+            let bpData = chunkBypassWriters[lane].bytes
+            appendUInt32BE(&out, UInt32(bpData.count))
+            out.append(contentsOf: bpData)
         }
         
-        for i in stride(from: pairCount - 1, through: 0, by: -1) {
-            let valLane = (i * 2 + 1) & 3
-            let valToken = pairValTokens[i]
-            enc.encodeSymbol(lane: valLane, cumFreq: valModel.tokenCumFreqs[Int(valToken)], freq: valModel.tokenFreqs[Int(valToken)])
+        // ---- Interleaved 4-way rANS エンコード（逆順） ----
+        var enc = Interleaved4rANSEncoder()
+        
+        // 各レーンを逆順でエンコード
+        // 末尾ゼロラン (lane 3)
+        if hasTrailingZeros {
+            let trailingRunToken = chunkRunTokens[3].last!
+            enc.encodeSymbol(lane: 3, cumFreq: runModel.tokenCumFreqs[Int(trailingRunToken)], freq: runModel.tokenFreqs[Int(trailingRunToken)])
+        }
+        
+        // 各レーンのペアを逆順エンコード
+        for lane in stride(from: 3, through: 0, by: -1) {
+            let runTokens = chunkRunTokens[lane]
+            let valTokens = chunkValTokens[lane]
+            let pairEnd = valTokens.count
             
-            let runLane = (i * 2) & 3
-            let runToken = pairRunTokens[i]
-            enc.encodeSymbol(lane: runLane, cumFreq: runModel.tokenCumFreqs[Int(runToken)], freq: runModel.tokenFreqs[Int(runToken)])
+            for i in stride(from: pairEnd - 1, through: 0, by: -1) {
+                let vt = valTokens[i]
+                enc.encodeSymbol(lane: lane, cumFreq: valModel.tokenCumFreqs[Int(vt)], freq: valModel.tokenFreqs[Int(vt)])
+                
+                let rt = runTokens[i]
+                enc.encodeSymbol(lane: lane, cumFreq: runModel.tokenCumFreqs[Int(rt)], freq: runModel.tokenFreqs[Int(rt)])
+            }
         }
         
         enc.flush()
@@ -190,8 +235,8 @@ public struct VevcEncoder {
 
 public struct VevcDecoder {
     var bypassReader: BypassReader
-    public var coeffs: [Int16]
-    private var index: Int = 0
+    public var pairs: [(run: UInt32, val: Int16)]
+    private var pairIndex: Int = 0
 
     public init(data: [UInt8]) throws {
         var offset = 0
@@ -208,7 +253,7 @@ public struct VevcDecoder {
         let coeffCount = Int(vevc.readUInt32BE(data, at: &offset))
         
         guard coeffCount > 0 else {
-            self.coeffs = []
+            self.pairs = []
             return
         }
         
@@ -225,8 +270,9 @@ public struct VevcDecoder {
             let rawData = Array(data[offset..<(offset + rawDataLen)])
             var rawReader = BypassReader(data: rawData)
             
-            var outCoeffs = [Int16](repeating: 0, count: coeffCount)
-            for i in 0..<coeffCount {
+            var decodedPairs = [(run: UInt32, val: Int16)]()
+            var zeroRun: UInt32 = 0
+            for _ in 0..<coeffCount {
                 let isNonZero = rawReader.readBit()
                 if isNonZero {
                     let isNeg = rawReader.readBit()
@@ -234,18 +280,33 @@ public struct VevcDecoder {
                     let token = UInt8(tokenBits)
                     let bypassBits = rawReader.readBits(count: max(0, Int(token) - 1))
                     let absVal = Int16(ValueTokenizer.detokenizeUnsigned(token: token, bypassBits: bypassBits)) + 1
-                    outCoeffs[i] = isNeg ? -absVal : absVal
+                    let val = isNeg ? -absVal : absVal
+                    decodedPairs.append((run: zeroRun, val: val))
+                    zeroRun = 0
+                } else {
+                    zeroRun += 1
                 }
             }
-            self.coeffs = outCoeffs
+            // 末尾ゼロはペアに含めない（coeffCountで暗黙管理）
+            if zeroRun > 0 {
+                decodedPairs.append((run: zeroRun, val: 0))
+            }
+            self.pairs = decodedPairs
             return
         }
         
+        // ---- rANS mode デコード ----
         let hasTrailingZeros = (flags & 1) != 0
         
         guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
-        let totalPairCount = Int(vevc.readUInt32BE(data, at: &offset))
-        let pairCount = hasTrailingZeros ? totalPairCount - 1 : totalPairCount
+        let totalPairEntries = Int(vevc.readUInt32BE(data, at: &offset))
+        
+        // チャンクサイズ (4レーン分)
+        guard offset + 16 <= data.count else { throw DecodeError.insufficientData }
+        var chunkSizes = [Int](repeating: 0, count: 4)
+        for lane in 0..<4 {
+            chunkSizes[lane] = Int(vevc.readUInt32BE(data, at: &offset))
+        }
         
         let runTokenFreqs = try VevcDecoder.readCompressedFreqTable(data, at: &offset)
         let runModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs)
@@ -253,57 +314,69 @@ public struct VevcDecoder {
         let valTokenFreqs = try VevcDecoder.readCompressedFreqTable(data, at: &offset)
         let valModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs)
         
-        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
-        let coeffBypassLen = Int(vevc.readUInt32BE(data, at: &offset))
-        guard offset + coeffBypassLen <= data.count else { throw DecodeError.insufficientData }
-        let coeffBypassData = Array(data[offset..<(offset + coeffBypassLen)])
-        var coeffBypassReader = BypassReader(data: coeffBypassData)
-        offset += coeffBypassLen
+        // 4系統 Bypass データ
+        var chunkBypassReaders = [BypassReader]()
+        for _ in 0..<4 {
+            guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
+            let bpLen = Int(vevc.readUInt32BE(data, at: &offset))
+            guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
+            let bpData = Array(data[offset..<(offset + bpLen)])
+            chunkBypassReaders.append(BypassReader(data: bpData))
+            offset += bpLen
+        }
         
+        // rANS ストリーム
         let ransData = Array(data[offset...])
         var ransDecoder = Interleaved4rANSDecoder(bitstream: ransData)
         
-        var outCoeffs = [Int16](repeating: 0, count: coeffCount)
-        var writeIdx = 0
+        // 各レーンからペアをデコード
+        var chunkPairs = [[(run: UInt32, val: Int16)]](repeating: [], count: 4)
         
-        for pairIdx in 0..<pairCount {
-            let runLane = (pairIdx * 2) & 3
-            let cfRun = ransDecoder.getCumulativeFreq(lane: runLane)
-            let rtInfo = runModel.findToken(cf: cfRun)
-            ransDecoder.advanceSymbol(lane: runLane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+        for lane in 0..<4 {
+            let chunkSize = chunkSizes[lane]
+            let hasTZ = (lane == 3 && hasTrailingZeros)
+            let pairCountInChunk = hasTZ ? chunkSize - 1 : chunkSize
+            chunkPairs[lane].reserveCapacity(chunkSize)
             
-            let runBypassBits = coeffBypassReader.readBits(count: max(0, Int(rtInfo.token) - 1))
-            let zeroRun = Int(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
-            
-            writeIdx += zeroRun
-            
-            let valLane = (pairIdx * 2 + 1) & 3
-            let cfVal = ransDecoder.getCumulativeFreq(lane: valLane)
-            let vtInfo = valModel.findToken(cf: cfVal)
-            ransDecoder.advanceSymbol(lane: valLane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
-            
-            let sign = coeffBypassReader.readBit()
-            let valBypassBits = coeffBypassReader.readBits(count: ValueTokenizer.bypassLength(for: vtInfo.token))
-            let val = ValueTokenizer.detokenize(isSignificant: true, sign: sign, token: vtInfo.token, bypassBits: valBypassBits)
-            
-            if writeIdx < coeffCount {
-                outCoeffs[writeIdx] = val
+            for _ in 0..<pairCountInChunk {
+                let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
+                let rtInfo = runModel.findToken(cf: cfRun)
+                ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+                
+                let runBypassBits = chunkBypassReaders[lane].readBits(count: max(0, Int(rtInfo.token) - 1))
+                let zeroRun = UInt32(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+                
+                let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
+                let vtInfo = valModel.findToken(cf: cfVal)
+                ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
+                
+                let sign = chunkBypassReaders[lane].readBit()
+                let valBypassBits = chunkBypassReaders[lane].readBits(count: ValueTokenizer.bypassLength(for: vtInfo.token))
+                let val = ValueTokenizer.detokenize(isSignificant: true, sign: sign, token: vtInfo.token, bypassBits: valBypassBits)
+                
+                chunkPairs[lane].append((run: zeroRun, val: val))
             }
-            writeIdx += 1
-        }
-        
-        if hasTrailingZeros {
-            let totalSymbols = pairCount * 2 + 1
-            let symIdx = totalSymbols - 1
-            let lane = symIdx & 3
-            let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-            let rtInfo = runModel.findToken(cf: cfRun)
-            ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
             
-            let _ = coeffBypassReader.readBits(count: max(0, Int(rtInfo.token) - 1))
+            // 末尾ゼロラン (lane 3)
+            if hasTZ {
+                let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
+                let rtInfo = runModel.findToken(cf: cfRun)
+                ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+                
+                let runBypassBits = chunkBypassReaders[lane].readBits(count: max(0, Int(rtInfo.token) - 1))
+                let zeroRun = UInt32(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+                chunkPairs[lane].append((run: zeroRun, val: 0))
+            }
         }
         
-        self.coeffs = outCoeffs
+        // 4チャンクを結合してペア配列を生成
+        var allPairs = [(run: UInt32, val: Int16)]()
+        allPairs.reserveCapacity(totalPairEntries)
+        for lane in 0..<4 {
+            allPairs.append(contentsOf: chunkPairs[lane])
+        }
+        
+        self.pairs = allPairs
     }
     
     private static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
@@ -326,22 +399,18 @@ public struct VevcDecoder {
     public mutating func decodeBypass() throws -> UInt8 {
         return bypassReader.readBit() ? 1 : 0
     }
-
-    @inline(__always)
-    public mutating func readCoeff() throws -> Int16 {
-        guard index < coeffs.count else { throw DecodeError.insufficientData }
-        let val = coeffs[index]
-        index += 1
-        return val
-    }
     
     @inline(__always)
-    public mutating func tryReadCoeff() -> Int16? {
-        guard index < coeffs.count else { return nil }
-        let val = coeffs[index]
-        index += 1
-        return val
+    public mutating func readPair() -> (run: Int, val: Int16) {
+        guard pairIndex < pairs.count else { return (0, 0) }
+        let pair = pairs[pairIndex]
+        pairIndex += 1
+        return (Int(pair.run), pair.val)
     }
+
+    // 後方互換: readCoeff / tryReadCoeff は廃止予定だが
+    // blockDecode 内の (run, val) = decodeCoeffRun() パターンが
+    // readPair() に直接マッピングされるため不要
 }
 
 @inline(__always)

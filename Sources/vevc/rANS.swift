@@ -321,7 +321,10 @@ public struct BypassReader {
     private var bitsInBuffer: Int
     
     public init(data: [UInt8]) {
-        self.bytes = data
+        // 8バイトのゼロパディングを追加してboundsチェックを排除
+        var padded = data
+        padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
+        self.bytes = padded
         self.byteOffset = 0
         self.buffer = 0
         self.bitsInBuffer = 0
@@ -329,7 +332,8 @@ public struct BypassReader {
     
     @inline(__always)
     private mutating func ensureBits(_ needed: Int) {
-        while bitsInBuffer < needed && byteOffset < bytes.count {
+        // パディング済み (8バイトのゼロ) が保証されるためboundsチェック不要
+        while bitsInBuffer < needed {
             buffer = (buffer << 8) | UInt32(bytes[byteOffset])
             byteOffset += 1
             bitsInBuffer += 8

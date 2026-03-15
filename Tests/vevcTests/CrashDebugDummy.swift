@@ -47,7 +47,7 @@ final class CrashDebugTests: XCTestCase {
         fflush(stdout)
         do {
             var decoder = try VevcDecoder(data: encodedData)
-            print("--- [DEBUG] Decoder initialized with coeffs count: \(decoder.coeffs.count) ---")
+            print("--- [DEBUG] Decoder initialized with pairs count: \(decoder.pairs.count) ---")
             fflush(stdout)
             
             var outBlock = Block2D(width: size, height: size)
