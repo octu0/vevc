@@ -575,6 +575,19 @@ Task {
     let rawTotalSizeKB = Double(localImages.count * localWidth * localHeight * 3) / 1024.0 // Assuming YCbCr size calculation standard. H264 is YUV 4:2:0 mostly.
     
     do {
+        // ウォームアップ: CPUキャッシュ・コードキャッシュを暖機するため、最大5フレームでダミー実行
+        let warmupCount = min(5, localImages.count)
+        let warmupImages = Array(localImages[0..<warmupCount])
+        print("Warming up (\(warmupCount) frames)...")
+        let _ = try await runVEVC(images: warmupImages, config: localConfig)
+        let _ = try await runVEVCOne(images: warmupImages, config: localConfig)
+        let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+        let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+        let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+        let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+        let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+        print("Warmup complete.\n")
+
         print("Running vevc...")
         let vevcResult = try await runVEVC(images: localImages, config: localConfig)
         
