@@ -396,7 +396,7 @@ func subtractCoeffsBase32(currBlocks: inout [Block2D], predBlocks: inout [Block2
 }
 
 @inline(__always)
-func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {
+func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -412,7 +412,7 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         }
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtY) }
         let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
-        return (buf, subband, predSubband)
+        return (buf, subband, predSubband, blocks)
     }()
     
     async let taskBufCb = {
@@ -425,7 +425,7 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         }
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtC) }
         let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
-        return (buf, subband, predSubband)
+        return (buf, subband, predSubband, blocks)
     }()
     
     async let taskBufCr = {
@@ -438,12 +438,12 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         }
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtC) }
         let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold)
-        return (buf, subband, predSubband)
+        return (buf, subband, predSubband, blocks)
     }()
 
-    let (bufY, subY, pSubY) = await taskBufY
-    let (bufCb, subCb, pSubCb) = await taskBufCb
-    let (bufCr, subCr, pSubCr) = await taskBufCr
+    let (bufY, subY, pSubY, yBlocks) = await taskBufY
+    let (bufCb, subCb, pSubCb, cbBlocks) = await taskBufCb
+    let (bufCr, subCr, pSubCr, crBlocks) = await taskBufCr
 
     let subPlane = PlaneData420(width: dx / 2, height: dy / 2, y: subY, cb: subCb, cr: subCr)
     var subPredPlane: PlaneData420? = nil
@@ -469,11 +469,11 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return (out, subPlane, subPredPlane)
+    return (out, subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
 }
 
 @inline(__always)
-func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?) {
+func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -489,7 +489,7 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         }
         for i in blocks.indices { evaluateQuantizeLayer16(block: &blocks[i], qt: qtY) }
         let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold)
-        return (buf, subband, predSubband)
+        return (buf, subband, predSubband, blocks)
     }()
     
     async let taskBufCb = {
@@ -502,7 +502,7 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         }
         for i in blocks.indices { evaluateQuantizeLayer16(block: &blocks[i], qt: qtC) }
         let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold)
-        return (buf, subband, predSubband)
+        return (buf, subband, predSubband, blocks)
     }()
     
     async let taskBufCr = {
@@ -515,12 +515,12 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         }
         for i in blocks.indices { evaluateQuantizeLayer16(block: &blocks[i], qt: qtC) }
         let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold)
-        return (buf, subband, predSubband)
+        return (buf, subband, predSubband, blocks)
     }()
 
-    let (bufY, subY, pSubY) = await taskBufY
-    let (bufCb, subCb, pSubCb) = await taskBufCb
-    let (bufCr, subCr, pSubCr) = await taskBufCr
+    let (bufY, subY, pSubY, yBlocks) = await taskBufY
+    let (bufCb, subCb, pSubCb, cbBlocks) = await taskBufCb
+    let (bufCr, subCr, pSubCr, crBlocks) = await taskBufCr
 
     let subPlane = PlaneData420(width: dx / 2, height: dy / 2, y: subY, cb: subCb, cr: subCr)
     var subPredPlane: PlaneData420? = nil
@@ -546,11 +546,134 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return (out, subPlane, subPredPlane)
+    return (out, subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
+}
+
+// encoder-side reconstruction for base 8x8 blocks
+@inline(__always)
+func reconstructPlaneBase8(blocks: [Block2D], width: Int, height: Int, qt: QuantizationTable) -> [Int16] {
+    let colCount = (width + 8 - 1) / 8
+    var plane = [Int16](repeating: 0, count: width * height)
+    
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        for idx in blocks.indices {
+            var blk = blocks[idx]
+            let row = idx / colCount
+            let col = idx % colCount
+            let startY = row * 8
+            let startX = col * 8
+            
+            blk.withView { view in
+                let half = 4
+                let base = view.base
+                var llView = BlockView(base: base, width: half, height: half, stride: 8)
+                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+                var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+                var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+                dequantizeLow(&llView, qt: qt)
+                dequantizeMidSignedMapping(&hlView, qt: qt)
+                dequantizeMidSignedMapping(&lhView, qt: qt)
+                dequantizeHighSignedMapping(&hhView, qt: qt)
+                invDwt2d_8(&view)
+            }
+            
+            let validEndY = min(height, startY + 8)
+            let validEndX = min(width, startX + 8)
+            let loopH = validEndY - startY
+            let loopW = validEndX - startX
+            
+            if loopH > 0 && loopW > 0 {
+                blk.withView { v in
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
+                    }
+                }
+            }
+        }
+    }
+    
+    return plane
+}
+
+// encoder-side reconstruction for layer blocks (16 or 32)
+// LL subband is copied from the reconstructed Image16 of the previous layer
+// using boundaryRepeat to match the decoder's behavior
+@inline(__always)
+func reconstructPlaneLayer(blocks: [Block2D], prevImg: Image16, planeType: Int, width: Int, height: Int, blockSize: Int, qt: QuantizationTable) -> [Int16] {
+    let colCount = (width + blockSize - 1) / blockSize
+    let half = blockSize / 2
+    var plane = [Int16](repeating: 0, count: width * height)
+    
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        
+        for idx in blocks.indices {
+            var blk = blocks[idx]
+            let row = idx / colCount
+            let col = idx % colCount
+            let startY = row * blockSize
+            let startX = col * blockSize
+            
+            // Copy LL from prev layer using Image16.getY/Cb/Cr (with boundaryRepeat)
+            let llX = startX / 2
+            let llY = startY / 2
+            var ll: Block2D
+            switch planeType {
+            case 0: ll = prevImg.getY(x: llX, y: llY, size: half)
+            case 1: ll = prevImg.getCb(x: llX, y: llY, size: half)
+            default: ll = prevImg.getCr(x: llX, y: llY, size: half)
+            }
+            ll.withView { srcView in
+                blk.withView { destView in
+                    for yi in 0..<half {
+                        let srcPtr = srcView.rowPointer(y: yi)
+                        let destPtr = destView.rowPointer(y: yi)
+                        destPtr.update(from: srcPtr, count: half)
+                    }
+                }
+            }
+            
+            // Dequantize HL/LH/HH subbands and inverse DWT
+            blk.withView { view in
+                let base = view.base
+                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
+                var lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
+                var hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
+                dequantizeMidSignedMapping(&hlView, qt: qt)
+                dequantizeMidSignedMapping(&lhView, qt: qt)
+                dequantizeHighSignedMapping(&hhView, qt: qt)
+                if blockSize == 32 {
+                    invDwt2d_32(&view)
+                } else {
+                    invDwt2d_16(&view)
+                }
+            }
+            
+            let validEndY = min(height, startY + blockSize)
+            let validEndX = min(width, startX + blockSize)
+            let loopH = validEndY - startY
+            let loopW = validEndX - startX
+            
+            if loopH > 0 && loopW > 0 {
+                blk.withView { v in
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
+                    }
+                }
+            }
+        }
+    }
+    
+    return plane
 }
 
 @inline(__always)
-func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
+func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -563,7 +686,9 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtY) }
-        return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+        let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY)
+        return (buf, reconPlane)
     }()
     
     async let taskBufCb = {
@@ -573,7 +698,9 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtC) }
-        return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+        let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
+        return (buf, reconPlane)
     }()
     
     async let taskBufCr = {
@@ -583,12 +710,16 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices { evaluateQuantizeBase8(block: &blocks[i], qt: qtC) }
-        return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold)
+        let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
+        return (buf, reconPlane)
     }()
 
-    let bufY = await taskBufY
-    let bufCb = await taskBufCb
-    let bufCr = await taskBufCr
+    let (bufY, reconY) = await taskBufY
+    let (bufCb, reconCb) = await taskBufCb
+    let (bufCr, reconCr) = await taskBufCr
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
     
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
@@ -608,7 +739,7 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return out
+    return (out, reconstructed)
 }
 
 // encoder-side reconstruction:
@@ -732,10 +863,38 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> [UInt8] {
-    let (layer2, sub2, subPred2) = try await encodePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-    let (layer1, sub1, subPred1) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-    let layer0 = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    
+    let (layer2, sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await encodePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    let (layer1, sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    
+    // Layer chain reconstruction: Base8 → Layer16 → Layer32
+    // Build Image16 from base reconstruction for boundaryRepeat support
+    let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+    
+    // Layer16: LL = base reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
+    let l1dx = sub2.width
+    let l1dy = sub2.height
+    let l1cbDx = ((l1dx + 1) / 2)
+    let l1cbDy = ((l1dy + 1) / 2)
+    let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY)
+    let reconL1Cb = reconstructPlaneLayer(blocks: l1cbBlocks, prevImg: baseImg, planeType: 1, width: l1cbDx, height: l1cbDy, blockSize: 16, qt: qtC)
+    let reconL1Cr = reconstructPlaneLayer(blocks: l1crBlocks, prevImg: baseImg, planeType: 2, width: l1cbDx, height: l1cbDy, blockSize: 16, qt: qtC)
+    
+    // Build Image16 from Layer16 reconstruction
+    let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
+    
+    // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
+    let reconL2Y = reconstructPlaneLayer(blocks: l2yBlocks, prevImg: l1Img, planeType: 0, width: dx, height: dy, blockSize: 32, qt: qtY)
+    let reconL2Cb = reconstructPlaneLayer(blocks: l2cbBlocks, prevImg: l1Img, planeType: 1, width: cbDx, height: cbDy, blockSize: 32, qt: qtC)
+    let reconL2Cr = reconstructPlaneLayer(blocks: l2crBlocks, prevImg: l1Img, planeType: 2, width: cbDx, height: cbDy, blockSize: 32, qt: qtC)
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: reconL2Y, cb: reconL2Cb, cr: reconL2Cr)
     
     debugLog("  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
     
@@ -749,5 +908,5 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return out
+    return (out, reconstructed)
 }

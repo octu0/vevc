@@ -1685,20 +1685,19 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         if forceIFrame {
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
-            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
             debugLog("[Frame \(i)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
             
-            let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
-            prevReconstructed = PlaneData420(img16: img16)
+            prevReconstructed = reconstructed
             gopCount = 1
         } else {
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
-            let bytes = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
@@ -1751,8 +1750,6 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             let totalBytes = bytes.count + mvOut.count
             debugLog("[Frame \(i)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
             
-            let img16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
-            let reconstructedResidual = PlaneData420(img16: img16)
             if let predicted = predictedPlane {
                 let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
                 prevReconstructed = reconstructed

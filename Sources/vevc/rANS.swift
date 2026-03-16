@@ -182,7 +182,10 @@ struct Interleaved4rANSDecoder {
     private var offset: Int
     
     public init(bitstream: [UInt8]) {
-        self.stream = bitstream
+        // Add padding to eliminate bounds checks in readWord
+        var padded = bitstream
+        padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
+        self.stream = padded
         self.offset = 0
         self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
         
@@ -190,10 +193,10 @@ struct Interleaved4rANSDecoder {
         
         @inline(__always)
         func readState(_ off: Int) -> UInt32 {
-            let b0 = UInt32(bitstream[off])
-            let b1 = UInt32(bitstream[off + 1])
-            let b2 = UInt32(bitstream[off + 2])
-            let b3 = UInt32(bitstream[off + 3])
+            let b0 = UInt32(padded[off])
+            let b1 = UInt32(padded[off + 1])
+            let b2 = UInt32(padded[off + 2])
+            let b3 = UInt32(padded[off + 3])
             return ((b0 << 8) | b1) << 16 | ((b2 << 8) | b3)
         }
         
@@ -218,13 +221,11 @@ struct Interleaved4rANSDecoder {
     
     @inline(__always)
     private mutating func readWord() -> UInt32 {
-        if offset + 1 < stream.count {
-            let b0 = UInt32(stream[offset])
-            let b1 = UInt32(stream[offset + 1])
-            offset += 2
-            return (b0 << 8) | b1
-        }
-        return 0
+        // bounds check eliminated by padding in init
+        let b0 = UInt32(stream[offset])
+        let b1 = UInt32(stream[offset + 1])
+        offset += 2
+        return (b0 << 8) | b1
     }
     
     @inline(__always)
@@ -343,11 +344,7 @@ struct BypassReader {
         ensureBits(1)
         bitsInBuffer -= 1
         let bit = (buffer >> bitsInBuffer) & 1
-        if 0 < bitsInBuffer {
-            buffer &= (1 << bitsInBuffer) - 1
-        } else {
-            buffer = 0
-        }
+        buffer &= (1 << bitsInBuffer) &- 1
         return bit == 1
     }
     
@@ -357,11 +354,7 @@ struct BypassReader {
         ensureBits(count)
         bitsInBuffer -= count
         let value = (buffer >> bitsInBuffer) & ((1 << count) - 1)
-        if 0 < bitsInBuffer {
-            buffer &= (1 << bitsInBuffer) - 1
-        } else {
-            buffer = 0
-        }
+        buffer &= (1 << bitsInBuffer) &- 1
         return UInt16(value)
     }
     

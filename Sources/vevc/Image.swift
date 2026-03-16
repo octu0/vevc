@@ -665,6 +665,14 @@ struct Image16: Sendable {
         self.cr = [Int16](repeating: 0, count: cWidth * cHeight)
     }
     
+    init(width: Int, height: Int, y: [Int16], cb: [Int16], cr: [Int16]) {
+        self.width = width
+        self.height = height
+        self.y = y
+        self.cb = cb
+        self.cr = cr
+    }
+    
     @inline(__always)
     func getY(x: Int, y yPos: Int, size: Int) -> Block2D {
         var block = Block2D(width: size, height: size)
