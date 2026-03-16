@@ -1813,7 +1813,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
             
-            let layer0 = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let (layer0, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x4F, 0x49]) // VEOI
             
@@ -1824,14 +1824,13 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             out.append(contentsOf: chunkOut)
             debugLog("[Frame \(i)] I-Frame (One): \(chunkOut.count) bytes (\(String(format: "%.2f", Double(chunkOut.count) / 1024.0)) KB)")
             
-            let img16 = try await decodeBase32(r: layer0, layer: 0)
-            prevReconstructed = PlaneData420(img16: img16)
+            prevReconstructed = reconstructed
             gopCount = 1
         } else {
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
             let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
             
-            let layer0 = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
 
@@ -1887,8 +1886,6 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             let totalBytes = chunkOut.count + mvOut.count
             debugLog("[Frame \(i)] P-Frame (One): \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(chunkOut.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
             
-            let img16 = try await decodeBase32(r: layer0, layer: 0)
-            let reconstructedResidual = PlaneData420(img16: img16)
             if let predicted = predictedPlane {
                 let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
                 prevReconstructed = reconstructed

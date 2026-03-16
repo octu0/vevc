@@ -144,12 +144,31 @@ extension PlaneData420 {
 
 @inline(__always)
 func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
+    // optimize SIMD UInt8 -> Int16 (-128 offset)
+    @inline(__always)
+    func convertPlane(src: UnsafeBufferPointer<UInt8>, dst: UnsafeMutableBufferPointer<Int16>) {
+        guard let srcPtr = src.baseAddress, let dstPtr = dst.baseAddress else { return }
+        let count = min(src.count, dst.count)
+        var i = 0
+        #if arch(arm64) || arch(x86_64) || arch(wasm32)
+        let offset128 = SIMD8<Int16>(repeating: 128)
+        while i + 8 <= count {
+            let u8 = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<UInt8>.self)
+            let i16 = SIMD8<Int16>(truncatingIfNeeded: u8) &- offset128
+            UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: i16, as: SIMD8<Int16>.self)
+            i += 8
+        }
+        #endif
+        while i < count {
+            dstPtr[i] = Int16(srcPtr[i]) - 128
+            i += 1
+        }
+    }
+
     return images.map { (img: YCbCrImage) in
         let y = [Int16](unsafeUninitializedCapacity: img.yPlane.count) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
             img.yPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
-                for i in 0..<src.count {
-                    buffer[i] = (Int16(src[i]) - 128)
-                }
+                convertPlane(src: src, dst: buffer)
             }
             initializedCount = img.yPlane.count
         }
@@ -204,17 +223,13 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
 
         let cb = [Int16](unsafeUninitializedCapacity: img.cbPlane.count) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
             img.cbPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
-                for i in 0..<src.count {
-                    buffer[i] = (Int16(src[i]) - 128)
-                }
+                convertPlane(src: src, dst: buffer)
             }
             initializedCount = img.cbPlane.count
         }
         let cr = [Int16](unsafeUninitializedCapacity: img.crPlane.count) { (buffer: inout UnsafeMutableBufferPointer<Int16>, initializedCount: inout Int) in
             img.crPlane.withUnsafeBufferPointer { (src: UnsafeBufferPointer<UInt8>) in
-                for i in 0..<src.count {
-                    buffer[i] = (Int16(src[i]) - 128)
-                }
+                convertPlane(src: src, dst: buffer)
             }
             initializedCount = img.crPlane.count
         }
@@ -634,9 +649,9 @@ struct ImageReader: Sendable {
 }
 
 struct Image16: Sendable {
-    var y: [Int16]      // フラット配列: height * width
-    var cb: [Int16]     // フラット配列: cHeight * cWidth
-    var cr: [Int16]     // フラット配列: cHeight * cWidth
+    var y: [Int16]
+    var cb: [Int16]
+    var cr: [Int16]
     let width: Int
     let height: Int
     
