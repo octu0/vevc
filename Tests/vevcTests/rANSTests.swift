@@ -1,8 +1,3 @@
-//
-//  rANSTests.swift
-//  vevcTests
-//
-
 import XCTest
 @testable import vevc
 
@@ -89,9 +84,6 @@ final class rANSTests: XCTestCase {
         let bypassStream = bypassWriter.bytes
         
         let totalRANSSize = ransStream.count + bypassStream.count
-        print("[rANSTests] Compressed Size (rANS): \(totalRANSSize) bytes")
-        
-        // CABACダミーとの比較用サイズは不要になったため削除
         print("[rANSTests] Compressed Size (rANS): \(totalRANSSize) bytes")
         
         // -------- rANS Decode --------

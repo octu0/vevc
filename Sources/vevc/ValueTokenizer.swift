@@ -1,6 +1,6 @@
 import Foundation
 
-public enum ValueTokenizer {
+enum ValueTokenizer {
     
     @inline(__always)
     public static func tokenize(_ value: Int16) -> (isSignificant: Bool, sign: Bool, token: UInt8, bypassBits: UInt16) {

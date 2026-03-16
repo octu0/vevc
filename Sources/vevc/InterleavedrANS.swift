@@ -7,8 +7,7 @@ import Foundation
 
 // MARK: - 4-way Interleaved rANS Encoder
 
-public struct InterleavedrANSEncoder {
-    // 4つの独立した rANS 状態を保持する（エンコード時は可変長に伸びるストリームのため、スカラー配列で管理する方がやりやすい）
+struct InterleavedrANSEncoder {
     public private(set) var states: [UInt32]
     public private(set) var streams: [[UInt16]]
     
@@ -43,8 +42,8 @@ public struct InterleavedrANSEncoder {
         }
     }
     
-    /// 4つのストリームを結合して返す
-    /// フォーマット: [len0(4bytes)][len1(4bytes)][len2(4bytes)][len3(4bytes)][stream0][stream1][stream2][stream3]
+    /// merge 4 streams into a single bitstream
+    /// format: [len0(4bytes)][len1(4bytes)][len2(4bytes)][len3(4bytes)][stream0][stream1][stream2][stream3]
     public func getBitstream() -> [UInt8] {
         var bytes = [UInt8]()
         
@@ -79,9 +78,8 @@ public struct InterleavedrANSEncoder {
 public struct InterleavedrANSDecoder {
     public private(set) var states: SIMD4<UInt32>
     
-    // データストリーム参照
     private let stream: [UInt8]
-    // 4レーンの独立したオフセット
+    // 4 lanes independent offsets
     private var offsets: SIMD4<Int>
     private let limits: SIMD4<Int>
     
@@ -114,13 +112,13 @@ public struct InterleavedrANSDecoder {
         for i in 0..<4 {
             let limit = currentOffset + lens[i]
             if currentOffset + 4 <= limit {
-                // ストリームはエンコーダから逆順(LIFO)で書き出されている。
-                // つまり「最後にフラッシュされたState (4バイト)」が各ストリームブロックの先頭にある。
+                // stream is written in reverse order (LIFO)
+                // so the last flushed state (4 bytes) is at the beginning of each stream block
                 let w1 = (UInt32(bitstream[currentOffset]) << 8) | UInt32(bitstream[currentOffset + 1])
                 let w0 = (UInt32(bitstream[currentOffset + 2]) << 8) | UInt32(bitstream[currentOffset + 3])
                 initStates[i] = (w1 << 16) | w0
                 
-                // 次の Renorm からはこの4バイトの直後から読み始める
+                // next renorm reads from the 4 bytes after this
                 initOffsets[i] = currentOffset + 4
             } else {
                 initStates[i] = 0
@@ -153,7 +151,7 @@ public struct InterleavedrANSDecoder {
         // SIMD Renormalization
         let th = SIMD4<UInt32>(repeating: RANS_L)
         
-        // 1回目の Renorm 試行
+        // first renormalization
         var renormMask = (states .< th) .& boolMask
         if any(renormMask) {
             for lane in 0..<4 {
@@ -170,7 +168,7 @@ public struct InterleavedrANSDecoder {
             }
         }
         
-        // 2回目の Renorm 試行
+        // second renormalization
         renormMask = (states .< th) .& boolMask
         if any(renormMask) {
             for lane in 0..<4 {

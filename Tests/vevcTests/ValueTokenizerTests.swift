@@ -1,8 +1,3 @@
-//
-//  ValueTokenizerTests.swift
-//  vevcTests
-//
-
 import XCTest
 @testable import vevc
 
@@ -61,11 +56,9 @@ final class ValueTokenizerTests: XCTestCase {
     }
     
     func testLosslessWithRandomOutliers() {
-        // ランダムな外れ値を含む配列での可逆変換テスト (Lossless)
         var rng = SystemRandomNumberGenerator()
         
         for _ in 0..<10000 {
-            // Int16の全範囲でのランダム生成
             let original = Int16.random(in: Int16.min...Int16.max, using: &rng)
             
             let t = ValueTokenizer.tokenize(original)
@@ -74,7 +67,6 @@ final class ValueTokenizerTests: XCTestCase {
             XCTAssertEqual(original, restored, "Failed to losslessly transform value: \(original)")
         }
         
-        // 境界値テスト
         let extremes: [Int16] = [Int16.min, Int16.min + 1, Int16.max - 1, Int16.max]
         for original in extremes {
             let t = ValueTokenizer.tokenize(original)

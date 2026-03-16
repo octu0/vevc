@@ -404,8 +404,7 @@ func blockEncodeDPCM8(encoder: inout VEVCEncoder, block: BlockView, lastVal: ino
         return x &- predicted
     }
 
-    var errors = [Int16](repeating: 0, count: 64)
-    errors.withUnsafeMutableBufferPointer { ptrErr in
+    withUnsafeTemporaryAllocation(of: Int16.self, capacity: 64) { ptrErr in
         guard let baseErr = ptrErr.baseAddress else { return }
         
         var last: Int16 = lastVal
@@ -485,8 +484,7 @@ func blockEncodeDPCM16(encoder: inout VEVCEncoder, block: BlockView, lastVal: in
         return x &- predicted
     }
 
-    var errors = [Int16](repeating: 0, count: 256)
-    errors.withUnsafeMutableBufferPointer { ptrErr in
+    withUnsafeTemporaryAllocation(of: Int16.self, capacity: 256) { ptrErr in
         guard let baseErr = ptrErr.baseAddress else { return }
         
         var last: Int16 = lastVal

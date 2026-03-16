@@ -1,6 +1,6 @@
 import Foundation
 
-public struct rANSCompressor {
+struct rANSCompressor {
     public static func compress(_ data: [Int16]) -> [UInt8] {
         if data.isEmpty {
             return []

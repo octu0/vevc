@@ -32,6 +32,17 @@ struct BlockView {
             ptr.update(from: srcBase, count: width)
         }
     }
+
+    @inline(__always)
+    func clearAll() {
+        if width == stride {
+            base.initialize(repeating: 0, count: width * height)
+        } else {
+            for y in 0..<height {
+                rowPointer(y: y).initialize(repeating: 0, count: width)
+            }
+        }
+    }
 }
 
 // MARK: - Block2D

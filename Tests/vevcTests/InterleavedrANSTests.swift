@@ -1,8 +1,3 @@
-//
-//  InterleavedrANSTests.swift
-//  vevcTests
-//
-
 import XCTest
 @testable import vevc
 
@@ -106,10 +101,6 @@ final class InterleavedrANSTests: XCTestCase {
         let invSigFreqVec = SIMD4<UInt32>(repeating: RANS_SCALE - model.sigFreq)
         let zeroVec = SIMD4<UInt32>(repeating: 0)
         
-        // Assemble and verify は measure の外で行うので、
-        // measureブロック内では純粋にデコードだけを行い、値の保存は一番最後（1回だけ実行される場所）で行うか、
-        // 毎回初期化して最後の結果だけを verify するように変更します。
-        
         var finalDecodingResult = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
         
         measure {
@@ -178,7 +169,6 @@ final class InterleavedrANSTests: XCTestCase {
             let forwardLaneTokens = finalDecodingResult[lane]
             
             for t in forwardLaneTokens {
-// ... 続きはそのまま
                 if t.isSignificant {
                     let sign = bypassReaders[lane].readBit()
                     let bypassBits = bypassReaders[lane].readBits(count: Int(t.token))

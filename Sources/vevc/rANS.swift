@@ -1,13 +1,13 @@
 import Foundation
 
-public let RANS_SCALE_BITS: UInt32 = 14
-public let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
-public let RANS_L: UInt32 = 1 << 15
-public let RANS_XMAX: UInt32 = ((RANS_L << 16) - 1)
+let RANS_SCALE_BITS: UInt32 = 14
+let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
+let RANS_L: UInt32 = 1 << 15
+let RANS_XMAX: UInt32 = ((RANS_L << 16) - 1)
 
 // MARK: - rANS Encoder
 
-public struct rANSEncoder {
+struct rANSEncoder {
     public private(set) var state: UInt32
     public private(set) var stream: [UInt16]
     
@@ -51,7 +51,7 @@ public struct rANSEncoder {
 
 // MARK: - rANS Decoder
 
-public struct rANSDecoder {
+struct rANSDecoder {
     public private(set) var state: UInt32
     private let stream: [UInt8]
     private var offset: Int
@@ -99,7 +99,7 @@ public struct rANSDecoder {
 
 // MARK: - Interleaved 4-way rANS Encoder
 
-public struct Interleaved4rANSEncoder {
+struct Interleaved4rANSEncoder {
     public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
     public private(set) var stream: [UInt16]
     
@@ -176,7 +176,7 @@ public struct Interleaved4rANSEncoder {
 
 // MARK: - Interleaved 4-way rANS Decoder
 
-public struct Interleaved4rANSDecoder {
+struct Interleaved4rANSDecoder {
     public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
     private let stream: [UInt8]
     private var offset: Int
@@ -250,7 +250,7 @@ public struct Interleaved4rANSDecoder {
     }
 }
 
-public struct BypassWriter {
+struct BypassWriter {
     public private(set) var bytes: [UInt8]
     private var buffer: UInt32
     private var bitsInBuffer: Int
@@ -314,7 +314,7 @@ public struct BypassWriter {
 
 // MARK: - Bypass Reader
 
-public struct BypassReader {
+struct BypassReader {
     private let bytes: [UInt8]
     private var byteOffset: Int
     private var buffer: UInt32
@@ -373,7 +373,7 @@ public struct BypassReader {
 
 // MARK: - rANS Probability Model
 
-public struct rANSModel {
+struct rANSModel {
     public private(set) var sigFreq: UInt32
     public private(set) var tokenFreqs: [UInt32]
     public private(set) var tokenCumFreqs: [UInt32]

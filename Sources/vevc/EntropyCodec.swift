@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - ContextModel / Legacy CABAC Support (To be removed)
 
-public struct ContextModel {
+struct ContextModel {
     public var pStateIdx: UInt8 = 0
     public var valMPS: UInt8 = 0
     public init() {}
@@ -10,7 +10,7 @@ public struct ContextModel {
 
 // MARK: - VevcEncoder
 
-public struct VEVCEncoder {
+struct VEVCEncoder {
     var bypassWriter: BypassWriter
     public var pairs: [(run: UInt32, val: Int16)]
     public var trailingZeros: UInt32
@@ -40,10 +40,12 @@ public struct VEVCEncoder {
         coeffCount += Int(count)
     }
 
+    @inline(__always)
     public mutating func flush() {
         bypassWriter.flush()
     }
 
+    @inline(__always)
     public mutating func getData() -> [UInt8] {
         var out = [UInt8]()
         out.reserveCapacity(pairs.count * 4 + 128)
@@ -229,7 +231,7 @@ public struct VEVCEncoder {
 
 // MARK: - VevcDecoder
 
-public struct VEVCDecoder {
+struct VEVCDecoder {
     var bypassReader: BypassReader
     public var pairs: [(run: UInt32, val: Int16)]
     private var pairIndex: Int = 0
@@ -375,6 +377,7 @@ public struct VEVCDecoder {
         self.pairs = allPairs
     }
     
+    @inline(__always)
     private static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
         guard offset + 2 <= data.count else { throw DecodeError.insufficientData }
         let bitmap = (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
