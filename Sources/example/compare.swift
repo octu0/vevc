@@ -181,7 +181,7 @@ func createPixelBuffer(from rgba: [PNG.RGBA<UInt8>], width: Int, height: Int) ->
     return buffer
 }
 
-func runH264(images: [ImageInput], config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
     var encTime: Double = 0
     var compSize: Int = 0
     
@@ -191,6 +191,12 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int) asyn
     }
     let frameBox = FrameBox()
     
+    // HWA無効化用のエンコーダ/デコーダ仕様
+    let encoderSpec: CFDictionary? = disableHWA ? ([
+        kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
+        kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
+    ] as CFDictionary) : nil
+    
     // 1. Setup Compression Session
     var compressionSessionOut: VTCompressionSession?
     let status = VTCompressionSessionCreate(
@@ -198,7 +204,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int) asyn
         width: Int32(width),
         height: Int32(height),
         codecType: kCMVideoCodecType_H264,
-        encoderSpecification: nil,
+        encoderSpecification: encoderSpec,
         imageBufferAttributes: nil,
         compressedDataAllocator: nil,
         outputCallback: { (outputCallbackRefCon, _, status, infoFlags, sampleBuffer) in
@@ -269,11 +275,17 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int) asyn
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
+    // HWA無効化用のデコーダ仕様
+    let decoderSpec: CFDictionary? = disableHWA ? ([
+        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
+        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
+    ] as CFDictionary) : nil
+    
     var decompressionSessionOut: VTDecompressionSession?
     let decStatus = VTDecompressionSessionCreate(
         allocator: kCFAllocatorDefault,
         formatDescription: formatDesc,
-        decoderSpecification: nil,
+        decoderSpecification: decoderSpec,
         imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
         outputCallback: nil,
         decompressionSessionOut: &decompressionSessionOut,
@@ -304,7 +316,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int) asyn
 }
 
 // MARK: - HEVC Encode / Decode (VideoToolbox)
-func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
     var encTime: Double = 0
     var compSize: Int = 0
     
@@ -313,6 +325,12 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int) asyn
     }
     let frameBox = FrameBox()
     
+    // HWA無効化用のエンコーダ/デコーダ仕様
+    let encoderSpec: CFDictionary? = disableHWA ? ([
+        kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
+        kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
+    ] as CFDictionary) : nil
+    
     // 1. Setup Compression Session
     var compressionSessionOut: VTCompressionSession?
     let status = VTCompressionSessionCreate(
@@ -320,7 +338,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int) asyn
         width: Int32(width),
         height: Int32(height),
         codecType: kCMVideoCodecType_HEVC,
-        encoderSpecification: nil,
+        encoderSpecification: encoderSpec,
         imageBufferAttributes: nil,
         compressedDataAllocator: nil,
         outputCallback: { (outputCallbackRefCon, _, status, infoFlags, sampleBuffer) in
@@ -389,11 +407,17 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int) asyn
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
+    // HWA無効化用のデコーダ仕様
+    let decoderSpec: CFDictionary? = disableHWA ? ([
+        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
+        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
+    ] as CFDictionary) : nil
+    
     var decompressionSessionOut: VTDecompressionSession?
     let decStatus = VTDecompressionSessionCreate(
         allocator: kCFAllocatorDefault,
         formatDescription: formatDesc,
-        decoderSpecification: nil,
+        decoderSpecification: decoderSpec,
         imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
         outputCallback: nil,
         decompressionSessionOut: &decompressionSessionOut,
@@ -557,11 +581,17 @@ Task {
         print("Running vevc (One)...")
         let vevcOneResult = try await runVEVCOne(images: localImages, config: localConfig)
         
-        print("Running H.264 (VideoToolbox)...")
+        print("Running H.264 (VideoToolbox HWA)...")
         let h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
         
-        print("Running HEVC (VideoToolbox)...")
+        print("Running H.264 (VideoToolbox SW)...")
+        let h264SwResult = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+        
+        print("Running HEVC (VideoToolbox HWA)...")
         let hevcResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+        
+        print("Running HEVC (VideoToolbox SW)...")
+        let hevcSwResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
         
         print("Running MJPEG (VideoToolbox)...")
         let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
@@ -582,8 +612,13 @@ Task {
         print("\n--- Results ---")
         printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
-        printStats(name: "H.264", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB)
-        printStats(name: "HEVC", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        
+        printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+
+        printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        
         printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
         print("---------------")
         
