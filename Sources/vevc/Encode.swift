@@ -10,7 +10,7 @@ public enum EncodeError: Error {
 
 @inline(__always)
 func debugLog(_ msg: String) {
-    FileHandle.standardError.write(Data((msg + "\n").utf8))
+    //FileHandle.standardError.write(Data((msg + "\n").utf8))
 }
 
 @inline(__always)
