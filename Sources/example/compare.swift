@@ -4,8 +4,6 @@ import CoreMedia
 import PNG
 import vevc
 
-// MARK: - CommandLine argument parsing
-let args = CommandLine.arguments
 struct Config {
     var bitrate: Int = 500
     var framerate: Int = 60
@@ -13,57 +11,17 @@ struct Config {
     var gopSize: Int = 15
     var sceneThreshold: Int = 8
     var maxLayer: Int = 2
+    var quality: Bool = false
+    var outputGraph: Bool = false
 }
 
-var config = Config()
-var positionalArgs: [String] = []
-
-var i = 1
-while i < args.count {
-    let arg = args[i]
-    switch arg {
-    case "-bitrate":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.bitrate = v }
-            i += 1
-        }
-    case "-framerate":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.framerate = v }
-            i += 1
-        }
-    case "-zeroThreshold":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.zeroThreshold = v }
-            i += 1
-        }
-    case "-gopSize":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.gopSize = v }
-            i += 1
-        }
-    case "-sceneThreshold":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.sceneThreshold = v }
-            i += 1
-        }
-    case "-maxLayer":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.maxLayer = v }
-            i += 1
-        }
-    default:
-        positionalArgs.append(arg)
-    }
-    i += 1
+struct ImageInput {
+    let vevcImage: YCbCrImage
+    let rgbaFrames: [PNG.RGBA<UInt8>]
+    let width: Int
+    let height: Int
 }
 
-if positionalArgs.isEmpty {
-    print("Usage: compare [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] <input1.png> [input2.png ...]")
-    exit(1)
-}
-
-// MARK: - Utilities
 func readPNG(path: String) -> (image: YCbCrImage, rawData: [PNG.RGBA<UInt8>], width: Int, height: Int)? {
     guard let image: PNG.Image = try? .decompress(path: path) else { return nil }
     let rgba: [PNG.RGBA<UInt8>] = image.unpack(as: PNG.RGBA<UInt8>.self)
@@ -77,41 +35,8 @@ func readPNG(path: String) -> (image: YCbCrImage, rawData: [PNG.RGBA<UInt8>], wi
     }
     return (vevc.rgbaToYCbCr(data: data, width: image.size.x, height: image.size.y), rgba, image.size.x, image.size.y)
 }
-
-struct ImageInput {
-    let vevcImage: YCbCrImage
-    let rgbaFrames: [PNG.RGBA<UInt8>]
-    let width: Int
-    let height: Int
-}
-
-var images: [ImageInput] = []
-for p in positionalArgs {
-    if let imgData = readPNG(path: p) {
-        images.append(ImageInput(vevcImage: imgData.image, rgbaFrames: imgData.rawData, width: imgData.width, height: imgData.height))
-    } else {
-        print("Failed to read \(p)")
-    }
-}
-
-if images.isEmpty {
-    print("No valid input images found.")
-    exit(1)
-}
-
-let width = images[0].width
-let height = images[0].height
-let rawFrameSize = width * height * 4 // RGBA 8bit
-
-print("--- Settings ---")
-print("Input frames   : \(images.count)")
-print("Resolution     : \(width)x\(height)")
-print("Target Bitrate : \(config.bitrate) kbps")
-print("Target FPS     : \(config.framerate)")
-print("----------------")
-
 // MARK: - VEVC Encode / Decode
-func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     let vevcImages = images.map { $0.vevcImage }
     
     // Encode
@@ -122,13 +47,24 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     // Decode
     let opts = vevc.DecodeOptions(maxLayer: config.maxLayer, maxFrames: 4)
     let decStart = Date()
-    let _ = try await vevc.decode(data: outBytes, opts: opts)
+    let outFrames = try await vevc.decode(data: outBytes, opts: opts)
     let decTime = Date().timeIntervalSince(decStart)
     
-    return (encTime, decTime, outBytes.count)
+    var metrics: [QualityMetrics]? = nil
+    if config.quality {
+        var mets = [QualityMetrics]()
+        for i in 0..<min(images.count, outFrames.count) {
+            let psnr = calculatePSNR(img1: images[i].vevcImage, img2: outFrames[i])
+            let ssim = calculateSSIM(img1: images[i].vevcImage, img2: outFrames[i])
+            mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+        }
+        metrics = mets
+    }
+    
+    return (encTime, decTime, outBytes.count, metrics)
 }
 
-func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     let vevcImages = images.map { $0.vevcImage }
     
     // Encode
@@ -138,10 +74,21 @@ func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: 
     
     // Decode
     let decStart = Date()
-    let _ = try await vevc.decodeOne(data: outBytes)
+    let outFrames = try await vevc.decodeOne(data: outBytes)
     let decTime = Date().timeIntervalSince(decStart)
     
-    return (encTime, decTime, outBytes.count)
+    var metrics: [QualityMetrics]? = nil
+    if config.quality {
+        var mets = [QualityMetrics]()
+        for i in 0..<min(images.count, outFrames.count) {
+            let psnr = calculatePSNR(img1: images[i].vevcImage, img2: outFrames[i])
+            let ssim = calculateSSIM(img1: images[i].vevcImage, img2: outFrames[i])
+            mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+        }
+        metrics = mets
+    }
+    
+    return (encTime, decTime, outBytes.count, metrics)
 }
 
 // MARK: - H264 Encode / Decode (VideoToolbox)
@@ -181,13 +128,15 @@ func createPixelBuffer(from rgba: [PNG.RGBA<UInt8>], width: Int, height: Int) ->
     return buffer
 }
 
-func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     var encTime: Double = 0
     var compSize: Int = 0
     
     // We must use a class to capture it safely in the C callback without escaping unsafe pointers.
-    class FrameBox {
+    class FrameBox: @unchecked Sendable {
         var frames: [CMSampleBuffer] = []
+        var decodedBuffers: [Int: CVPixelBuffer] = [:]
+        let lock = NSLock()
     }
     let frameBox = FrameBox()
     
@@ -231,11 +180,17 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
 
     VTCompressionSessionPrepareToEncodeFrames(compressionSession)
     
+    // Pre-create pixel buffers for fair encoding speed comparison
+    var encodeBuffers: [CVPixelBuffer] = []
+    for imgInput in images {
+        if let pb = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) {
+            encodeBuffers.append(pb)
+        }
+    }
+    
     // Encode loop
     let encStart = Date()
-    for (idx, imgInput) in images.enumerated() {
-        guard let pixelBuffer = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) else { continue }
-        
+    for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         // Define frame time
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
         
@@ -263,7 +218,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     
     // 2. Setup Decompression Session
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize) }
+    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil) }
     
     // Need format desc for decompression
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
@@ -295,7 +250,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         throw NSError(domain: "VTDecompressionSessionCreate", code: Int(decStatus), userInfo: nil)
     }
 
-    // Decode loop
+    // Decode loop (Speed Pass)
     let decStart = Date()
     for sample in frameBox.frames {
         var flags: VTDecodeInfoFlags = []
@@ -304,24 +259,69 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
             sampleBuffer: sample,
             flags: [],
             infoFlagsOut: &flags,
-            outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
-                // nop
-            },
+            outputHandler: { (_, _, _, _, _) in }
         )
     }
     VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
     decTime = Date().timeIntervalSince(decStart)
 
-    return (encTime, decTime, compSize)
+    var metrics: [QualityMetrics]? = nil
+    if config.quality {
+        var qualitySessionOut: VTDecompressionSession?
+        let qualityStatus = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: formatDesc,
+            decoderSpecification: decoderSpec,
+            imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
+            outputCallback: nil,
+            decompressionSessionOut: &qualitySessionOut
+        )
+        guard qualityStatus == noErr, let qualitySession = qualitySessionOut else {
+            throw NSError(domain: "VTDecompressionSessionCreate (H264 Quality)", code: Int(qualityStatus), userInfo: nil)
+        }
+        
+        for sample in frameBox.frames {
+            var flags: VTDecodeInfoFlags = []
+            VTDecompressionSessionDecodeFrame(
+                qualitySession,
+                sampleBuffer: sample,
+                flags: [],
+                infoFlagsOut: &flags,
+                outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
+                    if let buf = imageBuffer {
+                        let idx = Int(presentationTimeStamp.value)
+                        frameBox.lock.lock()
+                        frameBox.decodedBuffers[idx] = buf
+                        frameBox.lock.unlock()
+                    }
+                }
+            )
+        }
+        VTDecompressionSessionWaitForAsynchronousFrames(qualitySession)
+
+        var mets = [QualityMetrics]()
+        for i in 0..<images.count {
+            if let buf = frameBox.decodedBuffers[i] {
+                let psnr = calculatePSNR(img1: images[i].vevcImage, bgraBuffer: buf)
+                let ssim = calculateSSIM(img1: images[i].vevcImage, bgraBuffer: buf)
+                mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+            }
+        }
+        metrics = mets
+    }
+
+    return (encTime, decTime, compSize, metrics)
 }
 
 // MARK: - HEVC Encode / Decode (VideoToolbox)
-func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     var encTime: Double = 0
     var compSize: Int = 0
     
-    class FrameBox {
+    class FrameBox: @unchecked Sendable {
         var frames: [CMSampleBuffer] = []
+        var decodedBuffers: [Int: CVPixelBuffer] = [:]
+        let lock = NSLock()
     }
     let frameBox = FrameBox()
     
@@ -366,11 +366,17 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
 
     VTCompressionSessionPrepareToEncodeFrames(compressionSession)
     
+    // Pre-create pixel buffers for fair encoding speed comparison
+    var encodeBuffers: [CVPixelBuffer] = []
+    for imgInput in images {
+        if let pb = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) {
+            encodeBuffers.append(pb)
+        }
+    }
+    
     // Encode loop
     let encStart = Date()
-    for (idx, imgInput) in images.enumerated() {
-        guard let pixelBuffer = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) else { continue }
-        
+    for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
         var flags: VTEncodeInfoFlags = []
         VTCompressionSessionEncodeFrame(
@@ -396,7 +402,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     
     // 2. Setup Decompression Session
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize) }
+    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil) }
     
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
         throw NSError(domain: "CMSampleBufferGetFormatDescription (HEVC)", code: -1, userInfo: nil)
@@ -427,7 +433,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         throw NSError(domain: "VTDecompressionSessionCreate (HEVC)", code: Int(decStatus), userInfo: nil)
     }
 
-    // Decode loop
+    // Decode loop (Speed Pass)
     let decStart = Date()
     for sample in frameBox.frames {
         var flags: VTDecodeInfoFlags = []
@@ -436,24 +442,69 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
             sampleBuffer: sample,
             flags: [],
             infoFlagsOut: &flags,
-            outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
-                // nop
-            },
+            outputHandler: { (_, _, _, _, _) in }
         )
     }
     VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
     decTime = Date().timeIntervalSince(decStart)
 
-    return (encTime, decTime, compSize)
+    var metrics: [QualityMetrics]? = nil
+    if config.quality {
+        var qualitySessionOut: VTDecompressionSession?
+        let qualityStatus = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: formatDesc,
+            decoderSpecification: decoderSpec,
+            imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
+            outputCallback: nil,
+            decompressionSessionOut: &qualitySessionOut
+        )
+        guard qualityStatus == noErr, let qualitySession = qualitySessionOut else {
+            throw NSError(domain: "VTDecompressionSessionCreate (HEVC Quality)", code: Int(qualityStatus), userInfo: nil)
+        }
+        
+        for sample in frameBox.frames {
+            var flags: VTDecodeInfoFlags = []
+            VTDecompressionSessionDecodeFrame(
+                qualitySession,
+                sampleBuffer: sample,
+                flags: [],
+                infoFlagsOut: &flags,
+                outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
+                    if let buf = imageBuffer {
+                        let idx = Int(presentationTimeStamp.value)
+                        frameBox.lock.lock()
+                        frameBox.decodedBuffers[idx] = buf
+                        frameBox.lock.unlock()
+                    }
+                }
+            )
+        }
+        VTDecompressionSessionWaitForAsynchronousFrames(qualitySession)
+        
+        var mets = [QualityMetrics]()
+        for i in 0..<images.count {
+            if let buf = frameBox.decodedBuffers[i] {
+                let psnr = calculatePSNR(img1: images[i].vevcImage, bgraBuffer: buf)
+                let ssim = calculateSSIM(img1: images[i].vevcImage, bgraBuffer: buf)
+                mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+            }
+        }
+        metrics = mets
+    }
+
+    return (encTime, decTime, compSize, metrics)
 }
 
 // MARK: - MJPEG Encode / Decode (VideoToolbox)
-func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int) {
+func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     var encTime: Double = 0
     var compSize: Int = 0
     
-    class FrameBox {
+    class FrameBox: @unchecked Sendable {
         var frames: [CMSampleBuffer] = []
+        var decodedBuffers: [Int: CVPixelBuffer] = [:]
+        let lock = NSLock()
     }
     let frameBox = FrameBox()
     
@@ -490,11 +541,17 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
 
     VTCompressionSessionPrepareToEncodeFrames(compressionSession)
     
+    // Pre-create pixel buffers for fair encoding speed comparison
+    var encodeBuffers: [CVPixelBuffer] = []
+    for imgInput in images {
+        if let pb = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) {
+            encodeBuffers.append(pb)
+        }
+    }
+    
     // Encode loop
     let encStart = Date()
-    for (idx, imgInput) in images.enumerated() {
-        guard let pixelBuffer = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) else { continue }
-        
+    for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
         var flags: VTEncodeInfoFlags = []
         VTCompressionSessionEncodeFrame(
@@ -520,7 +577,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
     
     // 2. Setup Decompression Session
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize) }
+    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil) }
     
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
         throw NSError(domain: "CMSampleBufferGetFormatDescription (MJPEG)", code: -1, userInfo: nil)
@@ -545,7 +602,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         throw NSError(domain: "VTDecompressionSessionCreate (MJPEG)", code: Int(decStatus), userInfo: nil)
     }
 
-    // Decode loop
+    // Decode loop (Speed Pass)
     let decStart = Date()
     for sample in frameBox.frames {
         var flags: VTDecodeInfoFlags = []
@@ -554,19 +611,147 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
             sampleBuffer: sample,
             flags: [],
             infoFlagsOut: &flags,
-            outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
-                // nop
-            },
+            outputHandler: { (_, _, _, _, _) in }
         )
     }
     VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
     decTime = Date().timeIntervalSince(decStart)
 
-    return (encTime, decTime, compSize)
+    var metrics: [QualityMetrics]? = nil
+    if config.quality {
+        var qualitySessionOut: VTDecompressionSession?
+        let qualityStatus = VTDecompressionSessionCreate(
+            allocator: kCFAllocatorDefault,
+            formatDescription: formatDesc,
+            decoderSpecification: nil,
+            imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
+            outputCallback: nil,
+            decompressionSessionOut: &qualitySessionOut
+        )
+        guard qualityStatus == noErr, let qualitySession = qualitySessionOut else {
+            throw NSError(domain: "VTDecompressionSessionCreate (MJPEG Quality)", code: Int(qualityStatus), userInfo: nil)
+        }
+        
+        for sample in frameBox.frames {
+            var flags: VTDecodeInfoFlags = []
+            VTDecompressionSessionDecodeFrame(
+                qualitySession,
+                sampleBuffer: sample,
+                flags: [],
+                infoFlagsOut: &flags,
+                outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
+                    if let buf = imageBuffer {
+                        let idx = Int(presentationTimeStamp.value)
+                        frameBox.lock.lock()
+                        frameBox.decodedBuffers[idx] = buf
+                        frameBox.lock.unlock()
+                    }
+                }
+            )
+        }
+        VTDecompressionSessionWaitForAsynchronousFrames(qualitySession)
+        
+        var mets = [QualityMetrics]()
+        for i in 0..<images.count {
+            if let buf = frameBox.decodedBuffers[i] {
+                let psnr = calculatePSNR(img1: images[i].vevcImage, bgraBuffer: buf)
+                let ssim = calculateSSIM(img1: images[i].vevcImage, bgraBuffer: buf)
+                mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+            }
+        }
+        metrics = mets
+    }
+
+    return (encTime, decTime, compSize, metrics)
 }
 
-// MARK: - Main Execution
-Task {
+
+@main
+struct CompareApp {
+    static func main() async throws {
+let args = CommandLine.arguments
+
+
+var config = Config()
+var positionalArgs: [String] = []
+
+var i = 1
+while i < args.count {
+    let arg = args[i]
+    switch arg {
+    case "-bitrate":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { config.bitrate = v }
+            i += 1
+        }
+    case "-framerate":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { config.framerate = v }
+            i += 1
+        }
+    case "-zeroThreshold":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { config.zeroThreshold = v }
+            i += 1
+        }
+    case "-gopSize":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { config.gopSize = v }
+            i += 1
+        }
+    case "-sceneThreshold":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { config.sceneThreshold = v }
+            i += 1
+        }
+    case "-maxLayer":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { config.maxLayer = v }
+            i += 1
+        }
+    case "-quality":
+        config.quality = true
+    case "-output-graph":
+        config.outputGraph = true
+    default:
+        positionalArgs.append(arg)
+    }
+    i += 1
+}
+
+if positionalArgs.isEmpty {
+    print("Usage: compare [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] <input1.png> [input2.png ...]")
+    exit(1)
+}
+
+
+
+
+var images: [ImageInput] = []
+for p in positionalArgs {
+    if let imgData = readPNG(path: p) {
+        images.append(ImageInput(vevcImage: imgData.image, rgbaFrames: imgData.rawData, width: imgData.width, height: imgData.height))
+    } else {
+        print("Failed to read \(p)")
+    }
+}
+
+if images.isEmpty {
+    print("No valid input images found.")
+    exit(1)
+}
+
+let width = images[0].width
+let height = images[0].height
+let rawFrameSize = width * height * 4 // RGBA 8bit
+
+print("--- Settings ---")
+print("Input frames   : \(images.count)")
+print("Resolution     : \(width)x\(height)")
+print("Target Bitrate : \(config.bitrate) kbps")
+print("Target FPS     : \(config.framerate)")
+print("Quality Check  : \(config.quality)")
+print("----------------")
     // Top-level variables captured inside Task locally to avoid isolation errors
     let localImages = images
     let localConfig = config
@@ -609,7 +794,7 @@ Task {
         print("Running MJPEG (VideoToolbox)...")
         let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
         
-        func printStats(name: String, result: (encTime: Double, decTime: Double, compSize: Int), count: Int, rawSizeKB: Double) {
+        func printStats(name: String, result: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?), count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
             let encMs = result.encTime * 1000
             let decMs = result.decTime * 1000
             let encFps = Double(count) / result.encTime
@@ -620,26 +805,49 @@ Task {
             print(String(format: "  Encode : %7.2f ms (%.2f fps) - %.2f ms / frame", encMs, encFps, encMs / Double(count)))
             print(String(format: "  Decode : %7.2f ms (%.2f fps) - %.2f ms / frame", decMs, decFps, decMs / Double(count)))
             print(String(format: "  Size   : %7.2f KB (%.2f%% of raw %.2f KB)", sizeKB, (sizeKB / rawSizeKB) * 100.0, rawSizeKB))
+            
+            var avgPsnr: Double? = nil
+            var avgSsim: Double? = nil
+            if let stats = calculateQualityStats(metrics: result.metrics ?? []) {
+                avgPsnr = stats.avgPSNR
+                avgSsim = stats.avgSSIM
+                print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f | 50%%: %5.2f | 90%%: %5.2f | SD: %5.2f", 
+                             stats.avgPSNR, stats.minPSNR, stats.maxPSNR, stats.p50PSNR, stats.p90PSNR, stats.stddevPSNR))
+                print(String(format: "  SSIM   : Avg: %5.4f | Min: %5.4f | Max: %5.4f | 50%%: %5.4f | 90%%: %5.4f | SD: %5.4f", 
+                             stats.avgSSIM, stats.minSSIM, stats.maxSSIM, stats.p50SSIM, stats.p90SSIM, stats.stddevSSIM))
+            }
+            
+            return CodecBenchmarkResult(name: name, encTimeMs: encMs / Double(count), decTimeMs: decMs / Double(count), sizeKB: sizeKB, avgPSNR: avgPsnr, avgSSIM: avgSsim)
         }
         
         print("\n--- Results ---")
-        printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
-        printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        var chartResults: [CodecBenchmarkResult] = []
+        chartResults.append(printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+        chartResults.append(printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
         
-        printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
-        printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        chartResults.append(printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+        chartResults.append(printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
 
-        printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB)
-        printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        chartResults.append(printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+        chartResults.append(printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
         
-        printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB)
+        chartResults.append(printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
         print("---------------")
+        
+        if localConfig.outputGraph {
+            if #available(macOS 13.0, *) {
+                await MainActor.run {
+                    generateAndSaveCharts(results: chartResults)
+                }
+            } else {
+                print("Graph output requires macOS 13.0 or newer.")
+            }
+        }
         
     } catch {
         print("Error: \(error)")
         exit(1)
     }
     exit(0)
+    }
 }
-
-RunLoop.main.run()

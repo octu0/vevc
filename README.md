@@ -70,6 +70,24 @@ Spatial information (image resolution) is organized hierarchically as Layer 0 to
 
 ---
 
+## Performance
+
+### Speed & Size
+
+![speed_size](docs/speed_size.png)
+
+SW: Software, HWA: Hardware Acceleration
+
+### PSNR
+
+![psnr](docs/psnr.png)
+
+### SSIM
+
+![ssim](docs/ssim.png)
+
+---
+
 ## Entropy Coding: Interleaved rANS
 
 `vevc` uses **Interleaved 4-way rANS (Asymmetric Numeral Systems)** for entropy coding. rANS provides near-optimal compression and enables SIMD-parallel decoding, unlike CABAC which is inherently serial.
