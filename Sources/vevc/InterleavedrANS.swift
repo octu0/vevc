@@ -1,8 +1,3 @@
-//
-//  InterleavedrANS.swift
-//  vevc
-//
-
 import Foundation
 
 // MARK: - 4-way Interleaved rANS Encoder
@@ -52,7 +47,7 @@ struct InterleavedrANSEncoder {
             lengths[i] = streams[i].count * 2
         }
         
-        // ヘッダ (各ストリームのバイト長)
+        // header (length of each stream)
         for len in lengths {
             let l = UInt32(len)
             bytes.append(UInt8(truncatingIfNeeded: l >> 24))
@@ -61,7 +56,7 @@ struct InterleavedrANSEncoder {
             bytes.append(UInt8(truncatingIfNeeded: l & 0xFF))
         }
         
-        // ボディ (逆順で書き出す: LIFO)
+        // body (reverse order: LIFO)
         for lane in 0..<4 {
             for word in streams[lane].reversed() {
                 bytes.append(UInt8(truncatingIfNeeded: word >> 8)) // BE
@@ -75,7 +70,7 @@ struct InterleavedrANSEncoder {
 
 // MARK: - 4-way Interleaved rANS SIMD Decoder
 
-public struct InterleavedrANSDecoder {
+struct InterleavedrANSDecoder {
     public private(set) var states: SIMD4<UInt32>
     
     private let stream: [UInt8]
