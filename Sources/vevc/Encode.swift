@@ -1657,6 +1657,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         var predictedPlane: PlaneData420? = nil
         var mvs = MotionVectors(count: 0)
         var meanSAD: Int = 0
+        var maxBlockSAD: Int = 0
         
         if gopSize <= gopCount || prevReconstructed == nil {
             forceIFrame = true
@@ -1676,9 +1677,42 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             }
             meanSAD = sumSAD / (res.width * res.height)
             
+            // per-block maxSAD: 各64x64ブロックのSAD最大値を計算
+            // → 局所的な動き推定の失敗を検知する（meanSADでは埋もれる）
+            let mbSize = 64
+            let resMbCols = res.width / mbSize
+            let resMbRows = res.height / mbSize
+            maxBlockSAD = 0
+            res.y.withUnsafeBufferPointer { yBuf in
+                guard let yPtr = yBuf.baseAddress else { return }
+                let stride = res.width
+                for mbY in 0..<resMbRows {
+                    let startY = mbY * mbSize
+                    for mbX in 0..<resMbCols {
+                        let startX = mbX * mbSize
+                        var blockSAD = 0
+                        for by in 0..<mbSize {
+                            let rowOffset = (startY + by) * stride + startX
+                            for bx in 0..<mbSize {
+                                blockSAD += abs(Int(yPtr[rowOffset + bx]))
+                            }
+                        }
+                        if blockSAD > maxBlockSAD {
+                            maxBlockSAD = blockSAD
+                        }
+                    }
+                }
+            }
+            
+            // per-block maxSADによる適応的I-Frame挿入
+            // いずれかのブロック内の平均ピクセル誤差が5以上 → I-Frameを強制挿入
+            let blockSADThreshold = mbSize * mbSize * 5
             if sceneChangeThreshold < meanSAD {
                 forceIFrame = true
-                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high SAD (\(meanSAD) > \(sceneChangeThreshold))")
+                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
+            } else if maxBlockSAD > blockSADThreshold {
+                forceIFrame = true
+                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high maxBlockSAD (\(maxBlockSAD) > \(blockSADThreshold))")
             }
         }
         
@@ -1695,8 +1729,19 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             prevReconstructed = reconstructed
             gopCount = 1
         } else {
-            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
+            // 適応量子化: meanSADが高い（残差が大きい）フレームほど精密に量子化
+            // → 累積劣化（ゴースト）を防止する
+            let qtY: QuantizationTable
+            let qtC: QuantizationTable
+            if meanSAD > 1 {
+                // 動きが大きい: I-Frameと同等の精度で残差を保存
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+            } else {
+                // 動きが小さい: 通常のP-Frame量子化
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+            }
             let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
@@ -1748,7 +1793,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             appendUInt32BE(&out, UInt32(bytes.count))
             out.append(contentsOf: bytes)
             let totalBytes = bytes.count + mvOut.count
-            debugLog("[Frame \(i)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
+            debugLog("[Frame \(i)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) maxBlockSAD=\(maxBlockSAD) [PMV & LSCP applied]")
             
             if let predicted = predictedPlane {
                 let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
@@ -1781,6 +1826,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
         var predictedPlane: PlaneData420? = nil
         var mvs = MotionVectors(count: 0)
         var meanSAD: Int = 0
+        var maxBlockSAD: Int = 0
         
         if gopSize <= gopCount || prevReconstructed == nil {
             forceIFrame = true
@@ -1800,9 +1846,39 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             }
             meanSAD = sumSAD / (res.width * res.height)
             
+            // per-block maxSAD: 各64x64ブロックのSAD最大値を計算
+            let mbSize = 64
+            let resMbCols = res.width / mbSize
+            let resMbRows = res.height / mbSize
+            maxBlockSAD = 0
+            res.y.withUnsafeBufferPointer { yBuf in
+                guard let yPtr = yBuf.baseAddress else { return }
+                let stride = res.width
+                for mbY in 0..<resMbRows {
+                    let startY = mbY * mbSize
+                    for mbX in 0..<resMbCols {
+                        let startX = mbX * mbSize
+                        var blockSAD = 0
+                        for by in 0..<mbSize {
+                            let rowOffset = (startY + by) * stride + startX
+                            for bx in 0..<mbSize {
+                                blockSAD += abs(Int(yPtr[rowOffset + bx]))
+                            }
+                        }
+                        if blockSAD > maxBlockSAD {
+                            maxBlockSAD = blockSAD
+                        }
+                    }
+                }
+            }
+            
+            let blockSADThreshold = mbSize * mbSize * 5
             if sceneChangeThreshold < meanSAD {
                 forceIFrame = true
-                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high SAD (\(meanSAD) > \(sceneChangeThreshold))")
+                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
+            } else if maxBlockSAD > blockSADThreshold {
+                forceIFrame = true
+                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high maxBlockSAD (\(maxBlockSAD) > \(blockSADThreshold))")
             }
         }
         
@@ -1824,8 +1900,16 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             prevReconstructed = reconstructed
             gopCount = 1
         } else {
-            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
+            // 適応量子化: meanSADが高い（残差が大きい）フレームほど精密に量子化
+            let qtY: QuantizationTable
+            let qtC: QuantizationTable
+            if meanSAD > 1 {
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+            } else {
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+            }
             
             let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
