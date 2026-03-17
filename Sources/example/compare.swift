@@ -743,7 +743,6 @@ if images.isEmpty {
 
 let width = images[0].width
 let height = images[0].height
-let rawFrameSize = width * height * 4 // RGBA 8bit
 
 print("--- Settings ---")
 print("Input frames   : \(images.count)")
