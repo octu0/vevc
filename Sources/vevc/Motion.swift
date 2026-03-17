@@ -317,7 +317,6 @@ func estimateMBMEBlockEdge(
             bestDX = currentBestDX
             bestDY = currentBestDY
             bestSAD = currentBestSAD
-
             step /= 2
         }
     }
@@ -325,15 +324,76 @@ func estimateMBMEBlockEdge(
     mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
 }
 
+// MARK: - Subsampled SAD for Coarse Search
+
+/// 64x64ブロックのSADを1行おき（32行分）で計算する。
+/// ダウンスケールバッファを必要としないゼロコストの粗探索用SAD。
+/// 結果は近似値であり、正確なSADの約50%の値を返す。
+@inline(__always)
+func calculateSAD64x64_Subsample(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, currStride: Int, prevStride: Int) -> Int {
+    var sumVec0 = SIMD16<UInt16>()
+    var sumVec1 = SIMD16<UInt16>()
+    var sumVec2 = SIMD16<UInt16>()
+    var sumVec3 = SIMD16<UInt16>()
+
+    // 1行おきに計算（y=0,2,4,...62の32行分）
+    for y in stride(from: 0, to: 64, by: 2) {
+        let currRow = pCurr.advanced(by: y * currStride)
+        let prevRow = pPrev.advanced(by: y * prevStride)
+
+        let c0 = UnsafeRawPointer(currRow).loadUnaligned(as: SIMD16<Int16>.self)
+        let p0 = UnsafeRawPointer(prevRow).loadUnaligned(as: SIMD16<Int16>.self)
+        let c1 = UnsafeRawPointer(currRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p1 = UnsafeRawPointer(prevRow.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let c2 = UnsafeRawPointer(currRow.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p2 = UnsafeRawPointer(prevRow.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let c3 = UnsafeRawPointer(currRow.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p3 = UnsafeRawPointer(prevRow.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+
+        let diff0 = c0 &- p0
+        let mask0 = diff0 &>> 15
+        let abs0 = (diff0 ^ mask0) &- mask0
+
+        let diff1 = c1 &- p1
+        let mask1 = diff1 &>> 15
+        let abs1 = (diff1 ^ mask1) &- mask1
+
+        let diff2 = c2 &- p2
+        let mask2 = diff2 &>> 15
+        let abs2 = (diff2 ^ mask2) &- mask2
+
+        let diff3 = c3 &- p3
+        let mask3 = diff3 &>> 15
+        let abs3 = (diff3 ^ mask3) &- mask3
+
+        sumVec0 &+= SIMD16<UInt16>(truncatingIfNeeded: abs0)
+        sumVec1 &+= SIMD16<UInt16>(truncatingIfNeeded: abs1)
+        sumVec2 &+= SIMD16<UInt16>(truncatingIfNeeded: abs2)
+        sumVec3 &+= SIMD16<UInt16>(truncatingIfNeeded: abs3)
+    }
+
+    let total0 = SIMD16<UInt32>(truncatingIfNeeded: sumVec0).wrappedSum()
+    let total1 = SIMD16<UInt32>(truncatingIfNeeded: sumVec1).wrappedSum()
+    let total2 = SIMD16<UInt32>(truncatingIfNeeded: sumVec2).wrappedSum()
+    let total3 = SIMD16<UInt32>(truncatingIfNeeded: sumVec3).wrappedSum()
+
+    return Int(total0 &+ total1 &+ total2 &+ total3)
+}
+
+// MARK: - estimateMBME (Subsample SAD + PMV)
+
+/// サブサンプリングSADによる高速動き推定。
+/// 従来のステップサーチ構造をそのまま維持し、SADの計算を1行おき（50%計算量）にすることで高速化。
+/// 加えて、PMV（周辺ブロックのMV中央値）を探索開始点として使用し、収束を加速。
+/// デコーダへの出力フォーマットは従来と同一（変更不要）。
 @inline(__always)
 func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
     let mbSize = 64
     let w = curr.width
     let h = curr.height
     let mbCols = (w + mbSize - 1) / mbSize
-    let mbRows = (h + mbSize - 1) / mbSize
 
-    var mvs = MotionVectors(count: mbCols * mbRows)
+    var mvs = MotionVectors(count: mbCols * ((h + mbSize - 1) / mbSize))
 
     let searchRange = 16
 
@@ -347,19 +407,132 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
             let remW = w % mbSize
             let remH = h % mbSize
 
+            // --- フルサイズブロック: サブサンプリングSAD + PMV初期値 ---
             for mbY in 0..<fullMbRows {
                 let startY = mbY * mbSize
                 for mbX in 0..<fullMbCols {
                     let startX = mbX * mbSize
                     let idx = mbY * mbCols + mbX
-                    estimateMBMEBlock64x64(
-                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                        startX: startX, startY: startY, searchRange: searchRange,
-                        mvs: &mvs, mvIdx: idx
-                    )
+
+                    let minSafeDX = max(-1 * searchRange, -startX)
+                    let maxSafeDX = min(searchRange, w - 64 - startX)
+                    let minSafeDY = max(-1 * searchRange, -startY)
+                    let maxSafeDY = min(searchRange, h - 64 - startY)
+
+                    // PMVを探索開始点として活用
+                    let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
+                    var bestDX = max(minSafeDX, min(maxSafeDX, pmv.dx))
+                    var bestDY = max(minSafeDY, min(maxSafeDY, pmv.dy))
+
+                    // 初期SADの計算（サブサンプリング）
+                    var bestSAD: Int
+                    if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
+                        bestSAD = calculateSAD64x64_Subsample(
+                            pCurr: pCurr.advanced(by: startY * w + startX),
+                            pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
+                            currStride: w, prevStride: w
+                        )
+                    } else {
+                        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
+                    }
+
+                    // (0,0)のSADも必ず評価（PMVより良い場合があるため）
+                    if bestDX != 0 || bestDY != 0 {
+                        let zeroSAD = calculateSAD64x64_Subsample(
+                            pCurr: pCurr.advanced(by: startY * w + startX),
+                            pPrev: pPrev.advanced(by: startY * w + startX),
+                            currStride: w, prevStride: w
+                        )
+                        if zeroSAD < bestSAD {
+                            bestSAD = zeroSAD
+                            bestDX = 0
+                            bestDY = 0
+                        }
+                    }
+
+                    // earlyExitの閾値（サブサンプリングは半分の行数なので閾値も調整）
+                    let earlyExitThreshold = 64 * 32 * 2
+                    if earlyExitThreshold < bestSAD {
+                        let negSearchRange = -1 * searchRange
+                        let posSearchRange = searchRange
+
+                        var step = searchRange / 2
+                        while 1 <= step {
+                            var currentBestDX = bestDX
+                            var currentBestDY = bestDY
+                            var currentBestSAD = bestSAD
+
+                            // step==1のとき: フルSADでbestSADを再計算（サブサンプリング→フルの精度補正）
+                            if step == 1 {
+                                if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
+                                    currentBestSAD = calculateSAD64x64(
+                                        pCurr: pCurr.advanced(by: startY * w + startX),
+                                        pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
+                                        currStride: w, prevStride: w
+                                    )
+                                } else {
+                                    currentBestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
+                                }
+                            }
+
+                            for j in -1...1 {
+                                for i in -1...1 {
+                                    if i == 0 && j == 0 { continue }
+
+                                    let dx = bestDX + i * step
+                                    let dy = bestDY + j * step
+
+                                    if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
+
+                                    let diffX = dx >= 0 ? dx : -1 * dx
+                                    let diffY = dy >= 0 ? dy : -1 * dy
+                                    let penalty = diffX + diffY
+                                    if currentBestSAD <= penalty { continue }
+
+                                    let sad: Int
+                                    let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
+                                    if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
+                                        if step == 1 {
+                                            // 最終ステップ: フルSADで精密比較
+                                            sad = calculateSAD64x64(
+                                                pCurr: pCurr.advanced(by: startY * w + startX),
+                                                pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
+                                                currStride: w, prevStride: w
+                                            )
+                                        } else {
+                                            // 粗ステップ: サブサンプリングSADで高速比較
+                                            sad = calculateSAD64x64_Subsample(
+                                                pCurr: pCurr.advanced(by: startY * w + startX),
+                                                pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
+                                                currStride: w, prevStride: w
+                                            )
+                                        }
+                                    } else {
+                                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: dx, dy: dy)
+                                    }
+
+                                    let totalSad = sad &+ penalty
+                                    if totalSad < currentBestSAD {
+                                        currentBestSAD = totalSad
+                                        currentBestDX = dx
+                                        currentBestDY = dy
+                                    }
+                                }
+                            }
+
+                            bestDX = currentBestDX
+                            bestDY = currentBestDY
+                            bestSAD = currentBestSAD
+
+                            step /= 2
+                        }
+                    }
+
+                    mvs.vectors[idx] = SIMD2(Int16(bestDX), Int16(bestDY))
                 }
             }
 
+            // --- 端部ブロック: 従来方式にフォールバック ---
             if 0 < remW {
                 let mbX = fullMbCols
                 let startX = mbX * mbSize
