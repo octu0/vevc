@@ -5,9 +5,9 @@ final class InterleavedrANSTests: XCTestCase {
     
     struct EncodedData {
         let isSignificant: Bool
-        let sign: Bool
         let token: UInt8
         let bypassBits: UInt16
+        let bypassLen: Int
     }
     
     func testInterleavedrANSEncodeDecodeAndPerformance() {
@@ -33,16 +33,17 @@ final class InterleavedrANSTests: XCTestCase {
         tokens.reserveCapacity(count)
         
         var sigCounts: [Int] = [0, 0]
-        var tokenCounts: [Int] = Array(repeating: 0, count: 16)
+        var tokenCounts: [Int] = Array(repeating: 0, count: 32)
         
         for val in testData {
-            let t = ValueTokenizer.tokenize(val)
-            tokens.append(EncodedData(isSignificant: t.isSignificant, sign: t.sign, token: t.token, bypassBits: t.bypassBits))
-            
-            if t.isSignificant {
+            let isSig = val != 0
+            if isSig {
+                let t = ValueTokenizer.tokenize(val)
+                tokens.append(EncodedData(isSignificant: true, token: t.token, bypassBits: t.bypassBits, bypassLen: t.bypassLen))
                 sigCounts[1] += 1
                 tokenCounts[Int(t.token)] += 1
             } else {
+                tokens.append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
                 sigCounts[0] += 1
             }
         }
@@ -83,8 +84,7 @@ final class InterleavedrANSTests: XCTestCase {
             for i in start..<end {
                 let t = tokens[i]
                 if t.isSignificant {
-                    bypassWriters[lane].writeBit(t.sign)
-                    bypassWriters[lane].writeBits(t.bypassBits, count: ValueTokenizer.bypassLength(for: t.token))
+                    bypassWriters[lane].writeBits(t.bypassBits, count: t.bypassLen)
                 }
             }
             bypassWriters[lane].flush()
@@ -170,11 +170,11 @@ final class InterleavedrANSTests: XCTestCase {
             
             for t in forwardLaneTokens {
                 if t.isSignificant {
-                    let sign = bypassReaders[lane].readBit()
-                    let bypassBits = bypassReaders[lane].readBits(count: Int(t.token))
-                    restoredByLane[lane].append(EncodedData(isSignificant: true, sign: sign, token: t.token, bypassBits: bypassBits))
+                    let bypassLen = ValueTokenizer.bypassLength(for: t.token)
+                    let bypassBits = bypassReaders[lane].readBits(count: bypassLen)
+                    restoredByLane[lane].append(EncodedData(isSignificant: true, token: t.token, bypassBits: bypassBits, bypassLen: bypassLen))
                 } else {
-                    restoredByLane[lane].append(EncodedData(isSignificant: false, sign: false, token: 0, bypassBits: 0))
+                    restoredByLane[lane].append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
                 }
             }
         }

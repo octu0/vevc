@@ -5,9 +5,9 @@ final class rANSTests: XCTestCase {
     
     struct EncodedData {
         let isSignificant: Bool
-        let sign: Bool
         let token: UInt8
         let bypassBits: UInt16
+        let bypassLen: Int
     }
     
     func testRANSEncodeDecodeAndCompare() {
@@ -36,16 +36,17 @@ final class rANSTests: XCTestCase {
         tokens.reserveCapacity(count)
         
         var sigCounts: [Int] = [0, 0] // [falseCount, trueCount]
-        var tokenCounts: [Int] = Array(repeating: 0, count: 16)
+        var tokenCounts: [Int] = Array(repeating: 0, count: 32)
         
         for val in testData {
-            let t = ValueTokenizer.tokenize(val)
-            tokens.append(EncodedData(isSignificant: t.isSignificant, sign: t.sign, token: t.token, bypassBits: t.bypassBits))
-            
-            if t.isSignificant {
+            let isSig = val != 0
+            if isSig {
+                let t = ValueTokenizer.tokenize(val)
+                tokens.append(EncodedData(isSignificant: true, token: t.token, bypassBits: t.bypassBits, bypassLen: t.bypassLen))
                 sigCounts[1] += 1
                 tokenCounts[Int(t.token)] += 1
             } else {
+                tokens.append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
                 sigCounts[0] += 1
             }
         }
@@ -61,8 +62,7 @@ final class rANSTests: XCTestCase {
         // Pass 1: Forward for Bypass
         for t in tokens {
             if t.isSignificant {
-                bypassWriter.writeBit(t.sign)
-                bypassWriter.writeBits(t.bypassBits, count: ValueTokenizer.bypassLength(for: t.token))
+                bypassWriter.writeBits(t.bypassBits, count: t.bypassLen)
             }
         }
         bypassWriter.flush()
@@ -118,12 +118,12 @@ final class rANSTests: XCTestCase {
                 
                 decoder.advanceSymbol(cumFreq: tInfo.cumFreq, freq: tInfo.freq)
                 
-                let sign = bypassReader.readBit()
-                let bypassBits = bypassReader.readBits(count: ValueTokenizer.bypassLength(for: tInfo.token))
+                let bypassLen = ValueTokenizer.bypassLength(for: tInfo.token)
+                let bypassBits = bypassReader.readBits(count: bypassLen)
                 
-                restoredTokens.append(EncodedData(isSignificant: true, sign: sign, token: tInfo.token, bypassBits: bypassBits))
+                restoredTokens.append(EncodedData(isSignificant: true, token: tInfo.token, bypassBits: bypassBits, bypassLen: bypassLen))
             } else {
-                restoredTokens.append(EncodedData(isSignificant: false, sign: false, token: 0, bypassBits: 0))
+                restoredTokens.append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
             }
         }
         
@@ -134,7 +134,6 @@ final class rANSTests: XCTestCase {
             let rest = restoredTokens[i]
             XCTAssertEqual(orig.isSignificant, rest.isSignificant, "Mismatch at \(i)")
             if orig.isSignificant {
-                XCTAssertEqual(orig.sign, rest.sign, "Sign mismatch at \(i)")
                 XCTAssertEqual(orig.token, rest.token, "Token mismatch at \(i)")
                 XCTAssertEqual(orig.bypassBits, rest.bypassBits, "BypassBits mismatch at \(i)")
             }

@@ -11,19 +11,21 @@ struct rANSCompressor {
         outData.append(UInt8((data.count >> 8) & 0xFF))
         outData.append(UInt8(data.count & 0xFF))
         
-        var tokenInfos = [(isSignificant: Bool, sign: Bool, token: UInt8, bypassBits: UInt16)]()
+        var tokenInfos = [(isSignificant: Bool, token: UInt8, bypassBits: UInt16, bypassLen: Int)]()
         tokenInfos.reserveCapacity(data.count)
         
         var sigCounts = [1, 1] // [falseCount, trueCount], initialize with 1 to avoid 0 frequency
-        var tokenCounts = [Int](repeating: 1, count: 16)
+        var tokenCounts = [Int](repeating: 1, count: 32)
         
         for v in data {
-            let t = ValueTokenizer.tokenize(v)
-            tokenInfos.append(t)
-            if t.isSignificant {
+            let isSig = v != 0
+            if isSig {
+                let t = ValueTokenizer.tokenize(v)
+                tokenInfos.append((isSignificant: true, token: t.token, bypassBits: t.bypassBits, bypassLen: t.bypassLen))
                 sigCounts[1] += 1
                 tokenCounts[Int(t.token)] += 1
             } else {
+                tokenInfos.append((isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
                 sigCounts[0] += 1
             }
         }
@@ -81,8 +83,7 @@ struct rANSCompressor {
             for i in start..<end {
                 let t = tokenInfos[i]
                 if t.isSignificant {
-                    bypassWriters[lane].writeBit(t.sign)
-                    bypassWriters[lane].writeBits(t.bypassBits, count: ValueTokenizer.bypassLength(for: t.token))
+                    bypassWriters[lane].writeBits(t.bypassBits, count: t.bypassLen)
                 }
             }
             bypassWriters[lane].flush()
@@ -136,8 +137,8 @@ struct rANSCompressor {
         sigCounts[0] = try readUInt32()
         sigCounts[1] = try readUInt32()
         
-        var tokenCounts = [Int](repeating: 0, count: 16)
-        for i in 0..<16 {
+        var tokenCounts = [Int](repeating: 0, count: 32)
+        for i in 0..<32 {
             tokenCounts[i] = try readUInt32()
         }
         
@@ -245,9 +246,9 @@ struct rANSCompressor {
             for i in 0..<size {
                 let t = rANSDecodedByLane[lane][i] // DO NOT EXTRACT IN REVERSE! LIFO pop output is already in original forward order.
                 if t.isSignificant {
-                    let sign = bypassReaders[lane].readBit()
-                    let bypassBits = bypassReaders[lane].readBits(count: Int(t.token))
-                    outCoeffs[start + i] = ValueTokenizer.detokenize(isSignificant: true, sign: sign, token: t.token, bypassBits: bypassBits)
+                    let bypassLen = ValueTokenizer.bypassLength(for: t.token)
+                    let bypassBits = bypassReaders[lane].readBits(count: bypassLen)
+                    outCoeffs[start + i] = ValueTokenizer.detokenize(token: t.token, bypassBits: bypassBits)
                 } else {
                     outCoeffs[start + i] = 0
                 }

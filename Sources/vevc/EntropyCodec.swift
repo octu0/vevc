@@ -71,13 +71,10 @@ struct VEVCEncoder {
                 for _ in 0..<pair.run {
                     rawBypass.writeBit(false)
                 }
-                // for non-zero
                 rawBypass.writeBit(true)
-                rawBypass.writeBit(pair.val < 0)
-                let absVal = UInt32(abs(Int(pair.val))) - 1
-                let result = ValueTokenizer.tokenizeUnsigned(absVal)
-                rawBypass.writeBits(UInt16(result.token), count: 4)
-                rawBypass.writeBits(result.bypassBits, count: result.bypassLen)
+                let valResult = ValueTokenizer.tokenize(pair.val)
+                rawBypass.writeBits(UInt16(valResult.token), count: 5)
+                rawBypass.writeBits(valResult.bypassBits, count: valResult.bypassLen)
             }
             // for trailing zeros
             for _ in 0..<trailingZeros {
@@ -105,8 +102,8 @@ struct VEVCEncoder {
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-        var runTokenCounts = Array(repeating: 0, count: 16)
-        var valTokenCounts = Array(repeating: 0, count: 16)
+        var runTokenCounts = Array(repeating: 0, count: 32)
+        var valTokenCounts = Array(repeating: 0, count: 32)
         
         for lane in 0..<4 {
             let start = chunkStarts[lane]
@@ -126,8 +123,7 @@ struct VEVCEncoder {
                 let valResult = ValueTokenizer.tokenize(pair.val)
                 valTokenCounts[Int(valResult.token)] += 1
                 chunkValTokens[lane].append(valResult.token)
-                chunkBypassWriters[lane].writeBit(valResult.sign)
-                chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: ValueTokenizer.bypassLength(for: valResult.token))
+                chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)
             }
         }
         
@@ -204,16 +200,15 @@ struct VEVCEncoder {
     
     @inline(__always)
     private func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
-        var bitmap: UInt16 = 0
-        for i in 0..<16 {
+        var bitmap: UInt32 = 0
+        for i in 0..<32 {
             if freqs[i] > 1 {
-                bitmap |= UInt16(1 << i)
+                bitmap |= UInt32(1 << i)
             }
         }
-        out.append(UInt8(bitmap >> 8))
-        out.append(UInt8(bitmap & 0xFF))
-        for i in 0..<16 {
-            if (bitmap & UInt16(1 << i)) != 0 {
+        appendUInt32BE(&out, bitmap)
+        for i in 0..<32 {
+            if (bitmap & UInt32(1 << i)) != 0 {
                 out.append(UInt8(truncatingIfNeeded: freqs[i] >> 8))
                 out.append(UInt8(truncatingIfNeeded: freqs[i] & 0xFF))
             }
@@ -273,12 +268,11 @@ struct VEVCDecoder {
             for _ in 0..<coeffCount {
                 let isNonZero = rawReader.readBit()
                 if isNonZero {
-                    let isNeg = rawReader.readBit()
-                    let tokenBits = rawReader.readBits(count: 4)
+                    let tokenBits = rawReader.readBits(count: 5)
                     let token = UInt8(tokenBits)
-                    let bypassBits = rawReader.readBits(count: max(0, Int(token) - 1))
-                    let absVal = Int16(ValueTokenizer.detokenizeUnsigned(token: token, bypassBits: bypassBits)) + 1
-                    let val = isNeg ? -absVal : absVal
+                    let bypassLen = ValueTokenizer.bypassLength(for: token)
+                    let bypassBits = rawReader.readBits(count: bypassLen)
+                    let val = ValueTokenizer.detokenize(token: token, bypassBits: bypassBits)
                     decodedPairs.append((run: zeroRun, val: val))
                     zeroRun = 0
                 } else {
@@ -341,16 +335,17 @@ struct VEVCDecoder {
                 let rtInfo = runModel.findToken(cf: cfRun)
                 ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
                 
-                let runBypassBits = chunkBypassReaders[lane].readBits(count: max(0, Int(rtInfo.token) - 1))
+                let runBypassLen = ValueTokenizer.bypassLengthUnsigned(for: rtInfo.token)
+                let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
                 let zeroRun = UInt32(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
                 
                 let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
                 let vtInfo = valModel.findToken(cf: cfVal)
                 ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
                 
-                let sign = chunkBypassReaders[lane].readBit()
-                let valBypassBits = chunkBypassReaders[lane].readBits(count: ValueTokenizer.bypassLength(for: vtInfo.token))
-                let val = ValueTokenizer.detokenize(isSignificant: true, sign: sign, token: vtInfo.token, bypassBits: valBypassBits)
+                let valBypassLen = ValueTokenizer.bypassLength(for: vtInfo.token)
+                let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
+                let val = ValueTokenizer.detokenize(token: vtInfo.token, bypassBits: valBypassBits)
                 
                 chunkPairs[lane].append((run: zeroRun, val: val))
             }
@@ -361,7 +356,8 @@ struct VEVCDecoder {
                 let rtInfo = runModel.findToken(cf: cfRun)
                 ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
                 
-                let runBypassBits = chunkBypassReaders[lane].readBits(count: max(0, Int(rtInfo.token) - 1))
+                let runBypassLen = ValueTokenizer.bypassLengthUnsigned(for: rtInfo.token)
+                let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
                 let zeroRun = UInt32(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
                 chunkPairs[lane].append((run: zeroRun, val: 0))
             }
@@ -379,13 +375,12 @@ struct VEVCDecoder {
     
     @inline(__always)
     private static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
-        guard offset + 2 <= data.count else { throw DecodeError.insufficientData }
-        let bitmap = (UInt16(data[offset]) << 8) | UInt16(data[offset + 1])
-        offset += 2
+        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
+        let bitmap = vevc.readUInt32BE(data, at: &offset)
         
-        var freqs = [UInt32](repeating: 1, count: 16)
-        for i in 0..<16 {
-            if (bitmap & UInt16(1 << i)) != 0 {
+        var freqs = [UInt32](repeating: 1, count: 32)
+        for i in 0..<32 {
+            if (bitmap & UInt32(1 << i)) != 0 {
                 guard offset + 2 <= data.count else { throw DecodeError.insufficientData }
                 freqs[i] = (UInt32(data[offset]) << 8) | UInt32(data[offset + 1])
                 offset += 2
