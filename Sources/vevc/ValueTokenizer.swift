@@ -3,7 +3,7 @@ import Foundation
 enum ValueTokenizer {
     
     @inline(__always)
-    public static func tokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt16, bypassLen: Int) {
+    public static func tokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
         if value == 0 { return (0, 0, 0) }
         let sign = value < 0
         let absValue = UInt16(value.magnitude)
@@ -20,7 +20,7 @@ enum ValueTokenizer {
         
         let bits = UInt32.bitWidth - v.leadingZeroBitCount
         let subToken = UInt8(bits)
-        let bypass = UInt16(v & ((1 << (bits - 1)) - 1))
+        let bypass = UInt32(v & ((1 << (bits - 1)) - 1))
         let bypassLen = bits - 1
         
         let token = 16 + subToken
@@ -31,7 +31,7 @@ enum ValueTokenizer {
     }
     
     @inline(__always)
-    public static func detokenize(token: UInt8, bypassBits: UInt16) -> Int16 {
+    public static func detokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
         if token < 16 {
             let absValue = (UInt16(token) / 2) + 1
             let isNegative = (token % 2) == 1
@@ -60,7 +60,7 @@ enum ValueTokenizer {
     }
     
     @inline(__always)
-    public static func tokenizeUnsigned(_ value: UInt32) -> (token: UInt8, bypassBits: UInt16, bypassLen: Int) {
+    public static func tokenizeUnsigned(_ value: UInt32) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
         if value < 16 {
             return (UInt8(value), 0, 0)
         }
@@ -72,14 +72,14 @@ enum ValueTokenizer {
         
         let bits = UInt32.bitWidth - v.leadingZeroBitCount
         let subToken = UInt8(bits)
-        let bypass = UInt16(v & ((1 << (bits - 1)) - 1))
+        let bypass = UInt32(v & ((1 << (bits - 1)) - 1))
         let bypassLen = bits - 1
         
         return (16 + subToken, bypass, bypassLen)
     }
     
     @inline(__always)
-    public static func detokenizeUnsigned(token: UInt8, bypassBits: UInt16) -> UInt32 {
+    public static func detokenizeUnsigned(token: UInt8, bypassBits: UInt32) -> UInt32 {
         if token < 16 {
             return UInt32(token)
         }
@@ -99,13 +99,15 @@ enum ValueTokenizer {
     public static func bypassLength(for token: UInt8) -> Int {
         if token < 16 { return 0 }
         if token == 16 { return 1 }
-        return Int(token - 16)
+        let t = min(token, 31)
+        return Int(t - 16)
     }
     
     @inline(__always)
     public static func bypassLengthUnsigned(for token: UInt8) -> Int {
         if token < 16 { return 0 }
         if token == 16 { return 0 }
-        return Int(token - 17)
+        let t = min(token, 31)
+        return Int(t - 17)
     }
 }

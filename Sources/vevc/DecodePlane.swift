@@ -50,7 +50,7 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VEVCDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: dataSlice)
     
     let half = 32 / 2
     
@@ -130,6 +130,10 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var tasks: [(Int, DecodeTask16)] = []
     tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
+        // print if we are close to running out or failing
+        if brFlags.consumedBytes > data.count {
+            print("ERROR: decodePlaneSubbands16 running out of bits! i=\(i)/\(blockCount), consumed=\(brFlags.consumedBytes) dataCount=\(data.count)")
+        }
         let isZero = brFlags.readBit()
         if isZero {
             tasks.append((i, .skip))
@@ -164,7 +168,7 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VEVCDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: dataSlice)
     
     let half = 16 / 2
 
@@ -249,7 +253,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VEVCDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: dataSlice)
     
     let half = 8 / 2
 
@@ -292,7 +296,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VEVCDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: dataSlice)
     
     let half = 8 / 2
 
@@ -341,6 +345,9 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
     var tasks: [(Int, DecodeTaskBase32)] = []
     tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
+        if brFlags.consumedBytes > data.count {
+            print("ERROR: decodePlaneBaseSubbands32 running out of bits! i=\(i)/\(blockCount), consumed=\(brFlags.consumedBytes) dataCount=\(data.count)")
+        }
         let isZero = brFlags.readBit()
         if isZero {
             tasks.append((i, .skip))
@@ -375,7 +382,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
     guard consumed <= data.count else { throw DecodeError.insufficientData }
     let dataSlice = Array(data[consumed...])
     
-    var decoder = try VEVCDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: dataSlice)
     
     let half = 32 / 2
 

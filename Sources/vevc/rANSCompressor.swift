@@ -11,7 +11,7 @@ struct rANSCompressor {
         outData.append(UInt8((data.count >> 8) & 0xFF))
         outData.append(UInt8(data.count & 0xFF))
         
-        var tokenInfos = [(isSignificant: Bool, token: UInt8, bypassBits: UInt16, bypassLen: Int)]()
+        var tokenInfos: [(isSignificant: Bool, token: UInt8, bypassBits: UInt32, bypassLen: Int)] = []
         tokenInfos.reserveCapacity(data.count)
         
         var sigCounts = [1, 1] // [falseCount, trueCount], initialize with 1 to avoid 0 frequency

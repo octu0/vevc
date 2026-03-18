@@ -13,30 +13,36 @@ public enum DecodeError: Error {
 @inline(__always)
 func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
+
+    // encodeSpatialLayers appends layer0, then layer1, then layer2.
+    // So chunks are ordered [layer0, layer1, layer2].
+    
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
     guard (offset + Int(len0)) <= r.count else { throw DecodeError.insufficientData }
-
     let layer0Data = Array(r[offset..<(offset + Int(len0))])
     offset += Int(len0)
     
+    // Base layer (layer 0) is always Base8
     var current = try await decodeBase8(r: layer0Data, layer: 0)
     
     if 1 <= maxLayer {
         let len1 = try readUInt32BEFromBytes(r, offset: &offset)
         guard (offset + Int(len1)) <= r.count else { throw DecodeError.insufficientData }
-
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
+        
         current = try await decodeLayer16(r: layer1Data, layer: 1, prev: current)
     }
+    
     if 2 <= maxLayer {
         let len2 = try readUInt32BEFromBytes(r, offset: &offset)
         guard (offset + Int(len2)) <= r.count else { throw DecodeError.insufficientData }
-
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
+        
         current = try await decodeLayer32(r: layer2Data, layer: 2, prev: current)
     }
+    
     return current
 }
 
@@ -55,7 +61,7 @@ func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
 }
 
 @inline(__always)
-func decodeExpGolomb(decoder: inout VEVCDecoder) throws -> UInt32 {
+func decodeExpGolomb(decoder: inout EntropyDecoder) throws -> UInt32 {
     var bits = 0
     while try decoder.decodeBypass() == 0 {
         bits += 1
@@ -70,13 +76,13 @@ func decodeExpGolomb(decoder: inout VEVCDecoder) throws -> UInt32 {
 }
 
 @inline(__always)
-func decodeCoeffRun(decoder: inout VEVCDecoder) throws -> (Int, Int16) {
+func decodeCoeffRun(decoder: inout EntropyDecoder) throws -> (Int, Int16) {
     let pair = decoder.readPair()
     return (pair.run, pair.val)
 }
 
 @inline(__always)
-func blockDecode32(decoder: inout VEVCDecoder, block: inout BlockView) throws {
+func blockDecode32(decoder: inout EntropyDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -106,7 +112,7 @@ func blockDecode32(decoder: inout VEVCDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode16(decoder: inout VEVCDecoder, block: inout BlockView) throws {
+func blockDecode16(decoder: inout EntropyDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -137,7 +143,7 @@ func blockDecode16(decoder: inout VEVCDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode8(decoder: inout VEVCDecoder, block: inout BlockView) throws {
+func blockDecode8(decoder: inout EntropyDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -167,7 +173,7 @@ func blockDecode8(decoder: inout VEVCDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode4(decoder: inout VEVCDecoder, block: inout BlockView) throws {
+func blockDecode4(decoder: inout EntropyDecoder, block: inout BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -198,7 +204,7 @@ func blockDecode4(decoder: inout VEVCDecoder, block: inout BlockView) throws {
 }
 
 @inline(__always)
-func blockDecodeDPCM4(decoder: inout VEVCDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -254,7 +260,7 @@ func blockDecodeDPCM4(decoder: inout VEVCDecoder, block: inout BlockView, lastVa
 }
 
 @inline(__always)
-func blockDecodeDPCM8(decoder: inout VEVCDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -308,7 +314,7 @@ func blockDecodeDPCM8(decoder: inout VEVCDecoder, block: inout BlockView, lastVa
 }
 
 @inline(__always)
-func blockDecodeDPCM16(decoder: inout VEVCDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -1024,7 +1030,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
             let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
-            var mvBr = try VEVCDecoder(data: mvData)
+            var mvBr = try EntropyDecoder(data: mvData)
 
             let mbSize = 64
             // We need width to compute mbCols. We can infer width from previous frame.
@@ -1100,7 +1106,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
             let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
-            var mvBr = try VEVCDecoder(data: mvData)
+            var mvBr = try EntropyDecoder(data: mvData)
 
             let mbSize = 64
             // We need width to compute mbCols. We can infer width from previous frame.

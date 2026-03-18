@@ -55,7 +55,7 @@ func invDwt2dScalar(_ block: inout BlockView, size: Int) {
     }
 }
 
-func blockEncode(encoder: inout VEVCEncoder, block: BlockView, size: Int) {
+func blockEncode(encoder: inout EntropyEncoder, block: BlockView, size: Int) {
     switch size {
     case 32: blockEncode32(encoder: &encoder, block: block)
     case 16: blockEncode16(encoder: &encoder, block: block)
@@ -64,7 +64,7 @@ func blockEncode(encoder: inout VEVCEncoder, block: BlockView, size: Int) {
     }
 }
 
-func blockDecode(decoder: inout VEVCDecoder, block: inout BlockView, size: Int) throws {
+func blockDecode(decoder: inout EntropyDecoder, block: inout BlockView, size: Int) throws {
     switch size {
     case 32: try blockDecode32(decoder: &decoder, block: &block)
     case 16: try blockDecode16(decoder: &decoder, block: &block)

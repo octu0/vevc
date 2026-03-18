@@ -253,7 +253,7 @@ struct Interleaved4rANSDecoder {
 
 struct BypassWriter {
     public private(set) var bytes: [UInt8]
-    private var buffer: UInt32
+    private var buffer: UInt64
     private var bitsInBuffer: Int
     
     public init() {
@@ -278,9 +278,9 @@ struct BypassWriter {
     }
     
     @inline(__always)
-    public mutating func writeBits(_ value: UInt16, count: Int) {
+    public mutating func writeBits(_ value: UInt32, count: Int) {
         guard 0 < count else { return }
-        buffer = (buffer << count) | UInt32(value & ((1 << count) - 1))
+        buffer = (buffer << count) | UInt64(value & ((1 << count) - 1))
         bitsInBuffer += count
         while bitsInBuffer >= 8 {
             bitsInBuffer -= 8
@@ -318,7 +318,7 @@ struct BypassWriter {
 struct BypassReader {
     private let bytes: [UInt8]
     private var byteOffset: Int
-    private var buffer: UInt32
+    private var buffer: UInt64
     private var bitsInBuffer: Int
     
     public init(data: [UInt8]) {
@@ -333,8 +333,12 @@ struct BypassReader {
     @inline(__always)
     private mutating func ensureBits(_ needed: Int) {
         while bitsInBuffer < needed {
-            buffer = (buffer << 8) | UInt32(bytes[byteOffset])
-            byteOffset += 1
+            if byteOffset < bytes.count {
+                buffer = (buffer << 8) | UInt64(bytes[byteOffset])
+                byteOffset += 1
+            } else {
+                buffer = (buffer << 8) | 0
+            }
             bitsInBuffer += 8
         }
     }
@@ -349,13 +353,13 @@ struct BypassReader {
     }
     
     @inline(__always)
-    public mutating func readBits(count: Int) -> UInt16 {
+    public mutating func readBits(count: Int) -> UInt32 {
         guard 0 < count else { return 0 }
         ensureBits(count)
         bitsInBuffer -= count
         let value = (buffer >> bitsInBuffer) & ((1 << count) - 1)
         buffer &= (1 << bitsInBuffer) &- 1
-        return UInt16(value)
+        return UInt32(value)
     }
     
     public var consumedBytes: Int {
@@ -438,7 +442,6 @@ struct rANSModel {
                 sum += self.tokenFreqs[i]
             }
             
-            if sum != RANS_SCALE {
                 var maxIdx = 0
                 var maxVal = self.tokenFreqs[0]
                 for i in 1..<32 {
@@ -447,12 +450,26 @@ struct rANSModel {
                         maxIdx = i
                     }
                 }
+                
                 if sum < RANS_SCALE {
                     self.tokenFreqs[maxIdx] += (RANS_SCALE - sum)
-                } else if self.tokenFreqs[maxIdx] > (sum - RANS_SCALE) + 1 {
-                    self.tokenFreqs[maxIdx] -= (sum - RANS_SCALE)
+                } else if sum > RANS_SCALE {
+                    var diff = sum - RANS_SCALE
+                    while diff > 0 {
+                        // find the max frequency to subtract from
+                        var currentMaxIdx = 0
+                        var currentMaxVal = self.tokenFreqs[0]
+                        for i in 1..<32 {
+                            if self.tokenFreqs[i] > currentMaxVal {
+                                currentMaxVal = self.tokenFreqs[i]
+                                currentMaxIdx = i
+                            }
+                        }
+                        if currentMaxVal <= 1 { break } // cannot reduce further
+                        self.tokenFreqs[currentMaxIdx] -= 1
+                        diff -= 1
+                    }
                 }
-            }
         }
         
         var cumSum: UInt32 = 0

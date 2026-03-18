@@ -10,7 +10,7 @@ struct ContextModel {
 
 // MARK: - VevcEncoder
 
-struct VEVCEncoder {
+struct EntropyEncoder {
     var bypassWriter: BypassWriter
     public var pairs: [(run: UInt32, val: Int16)]
     public var trailingZeros: UInt32
@@ -73,7 +73,7 @@ struct VEVCEncoder {
                 }
                 rawBypass.writeBit(true)
                 let valResult = ValueTokenizer.tokenize(pair.val)
-                rawBypass.writeBits(UInt16(valResult.token), count: 5)
+                rawBypass.writeBits(UInt32(valResult.token), count: 5)
                 rawBypass.writeBits(valResult.bypassBits, count: valResult.bypassLen)
             }
             // for trailing zeros
@@ -226,7 +226,7 @@ struct VEVCEncoder {
 
 // MARK: - VevcDecoder
 
-struct VEVCDecoder {
+struct EntropyDecoder {
     var bypassReader: BypassReader
     public var pairs: [(run: UInt32, val: Int16)]
     private var pairIndex: Int = 0
@@ -300,10 +300,10 @@ struct VEVCDecoder {
             chunkSizes[lane] = Int(vevc.readUInt32BE(data, at: &offset))
         }
         
-        let runTokenFreqs = try VEVCDecoder.readCompressedFreqTable(data, at: &offset)
+        let runTokenFreqs = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
         let runModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs)
         
-        let valTokenFreqs = try VEVCDecoder.readCompressedFreqTable(data, at: &offset)
+        let valTokenFreqs = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
         let valModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs)
         
         // 4-way bypass data

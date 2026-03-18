@@ -69,10 +69,11 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> 
     let subHeight = (height / 2)
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 32 - 1) / 32)
-    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 8
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
+    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
     DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
         let startRow = (taskIdx * chunkSize)
         let endRow = min((startRow + chunkSize), rowCount)
@@ -88,16 +89,18 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> 
                 }
                 rowResults.append((block, w, h))
             }
-            results.value[i] = (h, rowResults)
+            resultsPtr[i] = (h, rowResults)
         }
     }
+    }
+
     
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
-            guard let res = results.value[i] else { continue }
+            guard let res = resultsArray[i] else { continue }
             for j in res.1.indices {
                 var (llBlock, w, h) = res.1[j]
                 blocks.append(llBlock)
@@ -154,10 +157,11 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
     let subHeight = (height / 2)
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 16 - 1) / 16)
-    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 8
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
+    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
     DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
         let startRow = (taskIdx * chunkSize)
         let endRow = min((startRow + chunkSize), rowCount)
@@ -173,16 +177,18 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
                 }
                 rowResults.append((block, w, h))
             }
-            results.value[i] = (h, rowResults)
+            resultsPtr[i] = (h, rowResults)
         }
     }
+    }
+
     
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 16 - 1) / 16)))
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
-            guard let res = results.value[i] else { continue }
+            guard let res = resultsArray[i] else { continue }
             for j in res.1.indices {
                 var (llBlock, w, h) = res.1[j]
                 blocks.append(llBlock)
@@ -228,10 +234,11 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
 @inline(__always)
 func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) -> [Block2D] {
     let rowCount = ((height + 8 - 1) / 8)
-    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 4
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
+    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
     DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
         let startRow = (taskIdx * chunkSize)
         let endRow = min((startRow + chunkSize), rowCount)
@@ -247,14 +254,16 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
                 }
                 rowResults.append((block, w, h))
             }
-            results.value[i] = (h, rowResults)
+            resultsPtr[i] = (h, rowResults)
         }
     }
+    }
+
     
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 8 - 1) / 8)))
     for i in 0..<rowCount {
-        guard let res = results.value[i] else { continue }
+        guard let res = resultsArray[i] else { continue }
         for j in res.1.indices {
             let (llBlock, _, _) = res.1[j]
             blocks.append(llBlock)
@@ -267,10 +276,11 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
 @inline(__always)
 func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int) -> [Block2D] {
     let rowCount = ((height + 32 - 1) / 32)
-    let results = ConcurrentBox([(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount))
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 4
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
+    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
     DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
         let startRow = (taskIdx * chunkSize)
         let endRow = min((startRow + chunkSize), rowCount)
@@ -286,14 +296,16 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int)
                 }
                 rowResults.append((block, w, h))
             }
-            results.value[i] = (h, rowResults)
+            resultsPtr[i] = (h, rowResults)
         }
     }
+    }
+
     
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
     for i in 0..<rowCount {
-        guard let res = results.value[i] else { continue }
+        guard let res = resultsArray[i] else { continue }
         for j in res.1.indices {
             let (llBlock, _, _) = res.1[j]
             blocks.append(llBlock)
@@ -899,6 +911,7 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     debugLog("  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
     
     var out: [UInt8] = []
+    
     appendUInt32BE(&out, UInt32(layer0.count))
     out.append(contentsOf: layer0)
     

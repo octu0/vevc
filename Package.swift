@@ -9,7 +9,8 @@ var packageProducts: [Product] = [
 ]
 
 var packageDeps: [Package.Dependency] = [
-    .package(url: "https://github.com/tayloraswift/swift-png", from: "4.4.9")
+    .package(url: "https://github.com/tayloraswift/swift-png", from: "4.4.9"),
+    .package(url: "https://github.com/apple/swift-system", from: "1.3.0")
 ]
 
 var packageTargets: [Target] = [
@@ -24,18 +25,28 @@ var packageTargets: [Target] = [
         dependencies: ["vevc"]
     ),
     .executableTarget(
-        name: "vevc-enc",
+        name: "example-enc",
         dependencies: [
             "vevc",
             .product(name: "PNG", package: "swift-png")
-        ]
+        ],
+        path: "Sources/example-enc"
+    ),
+    .executableTarget(
+        name: "example-dec",
+        dependencies: [
+            "vevc",
+            .product(name: "PNG", package: "swift-png")
+        ],
+        path: "Sources/example-dec"
+    ),
+    .executableTarget(
+        name: "vevc-enc",
+        dependencies: ["vevc", .product(name: "SystemPackage", package: "swift-system")]
     ),
     .executableTarget(
         name: "vevc-dec",
-        dependencies: [
-            "vevc",
-            .product(name: "PNG", package: "swift-png")
-        ]
+        dependencies: ["vevc", .product(name: "SystemPackage", package: "swift-system")]
     ),
     .executableTarget(
         name: "compare",

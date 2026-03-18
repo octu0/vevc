@@ -34,7 +34,7 @@ final class CompressionFeatureTests: XCTestCase {
 
     func testLSCPRoundTrip() throws {
         // We will encode and decode a block with many trailing zeros to test LSCP logic
-        var encoder = VEVCEncoder()
+        var encoder = EntropyEncoder()
 
         let size = 8
         var blockData = [Int16](repeating: 0, count: size * size)
@@ -59,7 +59,7 @@ final class CompressionFeatureTests: XCTestCase {
         encoder.flush()
 
         let encodedData = encoder.getData()
-        var decoder = try VEVCDecoder(data: encodedData)
+        var decoder = try EntropyDecoder(data: encodedData)
 
         var outBlock = Block2D(width: size, height: size)
 

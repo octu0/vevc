@@ -8,11 +8,11 @@ public enum EncodeError: Error {
 
 @inline(__always)
 func debugLog(_ message: String) {
-    //print(message)
+    fputs(message + "\n", stderr)
 }
 
 @inline(__always)
-func encodeExpGolomb(val: UInt32, encoder: inout VEVCEncoder) {
+func encodeExpGolomb(val: UInt32, encoder: inout EntropyEncoder) {
     var q = val
     var bits = 0
     while q > 0 {
@@ -29,12 +29,12 @@ func encodeExpGolomb(val: UInt32, encoder: inout VEVCEncoder) {
 }
 
 @inline(__always)
-func encodeCoeffRun(val: Int16, encoder: inout VEVCEncoder, run: Int) {
+func encodeCoeffRun(val: Int16, encoder: inout EntropyEncoder, run: Int) {
     encoder.addPair(run: UInt32(run), val: val)
 }
 
 @inline(__always)
-func blockEncode32(encoder: inout VEVCEncoder, block: BlockView) {
+func blockEncode32(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero16 = SIMD16<Int16>(repeating: 0)
@@ -91,7 +91,7 @@ func blockEncode32(encoder: inout VEVCEncoder, block: BlockView) {
 }
 
 @inline(__always)
-func blockEncode16(encoder: inout VEVCEncoder, block: BlockView) {
+func blockEncode16(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -148,7 +148,7 @@ func blockEncode16(encoder: inout VEVCEncoder, block: BlockView) {
 }
 
 @inline(__always)
-func blockEncode8(encoder: inout VEVCEncoder, block: BlockView) {
+func blockEncode8(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -205,7 +205,7 @@ func blockEncode8(encoder: inout VEVCEncoder, block: BlockView) {
 }
 
 @inline(__always)
-func blockEncode4(encoder: inout VEVCEncoder, block: BlockView) {
+func blockEncode4(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero2 = SIMD2<Int16>(repeating: 0)
@@ -301,7 +301,7 @@ func getSubbands8(view: BlockView) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM4(encoder: inout VEVCEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     let ptr0 = block.rowPointer(y: 0)
     let ptr1 = block.rowPointer(y: 1)
     let ptr2 = block.rowPointer(y: 2)
@@ -387,7 +387,7 @@ func blockEncodeDPCM4(encoder: inout VEVCEncoder, block: BlockView, lastVal: ino
 }
 
 @inline(__always)
-func blockEncodeDPCM8(encoder: inout VEVCEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -467,7 +467,7 @@ func blockEncodeDPCM8(encoder: inout VEVCEncoder, block: BlockView, lastVal: ino
 }
 
 @inline(__always)
-func blockEncodeDPCM16(encoder: inout VEVCEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -919,7 +919,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VEVCEncoder()
+    var encoder = EntropyEncoder()
     
     for (i, task) in tasks {
         blocks[i].withView { view in
@@ -1021,7 +1021,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VEVCEncoder()
+    var encoder = EntropyEncoder()
     
     for (i, task) in tasks {
         blocks[i].withView { view in
@@ -1095,7 +1095,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
     bwFlags.flush()
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VEVCEncoder()
+    var encoder = EntropyEncoder()
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
@@ -1133,7 +1133,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
     bwFlags.flush()
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VEVCEncoder()
+    var encoder = EntropyEncoder()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -1211,7 +1211,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     bwFlags.flush()
     debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = VEVCEncoder()
+    var encoder = EntropyEncoder()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {
@@ -1784,7 +1784,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
-            var mvBw = VEVCEncoder()
+            var mvBw = EntropyEncoder()
 
             let mbCols = (curr.width + mbSize - 1) / mbSize
             for mvIdx in 0..<mvs.vectors.count {
@@ -1922,7 +1922,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             
             out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
 
-            var mvBw = VEVCEncoder()
+            var mvBw = EntropyEncoder()
 
             let mbCols = (curr.width + mbSize - 1) / mbSize
             for mvIdx in 0..<mvs.vectors.count {

@@ -724,9 +724,6 @@ if positionalArgs.isEmpty {
     exit(1)
 }
 
-
-
-
 var images: [ImageInput] = []
 for p in positionalArgs {
     if let imgData = readPNG(path: p) {

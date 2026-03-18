@@ -1,23 +1,22 @@
 import Foundation
-import PNG
 import vevc
 
-let args = CommandLine.arguments
+var inputPath = ""
+var outPath = ""
 var bitrate = 500
-var positionalArgs: [String] = []
-var outPath = "a.vevc"
-var zeroThreshold = 0
+var zeroThreshold = 3
 var gopSize = 15
 var sceneThreshold = 8
 var isOne = false
 
+let args = CommandLine.arguments
 var i = 1
 while i < args.count {
     let arg = args[i]
     switch arg {
-    case "-bitrate":
+    case "-i":
         if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { bitrate = v }
+            inputPath = args[i + 1]
             i += 1
         }
     case "-o":
@@ -25,14 +24,19 @@ while i < args.count {
             outPath = args[i + 1]
             i += 1
         }
+    case "-b":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { bitrate = v }
+            i += 1
+        }
+    case "-I":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { gopSize = v }
+            i += 1
+        }
     case "-zeroThreshold":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { zeroThreshold = v }
-            i += 1
-        }
-    case "-gopSize":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { gopSize = v }
             i += 1
         }
     case "-sceneThreshold":
@@ -43,73 +47,70 @@ while i < args.count {
     case "-one":
         isOne = true
     default:
-        positionalArgs.append(arg)
+        ()
     }
     i += 1
 }
 
-if positionalArgs.isEmpty {
-    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-one] <input1.png> [input2.png ...]")
+if inputPath.isEmpty || outPath.isEmpty {
+    fputs("Usage: vevc-enc [-one] -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-I <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>]\n", stderr)
     exit(1)
 }
 
-func readPNG(path: String) -> YCbCrImage? {
-    guard let image: PNG.Image = try? .decompress(path: path) else { return nil }
-    let rgba: [PNG.RGBA<UInt8>] = image.unpack(as: PNG.RGBA<UInt8>.self)
-    var data = [UInt8](repeating: 0, count: rgba.count * 4)
-    for j in 0..<rgba.count {
-        let offset = j * 4
-        data[offset + 0] = rgba[j].r
-        data[offset + 1] = rgba[j].g
-        data[offset + 2] = rgba[j].b
-        data[offset + 3] = rgba[j].a
-    }
-    return vevc.rgbaToYCbCr(data: data, width: image.size.x, height: image.size.y)
-}
-
-var images: [YCbCrImage] = []
-for p in positionalArgs {
-    if let img = readPNG(path: p) {
-        images.append(img)
-    } else {
-        print("Failed to read \(p)")
-    }
-}
-
 do {
+    let inFileHandle: FileHandle
+    if inputPath == "-" {
+        inFileHandle = FileHandle.standardInput
+    } else {
+        guard let f = FileHandle(forReadingAtPath: inputPath) else {
+            fputs("Failed to read \(inputPath)\n", stderr)
+            exit(1)
+        }
+        inFileHandle = f
+    }
+
+    let outFileHandle: FileHandle
+    if outPath == "-" {
+        outFileHandle = FileHandle.standardOutput
+    } else {
+        FileManager.default.createFile(atPath: outPath, contents: nil, attributes: nil)
+        guard let f = FileHandle(forWritingAtPath: outPath) else {
+            fputs("Failed to write to \(outPath)\n", stderr)
+            exit(1)
+        }
+        outFileHandle = f
+    }
+
+    let y4mReader = try Y4MReader(fileHandle: inFileHandle)
+    let encoder = vevc.Encoder(
+        width: y4mReader.width,
+        height: y4mReader.height,
+        maxbitrate: bitrate * 1000,
+        zeroThreshold: zeroThreshold,
+        gopSize: gopSize,
+        sceneChangeThreshold: sceneThreshold,
+        isOne: isOne
+    )
+
+    var frameCount = 0
     let startTime = Date()
-    let out: [UInt8]
-    if isOne {
-        out = try await vevc.encodeOne(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize, sceneChangeThreshold: sceneThreshold)
-    } else {
-        out = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize, sceneChangeThreshold: sceneThreshold)
+
+    while let image = try y4mReader.readFrame() {
+        let chunk = try await encoder.encode(image: image)
+        outFileHandle.write(Data(chunk))
+        frameCount += 1
     }
+
     let elapsed = Date().timeIntervalSince(startTime)
-    
-    let dataSize: Int
-    if images.isEmpty != true {
-        let first = images[0]
-        dataSize = images.count * first.width * first.height * 3
-    } else {
-        dataSize = 0
+    if outPath != "-" {
+        let msPerFrame = frameCount > 0 ? (elapsed * 1000 / Double(frameCount)) : 0
+        let logMsg = String(format: "Encoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, elapsed * 1000, msPerFrame)
+        fputs(logMsg, stderr)
     }
-    
-    print(String(
-        format:"elapse= %.4fms (%.4fms/frame) %3.2fKB -> %3.2fKB compressed %3.2f%%",
-        elapsed * 1000,
-        elapsed * 1000 / Double(images.count),
-        Double(dataSize) / 1024.0,
-        Double(out.count) / 1024.0,
-        Double(out.count) / Double(dataSize) * 100.0
-    ))
-    
-    if FileManager.default.createFile(atPath: outPath, contents: Data(out)) {
-        print("Successfully encoded \(images.count) frames to \(outPath)")
-    } else {
-        print("Failed to write \(outPath)")
-        exit(1)
-    }
+
+    inFileHandle.closeFile()
+    outFileHandle.closeFile()
 } catch {
-    print("Failed to encode: \(error)")
+    fputs("Failed to encode: \(error)\n", stderr)
     exit(1)
 }

@@ -1,14 +1,13 @@
 import Foundation
-import PNG
 import vevc
 
-let args = CommandLine.arguments
 var inputPath = ""
-var outDir = ".out/"
+var outPath = ""
 var maxLayer = 2
 var maxFrames = 4
 var isOne = false
 
+let args = CommandLine.arguments
 var i = 1
 while i < args.count {
     let arg = args[i]
@@ -20,7 +19,7 @@ while i < args.count {
         }
     case "-o":
         if (i + 1) < args.count {
-            outDir = args[i + 1]
+            outPath = args[i + 1]
             i += 1
         }
     case "-maxLayer":
@@ -41,57 +40,72 @@ while i < args.count {
     i += 1
 }
 
-if inputPath.isEmpty {
-    print("Usage: vevc-dec -i <input.vevc> [-o output_dir] [-maxLayer 0-2] [-maxFrames 1|2|4] [-one]")
-    exit(1)
-}
-
-guard let inputData = try? Data(contentsOf: URL(fileURLWithPath: inputPath)) else {
-    print("Failed to read \(inputPath)")
+if inputPath.isEmpty || outPath.isEmpty {
+    fputs("Usage: vevc-dec [-one] -i </path/to/input.vevc | -> -o </path/to/output.y4m | -> [-maxLayer 0-2] [-maxFrames 1|2|4]\n", stderr)
     exit(1)
 }
 
 do {
-    let startTime = Date()
-    let images: [YCbCrImage]
-    if isOne {
-        images = try await vevc.decodeOne(data: Array(inputData))
+    let inFileHandle: FileHandle
+    if inputPath == "-" {
+        inFileHandle = FileHandle.standardInput
     } else {
-        let opts = vevc.DecodeOptions(maxLayer: maxLayer, maxFrames: maxFrames)
-        images = try await vevc.decode(data: Array(inputData), opts: opts)
-    }
-    let elapsed = Date().timeIntervalSince(startTime)
-    print(String(
-        format: "Decoded %d frames in %.4fms (%.4fms/frame)",
-        images.count,
-        elapsed * 1000,
-        elapsed * 1000 / Double(images.count),
-    ))
-    
-    let outputURL: URL = URL(fileURLWithPath: outDir).standardized
-
-    try? FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
-
-    for (idx, img) in images.enumerated() {
-        let rgba: [UInt8] = vevc.ycbcrToRGBA(img: img)
-        let imgSize: (x: Int, y: Int) = (x: img.width, y: img.height)
-        let layout: PNG.Layout = .init(format: .rgba8(palette: [], fill: nil))
-
-        var packed: [PNG.RGBA<UInt8>] = []
-        packed.reserveCapacity(img.width * img.height)
-        let total: Int = img.width * img.height
-        for j: Int in 0..<total {
-            let offset: Int = j * 4
-            packed.append(PNG.RGBA<UInt8>(rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]))
+        guard let f = FileHandle(forReadingAtPath: inputPath) else {
+            fputs("Failed to read \(inputPath)\n", stderr)
+            exit(1)
         }
-
-        let ppng: PNG.Image = PNG.Image(packing: packed, size: imgSize, layout: layout)
-        let fileName: String = "frame_\(String(format: "%04d", idx)).png"
-        let fileURL: URL = outputURL.appendingPathComponent(fileName)
-        try ppng.compress(path: fileURL.path)
-        print("Saved \(fileURL.path)")
+        inFileHandle = f
     }
+
+    let outFileHandle: FileHandle
+    if outPath == "-" {
+        outFileHandle = FileHandle.standardOutput
+    } else {
+        FileManager.default.createFile(atPath: outPath, contents: nil, attributes: nil)
+        guard let f = FileHandle(forWritingAtPath: outPath) else {
+            fputs("Failed to write to \(outPath)\n", stderr)
+            exit(1)
+        }
+        outFileHandle = f
+    }
+
+    let vevcReader = VEVCReader(fileHandle: inFileHandle)
+    
+    let layerToUse = isOne ? 0 : maxLayer
+    let decoder = vevc.Decoder(maxLayer: layerToUse)
+    
+    var y4mWriter: Y4MWriter? = nil
+
+    var frameCount = 0
+    let startTime = Date()
+
+    while let chunk = try vevcReader.readFrameChunk() {
+        let image = try await decoder.decode(chunk: chunk)
+        
+        if y4mWriter == nil {
+            y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height)
+        }
+        
+        try y4mWriter?.writeFrame(image)
+        frameCount += 1
+    }
+
+    let elapsed = Date().timeIntervalSince(startTime)
+    if outPath != "-" {
+        let msPerFrame = frameCount > 0 ? (elapsed * 1000 / Double(frameCount)) : 0
+        let logMsg = String(format: "Decoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, elapsed * 1000, msPerFrame)
+        fputs(logMsg, stderr)
+    }
+
+    inFileHandle.closeFile()
+    outFileHandle.closeFile()
+} catch let error as vevc.DecodeError {
+    fputs("Failed to decode: DecodeError \(error)\n", stderr)
+    exit(1)
+} catch let error as vevc.VEVCReaderError {
+    fputs("Failed to decode: VEVCReaderError \(error)\n", stderr)
+    exit(1)
 } catch {
-    print("Failed to decode: \(error)")
+    fputs("Failed to decode: \(error.localizedDescription) (\(error))\n", stderr)
     exit(1)
 }
