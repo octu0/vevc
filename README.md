@@ -72,6 +72,8 @@ Spatial information (image resolution) is organized hierarchically as Layer 0 to
 
 ## Performance
 
+*(Tested with 640x480, 60 frames, target 500 kbps)*
+
 ### Speed & Size
 
 ![speed_size](docs/speed_size.png)
@@ -85,20 +87,6 @@ SW: Software, HWA: Hardware Acceleration
 ### SSIM
 
 ![ssim](docs/ssim.png)
-
-### Benchmark Results
-
-*(Tested with 640x480, 60 frames, target 500 kbps)*
-
-| Codec | Encode | Decode | Size | PSNR (Avg) | SSIM (Avg) |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **VEVC** | 128.03 ms (468.65 fps) | 57.81 ms (1037.95 fps) | 240.69 KB | 52.73 | 0.9989 |
-| **VEVC (One)** | 70.43 ms (851.91 fps) | 45.38 ms (1322.11 fps) | 148.16 KB | 64.93 | 0.9999 |
-| **H.264 (SW)** | 124.94 ms (480.25 fps) | 35.76 ms (1678.04 fps) | 94.20 KB | 27.44 | 0.9861 |
-| **HEVC (SW)** | 1838.03 ms (32.64 fps) | 32.32 ms (1856.66 fps) | 35.04 KB | 29.09 | 0.9926 |
-| **H.264 (HWA)** | 77.25 ms (776.67 fps) | 35.75 ms (1678.18 fps) | 70.53 KB | 27.99 | 0.9820 |
-| **HEVC (HWA)** | 80.64 ms (744.02 fps) | 34.13 ms (1758.19 fps) | 32.27 KB | 29.20 | 0.9924 |
-| **MJPEG** | 18.88 ms (3177.96 fps) | 36.15 ms (1659.85 fps) | 544.49 KB | 29.00 | 0.9925 |
 
 ---
 
