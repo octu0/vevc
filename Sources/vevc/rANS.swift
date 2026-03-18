@@ -419,14 +419,21 @@ struct rANSModel {
         if totalTokens == 0 {
             self.tokenFreqs = Array(repeating: RANS_SCALE / 32, count: 32)
         } else {
+            // 未使用トークン数をカウントし、有効トークンへのスケール配分を最大化
+            var zeroCount: UInt32 = 0
+            for i in 0..<32 {
+                if tokenCounts[i] == 0 { zeroCount += 1 }
+            }
+            // 未使用トークンは最小freq=1を割り当て、残りを有効トークンに配分
+            let availableScale = RANS_SCALE - zeroCount
+            
             var sum: UInt32 = 0
             for i in 0..<32 {
                 let count = tokenCounts[i]
                 if count == 0 {
                     self.tokenFreqs[i] = 1
                 } else {
-                    let maxVal = RANS_SCALE - 32
-                    self.tokenFreqs[i] = max(1, UInt32((Int(maxVal) * count) / totalTokens))
+                    self.tokenFreqs[i] = max(1, UInt32((Int(availableScale) * count) / totalTokens))
                 }
                 sum += self.tokenFreqs[i]
             }

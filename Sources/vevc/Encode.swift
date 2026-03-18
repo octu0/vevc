@@ -1630,7 +1630,7 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
         
     let ratio = estimatedTotalBits / Double(targetBits)
-    let predictedStep = Double(probeStep) * ratio * 1.5
+    let predictedStep = Double(probeStep) * ratio * 3.5
     let q = Int(max(1, predictedStep))
     
     return QuantizationTable(baseStep: q)
@@ -1755,7 +1755,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         
         if forceIFrame {
             let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
             let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
@@ -1777,8 +1777,8 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
                 qtC = QuantizationTable(baseStep: max(1, Int(qt.step)))
             } else {
                 // 動きが小さい: 通常のP-Frame量子化
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 6))
             }
             let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
@@ -1849,7 +1849,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
 public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     
-    let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
+    // VEVC Oneは単層(Base32)のため、マルチレイヤVEVCより量子化ステップを大きくする
+    let baseQt = estimateQuantization(img: images[0], targetBits: maxbitrate)
+    let qt = QuantizationTable(baseStep: max(1, Int(Double(baseQt.step) * 1.5)))
     var out: [UInt8] = []
     
     var prevReconstructed: PlaneData420? = nil
@@ -1887,8 +1889,8 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
         }
         
         if forceIFrame {
-            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 6))
             
             let (layer0, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
@@ -1909,11 +1911,11 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int 
             let qtC: QuantizationTable
             let fineQuantizationThreshold = mbSize * mbSize * 1 // 64x64ブロック内の平均誤差が1以上(4096)
             if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) / 2))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
             } else {
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
             }
             
             let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
