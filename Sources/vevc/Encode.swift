@@ -8,7 +8,7 @@ public enum EncodeError: Error {
 
 @inline(__always)
 func debugLog(_ message: String) {
-    fputs(message + "\n", stderr)
+    // fputs(message + "\n", stderr)
 }
 
 @inline(__always)

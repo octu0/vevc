@@ -221,11 +221,14 @@ struct Interleaved4rANSDecoder {
     
     @inline(__always)
     private mutating func readWord() -> UInt32 {
-        // bounds check eliminated by padding in init
-        let b0 = UInt32(stream[offset])
-        let b1 = UInt32(stream[offset + 1])
-        offset += 2
-        return (b0 << 8) | b1
+        if offset + 1 < stream.count {
+            let b0 = UInt32(stream[offset])
+            let b1 = UInt32(stream[offset + 1])
+            offset += 2
+            return (b0 << 8) | b1
+        } else {
+            return 0
+        }
     }
     
     @inline(__always)
