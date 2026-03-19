@@ -482,67 +482,100 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
         return x &- predicted
     }
 
-    withUnsafeTemporaryAllocation(of: Int16.self, capacity: 256) { ptrErr in
-        guard let baseErr = ptrErr.baseAddress else { return }
-        
-        var last: Int16 = lastVal
-        for y in 0..<16 {
-            let ptrY = block.rowPointer(y: y)
-            let rowOffset = y * 16
-            if y == 0 {
-                for x in 0..<16 {
-                    if x == 0 {
-                        baseErr[rowOffset + 0] = ptrY[0] &- last
-                    } else {
-                        baseErr[rowOffset + x] = ptrY[x] &- ptrY[x - 1]
-                    }
-                }
-            } else {
-                let ptrPrevY = block.rowPointer(y: y - 1)
-                for x in 0..<16 {
-                    if x == 0 {
-                        baseErr[rowOffset + 0] = ptrY[0] &- ptrPrevY[0]
-                    } else {
-                        baseErr[rowOffset + x] = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                    }
-                }
-            }
-            last = ptrY[15]
-        }
-        
-        var lscpIdx = -1
-        for i in stride(from: 255, through: 0, by: -1) {
-            if baseErr[i] != 0 {
-                lscpIdx = i
-                break
-            }
-        }
-        
-        if lscpIdx == -1 {
-            encoder.encodeBypass(binVal: 0)
-            let ptrY = block.rowPointer(y: 15)
-            lastVal = ptrY[15]
-            return
-        }
+    let originalLastVal = lastVal
+    var lscpIdx = -1
+    var last: Int16 = originalLastVal
 
-        encoder.encodeBypass(binVal: 1)
-        let lscpX = UInt32(lscpIdx % 16)
-        let lscpY = UInt32(lscpIdx / 16)
-        encodeExpGolomb(val: lscpX, encoder: &encoder)
-        encodeExpGolomb(val: lscpY, encoder: &encoder)
-        
-        lastVal = last
-        
-        var run = 0
-        for i in 0...lscpIdx {
-            let diff = baseErr[i]
-            if diff == 0 {
-                run += 1
-            } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
-                run = 0
+    for y in 0..<16 {
+        let ptrY = block.rowPointer(y: y)
+        if y == 0 {
+            for x in 0..<16 {
+                let diff: Int16
+                if x == 0 {
+                    diff = ptrY[0] &- last
+                } else {
+                    diff = ptrY[x] &- ptrY[x - 1]
+                }
+                if diff != 0 {
+                    lscpIdx = y * 16 + x
+                }
+            }
+        } else {
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            for x in 0..<16 {
+                let diff: Int16
+                if x == 0 {
+                    diff = ptrY[0] &- ptrPrevY[0]
+                } else {
+                    diff = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                }
+                if diff != 0 {
+                    lscpIdx = y * 16 + x
+                }
             }
         }
+        last = ptrY[15]
+    }
+
+    if lscpIdx == -1 {
+        encoder.encodeBypass(binVal: 0)
+        let ptrY = block.rowPointer(y: 15)
+        lastVal = ptrY[15]
+        return
+    }
+
+    encoder.encodeBypass(binVal: 1)
+    let lscpX = UInt32(lscpIdx % 16)
+    let lscpY = UInt32(lscpIdx / 16)
+    encodeExpGolomb(val: lscpX, encoder: &encoder)
+    encodeExpGolomb(val: lscpY, encoder: &encoder)
+
+    lastVal = last
+
+    var run = 0
+    var currentIdx = 0
+    last = originalLastVal
+
+    for y in 0..<16 {
+        let ptrY = block.rowPointer(y: y)
+        if y == 0 {
+            for x in 0..<16 {
+                let diff: Int16
+                if x == 0 {
+                    diff = ptrY[0] &- last
+                } else {
+                    diff = ptrY[x] &- ptrY[x - 1]
+                }
+                if diff == 0 {
+                    run += 1
+                } else {
+                    encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                    run = 0
+                }
+                currentIdx += 1
+                if currentIdx > lscpIdx { break }
+            }
+        } else {
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            for x in 0..<16 {
+                let diff: Int16
+                if x == 0 {
+                    diff = ptrY[0] &- ptrPrevY[0]
+                } else {
+                    diff = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                }
+                if diff == 0 {
+                    run += 1
+                } else {
+                    encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                    run = 0
+                }
+                currentIdx += 1
+                if currentIdx > lscpIdx { break }
+            }
+        }
+        if currentIdx > lscpIdx { break }
+        last = ptrY[15]
     }
 }
 
