@@ -1,12 +1,12 @@
 {
-  "originHash" : "83366dcf6b838d618827ad27d76d8cd2acaf2f7df519e8b472308282f6449d85",
+  "originHash" : "722ffd366d380205c35fb3bc0341eb2658c49df5f36de358961508dc0a80f901",
   "pins" : [
     {
       "identity" : "swift-hash",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/tayloraswift/swift-hash",
       "state" : {
-        "revision" : "ea0b9fc3152ed5941dd82e4a01e65f99fe1a75d2",
+        "revision" : "7fd5fb1753fe69bd6c04ecda36aab546cdcaae99",
         "version" : "0.7.1"
       }
     },
