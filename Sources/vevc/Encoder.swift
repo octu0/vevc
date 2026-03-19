@@ -27,16 +27,6 @@ public class Encoder {
     
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
     public func encode(image: YCbCrImage) async throws -> [UInt8] {
-        if self.qt == nil {
-            let baseQt = estimateQuantization(img: image, targetBits: maxbitrate)
-            if isOne {
-                self.qt = QuantizationTable(baseStep: max(1, Int(Double(baseQt.step) * 1.5)))
-            } else {
-                self.qt = baseQt
-            }
-        }
-        guard let qt = self.qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
-        
         var out: [UInt8] = []
         let curr = toPlaneData420(images: [image])[0]
         
@@ -65,6 +55,16 @@ public class Encoder {
                 debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
             }
         }
+        
+        if forceIFrame {
+            let baseQt = estimateQuantization(img: image, targetBits: maxbitrate)
+            if isOne {
+                self.qt = QuantizationTable(baseStep: max(1, Int(Double(baseQt.step) * 1.5)))
+            } else {
+                self.qt = baseQt
+            }
+        }
+        guard let qt = self.qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
         
         if isOne {
             if forceIFrame {

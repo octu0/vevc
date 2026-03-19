@@ -1746,7 +1746,7 @@ func calculateSADAndMaxBlockSAD(res: PlaneData420, mbSize: Int) -> (meanSAD: Int
 public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {    
     if images.isEmpty { return [] }
     
-    let qt = estimateQuantization(img: images[0], targetBits: maxbitrate)
+    var qt: QuantizationTable? = nil
     var out: [UInt8] = []
     
     var prevReconstructed: PlaneData420? = nil
@@ -1787,8 +1787,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         }
         
         if forceIFrame {
-            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
+            qt = estimateQuantization(img: images[i], targetBits: maxbitrate)
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt!.step)))
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt!.step) * 3))
             let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             
             out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
@@ -1801,17 +1802,18 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3
         } else {
             // 適応量子化: meanSADが高いか局所的に動きが大きい（maxBlockSADが高い）ほど精密に量子化
             // → 累積劣化（ゴースト）を防止する
+            guard let validQt = qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
             let qtY: QuantizationTable
             let qtC: QuantizationTable
             let fineQuantizationThreshold = mbSize * mbSize * 1 // 64x64ブロック内の平均誤差が1以上(4096)
             if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
                 // 動きが大きい: P-Frameの残差エッジを保護するためにqMidを通常qt.stepと同等まで下げる
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) / 2))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                qtY = QuantizationTable(baseStep: max(1, Int(validQt.step) / 2))
+                qtC = QuantizationTable(baseStep: max(1, Int(validQt.step)))
             } else {
                 // 動きが小さい: 通常のP-Frame量子化
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 6))
+                qtY = QuantizationTable(baseStep: max(1, Int(validQt.step) * 3))
+                qtC = QuantizationTable(baseStep: max(1, Int(validQt.step) * 6))
             }
             let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
             

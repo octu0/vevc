@@ -83,7 +83,8 @@ do {
         let image = try await decoder.decode(chunk: chunk)
         
         if y4mWriter == nil {
-            y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height)
+            let fpsHeader = vevcReader.fpsHeader ?? "F30:1"
+            y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
         }
         
         try y4mWriter?.writeFrame(image)

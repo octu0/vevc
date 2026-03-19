@@ -1022,6 +1022,11 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             out.append(pd.toYCbCr())
             prevReconstructed = pd
 
+        case [0x56, 0x45, 0x56, 0x48]: // VEVH
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+            offset += len
+
         case [0x56, 0x45, 0x56, 0x50]:
             let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))

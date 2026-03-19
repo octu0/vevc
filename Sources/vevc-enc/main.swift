@@ -94,6 +94,19 @@ do {
 
     var frameCount = 0
     let startTime = Date()
+    
+    // Write VEVH header with fpsHeader
+    let fpsStr = y4mReader.fpsHeader
+    if let fpsData = fpsStr.data(using: .utf8) {
+        var vevh = Data([0x56, 0x45, 0x56, 0x48])
+        let len = UInt32(fpsData.count)
+        vevh.append(UInt8((len >> 24) & 0xFF))
+        vevh.append(UInt8((len >> 16) & 0xFF))
+        vevh.append(UInt8((len >> 8) & 0xFF))
+        vevh.append(UInt8(len & 0xFF))
+        vevh.append(fpsData)
+        outFileHandle.write(vevh)
+    }
 
     while let image = try y4mReader.readFrame() {
         let chunk = try await encoder.encode(image: image)

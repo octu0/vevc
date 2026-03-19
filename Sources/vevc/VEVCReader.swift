@@ -8,6 +8,7 @@ public enum VEVCReaderError: Error {
 
 public class VEVCReader {
     private let fileHandle: FileHandle
+    public var fpsHeader: String? = nil
     
     public init(fileHandle: FileHandle) {
         self.fileHandle = fileHandle
@@ -62,6 +63,22 @@ public class VEVCReader {
             chunk.append(contentsOf: payload)
             
             return chunk
+            
+        case Data([0x56, 0x45, 0x56, 0x48]): // VEVH
+            let lenData = readFully(count: 4)
+            guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
+            
+            let len = Int((UInt32(lenData[0]) << 24) | (UInt32(lenData[1]) << 16) | (UInt32(lenData[2]) << 8) | UInt32(lenData[3]))
+            guard len >= 0 else { throw VEVCReaderError.invalidHeader }
+            
+            if len > 0 {
+                let payload = readFully(count: len)
+                guard payload.count == len else { throw VEVCReaderError.unexpectedEOF }
+                self.fpsHeader = String(data: payload, encoding: .utf8)
+            }
+            
+            // recursively read the next chunk (which should be the first frame)
+            return try readFrameChunk()
             
         default:
             let magicString = magicData.map { String(format: "%02x", $0) }.joined()
