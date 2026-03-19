@@ -420,8 +420,8 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
     
     let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
-    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
@@ -623,8 +623,8 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
     
     let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
-    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
@@ -826,8 +826,8 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> Image16 {
     
     let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
-    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
@@ -1192,8 +1192,8 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
     
     let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let qtY = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
-    let qtC = QuantizationTable(baseStep: Int(try readUInt8FromBytes(r, offset: &offset)))
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
