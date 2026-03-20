@@ -8,7 +8,9 @@ public enum EncodeError: Error {
 
 @inline(__always)
 func debugLog(_ message: String) {
-    // fputs(message + "\n", stderr)
+    if ProcessInfo.processInfo.environment["VEVC_DEBUG"] != nil {
+        fputs(message + "\n", stderr)
+    }
 }
 
 @inline(__always)
@@ -1157,6 +1159,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
         if isZero {
             bwFlags.writeBit(true)
             bwFlags.writeBit(false)
+            blocks[i].withView { var v = $0; v.clearAll() }
         } else {
             bwFlags.writeBit(false)
             bwFlags.writeBit(false)
@@ -1212,6 +1215,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
         }
         if isZero {
             bwFlags.writeBit(true)
+            blocks[i].withView { var v = $0; v.clearAll() }
             tasks.append((i, .skip))
             zeroCount += 1
         } else {

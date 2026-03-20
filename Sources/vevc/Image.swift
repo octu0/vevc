@@ -284,8 +284,8 @@ func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData42
 @inline(__always)
 func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
     @Sendable @inline(__always)
-    func add(r: [Int16], p: [Int16]) -> [Int16] {
-        let count = r.count
+    func add(r: [Int16], p: [Int16], rW: Int, rH: Int, pW: Int) -> [Int16] {
+        let count = rW * rH
         if count < 1 { return [] }
 
         var curr = [Int16](repeating: 0, count: count)
@@ -296,21 +296,25 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
                           let pPtr = pBuf.baseAddress,
                           let cPtr = cBuf.baseAddress else { return }
                     
-                    var i = 0
-                    #if arch(arm64) || arch(x86_64) || arch(wasm32)
-                    let chunk = 16
-                    while i + chunk <= count {
-                        let rSimd = UnsafeRawPointer(rPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                        let pSimd = UnsafeRawPointer(pPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                        let sumSimd = rSimd &+ pSimd
-                        UnsafeMutableRawPointer(cPtr.advanced(by: i)).storeBytes(of: sumSimd, as: SIMD16<Int16>.self)
-                        i += chunk
-                    }
-                    #endif
-                    
-                    while i < count {
-                        cPtr[i] = rPtr[i] &+ pPtr[i]
-                        i += 1
+                    for y in 0..<rH {
+                        let rStart = y * rW
+                        let pStart = y * pW
+                        var x = 0
+                        #if arch(arm64) || arch(x86_64) || arch(wasm32)
+                        let chunk = 16
+                        while x + chunk <= rW {
+                            let rSimd = UnsafeRawPointer(rPtr.advanced(by: rStart + x)).loadUnaligned(as: SIMD16<Int16>.self)
+                            let pSimd = UnsafeRawPointer(pPtr.advanced(by: pStart + x)).loadUnaligned(as: SIMD16<Int16>.self)
+                            let sumSimd = rSimd &+ pSimd
+                            UnsafeMutableRawPointer(cPtr.advanced(by: rStart + x)).storeBytes(of: sumSimd, as: SIMD16<Int16>.self)
+                            x += chunk
+                        }
+                        #endif
+                        
+                        while x < rW {
+                            cPtr[rStart + x] = rPtr[rStart + x] &+ pPtr[pStart + x]
+                            x += 1
+                        }
                     }
                 }
             }
@@ -318,9 +322,13 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
         return curr
     }
     
-    async let y = add(r: residual.y, p: predicted.y)
-    async let cb = add(r: residual.cb, p: predicted.cb)
-    async let cr = add(r: residual.cr, p: predicted.cr)
+    let pCbDx = (predicted.width + 1) / 2
+    let rCbDx = (residual.width + 1) / 2
+    let rCbDy = (residual.height + 1) / 2
+    
+    async let y = add(r: residual.y, p: predicted.y, rW: residual.width, rH: residual.height, pW: predicted.width)
+    async let cb = add(r: residual.cb, p: predicted.cb, rW: rCbDx, rH: rCbDy, pW: pCbDx)
+    async let cr = add(r: residual.cr, p: predicted.cr, rW: rCbDx, rH: rCbDy, pW: pCbDx)
     
     return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
 }
