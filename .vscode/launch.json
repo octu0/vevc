@@ -59,6 +59,46 @@
             "target": "compare",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release compare"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug example-enc",
+            "target": "example-enc",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug example-enc"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release example-enc",
+            "target": "example-enc",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release example-enc"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug example-dec",
+            "target": "example-dec",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug example-dec"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release example-dec",
+            "target": "example-dec",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release example-dec"
         }
     ]
 }
