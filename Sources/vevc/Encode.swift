@@ -1432,6 +1432,79 @@ private func estimateRiceBitsDPCM16(block: BlockView, lastVal: inout Int16) -> I
     return bodyBits + headerBits
 }
 
+
+@inline(__always)
+func calculateSADAndMaxBlockSAD(res: PlaneData420, mbSize: Int) -> (meanSAD: Int, maxBlockSAD: Int) {
+    let resMbCols = res.width / mbSize
+    let resMbRows = res.height / mbSize
+    let stride = res.width
+    
+    var totalSAD = 0
+    var maxBlockSAD = 0
+    
+    res.y.withUnsafeBufferPointer { yBuf in
+        guard let yPtr = yBuf.baseAddress else { return }
+        
+        for mbY in 0..<resMbRows {
+            let startY = mbY * mbSize
+            for mbX in 0..<resMbCols {
+                let startX = mbX * mbSize
+                var blockSAD = 0
+                
+                if mbSize == 64 {
+                    var sumVec0 = SIMD16<Int16>()
+                    var sumVec1 = SIMD16<Int16>()
+                    var sumVec2 = SIMD16<Int16>()
+                    var sumVec3 = SIMD16<Int16>()
+                    
+                    for by in 0..<64 {
+                        let rowPtr = yPtr.advanced(by: (startY + by) * stride + startX)
+                        let c0 = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        let c1 = UnsafeRawPointer(rowPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        let c2 = UnsafeRawPointer(rowPtr.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+                        let c3 = UnsafeRawPointer(rowPtr.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+                        
+                        let mask0 = c0 &>> 15
+                        let abs0 = (c0 ^ mask0) &- mask0
+                        let mask1 = c1 &>> 15
+                        let abs1 = (c1 ^ mask1) &- mask1
+                        let mask2 = c2 &>> 15
+                        let abs2 = (c2 ^ mask2) &- mask2
+                        let mask3 = c3 &>> 15
+                        let abs3 = (c3 ^ mask3) &- mask3
+                        
+                        sumVec0 &+= abs0
+                        sumVec1 &+= abs1
+                        sumVec2 &+= abs2
+                        sumVec3 &+= abs3
+                    }
+                    
+                    let total0 = SIMD16<Int32>(clamping: sumVec0).wrappedSum()
+                    let total1 = SIMD16<Int32>(clamping: sumVec1).wrappedSum()
+                    let total2 = SIMD16<Int32>(clamping: sumVec2).wrappedSum()
+                    let total3 = SIMD16<Int32>(clamping: sumVec3).wrappedSum()
+                    blockSAD = Int(total0 &+ total1 &+ total2 &+ total3)
+                } else {
+                    for by in 0..<mbSize {
+                        let rowOffset = (startY + by) * stride + startX
+                        for bx in 0..<mbSize {
+                            blockSAD += abs(Int(yPtr[rowOffset + bx]))
+                        }
+                    }
+                }
+                
+                totalSAD += blockSAD
+                if blockSAD > maxBlockSAD {
+                    maxBlockSAD = blockSAD
+                }
+            }
+        }
+    }
+    
+    let meanSAD = totalSAD / (res.width * res.height)
+    return (meanSAD, maxBlockSAD)
+}
+
 @inline(__always)
 private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
@@ -1664,84 +1737,12 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
         
     let ratio = estimatedTotalBits / Double(targetBits)
     let predictedStep = Double(probeStep) * ratio * 3.5
-    let q = Int(max(1, predictedStep))
+    let q = min(10000, Int(max(1, predictedStep)))
     
     return QuantizationTable(baseStep: q)
 }
 
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-@inline(__always)
-func calculateSADAndMaxBlockSAD(res: PlaneData420, mbSize: Int) -> (meanSAD: Int, maxBlockSAD: Int) {
-    let resMbCols = res.width / mbSize
-    let resMbRows = res.height / mbSize
-    let stride = res.width
-    
-    var totalSAD = 0
-    var maxBlockSAD = 0
-    
-    res.y.withUnsafeBufferPointer { yBuf in
-        guard let yPtr = yBuf.baseAddress else { return }
-        
-        for mbY in 0..<resMbRows {
-            let startY = mbY * mbSize
-            for mbX in 0..<resMbCols {
-                let startX = mbX * mbSize
-                var blockSAD = 0
-                
-                if mbSize == 64 {
-                    var sumVec0 = SIMD16<Int16>()
-                    var sumVec1 = SIMD16<Int16>()
-                    var sumVec2 = SIMD16<Int16>()
-                    var sumVec3 = SIMD16<Int16>()
-                    
-                    for by in 0..<64 {
-                        let rowPtr = yPtr.advanced(by: (startY + by) * stride + startX)
-                        let c0 = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        let c1 = UnsafeRawPointer(rowPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        let c2 = UnsafeRawPointer(rowPtr.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
-                        let c3 = UnsafeRawPointer(rowPtr.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
-                        
-                        let mask0 = c0 &>> 15
-                        let abs0 = (c0 ^ mask0) &- mask0
-                        let mask1 = c1 &>> 15
-                        let abs1 = (c1 ^ mask1) &- mask1
-                        let mask2 = c2 &>> 15
-                        let abs2 = (c2 ^ mask2) &- mask2
-                        let mask3 = c3 &>> 15
-                        let abs3 = (c3 ^ mask3) &- mask3
-                        
-                        sumVec0 &+= abs0
-                        sumVec1 &+= abs1
-                        sumVec2 &+= abs2
-                        sumVec3 &+= abs3
-                    }
-                    
-                    let total0 = SIMD16<Int32>(clamping: sumVec0).wrappedSum()
-                    let total1 = SIMD16<Int32>(clamping: sumVec1).wrappedSum()
-                    let total2 = SIMD16<Int32>(clamping: sumVec2).wrappedSum()
-                    let total3 = SIMD16<Int32>(clamping: sumVec3).wrappedSum()
-                    blockSAD = Int(total0 &+ total1 &+ total2 &+ total3)
-                } else {
-                    for by in 0..<mbSize {
-                        let rowOffset = (startY + by) * stride + startX
-                        for bx in 0..<mbSize {
-                            blockSAD += abs(Int(yPtr[rowOffset + bx]))
-                        }
-                    }
-                }
-                
-                totalSAD += blockSAD
-                if blockSAD > maxBlockSAD {
-                    maxBlockSAD = blockSAD
-                }
-            }
-        }
-    }
-    
-    let meanSAD = totalSAD / (res.width * res.height)
-    return (meanSAD, maxBlockSAD)
-}
-
 @inline(__always)
 public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {    
     if images.isEmpty { return [] }

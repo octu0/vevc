@@ -184,7 +184,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
 
     
     var blocks: [Block2D] = []
-    blocks.reserveCapacity((rowCount * ((width + 16 - 1) / 16)))
+    blocks.reserveCapacity((rowCount * ((width + 16 - 1)  / 2)))
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
@@ -423,12 +423,10 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
             predSubband = pSubband
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
-        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
+        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         return (buf, subband, predSubband, blocks)
     }()
     
@@ -441,12 +439,10 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
             predSubband = pSubband
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         return (buf, subband, predSubband, blocks)
     }()
     
@@ -459,12 +455,10 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
             predSubband = pSubband
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         return (buf, subband, predSubband, blocks)
     }()
 
@@ -515,12 +509,10 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
             predSubband = pSubband
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero16(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtY)
         }
-        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
+        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: safeThreshold)
         return (buf, subband, predSubband, blocks)
     }()
     
@@ -533,12 +525,10 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
             predSubband = pSubband
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero16(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: safeThreshold)
         return (buf, subband, predSubband, blocks)
     }()
     
@@ -551,12 +541,10 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
             predSubband = pSubband
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero16(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: safeThreshold)
         return (buf, subband, predSubband, blocks)
     }()
 
@@ -728,12 +716,10 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero8(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
         }
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY)
         return (buf, reconPlane)
     }()
@@ -745,12 +731,10 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero8(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane)
     }()
@@ -762,12 +746,10 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero8(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane)
     }()
@@ -863,12 +845,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeBase32(block: &blocks[i], qt: qtY)
         }
-        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
+        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase32(blocks: blocks, width: dx, height: dy, qt: qtY)
         return (buf, reconPlane)
     }()
@@ -880,12 +860,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeBase32(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane)
     }()
@@ -897,12 +875,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            _ = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-                isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
-            }
             evaluateQuantizeBase32(block: &blocks[i], qt: qtC)
         }
-        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: 0)
+        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
+        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane)
     }()
