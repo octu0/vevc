@@ -130,9 +130,8 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var tasks: [(Int, DecodeTask16)] = []
     tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
-        // print if we are close to running out or failing
         if brFlags.consumedBytes > data.count {
-            print("ERROR: decodePlaneSubbands16 running out of bits! i=\(i)/\(blockCount), consumed=\(brFlags.consumedBytes) dataCount=\(data.count)")
+            throw DecodeError.outOfBits
         }
         let isZero = brFlags.readBit()
         if isZero {
@@ -346,7 +345,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
     tasks.reserveCapacity(blockCount)
     for i in 0..<blockCount {
         if brFlags.consumedBytes > data.count {
-            print("ERROR: decodePlaneBaseSubbands32 running out of bits! i=\(i)/\(blockCount), consumed=\(brFlags.consumedBytes) dataCount=\(data.count)")
+            throw DecodeError.outOfBits
         }
         let isZero = brFlags.readBit()
         if isZero {

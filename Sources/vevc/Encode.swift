@@ -1159,7 +1159,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
         if isZero {
             bwFlags.writeBit(true)
             bwFlags.writeBit(false)
-            blocks[i].withView { var v = $0; v.clearAll() }
+            blocks[i].withView { $0.clearAll() }
         } else {
             bwFlags.writeBit(false)
             bwFlags.writeBit(false)
@@ -1215,7 +1215,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
         }
         if isZero {
             bwFlags.writeBit(true)
-            blocks[i].withView { var v = $0; v.clearAll() }
+            blocks[i].withView { $0.clearAll() }
             tasks.append((i, .skip))
             zeroCount += 1
         } else {

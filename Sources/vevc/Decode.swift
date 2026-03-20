@@ -8,6 +8,7 @@ public enum DecodeError: Error {
     case invalidLayerNumber
     case noDataProvided
     case unsupportedArchitecture
+    case outOfBits
 }
 
 @inline(__always)
