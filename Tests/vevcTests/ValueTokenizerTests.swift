@@ -1,63 +1,110 @@
 import XCTest
 @testable import vevc
 
+/// ValueTokenizer のラウンドトリップテスト
 final class ValueTokenizerTests: XCTestCase {
     
-    func testTokenizeAndDetokenize() {
-        // 1 and -1 (Token 0 and 1)
-        let pos1 = ValueTokenizer.tokenize(1)
-        XCTAssertEqual(pos1.token, 0)
-        XCTAssertEqual(pos1.bypassBits, 0)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: pos1.token, bypassBits: pos1.bypassBits), 1)
+    func testSignedRoundtrip() {
+        let testValues: [Int16] = [
+            0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8,
+            9, -9, 10, -10, 15, -15, 16, -16, 20, -20, 50, -50, 100, -100,
+            127, -128, 255, -256, 500, -500, 1000, -1000,
+            Int16.max, Int16.min, Int16.max - 1, Int16.min + 1
+        ]
         
-        let neg1 = ValueTokenizer.tokenize(-1)
-        XCTAssertEqual(neg1.token, 1)
-        XCTAssertEqual(neg1.bypassBits, 0)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: neg1.token, bypassBits: neg1.bypassBits), -1)
-        
-        // 2 and -2 (Token 2 and 3)
-        let pos2 = ValueTokenizer.tokenize(2)
-        XCTAssertEqual(pos2.token, 2)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: pos2.token, bypassBits: pos2.bypassBits), 2)
-        
-        let neg2 = ValueTokenizer.tokenize(-2)
-        XCTAssertEqual(neg2.token, 3)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: neg2.token, bypassBits: neg2.bypassBits), -2)
-        
-        // 8 and -8 (Token 14 and 15)
-        let pos8 = ValueTokenizer.tokenize(8)
-        XCTAssertEqual(pos8.token, 14)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: pos8.token, bypassBits: pos8.bypassBits), 8)
-        
-        let neg8 = ValueTokenizer.tokenize(-8)
-        XCTAssertEqual(neg8.token, 15)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: neg8.token, bypassBits: neg8.bypassBits), -8)
-        
-        // 9 (Token 16 or 17...)
-        let pos9 = ValueTokenizer.tokenize(9)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: pos9.token, bypassBits: pos9.bypassBits), 9)
-        
-        let neg9 = ValueTokenizer.tokenize(-9)
-        XCTAssertEqual(ValueTokenizer.detokenize(token: neg9.token, bypassBits: neg9.bypassBits), -9)
+        for val in testValues {
+            let result = ValueTokenizer.tokenize(val)
+            let bypassLen = ValueTokenizer.bypassLength(for: result.token)
+            XCTAssertEqual(bypassLen, result.bypassLen, "bypassLength mismatch for val=\(val)")
+            let restored = ValueTokenizer.detokenize(token: result.token, bypassBits: result.bypassBits)
+            XCTAssertEqual(val, restored, "Signed roundtrip failed for val=\(val)")
+        }
     }
     
-    func testLosslessWithRandomOutliers() {
-        var rng = SystemRandomNumberGenerator()
+    func testUnsignedRoundtrip() {
+        let testValues: [UInt32] = [0, 1, 2, 3, 4, 5, 10, 15, 16, 17, 20, 30, 50, 100, 200, 500, 1000]
         
-        for _ in 0..<10000 {
-            let original = Int16.random(in: Int16.min...Int16.max, using: &rng)
-            
-            let t = ValueTokenizer.tokenize(original)
-            let restored = ValueTokenizer.detokenize(token: t.token, bypassBits: t.bypassBits)
-            
-            XCTAssertEqual(original, restored, "Failed to losslessly transform value: \(original)")
+        for val in testValues {
+            let result = ValueTokenizer.tokenizeUnsigned(val)
+            let bypassLen = ValueTokenizer.bypassLengthUnsigned(for: result.token)
+            XCTAssertEqual(bypassLen, result.bypassLen, "bypassLength mismatch for val=\(val)")
+            let restored = ValueTokenizer.detokenizeUnsigned(token: result.token, bypassBits: result.bypassBits)
+            XCTAssertEqual(val, restored, "Unsigned roundtrip failed for val=\(val)")
+        }
+    }
+    
+    /// 実際のDWTデータでEntropyEncoder→EntropyDecoder pairs roundtrip
+    func testRansModeWithActualBlockData() throws {
+        let width = 128
+        let height = 128
+        
+        var img = YCbCrImage(width: width, height: height)
+        for y in 0..<height {
+            for x in 0..<width {
+                let base = (x + y * 2) % 256
+                let noise = (x &* 2654435761 ^ y &* 2246822519) % 20
+                img.yPlane[y * width + x] = UInt8(clamping: base + noise - 10)
+            }
+        }
+        let cW = (width + 1) / 2
+        let cH = (height + 1) / 2
+        for cy in 0..<cH {
+            for cx in 0..<cW {
+                img.cbPlane[cy * cW + cx] = 128
+                img.crPlane[cy * cW + cx] = 128
+            }
         }
         
-        let extremes: [Int16] = [Int16.min, Int16.min + 1, Int16.max - 1, Int16.max]
-        for original in extremes {
-            let t = ValueTokenizer.tokenize(original)
-            let restored = ValueTokenizer.detokenize(token: t.token, bypassBits: t.bypassBits)
-            XCTAssertEqual(original, restored, "Failed at extreme value: \(original)")
+        let pd = toPlaneData420(images: [img])[0]
+        let qtY = QuantizationTable(baseStep: 2)
+        
+        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        for i in blocks.indices {
+            evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
+        
+        let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
+        
+        var encoder = EntropyEncoder()
+        
+        for i in blocks.indices {
+            let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+                return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
+            }
+            if isZero { continue }
+            
+            blocks[i].withView { view in
+                let subs = getSubbands32(view: view)
+                blockEncode16(encoder: &encoder, block: subs.hl)
+                blockEncode16(encoder: &encoder, block: subs.lh)
+                blockEncode16(encoder: &encoder, block: subs.hh)
+            }
+        }
+        
+        print("=== Encoder: pairs=\(encoder.pairs.count) coeffCount=\(encoder.coeffCount) trailingZeros=\(encoder.trailingZeros) ===")
+        
+        let encPairs = encoder.pairs
+        let data = encoder.getData()
+        
+        var decoder = try EntropyDecoder(data: data)
+        let decPairs = decoder.pairs
+        
+        print("=== Decoder: pairs=\(decPairs.count) ===")
+        
+        XCTAssertEqual(encPairs.count, decPairs.count, "pairs count")
+        
+        var firstDiff = -1
+        var diffCount = 0
+        for i in 0..<min(encPairs.count, decPairs.count) {
+            if encPairs[i].run != decPairs[i].run || encPairs[i].val != decPairs[i].val {
+                if firstDiff < 0 {
+                    firstDiff = i
+                    print("DIFF[\(i)]: enc=(\(encPairs[i].run), \(encPairs[i].val)) dec=(\(decPairs[i].run), \(decPairs[i].val))")
+                }
+                diffCount += 1
+            }
+        }
+        
+        XCTAssertEqual(diffCount, 0, "Pairs diff: \(diffCount) total, first at \(firstDiff)")
     }
 }

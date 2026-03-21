@@ -3,7 +3,7 @@ import Foundation
 let RANS_SCALE_BITS: UInt32 = 14
 let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
 let RANS_L: UInt32 = 1 << 15
-let RANS_XMAX: UInt32 = ((RANS_L << 16) - 1)
+let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 
 // MARK: - rANS Encoder
 
@@ -19,8 +19,8 @@ struct rANSEncoder {
     
     @inline(__always)
     public mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
-        let xMax = RANS_XMAX / RANS_SCALE * freq
-        while state > xMax {
+        let xMax = RANS_XMAX * freq
+        while state >= xMax {
             stream.append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
@@ -111,32 +111,32 @@ struct Interleaved4rANSEncoder {
     
     @inline(__always)
     public mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
-        let xMax = RANS_XMAX / RANS_SCALE * freq
+        let xMax = RANS_XMAX * freq
         
         switch lane {
         case 0:
-            while states.0 > xMax {
+            while states.0 >= xMax {
                 stream.append(UInt16(truncatingIfNeeded: states.0))
                 states.0 >>= 16
             }
             let q = states.0 / freq
             states.0 = (q << RANS_SCALE_BITS) + (states.0 - q * freq) + cumFreq
         case 1:
-            while states.1 > xMax {
+            while states.1 >= xMax {
                 stream.append(UInt16(truncatingIfNeeded: states.1))
                 states.1 >>= 16
             }
             let q = states.1 / freq
             states.1 = (q << RANS_SCALE_BITS) + (states.1 - q * freq) + cumFreq
         case 2:
-            while states.2 > xMax {
+            while states.2 >= xMax {
                 stream.append(UInt16(truncatingIfNeeded: states.2))
                 states.2 >>= 16
             }
             let q = states.2 / freq
             states.2 = (q << RANS_SCALE_BITS) + (states.2 - q * freq) + cumFreq
         case 3:
-            while states.3 > xMax {
+            while states.3 >= xMax {
                 stream.append(UInt16(truncatingIfNeeded: states.3))
                 states.3 >>= 16
             }

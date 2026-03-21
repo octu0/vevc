@@ -19,9 +19,9 @@ struct InterleavedrANSEncoder {
     @inline(__always)
     public mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         var state = states[lane]
-        let xMax = RANS_XMAX / RANS_SCALE * freq
+        let xMax = RANS_XMAX * freq
         
-        while state > xMax {
+        while state >= xMax {
             streams[lane].append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }

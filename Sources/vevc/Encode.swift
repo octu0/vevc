@@ -126,6 +126,13 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView) {
 
     if lscpX == -1 {
         encoder.encodeBypass(binVal: 0)
+        // デコーダはclearAll()するため、エンコーダ側もゼロクリアして再構築時の一致を保証
+        for y in 0..<16 {
+            let ptr = block.rowPointer(y: y)
+            for x in 0..<16 {
+                ptr[x] = 0
+            }
+        }
         return
     }
     encoder.encodeBypass(binVal: 1)
@@ -145,6 +152,19 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView) {
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
             }
+        }
+    }
+    
+    // lscp超の位置をゼロクリア（デコーダはclearAll→lscpまでデコードするためlscp超は0）
+    // エンコーダ側もlscp超をゼロにして再構築時のデコーダとの一致を保証
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<16 {
+        lscpPtr[x] = 0
+    }
+    for y in (lscpY + 1)..<16 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<16 {
+            ptr[x] = 0
         }
     }
 }
@@ -183,6 +203,13 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView) {
 
     if lscpX == -1 {
         encoder.encodeBypass(binVal: 0)
+        // デコーダはclearAll()するため、エンコーダ側もゼロクリアして再構築時の一致を保証
+        for y in 0..<8 {
+            let ptr = block.rowPointer(y: y)
+            for x in 0..<8 {
+                ptr[x] = 0
+            }
+        }
         return
     }
     encoder.encodeBypass(binVal: 1)
@@ -202,6 +229,18 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView) {
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
             }
+        }
+    }
+    
+    // lscp超の位置をゼロクリア（デコーダはclearAll→lscpまでデコードするためlscp超は0）
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<8 {
+        lscpPtr[x] = 0
+    }
+    for y in (lscpY + 1)..<8 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<8 {
+            ptr[x] = 0
         }
     }
 }
@@ -240,6 +279,12 @@ func blockEncode4(encoder: inout EntropyEncoder, block: BlockView) {
 
     if lscpX == -1 {
         encoder.encodeBypass(binVal: 0)
+        for y in 0..<4 {
+            let ptr = block.rowPointer(y: y)
+            for x in 0..<4 {
+                ptr[x] = 0
+            }
+        }
         return
     }
     encoder.encodeBypass(binVal: 1)
@@ -259,6 +304,18 @@ func blockEncode4(encoder: inout EntropyEncoder, block: BlockView) {
                 encodeCoeffRun(val: val, encoder: &encoder, run: run)
                 run = 0
             }
+        }
+    }
+    
+    // lscp超ゼロクリア
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<4 {
+        lscpPtr[x] = 0
+    }
+    for y in (lscpY + 1)..<4 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<4 {
+            ptr[x] = 0
         }
     }
 }
@@ -922,6 +979,16 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
         }
         if isZero {
             bwFlags.writeBit(true)
+            blocks[i].withView { view in
+                let half = 32 / 2
+                let base = view.base
+                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                hlView.clearAll()
+                lhView.clearAll()
+                hhView.clearAll()
+            }
             zeroCount += 1
         } else {
             bwFlags.writeBit(false)
@@ -1025,6 +1092,16 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
         }
         if isZero {
             bwFlags.writeBit(true)
+            blocks[i].withView { view in
+                let half = 16 / 2
+                let base = view.base
+                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+                var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+                var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+                hlView.clearAll()
+                lhView.clearAll()
+                hhView.clearAll()
+            }
             zeroCount += 1
         } else {
             bwFlags.writeBit(false)
