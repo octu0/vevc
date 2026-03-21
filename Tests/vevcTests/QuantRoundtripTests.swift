@@ -63,11 +63,12 @@ final class QuantRoundtripTests: XCTestCase {
         for y in 0..<size {
             for x in 0..<size {
                 let v: Int16
-                if (x + y) % 3 == 0 {
+                switch (x + y) % 3 {
+                case 0:
                     v = Int16(x * 8 - 64)  // -64..+56
-                } else if (x + y) % 3 == 1 {
-                    v = -Int16(y * 6 + 1)  // -1..-97
-                } else {
+                case 1:
+                    v = -1 * Int16(y * 6 + 1)  // -1..-97
+                default:
                     v = Int16(x + y)       // 0..+30
                 }
                 block.data[y * size + x] = v
@@ -158,8 +159,8 @@ final class QuantRoundtripTests: XCTestCase {
             let restored = block.data[i]
             // ゼロ以外の値は符号が保持されるべき
             if orig != 0 && restored != 0 {
-                let origSign = orig > 0
-                let restoredSign = restored > 0
+                let origSign = 0 < orig
+                let restoredSign = 0 < restored
                 if origSign != restoredSign {
                     signMismatches.append((i, orig, restored))
                 }
@@ -197,7 +198,7 @@ final class QuantRoundtripTests: XCTestCase {
             let orig = testValues[i]
             let restored = blockMid.data[i]
             if orig != 0 && restored != 0 {
-                if (orig > 0) != (restored > 0) {
+                if (0 < orig) != (0 < restored) {
                     midSignMismatches.append((i, orig, restored))
                 }
             }
@@ -217,7 +218,7 @@ final class QuantRoundtripTests: XCTestCase {
             let orig = testValues[i]
             let restored = blockHigh.data[i]
             if orig != 0 && restored != 0 {
-                if (orig > 0) != (restored > 0) {
+                if (0 < orig) != (0 < restored) {
                     highSignMismatches.append((i, orig, restored))
                 }
             }

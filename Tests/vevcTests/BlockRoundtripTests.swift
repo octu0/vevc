@@ -81,7 +81,7 @@ final class BlockRoundtripTests: XCTestCase {
         for y in 0..<16 {
             for x in 0..<16 {
                 let idx = y * 16 + x
-                if y > 5 || (y == 5 && x > 5) {
+                if 5 < y || (y == 5 && 5 < x) {
                     block.data[idx] = 0
                 }
             }
@@ -103,7 +103,7 @@ final class BlockRoundtripTests: XCTestCase {
         for y in 0..<16 {
             for x in 0..<16 {
                 let idx = y * 16 + x
-                if y > 5 || (y == 5 && x > 5) {
+                if 5 < y || (y == 5 && 5 < x) {
                     XCTAssertEqual(afterData[idx], 0, "lscp超のデータが残留: y=\(y) x=\(x) before=\(beforeData[idx]) after=\(afterData[idx])")
                 }
             }

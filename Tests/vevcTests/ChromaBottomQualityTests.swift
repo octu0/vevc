@@ -32,7 +32,7 @@ final class ChromaBottomQualityTests: XCTestCase {
                 count += 1
             }
         }
-        guard count > 0 else { return 0 }
+        guard 0 < count else { return 0 }
         mse /= Double(count)
         if mse < 0.0001 { return 100.0 }
         return 10.0 * log10(255.0 * 255.0 / mse)
@@ -41,7 +41,7 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// 全体のPSNRを計算する
     private func calculatePSNR(original: [UInt8], decoded: [UInt8]) -> Double {
         let count = min(original.count, decoded.count)
-        guard count > 0 else { return 0 }
+        guard 0 < count else { return 0 }
         var mse: Double = 0
         for i in 0..<count {
             let diff = Double(Int(original[i]) - Int(decoded[i]))
@@ -95,10 +95,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         let cbDiff = cbTopPsnr - cbBottomPsnr
         let crDiff = crTopPsnr - crBottomPsnr
         
-        if cbDiff > maxPsnrDifference {
+        if maxPsnrDifference < cbDiff {
             XCTFail("\(frameLabel) Cb上下PSNR差(\(String(format: "%.1f", cbDiff))dB)が\(maxPsnrDifference)dBを超えている (上=\(String(format: "%.1f", cbTopPsnr))dB, 下=\(String(format: "%.1f", cbBottomPsnr))dB) → 下部に集中的なカラーノイズ")
         }
-        if crDiff > maxPsnrDifference {
+        if maxPsnrDifference < crDiff {
             XCTFail("\(frameLabel) Cr上下PSNR差(\(String(format: "%.1f", crDiff))dB)が\(maxPsnrDifference)dBを超えている (上=\(String(format: "%.1f", crTopPsnr))dB, 下=\(String(format: "%.1f", crBottomPsnr))dB) → 下部に集中的なカラーノイズ")
         }
     }
@@ -216,10 +216,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         }
         
         // P-Frame間で下部品質が急激に劣化していないか
-        if bottomCbPsnrs.count >= 3 {
+        if 3 <= bottomCbPsnrs.count {
             let firstPsnr = bottomCbPsnrs[1]  // 最初のP-Frame
             let lastPsnr = bottomCbPsnrs.last!
-            if firstPsnr - lastPsnr > 15.0 {
+            if 15.0 < firstPsnr - lastPsnr {
                 XCTFail("Cb下部PSNRが急激に劣化: first P-Frame=\(String(format: "%.1f", firstPsnr))dB → last=\(String(format: "%.1f", lastPsnr))dB → P-Frame累積劣化")
             }
         }
@@ -385,7 +385,7 @@ final class ChromaBottomQualityTests: XCTestCase {
     
     private func calculatePlaneMAE(a: [Int16], b: [Int16]) -> Double {
         let count = min(a.count, b.count)
-        guard count > 0 else { return 0 }
+        guard 0 < count else { return 0 }
         var sum: Double = 0
         for i in 0..<count {
             sum += abs(Double(a[i]) - Double(b[i]))

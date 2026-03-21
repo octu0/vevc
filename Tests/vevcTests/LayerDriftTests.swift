@@ -11,7 +11,7 @@ final class LayerDriftTests: XCTestCase {
         var sum: Int64 = 0
         for v in arr {
             if v < mn { mn = v }
-            if v > mx { mx = v }
+            if mx < v { mx = v }
             sum += Int64(v)
         }
         return "min=\(mn) max=\(mx) mean=\(String(format: "%.1f", Double(sum)/Double(arr.count)))"
@@ -23,8 +23,8 @@ final class LayerDriftTests: XCTestCase {
         var diffCount = 0
         for i in 0..<count {
             let d = abs(Int(a[i]) - Int(b[i]))
-            if d > 0 { diffCount += 1 }
-            if d > maxD { maxD = d }
+            if 0 < d { diffCount += 1 }
+            if maxD < d { maxD = d }
         }
         return (maxD, diffCount, count)
     }

@@ -42,7 +42,7 @@ final class Block13DebugTests: XCTestCase {
                 return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
             }
             var forceSplit = false
-            if !isZero {
+            if isZero != true {
                 forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
                     return shouldSplit32(data: ptr, skipLL: true)
                 }
@@ -111,7 +111,7 @@ final class Block13DebugTests: XCTestCase {
             
             print("=== Block[\(bi)] ===")
             print("  HL diff: \(diffHL), LH diff: \(diffLH), HH diff: \(diffHH)")
-            if !firstDiffDetail.isEmpty {
+            if firstDiffDetail.isEmpty != true {
                 print("  First diff: \(firstDiffDetail)")
             }
         }

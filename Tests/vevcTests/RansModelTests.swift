@@ -116,7 +116,7 @@ final class RansModelTests: XCTestCase {
     private func writeCompressedFreqTableTest(_ out: inout [UInt8], freqs: [UInt32]) {
         var bitmap: UInt32 = 0
         for i in 0..<32 {
-            if freqs[i] > 1 { bitmap |= UInt32(1 << i) }
+            if 1 < freqs[i] { bitmap |= UInt32(1 << i) }
         }
         appendBE(&out, bitmap)
         for i in 0..<32 {

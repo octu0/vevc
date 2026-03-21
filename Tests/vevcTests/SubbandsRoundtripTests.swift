@@ -95,17 +95,17 @@ final class SubbandsRoundtripTests: XCTestCase {
             var maxD = 0
             for i in 0..<256 {
                 let d = abs(Int(encAfterHL[bi][i]) - Int(decHL[bi][i]))
-                if d > 0 { diffCount += 1 }
-                if d > maxD { maxD = d }
+                if 0 < d { diffCount += 1 }
+                if maxD < d { maxD = d }
             }
             
             // 差異があった場合、最初の5ピクセルの詳細を出力
-            if diffCount > 0 {
+            if 0 < diffCount {
                 var details = ""
                 var shown = 0
                 for i in 0..<256 {
                     let d = abs(Int(encAfterHL[bi][i]) - Int(decHL[bi][i]))
-                    if d > 0 && shown < 5 {
+                    if 0 < d && shown < 5 {
                         details += " [y:\(i/16) x:\(i%16)]: orig=\(origHL[bi][i]) encAfter=\(encAfterHL[bi][i]) dec=\(decHL[bi][i])"
                         shown += 1
                     }
@@ -247,9 +247,9 @@ final class SubbandsRoundtripTests: XCTestCase {
                             let ev = encView.base.advanced(by: y * 32 + 16)[x]
                             let dv = decView.base.advanced(by: y * 32 + 16)[x]
                             let d = abs(Int(ev) - Int(dv))
-                            if d > 0 {
+                            if 0 < d {
                                 totalDiff += 1
-                                if d > maxDiff { maxDiff = d }
+                                if maxDiff < d { maxDiff = d }
                                 if firstDiffBlock < 0 { firstDiffBlock = bi }
                             }
                             // LH
@@ -314,7 +314,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let sizes: [(Int, Int)] = [(64, 64), (128, 128), (192, 128), (192, 192), (256, 192), (320, 240)]
         for (w, h) in sizes {
             let (totalDiff, firstBlock, totalBlocks) = try subbands32RoundtripForSize(width: w, height: h)
-            if totalDiff > 0 {
+            if 0 < totalDiff {
                 XCTFail("\(w)x\(h) (\(totalBlocks)blocks): totalDiff=\(totalDiff) firstBlock=\(firstBlock)")
             }
         }
@@ -370,7 +370,7 @@ final class SubbandsRoundtripTests: XCTestCase {
                     }
                 }
             }
-            if totalDiff > 0 {
+            if 0 < totalDiff {
                 XCTFail("\(w)x\(h) (\(blocks.count)blocks) PD420: totalDiff=\(totalDiff) firstBlock=\(firstDiffBlock)")
             }
         }

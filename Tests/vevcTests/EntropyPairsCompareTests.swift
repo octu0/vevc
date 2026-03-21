@@ -48,9 +48,9 @@ final class EntropyPairsCompareTests: XCTestCase {
                 blocks[i].withView { view in
                     let half = 32 / 2
                     let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
                     hlView.clearAll()
                     lhView.clearAll()
                     hhView.clearAll()
@@ -122,7 +122,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         let entropyData = encoder.getData()
         
         // デコーダでpairsを復元
-        var decoder = try EntropyDecoder(data: entropyData)
+        let decoder = try EntropyDecoder(data: entropyData)
         let decPairs = decoder.pairs
         
         print("=== EntropyEncoder pairs count: \(encPairs.count) ===")
@@ -218,7 +218,7 @@ final class EntropyPairsCompareTests: XCTestCase {
             }
         }
         
-        if totalDiff > 0 {
+        if 0 < totalDiff {
             XCTFail("Direct entropy roundtrip: totalDiff=\(totalDiff) firstDiffBlock=\(firstDiffBlock)")
         }
     }

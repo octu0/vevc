@@ -19,13 +19,14 @@ final class rANSTests: XCTestCase {
         
         for _ in 0..<count {
             let p = Int.random(in: 0..<100, using: &rng)
-            if p < 80 {
+            switch true {
+            case p < 80:
                 // 80%: 0
                 testData.append(0)
-            } else if p < 98 {
+            case p < 98:
                 // 18%: -3 to 3
                 testData.append(Int16.random(in: -3...3, using: &rng))
-            } else {
+            default:
                 // 2%: 外れ値
                 testData.append(Int16.random(in: -255...255, using: &rng))
             }

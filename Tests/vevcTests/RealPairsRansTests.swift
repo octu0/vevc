@@ -67,7 +67,7 @@ final class RealPairsRansTests: XCTestCase {
         }
         
         let data = encoder.getData()
-        var decoder = try EntropyDecoder(data: data)
+        let decoder = try EntropyDecoder(data: data)
         let decPairs = decoder.pairs
         
         XCTAssertEqual(realPairs.count, decPairs.count, "pairs count: enc=\(realPairs.count) dec=\(decPairs.count)")
@@ -84,7 +84,7 @@ final class RealPairsRansTests: XCTestCase {
             }
         }
         
-        if diffCount > 0 {
+        if 0 < diffCount {
             // チャンク分析
             let pairCount = realPairs.count
             let chunkBase = pairCount / 4

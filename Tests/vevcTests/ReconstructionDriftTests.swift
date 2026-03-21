@@ -11,7 +11,7 @@ final class ReconstructionDriftTests: XCTestCase {
         var sum: Int64 = 0
         for v in arr {
             if v < mn { mn = v }
-            if v > mx { mx = v }
+            if mx < v { mx = v }
             sum += Int64(v)
         }
         return (mn, mx, Double(sum) / Double(arr.count))
@@ -62,7 +62,7 @@ final class ReconstructionDriftTests: XCTestCase {
         for i in 0..<count {
             if encRecon.y[i] != decRecon.y[i] {
                 firstDiffs.append((i, encRecon.y[i], decRecon.y[i]))
-                if firstDiffs.count >= 10 { break }
+                if 10 <= firstDiffs.count { break }
             }
         }
         
@@ -71,22 +71,22 @@ final class ReconstructionDriftTests: XCTestCase {
         var maxDIdx = -1
         for i in 0..<count {
             let d = abs(Int(encRecon.y[i]) - Int(decRecon.y[i]))
-            if d > 0 { diffCount += 1 }
-            if d > maxD { maxD = d; maxDIdx = i }
+            if 0 < d { diffCount += 1 }
+            if maxD < d { maxD = d; maxDIdx = i }
         }
         
         // 差が大きい上位10ピクセルを見つける
         var topDiffs: [(Int, Int16, Int16, Int)] = [] // (idx, enc, dec, diff)
         for i in 0..<count {
             let d = abs(Int(encRecon.y[i]) - Int(decRecon.y[i]))
-            if d > 100 {
+            if 100 < d {
                 topDiffs.append((i, encRecon.y[i], decRecon.y[i], d))
             }
         }
-        topDiffs.sort { $0.3 > $1.3 }
+        topDiffs.sort { $1.3 < $0.3 }
         let showTop = topDiffs.prefix(10)
         
-        if diffCount > 0 {
+        if 0 < diffCount {
             let diffsStr = firstDiffs.map { "[\($0.0) y:\($0.0/width) x:\($0.0%width)]: enc=\($0.1) dec=\($0.2)" }.joined(separator: "\n  ")
             let topStr = showTop.map { "[\($0.0) y:\($0.0/width) x:\($0.0%width)]: enc=\($0.1) dec=\($0.2) diff=\($0.3)" }.joined(separator: "\n  ")
             XCTFail("""
@@ -149,7 +149,7 @@ final class ReconstructionDriftTests: XCTestCase {
     
     private func calculatePSNR(original: YCbCrImage, decoded: YCbCrImage) -> Double {
         let count = min(original.yPlane.count, decoded.yPlane.count)
-        guard count > 0 else { return 0 }
+        guard 0 < count else { return 0 }
         var mse: Double = 0
         for i in 0..<count {
             let diff = Double(Int(original.yPlane[i]) - Int(decoded.yPlane[i]))

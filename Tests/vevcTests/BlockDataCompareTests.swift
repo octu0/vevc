@@ -72,9 +72,9 @@ final class BlockDataCompareTests: XCTestCase {
                         let decPtr = decView.base.advanced(by: y * 32 + half)
                         for x in 0..<half {
                             let d = abs(Int(encPtr[x]) - Int(decPtr[x]))
-                            if d > 0 {
+                            if 0 < d {
                                 totalDiffHL += 1
-                                if d > maxDiffHL { maxDiffHL = d }
+                                if maxDiffHL < d { maxDiffHL = d }
                                 if firstDiffBlockHL < 0 { firstDiffBlockHL = i }
                             }
                         }

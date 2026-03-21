@@ -8,7 +8,7 @@ final class VevcTests: XCTestCase {
     /// 2つのUInt8配列間のPSNRを計算する
     private func calculatePSNR(original: [UInt8], decoded: [UInt8]) -> Double {
         let count = min(original.count, decoded.count)
-        guard count > 0 else { return 0 }
+        guard 0 < count else { return 0 }
         var mse: Double = 0
         for i in 0..<count {
             let diff = Double(Int(original[i]) - Int(decoded[i]))
