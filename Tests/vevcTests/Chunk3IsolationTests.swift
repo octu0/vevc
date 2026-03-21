@@ -73,7 +73,7 @@ final class Chunk3IsolationTests: XCTestCase {
         }
         
         let data = encoder.getData()
-        var decoder = try EntropyDecoder(data: data)
+        let decoder = try EntropyDecoder(data: data)
         let decPairs = decoder.pairs
         
         XCTAssertEqual(chunk3Pairs.count, decPairs.count, "pairs count: \(chunk3Pairs.count) vs \(decPairs.count)")
@@ -113,7 +113,7 @@ final class Chunk3IsolationTests: XCTestCase {
             }
             
             let data = encoder.getData()
-            var decoder = try EntropyDecoder(data: data)
+            let decoder = try EntropyDecoder(data: data)
             let decPairs = decoder.pairs
             
             var diffCount = 0
@@ -123,7 +123,7 @@ final class Chunk3IsolationTests: XCTestCase {
                 }
             }
             
-            if diffCount > 0 {
+            if 0 < diffCount {
                 XCTFail("Chunk[\(chunk)] (\(chunkPairs.count) pairs): \(diffCount) diffs")
             }
         }

@@ -164,7 +164,7 @@ final class RansStreamTraceTests: XCTestCase {
             let chunkSize = chunkStarts[lane + 1] - chunkStarts[lane]
             let offsetBefore = offset
             
-            for pairIdx in 0..<chunkSize {
+            for _ in 0..<chunkSize {
                 // decode run token
                 let cfRun: UInt32
                 switch lane {

@@ -216,7 +216,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
-        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
