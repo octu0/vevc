@@ -35,6 +35,42 @@ func readPNG(path: String) -> (image: YCbCrImage, rawData: [PNG.RGBA<UInt8>], wi
     }
     return (vevc.rgbaToYCbCr(data: data, width: image.size.x, height: image.size.y), rgba, image.size.x, image.size.y)
 }
+
+func readY4M(path: String) -> [ImageInput]? {
+    let fileHandle: FileHandle
+    if path == "-" {
+        fileHandle = FileHandle.standardInput
+    } else {
+        guard let f = FileHandle(forReadingAtPath: path) else { return nil }
+        fileHandle = f
+    }
+    defer { if path != "-" { fileHandle.closeFile() } }
+    
+    guard let reader = try? Y4MReader(fileHandle: fileHandle) else { return nil }
+    var inputs: [ImageInput] = []
+    
+    while let img = try? reader.readFrame() {
+        let width = reader.width
+        let height = reader.height
+        
+        let rawData = vevc.ycbcrToRGBA(img: img)
+        let pixelCount = width * height
+        var rgbaFrames = [PNG.RGBA<UInt8>](repeating: .init(0, 0, 0, 0), count: pixelCount)
+        
+        rawData.withUnsafeBufferPointer { rawPtr in
+            rgbaFrames.withUnsafeMutableBufferPointer { rgbaPtr in
+                guard let rawBase = rawPtr.baseAddress, let rgbaBase = rgbaPtr.baseAddress else { return }
+                for i in 0..<pixelCount {
+                    let offset = i * 4
+                    rgbaBase[i] = PNG.RGBA<UInt8>(rawBase[offset], rawBase[offset + 1], rawBase[offset + 2], rawBase[offset + 3])
+                }
+            }
+        }
+        
+        inputs.append(ImageInput(vevcImage: img, rgbaFrames: rgbaFrames, width: width, height: height))
+    }
+    return inputs
+}
 // MARK: - VEVC Encode / Decode
 func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     let vevcImages = images.map { $0.vevcImage }
@@ -669,181 +705,194 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
 @main
 struct CompareApp {
     static func main() async throws {
-let args = CommandLine.arguments
+    let args = CommandLine.arguments
 
+    var config = Config()
+    var positionalArgs: [String] = []
+    var y4mPath: String? = nil
 
-var config = Config()
-var positionalArgs: [String] = []
-
-var i = 1
-while i < args.count {
-    let arg = args[i]
-    switch arg {
-    case "-bitrate":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.bitrate = v }
-            i += 1
-        }
-    case "-framerate":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.framerate = v }
-            i += 1
-        }
-    case "-zeroThreshold":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.zeroThreshold = v }
-            i += 1
-        }
-    case "-gopSize":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.gopSize = v }
-            i += 1
-        }
-    case "-sceneThreshold":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.sceneThreshold = v }
-            i += 1
-        }
-    case "-maxLayer":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { config.maxLayer = v }
-            i += 1
-        }
-    case "-quality":
-        config.quality = true
-    case "-output-graph":
-        config.outputGraph = true
-    default:
-        positionalArgs.append(arg)
-    }
-    i += 1
-}
-
-if positionalArgs.isEmpty {
-    print("Usage: compare [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] <input1.png> [input2.png ...]")
-    exit(1)
-}
-
-var images: [ImageInput] = []
-for p in positionalArgs {
-    if let imgData = readPNG(path: p) {
-        images.append(ImageInput(vevcImage: imgData.image, rgbaFrames: imgData.rawData, width: imgData.width, height: imgData.height))
-    } else {
-        print("Failed to read \(p)")
-    }
-}
-
-if images.isEmpty {
-    print("No valid input images found.")
-    exit(1)
-}
-
-let width = images[0].width
-let height = images[0].height
-
-print("--- Settings ---")
-print("Input frames   : \(images.count)")
-print("Resolution     : \(width)x\(height)")
-print("Target Bitrate : \(config.bitrate) kbps")
-print("Target FPS     : \(config.framerate)")
-print("Quality Check  : \(config.quality)")
-print("----------------")
-    // Top-level variables captured inside Task locally to avoid isolation errors
-    let localImages = images
-    let localConfig = config
-    let localWidth = width
-    let localHeight = height
-    let rawTotalSizeKB = Double(localImages.count * localWidth * localHeight * 3) / 1024.0 // Assuming YCbCr size calculation standard. H264 is YUV 4:2:0 mostly.
-    
-    do {
-        // ウォームアップ: CPUキャッシュ・コードキャッシュを暖機するため、最大5フレームでダミー実行
-        let warmupCount = min(5, localImages.count)
-        let warmupImages = Array(localImages[0..<warmupCount])
-        print("Warming up (\(warmupCount) frames)...")
-        let _ = try await runVEVC(images: warmupImages, config: localConfig)
-        let _ = try await runVEVCOne(images: warmupImages, config: localConfig)
-        let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-        let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-        let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-        let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-        let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-        print("Warmup complete.\n")
-
-        print("Running vevc...")
-        let vevcResult = try await runVEVC(images: localImages, config: localConfig)
-        
-        print("Running vevc (One)...")
-        let vevcOneResult = try await runVEVCOne(images: localImages, config: localConfig)
-        
-        print("Running H.264 (VideoToolbox HWA)...")
-        let h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
-        
-        print("Running H.264 (VideoToolbox SW)...")
-        let h264SwResult = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-        
-        print("Running HEVC (VideoToolbox HWA)...")
-        let hevcResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight)
-        
-        print("Running HEVC (VideoToolbox SW)...")
-        let hevcSwResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-        
-        print("Running MJPEG (VideoToolbox)...")
-        let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
-        
-        func printStats(name: String, result: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?), count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
-            let encMs = result.encTime * 1000
-            let decMs = result.decTime * 1000
-            let encFps = Double(count) / result.encTime
-            let decFps = Double(count) / result.decTime
-            let sizeKB = Double(result.compSize) / 1024.0
-            
-            print("[\(name)]")
-            print(String(format: "  Encode : %7.2f ms (%.2f fps) - %.2f ms / frame", encMs, encFps, encMs / Double(count)))
-            print(String(format: "  Decode : %7.2f ms (%.2f fps) - %.2f ms / frame", decMs, decFps, decMs / Double(count)))
-            print(String(format: "  Size   : %7.2f KB (%.2f%% of raw %.2f KB)", sizeKB, (sizeKB / rawSizeKB) * 100.0, rawSizeKB))
-            
-            var avgPsnr: Double? = nil
-            var avgSsim: Double? = nil
-            if let stats = calculateQualityStats(metrics: result.metrics ?? []) {
-                avgPsnr = stats.avgPSNR
-                avgSsim = stats.avgSSIM
-                print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f | 50%%: %5.2f | 90%%: %5.2f | SD: %5.2f", 
-                             stats.avgPSNR, stats.minPSNR, stats.maxPSNR, stats.p50PSNR, stats.p90PSNR, stats.stddevPSNR))
-                print(String(format: "  SSIM   : Avg: %5.4f | Min: %5.4f | Max: %5.4f | 50%%: %5.4f | 90%%: %5.4f | SD: %5.4f", 
-                             stats.avgSSIM, stats.minSSIM, stats.maxSSIM, stats.p50SSIM, stats.p90SSIM, stats.stddevSSIM))
+    var i = 1
+    while i < args.count {
+        let arg = args[i]
+        switch arg {
+        case "-bitrate":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.bitrate = v }
+                i += 1
             }
-            
-            return CodecBenchmarkResult(name: name, encTimeMs: encMs / Double(count), decTimeMs: decMs / Double(count), sizeKB: sizeKB, avgPSNR: avgPsnr, avgSSIM: avgSsim)
-        }
-        
-        print("\n--- Results ---")
-        var chartResults: [CodecBenchmarkResult] = []
-        chartResults.append(printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-        chartResults.append(printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-        
-        chartResults.append(printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-        chartResults.append(printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-
-        chartResults.append(printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-        chartResults.append(printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-        
-        chartResults.append(printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-        print("---------------")
-        
-        if localConfig.outputGraph {
-            if #available(macOS 13.0, *) {
-                await MainActor.run {
-                    generateAndSaveCharts(results: chartResults)
-                }
-            } else {
-                print("Graph output requires macOS 13.0 or newer.")
+        case "-framerate":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.framerate = v }
+                i += 1
             }
+        case "-zeroThreshold":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.zeroThreshold = v }
+                i += 1
+            }
+        case "-gopSize":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.gopSize = v }
+                i += 1
+            }
+        case "-sceneThreshold":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.sceneThreshold = v }
+                i += 1
+            }
+        case "-maxLayer":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.maxLayer = v }
+                i += 1
+            }
+        case "-quality":
+            config.quality = true
+        case "-output-graph":
+            config.outputGraph = true
+        case "-y4m":
+            if (i + 1) < args.count {
+                y4mPath = args[i + 1]
+                i += 1
+            }
+        default:
+            positionalArgs.append(arg)
         }
-        
-    } catch {
-        print("Error: \(error)")
+        i += 1
+    }
+
+    if positionalArgs.isEmpty && y4mPath == nil {
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [<input1.png> input2.png ...]")
         exit(1)
     }
-    exit(0)
+
+    var images: [ImageInput] = []
+    if let y4m = y4mPath {
+        if let y4mImages = readY4M(path: y4m) {
+            images = y4mImages
+        } else {
+            print("Failed to read y4m: \(y4m)")
+        }
+    } else {
+        for p in positionalArgs {
+            if let imgData = readPNG(path: p) {
+                images.append(ImageInput(vevcImage: imgData.image, rgbaFrames: imgData.rawData, width: imgData.width, height: imgData.height))
+            } else {
+                print("Failed to read \(p)")
+            }
+        }
+    }
+
+    if images.isEmpty {
+        print("No valid input images found.")
+        exit(1)
+    }
+
+    let width = images[0].width
+    let height = images[0].height
+
+    print("--- Settings ---")
+    print("Input frames   : \(images.count)")
+    print("Resolution     : \(width)x\(height)")
+    print("Target Bitrate : \(config.bitrate) kbps")
+    print("Target FPS     : \(config.framerate)")
+    print("Quality Check  : \(config.quality)")
+    print("----------------")
+        // Top-level variables captured inside Task locally to avoid isolation errors
+        let localImages = images
+        let localConfig = config
+        let localWidth = width
+        let localHeight = height
+        let rawTotalSizeKB = Double(localImages.count * localWidth * localHeight * 3) / 1024.0 // Assuming YCbCr size calculation standard. H264 is YUV 4:2:0 mostly.
+        
+        do {
+            // ウォームアップ: CPUキャッシュ・コードキャッシュを暖機するため、最大5フレームでダミー実行
+            let warmupCount = min(5, localImages.count)
+            let warmupImages = Array(localImages[0..<warmupCount])
+            print("Warming up (\(warmupCount) frames)...")
+            let _ = try await runVEVC(images: warmupImages, config: localConfig)
+            let _ = try await runVEVCOne(images: warmupImages, config: localConfig)
+            let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+            let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+            let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+            let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+            let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+            print("Warmup complete.\n")
+
+            print("Running vevc...")
+            let vevcResult = try await runVEVC(images: localImages, config: localConfig)
+            
+            print("Running vevc (One)...")
+            let vevcOneResult = try await runVEVCOne(images: localImages, config: localConfig)
+            
+            print("Running H.264 (VideoToolbox HWA)...")
+            let h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+            
+            print("Running H.264 (VideoToolbox SW)...")
+            let h264SwResult = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+            
+            print("Running HEVC (VideoToolbox HWA)...")
+            let hevcResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+            
+            print("Running HEVC (VideoToolbox SW)...")
+            let hevcSwResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+            
+            print("Running MJPEG (VideoToolbox)...")
+            let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+            
+            func printStats(name: String, result: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?), count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
+                let encMs = result.encTime * 1000
+                let decMs = result.decTime * 1000
+                let encFps = Double(count) / result.encTime
+                let decFps = Double(count) / result.decTime
+                let sizeKB = Double(result.compSize) / 1024.0
+                
+                print("[\(name)]")
+                print(String(format: "  Encode : %7.2f ms (%.2f fps) - %.2f ms / frame", encMs, encFps, encMs / Double(count)))
+                print(String(format: "  Decode : %7.2f ms (%.2f fps) - %.2f ms / frame", decMs, decFps, decMs / Double(count)))
+                print(String(format: "  Size   : %7.2f KB (%.2f%% of raw %.2f KB)", sizeKB, (sizeKB / rawSizeKB) * 100.0, rawSizeKB))
+                
+                var avgPsnr: Double? = nil
+                var avgSsim: Double? = nil
+                if let stats = calculateQualityStats(metrics: result.metrics ?? []) {
+                    avgPsnr = stats.avgPSNR
+                    avgSsim = stats.avgSSIM
+                    print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f | 50%%: %5.2f | 90%%: %5.2f | SD: %5.2f", 
+                                stats.avgPSNR, stats.minPSNR, stats.maxPSNR, stats.p50PSNR, stats.p90PSNR, stats.stddevPSNR))
+                    print(String(format: "  SSIM   : Avg: %5.4f | Min: %5.4f | Max: %5.4f | 50%%: %5.4f | 90%%: %5.4f | SD: %5.4f", 
+                                stats.avgSSIM, stats.minSSIM, stats.maxSSIM, stats.p50SSIM, stats.p90SSIM, stats.stddevSSIM))
+                }
+                
+                return CodecBenchmarkResult(name: name, encTimeMs: encMs / Double(count), decTimeMs: decMs / Double(count), sizeKB: sizeKB, avgPSNR: avgPsnr, avgSSIM: avgSsim)
+            }
+            
+            print("\n--- Results ---")
+            var chartResults: [CodecBenchmarkResult] = []
+            chartResults.append(printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            
+            chartResults.append(printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+
+            chartResults.append(printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            
+            chartResults.append(printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            print("---------------")
+            
+            if localConfig.outputGraph {
+                if #available(macOS 13.0, *) {
+                    await MainActor.run {
+                        generateAndSaveCharts(results: chartResults)
+                    }
+                } else {
+                    print("Graph output requires macOS 13.0 or newer.")
+                }
+            }
+            
+        } catch {
+            print("Error: \(error)")
+            exit(1)
+        }
+        exit(0)
     }
 }
