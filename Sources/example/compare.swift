@@ -71,6 +71,7 @@ func readY4M(path: String) -> [ImageInput]? {
     }
     return inputs
 }
+
 // MARK: - VEVC Encode / Decode
 func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
     let vevcImages = images.map { $0.vevcImage }
@@ -128,37 +129,58 @@ func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: 
 }
 
 // MARK: - H264 Encode / Decode (VideoToolbox)
-func createPixelBuffer(from rgba: [PNG.RGBA<UInt8>], width: Int, height: Int) -> CVPixelBuffer? {
+func createPixelBuffer(from img: YCbCrImage) -> CVPixelBuffer? {
+    let width = img.width
+    let height = img.height
+    
     let attrs = [
         kCVPixelBufferCGImageCompatibilityKey: kCFBooleanTrue,
-        kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue
+        kCVPixelBufferCGBitmapContextCompatibilityKey: kCFBooleanTrue,
+        kCVPixelBufferMetalCompatibilityKey: kCFBooleanTrue,
     ] as CFDictionary
     
     var pixelBuffer: CVPixelBuffer?
-    let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32ARGB, attrs, &pixelBuffer)
+    let status = CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_420YpCbCr8BiPlanarFullRange, attrs, &pixelBuffer)
     guard status == kCVReturnSuccess, let buffer = pixelBuffer else { return nil }
     
     CVPixelBufferLockBaseAddress(buffer, [])
     defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
     
-    guard let context = CGContext(
-        data: CVPixelBufferGetBaseAddress(buffer),
-        width: width,
-        height: height,
-        bitsPerComponent: 8,
-        bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue,
-    ) else { return nil }
+    // Y Plane
+    if let yDest = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) {
+        let destStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+        img.yPlane.withUnsafeBufferPointer { ySrc in
+            guard let srcBase = ySrc.baseAddress else { return }
+            for y in 0..<height {
+                let destRow = yDest.advanced(by: y * destStride)
+                let srcRow = srcBase.advanced(by: y * width)
+                memcpy(destRow, srcRow, width)
+            }
+        }
+    }
     
-    // ARGB: skip first byte for Alpha/Padding, then R, G, B
-    let ptr = context.data!.bindMemory(to: UInt8.self, capacity: width * height * 4)
-    for i in 0..<(width * height) {
-        let rgbaPixel = rgba[i]
-        ptr[i * 4 + 0] = 255 // A (Ignored)
-        ptr[i * 4 + 1] = rgbaPixel.r
-        ptr[i * 4 + 2] = rgbaPixel.g
-        ptr[i * 4 + 3] = rgbaPixel.b
+    // UV Plane (BiPlanar)
+    if let uvDest = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) {
+        let destStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
+        let cWidth = (width + 1) / 2
+        let cHeight = (height + 1) / 2
+        
+        img.cbPlane.withUnsafeBufferPointer { cbSrc in
+            img.crPlane.withUnsafeBufferPointer { crSrc in
+                guard let cbBase = cbSrc.baseAddress, let crBase = crSrc.baseAddress else { return }
+                
+                for y in 0..<cHeight {
+                    let destRow = uvDest.advanced(by: y * destStride).assumingMemoryBound(to: UInt8.self)
+                    let cbRow = cbBase.advanced(by: y * cWidth)
+                    let crRow = crBase.advanced(by: y * cWidth)
+                    
+                    for x in 0..<cWidth {
+                        destRow[x * 2 + 0] = cbRow[x]
+                        destRow[x * 2 + 1] = crRow[x]
+                    }
+                }
+            }
+        }
     }
     
     return buffer
@@ -219,7 +241,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     // Pre-create pixel buffers for fair encoding speed comparison
     var encodeBuffers: [CVPixelBuffer] = []
     for imgInput in images {
-        if let pb = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) {
+        if let pb = createPixelBuffer(from: imgInput.vevcImage) {
             encodeBuffers.append(pb)
         }
     }
@@ -262,7 +284,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     }
     
     let destPixelBufferAttributes: [String: Any] = [
-        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
@@ -405,7 +427,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     // Pre-create pixel buffers for fair encoding speed comparison
     var encodeBuffers: [CVPixelBuffer] = []
     for imgInput in images {
-        if let pb = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) {
+        if let pb = createPixelBuffer(from: imgInput.vevcImage) {
             encodeBuffers.append(pb)
         }
     }
@@ -445,7 +467,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     }
     
     let destPixelBufferAttributes: [String: Any] = [
-        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
@@ -580,7 +602,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
     // Pre-create pixel buffers for fair encoding speed comparison
     var encodeBuffers: [CVPixelBuffer] = []
     for imgInput in images {
-        if let pb = createPixelBuffer(from: imgInput.rgbaFrames, width: width, height: height) {
+        if let pb = createPixelBuffer(from: imgInput.vevcImage) {
             encodeBuffers.append(pb)
         }
     }

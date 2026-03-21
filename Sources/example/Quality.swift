@@ -85,15 +85,29 @@ public func calculateQualityStats(metrics: [QualityMetrics]) -> QualityStats? {
 public func calculatePSNR(img1: YCbCrImage, img2: YCbCrImage) -> Double {
     let w = min(img1.width, img2.width)
     let h = min(img1.height, img2.height)
+    
+    let psnrY = calcPlanePSNR(p1: img1.yPlane, p2: img2.yPlane, w: w, h: h, stride1: img1.width, stride2: img2.width)
+    
+    let cw = min((img1.width + 1) / 2, (img2.width + 1) / 2)
+    let ch = min((img1.height + 1) / 2, (img2.height + 1) / 2)
+    let psnrU = calcPlanePSNR(p1: img1.cbPlane, p2: img2.cbPlane, w: cw, h: ch, stride1: (img1.width + 1) / 2, stride2: (img2.width + 1) / 2)
+    let psnrV = calcPlanePSNR(p1: img1.crPlane, p2: img2.crPlane, w: cw, h: ch, stride1: (img1.width + 1) / 2, stride2: (img2.width + 1) / 2)
+    
+    return (4.0 * psnrY + psnrU + psnrV) / 6.0
+}
+
+@inline(__always)
+private func calcPlanePSNR(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: Int, stride2: Int) -> Double {
     var ssd = 0
     let count = w * h
+    if count == 0 { return 100.0 }
     
-    img1.yPlane.withUnsafeBufferPointer { p1 in
-        img2.yPlane.withUnsafeBufferPointer { p2 in
-            guard let b1 = p1.baseAddress, let b2 = p2.baseAddress else { return }
+    p1.withUnsafeBufferPointer { ptr1 in
+        p2.withUnsafeBufferPointer { ptr2 in
+            guard let b1 = ptr1.baseAddress, let b2 = ptr2.baseAddress else { return }
             for y in 0..<h {
-                let r1 = b1.advanced(by: y * img1.width)
-                let r2 = b2.advanced(by: y * img2.width)
+                let r1 = b1.advanced(by: y * stride1)
+                let r2 = b2.advanced(by: y * stride2)
                 for x in 0..<w {
                     let diff = Int(r1[x]) - Int(r2[x])
                     ssd += diff * diff
@@ -109,40 +123,10 @@ public func calculatePSNR(img1: YCbCrImage, img2: YCbCrImage) -> Double {
 
 @inline(__always)
 public func calculatePSNR(img1: YCbCrImage, bgraBuffer buffer: CVPixelBuffer) -> Double {
-    CVPixelBufferLockBaseAddress(buffer, .readOnly)
-    defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-    
     let w = min(img1.width, CVPixelBufferGetWidth(buffer))
     let h = min(img1.height, CVPixelBufferGetHeight(buffer))
-    let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-    let baseAddr = CVPixelBufferGetBaseAddress(buffer)!
-    
-    var ssd = 0
-    let count = w * h
-    let bias = 1 << 15
-    
-    img1.yPlane.withUnsafeBufferPointer { p1 in
-        guard let b1 = p1.baseAddress else { return }
-        for y in 0..<h {
-            let bgraRow = baseAddr.advanced(by: y * bytesPerRow).assumingMemoryBound(to: UInt8.self)
-            let yRow = b1.advanced(by: y * img1.width)
-            for x in 0..<w {
-                let off = x * 4
-                let b = Int(bgraRow[off + 0])
-                let g = Int(bgraRow[off + 1])
-                let r = Int(bgraRow[off + 2])
-                let y2 = (19595 * r + 38470 * g + 7471 * b + bias) >> 16
-                let y2Clamped = y2 < 0 ? 0 : (y2 > 255 ? 255 : y2)
-                
-                let diff = Int(yRow[x]) - y2Clamped
-                ssd += diff * diff
-            }
-        }
-    }
-    
-    if ssd == 0 { return 100.0 }
-    let mse = Double(ssd) / Double(count)
-    return 10.0 * log10((255.0 * 255.0) / mse)
+    let img2 = createYCbCrImage(from: buffer, width: w, height: h)
+    return calculatePSNR(img1: img1, img2: img2)
 }
 
 @inline(__always)
@@ -150,20 +134,32 @@ public func calculateSSIM(img1: YCbCrImage, img2: YCbCrImage) -> Double {
     let w = min(img1.width, img2.width)
     let h = min(img1.height, img2.height)
     
+    let ssimY = calcPlaneSSIM(p1: img1.yPlane, p2: img2.yPlane, w: w, h: h, stride1: img1.width, stride2: img2.width)
+    
+    let cw = min((img1.width + 1) / 2, (img2.width + 1) / 2)
+    let ch = min((img1.height + 1) / 2, (img2.height + 1) / 2)
+    let ssimU = calcPlaneSSIM(p1: img1.cbPlane, p2: img2.cbPlane, w: cw, h: ch, stride1: (img1.width + 1) / 2, stride2: (img2.width + 1) / 2)
+    let ssimV = calcPlaneSSIM(p1: img1.crPlane, p2: img2.crPlane, w: cw, h: ch, stride1: (img1.width + 1) / 2, stride2: (img2.width + 1) / 2)
+    
+    return (4.0 * ssimY + ssimU + ssimV) / 6.0
+}
+
+@inline(__always)
+private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: Int, stride2: Int) -> Double {
     var ssimSum: Double = 0
     var blocks = 0
     let C1: Double = 6.5025
     let C2: Double = 58.5225
     
-    img1.yPlane.withUnsafeBufferPointer { p1 in
-        img2.yPlane.withUnsafeBufferPointer { p2 in
-            guard let b1 = p1.baseAddress, let b2 = p2.baseAddress else { return }
+    p1.withUnsafeBufferPointer { ptr1 in
+        p2.withUnsafeBufferPointer { ptr2 in
+            guard let b1 = ptr1.baseAddress, let b2 = ptr2.baseAddress else { return }
             for y in stride(from: 0, to: h - 7, by: 8) {
                 for x in stride(from: 0, to: w - 7, by: 8) {
                     var sum1 = 0, sum2 = 0, sum1sq = 0, sum2sq = 0, sum12 = 0
                     for dy in 0..<8 {
-                        let r1 = b1.advanced(by: (y + dy) * img1.width + x)
-                        let r2 = b2.advanced(by: (y + dy) * img2.width + x)
+                        let r1 = b1.advanced(by: (y + dy) * stride1 + x)
+                        let r2 = b2.advanced(by: (y + dy) * stride2 + x)
                         for dx in 0..<8 {
                             let v1 = Int(r1[dx])
                             let v2 = Int(r2[dx])
@@ -199,61 +195,109 @@ public func calculateSSIM(img1: YCbCrImage, img2: YCbCrImage) -> Double {
 
 @inline(__always)
 public func calculateSSIM(img1: YCbCrImage, bgraBuffer buffer: CVPixelBuffer) -> Double {
+    let w = min(img1.width, CVPixelBufferGetWidth(buffer))
+    let h = min(img1.height, CVPixelBufferGetHeight(buffer))
+    let img2 = createYCbCrImage(from: buffer, width: w, height: h)
+    return calculateSSIM(img1: img1, img2: img2)
+}
+
+@inline(__always)
+private func createYCbCrImage(from buffer: CVPixelBuffer, width: Int, height: Int) -> YCbCrImage {
+    var ycbcr = YCbCrImage(width: width, height: height, ratio: .ratio420)
+    
     CVPixelBufferLockBaseAddress(buffer, .readOnly)
     defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
     
-    let w = min(img1.width, CVPixelBufferGetWidth(buffer))
-    let h = min(img1.height, CVPixelBufferGetHeight(buffer))
-    let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-    let baseAddr = CVPixelBufferGetBaseAddress(buffer)!
+    let format = CVPixelBufferGetPixelFormatType(buffer)
+    let isBiPlanar = CVPixelBufferIsPlanar(buffer)
     
-    var ssimSum: Double = 0
-    var blocks = 0
-    let C1: Double = 6.5025
-    let C2: Double = 58.5225
-    let bias = 1 << 15
-    
-    img1.yPlane.withUnsafeBufferPointer { p1 in
-        guard let b1 = p1.baseAddress else { return }
-        for y in stride(from: 0, to: h - 7, by: 8) {
-            for x in stride(from: 0, to: w - 7, by: 8) {
-                var sum1 = 0, sum2 = 0, sum1sq = 0, sum2sq = 0, sum12 = 0
-                for dy in 0..<8 {
-                    let yRow = b1.advanced(by: (y + dy) * img1.width + x)
-                    let bgraRow = baseAddr.advanced(by: (y + dy) * bytesPerRow).assumingMemoryBound(to: UInt8.self).advanced(by: x * 4)
-                    for dx in 0..<8 {
-                        let off = dx * 4
-                        let cb = Int(bgraRow[off + 0])
-                        let cg = Int(bgraRow[off + 1])
-                        let cr = Int(bgraRow[off + 2])
-                        let y2 = (19595 * cr + 38470 * cg + 7471 * cb + bias) >> 16
-                        let v2 = y2 < 0 ? 0 : (y2 > 255 ? 255 : y2)
+    if isBiPlanar {
+        // Y Plane
+        if let ySrc = CVPixelBufferGetBaseAddressOfPlane(buffer, 0) {
+            let srcStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 0)
+            ycbcr.yPlane.withUnsafeMutableBufferPointer { yDest in
+                guard let destBase = yDest.baseAddress else { return }
+                for y in 0..<height {
+                    memcpy(destBase.advanced(by: y * width), ySrc.advanced(by: y * srcStride), width)
+                }
+            }
+        }
+        
+        // UV Plane
+        if let uvSrc = CVPixelBufferGetBaseAddressOfPlane(buffer, 1) {
+            let srcStride = CVPixelBufferGetBytesPerRowOfPlane(buffer, 1)
+            let cWidth = (width + 1) / 2
+            let cHeight = (height + 1) / 2
+            
+            ycbcr.cbPlane.withUnsafeMutableBufferPointer { cbDest in
+                ycbcr.crPlane.withUnsafeMutableBufferPointer { crDest in
+                    guard let cbBase = cbDest.baseAddress, let crBase = crDest.baseAddress else { return }
+                    
+                    for y in 0..<cHeight {
+                        let srcRow = uvSrc.advanced(by: y * srcStride).assumingMemoryBound(to: UInt8.self)
+                        let cbRow = cbBase.advanced(by: y * cWidth)
+                        let crRow = crBase.advanced(by: y * cWidth)
                         
-                        let v1 = Int(yRow[dx])
-                        sum1 += v1
-                        sum2 += v2
-                        sum1sq += v1 * v1
-                        sum2sq += v2 * v2
-                        sum12 += v1 * v2
+                        for x in 0..<cWidth {
+                            cbRow[x] = srcRow[x * 2 + 0]
+                            crRow[x] = srcRow[x * 2 + 1]
+                        }
                     }
                 }
-                let n = 64.0
-                let mu1 = Double(sum1) / n
-                let mu2 = Double(sum2) / n
-                let mu1sq = mu1 * mu1
-                let mu2sq = mu2 * mu2
-                let mu12 = mu1 * mu2
-                
-                let sigma1sq = (Double(sum1sq) / n) - mu1sq
-                let sigma2sq = (Double(sum2sq) / n) - mu2sq
-                let sigma12 = (Double(sum12) / n) - mu12
-                
-                let num = (2.0 * mu12 + C1) * (2.0 * sigma12 + C2)
-                let den = (mu1sq + mu2sq + C1) * (sigma1sq + sigma2sq + C2)
-                ssimSum += num / den
-                blocks += 1
+            }
+        }
+    } else {
+        guard format == kCVPixelFormatType_32BGRA || format == kCVPixelFormatType_32RGBA || format == kCVPixelFormatType_32ARGB || format == kCVPixelFormatType_32ABGR else {
+            let p1 = String(UnicodeScalar((format >> 24) & 255) ?? "?")
+            let p2 = String(UnicodeScalar((format >> 16) & 255) ?? "?")
+            let p3 = String(UnicodeScalar((format >> 8) & 255) ?? "?")
+            let p4 = String(UnicodeScalar(format & 255) ?? "?")
+            fatalError("Unsupported format for createYCbCrImage: \(p1)\(p2)\(p3)\(p4) (\(format))")
+        }
+        
+        // Fallback for BGRA
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        let baseAddr = CVPixelBufferGetBaseAddress(buffer)!
+        let biasY = 1 << 15
+        let biasC = 1 << 15
+        
+        let actualWidth = min(width, CVPixelBufferGetWidth(buffer))
+        let actualHeight = min(height, CVPixelBufferGetHeight(buffer))
+        
+        ycbcr.yPlane.withUnsafeMutableBufferPointer { yPtr in
+            ycbcr.cbPlane.withUnsafeMutableBufferPointer { cbPtr in
+                ycbcr.crPlane.withUnsafeMutableBufferPointer { crPtr in
+                    guard let yBase = yPtr.baseAddress, let cbBase = cbPtr.baseAddress, let crBase = crPtr.baseAddress else { return }
+                    
+                    let strideY = width
+                    let strideC = (width + 1) / 2
+                    
+                    for y in 0..<actualHeight {
+                        let bgraRow = baseAddr.advanced(by: y * bytesPerRow).assumingMemoryBound(to: UInt8.self)
+                        let yRow = yBase.advanced(by: y * strideY)
+                        
+                        for x in 0..<actualWidth {
+                            let off = x * 4
+                            let b = Int(bgraRow[off + 0])
+                            let g = Int(bgraRow[off + 1])
+                            let r = Int(bgraRow[off + 2])
+                            
+                            let y2 = (19595 * r + 38470 * g + 7471 * b + biasY) >> 16
+                            yRow[x] = UInt8(clamping: y2)
+                            
+                            if x % 2 == 0 && y % 2 == 0 {
+                                let cb2 = ((-11059 * r - 21709 * g + 32768 * b + biasC) >> 16) + 128
+                                let cr2 = ((32768 * r - 27439 * g - 5329 * b + biasC) >> 16) + 128
+                                
+                                cbBase[(y / 2) * strideC + (x / 2)] = UInt8(clamping: cb2)
+                                crBase[(y / 2) * strideC + (x / 2)] = UInt8(clamping: cr2)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
-    return blocks == 0 ? 1.0 : ssimSum / Double(blocks)
+    
+    return ycbcr
 }
