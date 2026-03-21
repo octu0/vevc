@@ -27,8 +27,8 @@ struct QuantizationTable: Sendable {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
         self.qLow  = Quantizer(step: s, roundToNearest: true)
-        self.qMid  = Quantizer(step: (s * 2), roundToNearest: false)
-        self.qHigh = Quantizer(step: (s * 4), roundToNearest: false)
+        self.qMid  = Quantizer(step: Int(Double(s) * 1.5), roundToNearest: false)
+        self.qHigh = Quantizer(step: (s * 2), roundToNearest: false)
     }
 }
 
