@@ -86,7 +86,7 @@ final class ValueTokenizerTests: XCTestCase {
         let encPairs = encoder.pairs
         let data = encoder.getData()
         
-        var decoder = try EntropyDecoder(data: data)
+        let decoder = try EntropyDecoder(data: data)
         let decPairs = decoder.pairs
         
         print("=== Decoder: pairs=\(decPairs.count) ===")

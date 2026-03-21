@@ -33,7 +33,7 @@ final class LargeRansTests: XCTestCase {
         print("=== Encoder: pairs=\(encoder.pairs.count) coeffCount=\(encoder.coeffCount) trailingZeros=\(encoder.trailingZeros) ===")
         
         let data = encoder.getData()
-        var decoder = try EntropyDecoder(data: data)
+        let decoder = try EntropyDecoder(data: data)
         let decPairs = decoder.pairs
         
         print("=== Decoder: pairs=\(decPairs.count) ===")
@@ -80,7 +80,7 @@ final class LargeRansTests: XCTestCase {
         var decoder = try EntropyDecoder(data: data)
         
         // bypass読み飛ばし
-        for block in 0..<48 {
+        for _ in 0..<48 {
             let _ = try decoder.decodeBypass()
             let _ = try decodeExpGolomb(decoder: &decoder)
             let _ = try decodeExpGolomb(decoder: &decoder)

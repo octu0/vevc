@@ -64,13 +64,13 @@ public class Y4MReader {
         frameData.withUnsafeBytes { ptr in
             let base = ptr.bindMemory(to: UInt8.self).baseAddress!
             img.yPlane.withUnsafeMutableBufferPointer { yPtr in
-                yPtr.baseAddress!.assign(from: base, count: ySize)
+                yPtr.baseAddress!.update(from: base, count: ySize)
             }
             img.cbPlane.withUnsafeMutableBufferPointer { cbPtr in
-                cbPtr.baseAddress!.assign(from: base.advanced(by: ySize), count: cSize)
+                cbPtr.baseAddress!.update(from: base.advanced(by: ySize), count: cSize)
             }
             img.crPlane.withUnsafeMutableBufferPointer { crPtr in
-                crPtr.baseAddress!.assign(from: base.advanced(by: ySize + cSize), count: cSize)
+                crPtr.baseAddress!.update(from: base.advanced(by: ySize + cSize), count: cSize)
             }
         }
         

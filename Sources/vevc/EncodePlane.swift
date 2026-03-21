@@ -74,24 +74,25 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> 
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
     resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCount)
-        
-        for i in startRow..<endRow {
-            let h = (i * 32)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: width, by: 32) {
-                var block = Block2D(width: 32, height: 32)
-                block.withView { view in
-                    r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                    dwt2d_32(&view)
+        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
+        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
+            let startRow = (taskIdx * chunkSize)
+            let endRow = min((startRow + chunkSize), rowCount)
+
+            for i in startRow..<endRow {
+                let h = (i * 32)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for w in stride(from: 0, to: width, by: 32) {
+                    var block = Block2D(width: 32, height: 32)
+                    block.withView { view in
+                        r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                        dwt2d_32(&view)
+                    }
+                    rowResults.append((block, w, h))
                 }
-                rowResults.append((block, w, h))
+                ptr[i] = (h, rowResults)
             }
-            resultsPtr[i] = (h, rowResults)
         }
-    }
     }
 
     
@@ -162,24 +163,25 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
     resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCount)
-        
-        for i in startRow..<endRow {
-            let h = (i * 16)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: width, by: 16) {
-                var block = Block2D(width: 16, height: 16)
-                block.withView { view in
-                    r.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
-                    dwt2d_16(&view)
+        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
+        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
+            let startRow = (taskIdx * chunkSize)
+            let endRow = min((startRow + chunkSize), rowCount)
+
+            for i in startRow..<endRow {
+                let h = (i * 16)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for w in stride(from: 0, to: width, by: 16) {
+                    var block = Block2D(width: 16, height: 16)
+                    block.withView { view in
+                        r.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
+                        dwt2d_16(&view)
+                    }
+                    rowResults.append((block, w, h))
                 }
-                rowResults.append((block, w, h))
+                ptr[i] = (h, rowResults)
             }
-            resultsPtr[i] = (h, rowResults)
         }
-    }
     }
 
     
@@ -239,24 +241,25 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
     resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCount)
-        
-        for i in startRow..<endRow {
-            let h = (i * 8)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: width, by: 8) {
-                var block = Block2D(width: 8, height: 8)
-                block.withView { view in
-                    r.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
-                    dwt2d_8(&view)
+        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
+        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
+            let startRow = (taskIdx * chunkSize)
+            let endRow = min((startRow + chunkSize), rowCount)
+
+            for i in startRow..<endRow {
+                let h = (i * 8)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for w in stride(from: 0, to: width, by: 8) {
+                    var block = Block2D(width: 8, height: 8)
+                    block.withView { view in
+                        r.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
+                        dwt2d_8(&view)
+                    }
+                    rowResults.append((block, w, h))
                 }
-                rowResults.append((block, w, h))
+                ptr[i] = (h, rowResults)
             }
-            resultsPtr[i] = (h, rowResults)
         }
-    }
     }
 
     
@@ -281,24 +284,25 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int)
     let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
     resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-    DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-        let startRow = (taskIdx * chunkSize)
-        let endRow = min((startRow + chunkSize), rowCount)
-        
-        for i in startRow..<endRow {
-            let h = (i * 32)
-            var rowResults: [(Block2D, Int, Int)] = []
-            for w in stride(from: 0, to: width, by: 32) {
-                var block = Block2D(width: 32, height: 32)
-                block.withView { view in
-                    r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                    dwt2d_32(&view)
+        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
+        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
+            let startRow = (taskIdx * chunkSize)
+            let endRow = min((startRow + chunkSize), rowCount)
+
+            for i in startRow..<endRow {
+                let h = (i * 32)
+                var rowResults: [(Block2D, Int, Int)] = []
+                for w in stride(from: 0, to: width, by: 32) {
+                    var block = Block2D(width: 32, height: 32)
+                    block.withView { view in
+                        r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                        dwt2d_32(&view)
+                    }
+                    rowResults.append((block, w, h))
                 }
-                rowResults.append((block, w, h))
+                ptr[i] = (h, rowResults)
             }
-            resultsPtr[i] = (h, rowResults)
         }
-    }
     }
 
     
