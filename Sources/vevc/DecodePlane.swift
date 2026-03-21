@@ -243,7 +243,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     for i in 0..<blockCount {
         let isZero = brFlags.readBit()
         let _ = brFlags.readBit()
-        if !isZero {
+        if isZero != true {
             nonZeroIndices.append(i)
         }
     }

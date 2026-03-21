@@ -982,9 +982,9 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
             blocks[i].withView { view in
                 let half = 32 / 2
                 let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
                 hlView.clearAll()
                 lhView.clearAll()
                 hhView.clearAll()
@@ -1095,9 +1095,9 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
             blocks[i].withView { view in
                 let half = 16 / 2
                 let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+                let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+                let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
                 hlView.clearAll()
                 lhView.clearAll()
                 hhView.clearAll()
