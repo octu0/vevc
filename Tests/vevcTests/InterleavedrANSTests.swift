@@ -6,7 +6,7 @@ final class InterleavedrANSTests: XCTestCase {
     struct EncodedData {
         let isSignificant: Bool
         let token: UInt8
-        let bypassBits: UInt16
+        let bypassBits: UInt32
         let bypassLen: Int
     }
     
