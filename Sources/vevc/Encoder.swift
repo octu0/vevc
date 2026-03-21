@@ -69,7 +69,7 @@ public class Encoder {
         if isOne {
             if forceIFrame {
                 let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 6))
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
                 
                 let (layer0, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
@@ -92,8 +92,8 @@ public class Encoder {
                     qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
                     qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
                 } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(Double(qt.step) * 1.5)))
-                    qtC = QuantizationTable(baseStep: max(1, Int(Double(qt.step) * 3.0)))
+                    qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                    qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
                 }
                 
                 let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
@@ -150,7 +150,7 @@ public class Encoder {
         } else {
             if forceIFrame {
                 let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
                 let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
@@ -168,8 +168,8 @@ public class Encoder {
                     qtY = QuantizationTable(baseStep: max(1, Int(qt.step) / 2))
                     qtC = QuantizationTable(baseStep: max(1, Int(qt.step)))
                 } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(Double(qt.step) * 1.5)))
-                    qtC = QuantizationTable(baseStep: max(1, Int(Double(qt.step) * 3.0)))
+                    qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                    qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
                 }
                 let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
