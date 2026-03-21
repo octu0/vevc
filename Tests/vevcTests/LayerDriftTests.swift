@@ -88,8 +88,8 @@ final class LayerDriftTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 6)
         
         // encodeSpatialLayersのLayer2→Layer1→Base8 チェーンの部分実行と同等
-        let (layer2, sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await encodePlaneLayer32(pd: pd, predictedPd: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (layer1, sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (_, sub2, subPred2, _, _, _) = try await encodePlaneLayer32(pd: pd, predictedPd: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (layer1, sub1, subPred1, l1yBlocks, _, _) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
         // エンコーダ再構築: Base8 → Layer16
