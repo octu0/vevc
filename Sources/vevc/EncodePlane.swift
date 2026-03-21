@@ -14,9 +14,9 @@ func evaluateQuantizeLayer32(block: inout Block2D, qt: QuantizationTable) {
         var hl = subs.hl
         var lh = subs.lh
         var hh = subs.hh
-        quantizeMidSignedMapping(&hl, qt: qt)
-        quantizeMidSignedMapping(&lh, qt: qt)
-        quantizeHighSignedMapping(&hh, qt: qt)
+        quantizeSignedMapping(&hl, q: qt.qMid)
+        quantizeSignedMapping(&lh, q: qt.qMid)
+        quantizeSignedMapping(&hh, q: qt.qHigh)
     }
 }
 
@@ -27,9 +27,9 @@ func evaluateQuantizeLayer16(block: inout Block2D, qt: QuantizationTable) {
         var hl = subs.hl
         var lh = subs.lh
         var hh = subs.hh
-        quantizeMidSignedMapping(&hl, qt: qt)
-        quantizeMidSignedMapping(&lh, qt: qt)
-        quantizeHighSignedMapping(&hh, qt: qt)
+        quantizeSignedMapping(&hl, q: qt.qMid)
+        quantizeSignedMapping(&lh, q: qt.qMid)
+        quantizeSignedMapping(&hh, q: qt.qHigh)
     }
 }
 
@@ -41,10 +41,10 @@ func evaluateQuantizeBase8(block: inout Block2D, qt: QuantizationTable) {
         var hl = subs.hl
         var lh = subs.lh
         var hh = subs.hh
-        quantizeLow(&ll, qt: qt)
-        quantizeMidSignedMapping(&hl, qt: qt)
-        quantizeMidSignedMapping(&lh, qt: qt)
-        quantizeHighSignedMapping(&hh, qt: qt)
+        quantize(&ll, q: qt.qLow)
+        quantizeSignedMapping(&hl, q: qt.qMid)
+        quantizeSignedMapping(&lh, q: qt.qMid)
+        quantizeSignedMapping(&hh, q: qt.qHigh)
     }
 }
 
@@ -56,10 +56,10 @@ func evaluateQuantizeBase32(block: inout Block2D, qt: QuantizationTable) {
         var hl = subs.hl
         var lh = subs.lh
         var hh = subs.hh
-        quantizeLow(&ll, qt: qt)
-        quantizeMidSignedMapping(&hl, qt: qt)
-        quantizeMidSignedMapping(&lh, qt: qt)
-        quantizeHighSignedMapping(&hh, qt: qt)
+        quantize(&ll, q: qt.qLow)
+        quantizeSignedMapping(&hl, q: qt.qMid)
+        quantizeSignedMapping(&lh, q: qt.qMid)
+        quantizeSignedMapping(&hh, q: qt.qHigh)
     }
 }
 
@@ -605,10 +605,10 @@ func reconstructPlaneBase8(blocks: [Block2D], width: Int, height: Int, qt: Quant
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
                 var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
                 var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeLow(&llView, qt: qt)
-                dequantizeMidSignedMapping(&hlView, qt: qt)
-                dequantizeMidSignedMapping(&lhView, qt: qt)
-                dequantizeHighSignedMapping(&hhView, qt: qt)
+                dequantize(&llView, q: qt.qLow)
+                dequantizeSignedMapping(&hlView, q: qt.qMid)
+                dequantizeSignedMapping(&lhView, q: qt.qMid)
+                dequantizeSignedMapping(&hhView, q: qt.qHigh)
                 invDwt2d_8(&view)
             }
             
@@ -676,9 +676,9 @@ func reconstructPlaneLayer(blocks: [Block2D], prevImg: Image16, planeType: Int, 
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
                 var lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
                 var hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
-                dequantizeMidSignedMapping(&hlView, qt: qt)
-                dequantizeMidSignedMapping(&lhView, qt: qt)
-                dequantizeHighSignedMapping(&hhView, qt: qt)
+                dequantizeSignedMapping(&hlView, q: qt.qMid)
+                dequantizeSignedMapping(&lhView, q: qt.qMid)
+                dequantizeSignedMapping(&hhView, q: qt.qHigh)
                 if blockSize == 32 {
                     invDwt2d_32(&view)
                 } else {
@@ -808,10 +808,10 @@ func reconstructPlaneBase32(blocks: [Block2D], width: Int, height: Int, qt: Quan
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
                 var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
                 var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                dequantizeLow(&llView, qt: qt)
-                dequantizeMidSignedMapping(&hlView, qt: qt)
-                dequantizeMidSignedMapping(&lhView, qt: qt)
-                dequantizeHighSignedMapping(&hhView, qt: qt)
+                dequantize(&llView, q: qt.qLow)
+                dequantizeSignedMapping(&hlView, q: qt.qMid)
+                dequantizeSignedMapping(&lhView, q: qt.qMid)
+                dequantizeSignedMapping(&hhView, q: qt.qHigh)
                 invDwt2d_32(&view)
             }
             

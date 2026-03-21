@@ -102,8 +102,8 @@ struct EntropyEncoder {
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-        var runTokenCounts = Array(repeating: 0, count: 32)
-        var valTokenCounts = Array(repeating: 0, count: 32)
+        var runTokenCounts = Array(repeating: 0, count: 64)
+        var valTokenCounts = Array(repeating: 0, count: 64)
         
         for lane in 0..<4 {
             let start = chunkStarts[lane]
@@ -138,11 +138,15 @@ struct EntropyEncoder {
         for lane in 0..<4 {
             chunkBypassWriters[lane].flush()
         }
+        // Cap frequencies to 16-bit to ensure bitstream serialization perfectly matches what the decoder reads
+        for i in 0..<64 {
+            if runTokenCounts[i] > 65535 { runTokenCounts[i] = 65535 }
+            if valTokenCounts[i] > 65535 { valTokenCounts[i] = 65535 }
+        }
         
-        // rANS model
         var runModel = rANSModel()
-        runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
         var valModel = rANSModel()
+        runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
         valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
         
         // header
@@ -200,15 +204,23 @@ struct EntropyEncoder {
     
     @inline(__always)
     private func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
-        var bitmap: UInt32 = 0
-        for i in 0..<32 {
+        var bitmap: UInt64 = 0
+        for i in 0..<64 {
             if freqs[i] > 1 {
-                bitmap |= UInt32(1 << i)
+                bitmap |= UInt64(1) << i
             }
         }
-        appendUInt32BE(&out, bitmap)
-        for i in 0..<32 {
-            if (bitmap & UInt32(1 << i)) != 0 {
+        out.append(UInt8((bitmap >> 56) & 0xFF))
+        out.append(UInt8((bitmap >> 48) & 0xFF))
+        out.append(UInt8((bitmap >> 40) & 0xFF))
+        out.append(UInt8((bitmap >> 32) & 0xFF))
+        out.append(UInt8((bitmap >> 24) & 0xFF))
+        out.append(UInt8((bitmap >> 16) & 0xFF))
+        out.append(UInt8((bitmap >> 8) & 0xFF))
+        out.append(UInt8(bitmap & 0xFF))
+        
+        for i in 0..<64 {
+            if (bitmap & (UInt64(1) << i)) != 0 {
                 out.append(UInt8(truncatingIfNeeded: freqs[i] >> 8))
                 out.append(UInt8(truncatingIfNeeded: freqs[i] & 0xFF))
             }
@@ -375,12 +387,21 @@ struct EntropyDecoder {
     
     @inline(__always)
     private static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
-        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
-        let bitmap = vevc.readUInt32BE(data, at: &offset)
+        guard offset + 8 <= data.count else { throw DecodeError.insufficientData }
+        let b0 = UInt64(data[offset])
+        let b1 = UInt64(data[offset+1])
+        let b2 = UInt64(data[offset+2])
+        let b3 = UInt64(data[offset+3])
+        let b4 = UInt64(data[offset+4])
+        let b5 = UInt64(data[offset+5])
+        let b6 = UInt64(data[offset+6])
+        let b7 = UInt64(data[offset+7])
+        let bitmap = (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32) | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7
+        offset += 8
         
-        var freqs = [UInt32](repeating: 1, count: 32)
-        for i in 0..<32 {
-            if (bitmap & UInt32(1 << i)) != 0 {
+        var freqs = [UInt32](repeating: 1, count: 64)
+        for i in 0..<64 {
+            if (bitmap & (UInt64(1) << i)) != 0 {
                 guard offset + 2 <= data.count else { throw DecodeError.insufficientData }
                 freqs[i] = (UInt32(data[offset]) << 8) | UInt32(data[offset + 1])
                 offset += 2

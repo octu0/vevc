@@ -6,12 +6,16 @@ struct Quantizer: Sendable {
     let bias: Int32
     let shift: Int16 = 16
     
-    init(step: Int, roundToNearest: Bool = false) {
+    init(step: Int, roundToNearest: Bool = false, deadZoneRatio: Double = 0.0) {
         self.step = Int16(step)
         self.mul = Int32((1 << 16) / step)
         var b: Int32 = 0
         if roundToNearest {
             b = Int32(1 << 15)
+        } else if deadZoneRatio != 0.0 {
+            // positive deadZoneRatio narrows the dead zone (towards round-to-nearest)
+            // negative deadZoneRatio widens the dead zone (more values become 0)
+            b = Int32(Double(1 << 16) * deadZoneRatio)
         }
         self.bias = b
     }
@@ -23,44 +27,25 @@ struct QuantizationTable: Sendable {
     let qMid: Quantizer
     let qHigh: Quantizer
     
-    init(baseStep: Int) {
+    init(baseStep: Int, isChroma: Bool = false) {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
-        self.qLow  = Quantizer(step: s, roundToNearest: true)
-        self.qMid  = Quantizer(step: Int(Double(s) * 1.5), roundToNearest: false)
-        self.qHigh = Quantizer(step: (s * 2), roundToNearest: false)
+        
+        if isChroma {
+            self.qLow = Quantizer(step: Int(min(4, max(1, baseStep / 8))), roundToNearest: true)
+            // Widen deadzone slightly for mid/high chroma to drop barely-visible color variations
+            self.qMid = Quantizer(step: Int(min(16, max(1, baseStep))), deadZoneRatio: -0.1)
+            self.qHigh = Quantizer(step: Int(min(32, max(1, baseStep * 2))), deadZoneRatio: -0.2)
+        } else {
+            // Luma LL band holds structural integrity, keep it very high quality
+            self.qLow = Quantizer(step: Int(min(8, max(1, baseStep / 6))), roundToNearest: true)
+            // Widen deadzone for higher luma frequencies
+            self.qMid = Quantizer(step: Int(min(256, max(1, baseStep))), deadZoneRatio: -0.1)
+            self.qHigh = Quantizer(step: Int(min(512, max(1, Int(Double(baseStep) * 2.5)))), deadZoneRatio: -0.3)
+        }
     }
 }
 
-@inline(__always)
-func quantizeLow(_ block: inout BlockView, qt: QuantizationTable) {
-    quantize(&block, q: qt.qLow)
-}
-
-@inline(__always)
-func quantizeLowSignedMapping(_ block: inout BlockView, qt: QuantizationTable) {
-    quantizeSignedMapping(&block, q: qt.qLow)
-}
-
-@inline(__always)
-func quantizeMid(_ block: inout BlockView, qt: QuantizationTable) {
-    quantize(&block, q: qt.qMid)
-}
-
-@inline(__always)
-func quantizeMidSignedMapping(_ block: inout BlockView, qt: QuantizationTable) {
-    quantizeSignedMapping(&block, q: qt.qMid)
-}
-
-@inline(__always)
-func quantizeHigh(_ block: inout BlockView, qt: QuantizationTable) {
-    quantize(&block, q: qt.qHigh)
-}
-
-@inline(__always)
-func quantizeHighSignedMapping(_ block: inout BlockView, qt: QuantizationTable) {
-    quantizeSignedMapping(&block, q: qt.qHigh)
-}
 
 @inline(__always)
 internal func quantize(_ block: inout BlockView, q: Quantizer) {
@@ -90,8 +75,11 @@ private func performQuantizeSIMD8(_ vec: SIMD8<Int16>, mul: Int32, shift: Int32,
     let shiftVec = SIMD4<Int32>(repeating: shift)
     let biasVec = SIMD4<Int32>(repeating: bias)
     
-    let resLow32 = (((low32 &* mulVec) &+ biasVec) &>> shiftVec)
-    let resHigh32 = (((high32 &* mulVec) &+ biasVec) &>> shiftVec)
+    var resLow32 = (((low32 &* mulVec) &+ biasVec) &>> shiftVec)
+    var resHigh32 = (((high32 &* mulVec) &+ biasVec) &>> shiftVec)
+    
+    resLow32.replace(with: SIMD4<Int32>.zero, where: resLow32 .< 0)
+    resHigh32.replace(with: SIMD4<Int32>.zero, where: resHigh32 .< 0)
     
     let res = SIMD8<Int16>(
         Int16(resLow32[0]), Int16(resLow32[1]), Int16(resLow32[2]), Int16(resLow32[3]),
@@ -184,7 +172,7 @@ private func quantizeSIMDGeneric(_ block: inout BlockView, q: Quantizer) {
         while i < block.width {
             let val = Int32(ptr[i])
             let absVal = abs(val)
-            let qVal = (((absVal &* mul) &+ bias) &>> shift)
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
             var res: Int32 = qVal
             if val <= -1 {
                 res = (-1 * qVal)
@@ -286,7 +274,7 @@ private func quantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Quant
         while i < block.width {
             let val = Int32(ptr[i])
             let absVal = abs(val)
-            let qVal = (((absVal &* mul) &+ bias) &>> shift)
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
             var res: Int32 = qVal
             if val <= -1 {
                 res = (-1 * qVal)
@@ -301,35 +289,6 @@ private func quantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Quant
 
 // MARK: - Dequantization
 
-@inline(__always)
-func dequantizeLow(_ block: inout BlockView, qt: QuantizationTable) {
-    dequantize(&block, q: qt.qLow)
-}
-
-@inline(__always)
-func dequantizeLowSignedMapping(_ block: inout BlockView, qt: QuantizationTable) {
-    dequantizeSignedMapping(&block, q: qt.qLow)
-}
-
-@inline(__always)
-func dequantizeMid(_ block: inout BlockView, qt: QuantizationTable) {
-    dequantize(&block, q: qt.qMid)
-}
-
-@inline(__always)
-func dequantizeMidSignedMapping(_ block: inout BlockView, qt: QuantizationTable) {
-    dequantizeSignedMapping(&block, q: qt.qMid)
-}
-
-@inline(__always)
-func dequantizeHigh(_ block: inout BlockView, qt: QuantizationTable) {
-    dequantize(&block, q: qt.qHigh)
-}
-
-@inline(__always)
-func dequantizeHighSignedMapping(_ block: inout BlockView, qt: QuantizationTable) {
-    dequantizeSignedMapping(&block, q: qt.qHigh)
-}
 
 @inline(__always)
 internal func dequantize(_ block: inout BlockView, q: Quantizer) {

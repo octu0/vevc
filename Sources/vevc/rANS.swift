@@ -381,8 +381,8 @@ struct rANSModel {
     
     public init() {
         self.sigFreq = RANS_SCALE / 2
-        self.tokenFreqs = Array(repeating: RANS_SCALE / 32, count: 32)
-        self.tokenCumFreqs = (0..<32).map { UInt32($0) * (RANS_SCALE / 32) }
+        self.tokenFreqs = Array(repeating: RANS_SCALE / 64, count: 64)
+        self.tokenCumFreqs = (0..<64).map { UInt32($0) * (RANS_SCALE / 64) }
         self.tokenLUT = [UInt8](repeating: 0, count: Int(RANS_SCALE))
         buildLUT()
     }
@@ -390,9 +390,9 @@ struct rANSModel {
     public init(sigFreq: UInt32, tokenFreqs: [UInt32]) {
         self.sigFreq = sigFreq
         self.tokenFreqs = tokenFreqs
-        self.tokenCumFreqs = [UInt32](repeating: 0, count: 32)
+        self.tokenCumFreqs = [UInt32](repeating: 0, count: 64)
         var sum: UInt32 = 0
-        for i in 0..<32 {
+        for i in 0..<64 {
             self.tokenCumFreqs[i] = sum
             sum += tokenFreqs[i]
         }
@@ -402,7 +402,7 @@ struct rANSModel {
     
     private mutating func buildLUT() {
         tokenLUT.withUnsafeMutableBufferPointer { ptr in
-            for sym in 0..<32 {
+            for sym in 0..<64 {
                 let start = Int(tokenCumFreqs[sym])
                 let end = start + Int(tokenFreqs[sym])
                 let s = UInt8(sym)
@@ -424,18 +424,18 @@ struct rANSModel {
         
         let totalTokens = tokenCounts.reduce(0, +)
         if totalTokens == 0 {
-            self.tokenFreqs = Array(repeating: RANS_SCALE / 32, count: 32)
+            self.tokenFreqs = Array(repeating: RANS_SCALE / 64, count: 64)
         } else {
             // 未使用トークン数をカウントし、有効トークンへのスケール配分を最大化
             var zeroCount: UInt32 = 0
-            for i in 0..<32 {
+            for i in 0..<64 {
                 if tokenCounts[i] == 0 { zeroCount += 1 }
             }
             // 未使用トークンは最小freq=1を割り当て、残りを有効トークンに配分
             let availableScale = RANS_SCALE - zeroCount
             
             var sum: UInt32 = 0
-            for i in 0..<32 {
+            for i in 0..<64 {
                 let count = tokenCounts[i]
                 if count == 0 {
                     self.tokenFreqs[i] = 1
@@ -447,7 +447,7 @@ struct rANSModel {
             
                 var maxIdx = 0
                 var maxVal = self.tokenFreqs[0]
-                for i in 1..<32 {
+                for i in 1..<64 {
                     if self.tokenFreqs[i] > maxVal {
                         maxVal = self.tokenFreqs[i]
                         maxIdx = i
@@ -462,7 +462,7 @@ struct rANSModel {
                         // find the max frequency to subtract from
                         var currentMaxIdx = 0
                         var currentMaxVal = self.tokenFreqs[0]
-                        for i in 1..<32 {
+                        for i in 1..<64 {
                             if self.tokenFreqs[i] > currentMaxVal {
                                 currentMaxVal = self.tokenFreqs[i]
                                 currentMaxIdx = i
@@ -476,7 +476,7 @@ struct rANSModel {
         }
         
         var cumSum: UInt32 = 0
-        for i in 0..<32 {
+        for i in 0..<64 {
             self.tokenCumFreqs[i] = cumSum
             cumSum += self.tokenFreqs[i]
         }

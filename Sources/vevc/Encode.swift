@@ -1592,10 +1592,10 @@ private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> I
         return dwt2d_8_sb(&view)
     }
     
-    quantizeLow(&sub.ll, qt: qt)
-    quantizeMid(&sub.hl, qt: qt)
-    quantizeMid(&sub.lh, qt: qt)
-    quantizeHigh(&sub.hh, qt: qt)
+    quantize(&sub.ll, q: qt.qLow)
+    quantize(&sub.hl, q: qt.qMid)
+    quantize(&sub.lh, q: qt.qMid)
+    quantize(&sub.hh, q: qt.qHigh)
     
     let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
         return isEffectivelyZeroBase4(data: ptr, threshold: 0)
@@ -1724,10 +1724,10 @@ private func measureBlockBits32(block: inout Block2D, qt: QuantizationTable) -> 
         return dwt2d_32_sb(&view)
     }
     
-    quantizeLow(&sub.ll, qt: qt)
-    quantizeMid(&sub.hl, qt: qt)
-    quantizeMid(&sub.lh, qt: qt)
-    quantizeHigh(&sub.hh, qt: qt)
+    quantize(&sub.ll, q: qt.qLow)
+    quantize(&sub.hl, q: qt.qMid)
+    quantize(&sub.lh, q: qt.qMid)
+    quantize(&sub.hh, q: qt.qHigh)
     
     let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
         return isEffectivelyZeroBase32(data: ptr, threshold: 0)
@@ -1824,290 +1824,58 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
 }
 
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-@inline(__always)
-public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {    
+public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {    
     if images.isEmpty { return [] }
+    guard let first = images.first else { return [] }
     
-    var qt: QuantizationTable? = nil
+    let encoder = Encoder(
+        width: first.width,
+        height: first.height,
+        maxbitrate: maxbitrate,
+        framerate: framerate,
+        zeroThreshold: zeroThreshold,
+        gopSize: gopSize,
+        sceneChangeThreshold: sceneChangeThreshold,
+        isOne: false
+    )
+    
     var out: [UInt8] = []
-    
-    var prevReconstructed: PlaneData420? = nil
-    let planes = toPlaneData420(images: images)
-    
-    var gopCount = 0
-    
-    for i in 0..<planes.count {
-        let curr = planes[i]
-        var forceIFrame = false
-        var predictedPlane: PlaneData420? = nil
-        var mvs = MotionVectors(count: 0)
-        var meanSAD: Int = 0
-        var maxBlockSAD: Int = 0
-        let mbSize = 64
-        
-        if gopSize <= gopCount || prevReconstructed == nil {
-            forceIFrame = true
-        } else {
-            guard let prev = prevReconstructed else { continue }
-            
-            mvs = estimateMBME(curr: curr, prev: prev)
-            let predicted = await applyMBME(prev: prev, mvs: mvs)
-            predictedPlane = predicted
-            let res = await subPlanes(curr: curr, predicted: predicted)
-            
-            let stats = calculateSADAndMaxBlockSAD(res: res, mbSize: mbSize)
-            meanSAD = stats.meanSAD
-            maxBlockSAD = stats.maxBlockSAD
-            
-            // per-block maxSADによる適応的I-Frame挿入
-            // いずれかのブロック内の平均ピクセル誤差が5以上 → I-Frameを強制挿入
-            debugLog("[Frame \(i)] P-Frame candidate: meanSAD=\(meanSAD), maxBlockSAD=\(maxBlockSAD)")
-            if sceneChangeThreshold < meanSAD {
-                forceIFrame = true
-                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
-            }
-        }
-        
-        if forceIFrame {
-            qt = estimateQuantization(img: images[i], targetBits: maxbitrate)
-            let qtY = QuantizationTable(baseStep: max(1, Int(qt!.step)))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt!.step) * 3))
-            let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-            
-            out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
-            appendUInt32BE(&out, UInt32(bytes.count))
-            out.append(contentsOf: bytes)
-            debugLog("[Frame \(i)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
-            
-            prevReconstructed = reconstructed
-            gopCount = 1
-        } else {
-            // 適応量子化: meanSADが高いか局所的に動きが大きい（maxBlockSADが高い）ほど精密に量子化
-            // → 累積劣化（ゴースト）を防止する
-            guard let validQt = qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
-            let qtY: QuantizationTable
-            let qtC: QuantizationTable
-            let fineQuantizationThreshold = mbSize * mbSize * 1 // 64x64ブロック内の平均誤差が1以上(4096)
-            if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                // 動きが大きい: P-Frameの残差エッジを保護するためにqMidを通常qt.stepと同等まで下げる
-                qtY = QuantizationTable(baseStep: max(1, Int(validQt.step) / 2))
-                qtC = QuantizationTable(baseStep: max(1, Int(validQt.step)))
-            } else {
-                // 動きが小さい: 通常のP-Frame量子化
-                qtY = QuantizationTable(baseStep: max(1, Int(validQt.step) * 3))
-                qtC = QuantizationTable(baseStep: max(1, Int(validQt.step) * 6))
-            }
-            let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-            
-            out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
-
-            var mvBw = EntropyEncoder()
-
-            let mbCols = (curr.width + mbSize - 1) / mbSize
-            for mvIdx in 0..<mvs.vectors.count {
-                let mbX = mvIdx % mbCols
-                let mbY = mvIdx / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                let vec = mvs.vectors[mvIdx]
-                let mvdX = Int(vec.x) - pmv.dx
-                let mvdY = Int(vec.y) - pmv.dy
-
-                if mvdX == 0 && mvdY == 0 {
-                    mvBw.encodeBypass(binVal: 0)
-                } else {
-                    mvBw.encodeBypass(binVal: 1)
-
-                    let sx: UInt8
-                    if mvdX <= -1 {
-                        sx = 1
-                    } else {
-                        sx = 0
-                    }
-                    mvBw.encodeBypass(binVal: sx)
-                    let mx = UInt32(abs(mvdX))
-                    encodeExpGolomb(val: mx, encoder: &mvBw)
-
-                    let sy: UInt8
-                    if mvdY <= -1 {
-                        sy = 1
-                    } else {
-                        sy = 0
-                    }
-                    mvBw.encodeBypass(binVal: sy)
-                    let my = UInt32(abs(mvdY))
-                    encodeExpGolomb(val: my, encoder: &mvBw)
-                }
-            }
-            mvBw.flush()
-            let mvOut = mvBw.getData()
-            appendUInt32BE(&out, UInt32(mvs.vectors.count))
-            appendUInt32BE(&out, UInt32(mvOut.count))
-            out.append(contentsOf: mvOut)
-
-            appendUInt32BE(&out, UInt32(bytes.count))
-            out.append(contentsOf: bytes)
-            let totalBytes = bytes.count + mvOut.count
-            debugLog("[Frame \(i)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) maxBlockSAD=\(maxBlockSAD) [PMV & LSCP applied]")
-            
-            if let predicted = predictedPlane {
-                let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
-                prevReconstructed = reconstructed
-            } else {
-                prevReconstructed = reconstructedResidual
-            }
-            gopCount += 1
-        }
+    for img in images {
+        let chunk = try await encoder.encode(image: img)
+        out.append(contentsOf: chunk)
     }
-    
     return out
 }
 
 @inline(__always)
-public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
+public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {
     if images.isEmpty { return [] }
+    guard let first = images.first else { return [] }
     
-    // VEVC Oneは単層(Base32)のため、マルチレイヤVEVCより量子化ステップを大きくする
-    let baseQt = estimateQuantization(img: images[0], targetBits: maxbitrate)
-    let qt = QuantizationTable(baseStep: max(1, Int(Double(baseQt.step) * 1.5)))
+    let encoder = Encoder(
+        width: first.width,
+        height: first.height,
+        maxbitrate: maxbitrate,
+        framerate: framerate,
+        zeroThreshold: zeroThreshold,
+        gopSize: gopSize,
+        sceneChangeThreshold: sceneChangeThreshold,
+        isOne: true
+    )
+    
     var out: [UInt8] = []
-    
-    var prevReconstructed: PlaneData420? = nil
-    let planes = toPlaneData420(images: images)
-    
-    var gopCount = 0
-    
-    for i in 0..<planes.count {
-        let curr = planes[i]
-        var forceIFrame = false
-        var predictedPlane: PlaneData420? = nil
-        var mvs = MotionVectors(count: 0)
-        var meanSAD: Int = 0
-        var maxBlockSAD: Int = 0
-        let mbSize = 64
-        
-        if gopSize <= gopCount || prevReconstructed == nil {
-            forceIFrame = true
-        } else {
-            guard let prev = prevReconstructed else { continue }
-            
-            mvs = estimateMBME(curr: curr, prev: prev)
-            let predicted = await applyMBME(prev: prev, mvs: mvs)
-            predictedPlane = predicted
-            let res = await subPlanes(curr: curr, predicted: predicted)
-            
-            let stats = calculateSADAndMaxBlockSAD(res: res, mbSize: mbSize)
-            meanSAD = stats.meanSAD
-            maxBlockSAD = stats.maxBlockSAD
-            
-            if sceneChangeThreshold < meanSAD {
-                forceIFrame = true
-                debugLog("[Frame \(i)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
-            }
-        }
-        
-        if forceIFrame {
-            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
-            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 6))
-            
-            let (layer0, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-            
-            out.append(contentsOf: [0x56, 0x45, 0x4F, 0x49]) // VEOI
-            
-            var chunkOut: [UInt8] = []
-            chunkOut.append(contentsOf: layer0)
-            
-            appendUInt32BE(&out, UInt32(chunkOut.count))
-            out.append(contentsOf: chunkOut)
-            debugLog("[Frame \(i)] I-Frame (One): \(chunkOut.count) bytes (\(String(format: "%.2f", Double(chunkOut.count) / 1024.0)) KB)")
-            
-            prevReconstructed = reconstructed
-            gopCount = 1
-        } else {
-            // 適応量子化: meanSADが高い（残差が大きい）フレームほど精密に量子化
-            let qtY: QuantizationTable
-            let qtC: QuantizationTable
-            let fineQuantizationThreshold = mbSize * mbSize * 1 // 64x64ブロック内の平均誤差が1以上(4096)
-            if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
-            } else {
-                qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
-                qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 8))
-            }
-            
-            let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-            
-            out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
-
-            var mvBw = EntropyEncoder()
-
-            let mbCols = (curr.width + mbSize - 1) / mbSize
-            for mvIdx in 0..<mvs.vectors.count {
-                let mbX = mvIdx % mbCols
-                let mbY = mvIdx / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                let vec = mvs.vectors[mvIdx]
-                let mvdX = Int(vec.x) - pmv.dx
-                let mvdY = Int(vec.y) - pmv.dy
-
-                if mvdX == 0 && mvdY == 0 {
-                    mvBw.encodeBypass(binVal: 0)
-                } else {
-                    mvBw.encodeBypass(binVal: 1)
-
-                    let sx: UInt8
-                    if mvdX <= -1 {
-                        sx = 1
-                    } else {
-                        sx = 0
-                    }
-                    mvBw.encodeBypass(binVal: sx)
-                    let mx = UInt32(abs(mvdX))
-                    encodeExpGolomb(val: mx, encoder: &mvBw)
-
-                    let sy: UInt8
-                    if mvdY <= -1 {
-                        sy = 1
-                    } else {
-                        sy = 0
-                    }
-                    mvBw.encodeBypass(binVal: sy)
-                    let my = UInt32(abs(mvdY))
-                    encodeExpGolomb(val: my, encoder: &mvBw)
-                }
-            }
-            mvBw.flush()
-            let mvOut = mvBw.getData()
-            appendUInt32BE(&out, UInt32(mvs.vectors.count))
-            appendUInt32BE(&out, UInt32(mvOut.count))
-            out.append(contentsOf: mvOut)
-
-            var chunkOut: [UInt8] = []
-            chunkOut.append(contentsOf: layer0)
-            
-            appendUInt32BE(&out, UInt32(chunkOut.count))
-            out.append(contentsOf: chunkOut)
-            let totalBytes = chunkOut.count + mvOut.count
-            debugLog("[Frame \(i)] P-Frame (One): \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(chunkOut.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
-            
-            if let predicted = predictedPlane {
-                let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
-                prevReconstructed = reconstructed
-            } else {
-                prevReconstructed = reconstructedResidual
-            }
-            gopCount += 1
-        }
+    for img in images {
+        let chunk = try await encoder.encode(image: img)
+        out.append(contentsOf: chunk)
     }
-    
     return out
 }
-
+            
 #else
-public func encode(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
+public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {
     throw EncodeError.unsupportedArchitecture
 }
-public func encodeOne(images: [YCbCrImage], maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8) async throws -> [UInt8] {
+public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {
     throw EncodeError.unsupportedArchitecture
 }
 #endif

@@ -108,7 +108,7 @@ func estimateMBMEBlock64x64(
     var bestDX = 0
     var bestDY = 0
 
-    let earlyExitThreshold = 64 * 64 * 2
+    let earlyExitThreshold = 64 * 64 * 1
     if earlyExitThreshold < bestSAD {
         let minSafeDX = max(-1 * searchRange, -startX)
         let maxSafeDX = min(searchRange, w - 64 - startX)
@@ -185,7 +185,7 @@ func estimateMBMEBlock32x32(
     var bestDX = 0
     var bestDY = 0
 
-    let earlyExitThreshold = 32 * 32 * 2
+    let earlyExitThreshold = 32 * 32 * 1
     if earlyExitThreshold < bestSAD {
         let minSafeDX = max(-1 * searchRange, -startX)
         let maxSafeDX = min(searchRange, w - 32 - startX)
@@ -258,7 +258,7 @@ func estimateMBMEBlockEdge(
     var bestDX = 0
     var bestDY = 0
 
-    let earlyExitThreshold = actW * actH * 2
+    let earlyExitThreshold = actW * actH * 1
     if earlyExitThreshold < bestSAD {
         let negSearchRange = -1 * searchRange
         let posSearchRange = searchRange
@@ -451,7 +451,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                     }
 
                     // earlyExitの閾値（サブサンプリングは半分の行数なので閾値も調整）
-                    let earlyExitThreshold = 64 * 32 * 2
+                    let earlyExitThreshold = 64 * 32 * 1
                     if earlyExitThreshold < bestSAD {
                         let negSearchRange = -1 * searchRange
                         let posSearchRange = searchRange

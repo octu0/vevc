@@ -4,6 +4,7 @@ public class Encoder {
     public let width: Int
     public let height: Int
     public let maxbitrate: Int
+    public let framerate: Int
     public let zeroThreshold: Int
     public let gopSize: Int
     public let sceneChangeThreshold: Int
@@ -15,14 +16,20 @@ public class Encoder {
     private let mbSize = 64
     private var frameIndex = 0
     
-    public init(width: Int, height: Int, maxbitrate: Int, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
+    // Rate Control
+    private var rateController: RateController
+    
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
+        self.framerate = framerate
         self.zeroThreshold = zeroThreshold
         self.gopSize = gopSize
         self.sceneChangeThreshold = sceneChangeThreshold
         self.isOne = isOne
+        
+        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, gopSize: gopSize)
     }
     
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
@@ -57,7 +64,8 @@ public class Encoder {
         }
         
         if forceIFrame {
-            let baseQt = estimateQuantization(img: image, targetBits: maxbitrate)
+            let targetBits = rateController.beginGOP()
+            let baseQt = estimateQuantization(img: image, targetBits: targetBits)
             if isOne {
                 self.qt = QuantizationTable(baseStep: max(1, Int(Double(baseQt.step) * 1.5)))
             } else {
@@ -68,8 +76,8 @@ public class Encoder {
         
         if isOne {
             if forceIFrame {
-                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step) * 3))
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 4))
+                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true)
                 
                 let (layer0, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
@@ -82,18 +90,26 @@ public class Encoder {
                 out.append(contentsOf: chunkOut)
                 debugLog("[Frame \(frameIndex)] I-Frame (One): \(chunkOut.count) bytes (\(String(format: "%.2f", Double(chunkOut.count) / 1024.0)) KB)")
                 
+                rateController.consumeIFrame(bits: chunkOut.count * 8, qStep: Int(qtY.step))
+                
                 prevReconstructed = reconstructed
                 gopCount = 1
             } else {
-                let qtY: QuantizationTable
-                let qtC: QuantizationTable
+                // Adaptive Quantization (isOne mode)
+                let currentSAD = Double(meanSAD)
+                let newStepInt = rateController.calculatePFrameQStep(currentSAD: currentSAD, baseStep: Int(qt.step))
+                let newStep = Int16(newStepInt)
+                
+                var qtY: QuantizationTable
+                var qtC: QuantizationTable
+                
                 let fineQuantizationThreshold = mbSize * mbSize * 1
                 if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                    qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                    qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true)
                 } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                    qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true)
                 }
                 
                 let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
@@ -139,6 +155,8 @@ public class Encoder {
                 let totalBytes = chunkOut.count + mvOut.count
                 debugLog("[Frame \(frameIndex)] P-Frame (One): \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(chunkOut.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
                 
+                rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(qtY.step), sad: Double(meanSAD))
+                
                 if let predicted = predictedPlane {
                     let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
                     prevReconstructed = reconstructed
@@ -150,7 +168,7 @@ public class Encoder {
         } else {
             if forceIFrame {
                 let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true)
                 let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
@@ -158,18 +176,25 @@ public class Encoder {
                 out.append(contentsOf: bytes)
                 debugLog("[Frame \(frameIndex)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
                 
+                rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
+                
                 prevReconstructed = reconstructed
                 gopCount = 1
             } else {
-                let qtY: QuantizationTable
-                let qtC: QuantizationTable
+                let currentSAD = Double(meanSAD)
+                let newStepInt = rateController.calculatePFrameQStep(currentSAD: currentSAD, baseStep: Int(qt.step))
+                let newStep = Int16(newStepInt)
+                
+                var qtY: QuantizationTable
+                var qtC: QuantizationTable
+                
                 let fineQuantizationThreshold = mbSize * mbSize * 1
                 if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                    qtY = QuantizationTable(baseStep: max(1, Int(qt.step) / 2))
-                    qtC = QuantizationTable(baseStep: max(1, Int(qt.step)))
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true)
                 } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                    qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2))
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true)
                 }
                 let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
@@ -210,6 +235,8 @@ public class Encoder {
                 out.append(contentsOf: bytes)
                 let totalBytes = bytes.count + mvOut.count
                 debugLog("[Frame \(frameIndex)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) maxBlockSAD=\(maxBlockSAD) [PMV & LSCP applied]")
+                
+                rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(qtY.step), sad: Double(meanSAD))
                 
                 if let predicted = predictedPlane {
                     let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)

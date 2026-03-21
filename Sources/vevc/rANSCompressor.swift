@@ -15,7 +15,7 @@ struct rANSCompressor {
         tokenInfos.reserveCapacity(data.count)
         
         var sigCounts = [1, 1] // [falseCount, trueCount], initialize with 1 to avoid 0 frequency
-        var tokenCounts = [Int](repeating: 1, count: 32)
+        var tokenCounts = [Int](repeating: 1, count: 64)
         
         for v in data {
             let isSig = v != 0
@@ -137,8 +137,8 @@ struct rANSCompressor {
         sigCounts[0] = try readUInt32()
         sigCounts[1] = try readUInt32()
         
-        var tokenCounts = [Int](repeating: 0, count: 32)
-        for i in 0..<32 {
+        var tokenCounts = [Int](repeating: 0, count: 64)
+        for i in 0..<64 {
             tokenCounts[i] = try readUInt32()
         }
         

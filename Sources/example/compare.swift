@@ -9,7 +9,7 @@ struct Config {
     var framerate: Int = 60
     var zeroThreshold: Int = 0
     var gopSize: Int = 15
-    var sceneThreshold: Int = 8
+    var sceneThreshold: Int = 32
     var maxLayer: Int = 2
     var quality: Bool = false
     var outputGraph: Bool = false
@@ -77,15 +77,19 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     let vevcImages = images.map { $0.vevcImage }
     
     // Encode
+    print("  -> runVEVC Encoding...")
     let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
+    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
     let encTime = Date().timeIntervalSince(encStart)
+    print("  -> runVEVC Encoded \(outBytes.count) bytes")
     
     // Decode
+    print("  -> runVEVC Decoding...")
     let opts = vevc.DecodeOptions(maxLayer: config.maxLayer, maxFrames: 4)
     let decStart = Date()
     let outFrames = try await vevc.decode(data: outBytes, opts: opts)
     let decTime = Date().timeIntervalSince(decStart)
+    print("  -> runVEVC Decoded \(outFrames.count) frames")
     
     var metrics: [QualityMetrics]? = nil
     if config.quality {
@@ -106,7 +110,7 @@ func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: 
     
     // Encode
     let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encodeOne(images: vevcImages, maxbitrate: config.bitrate * 1000, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
+    let outBytes: [UInt8] = try await vevc.encodeOne(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
     let encTime = Date().timeIntervalSince(encStart)
     
     // Decode

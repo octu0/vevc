@@ -82,10 +82,21 @@ do {
     }
 
     let y4mReader = try Y4MReader(fileHandle: inFileHandle)
+    
+    var fps = 30
+    if y4mReader.fpsHeader.starts(with: "F") {
+        let parts = y4mReader.fpsHeader.dropFirst().split(separator: ":")
+        if parts.count == 2, let num = Int(parts[0]), let den = Int(parts[1]), den > 0 {
+            fps = num / den
+            if fps == 0 { fps = 30 }
+        }
+    }
+    
     let encoder = vevc.Encoder(
         width: y4mReader.width,
         height: y4mReader.height,
         maxbitrate: bitrate * 1000,
+        framerate: fps,
         zeroThreshold: zeroThreshold,
         gopSize: gopSize,
         sceneChangeThreshold: sceneThreshold,
