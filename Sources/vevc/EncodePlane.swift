@@ -65,8 +65,8 @@ func evaluateQuantizeBase32(block: inout Block2D, qt: QuantizationTable) {
 
 @inline(__always)
 func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
-    let subWidth = (width / 2)
-    let subHeight = (height / 2)
+    let subWidth = ((width + 1) / 2)
+    let subHeight = ((height + 1) / 2)
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 32 - 1) / 32)
     var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
@@ -153,8 +153,8 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> 
 
 @inline(__always)
 func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
-    let subWidth = (width / 2)
-    let subHeight = (height / 2)
+    let subWidth = ((width + 1) / 2)
+    let subHeight = ((height + 1) / 2)
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 16 - 1) / 16)
     var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
@@ -466,10 +466,10 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     let (bufCb, subCb, pSubCb, cbBlocks) = await taskBufCb
     let (bufCr, subCr, pSubCr, crBlocks) = await taskBufCr
 
-    let subPlane = PlaneData420(width: dx / 2, height: dy / 2, y: subY, cb: subCb, cr: subCr)
+    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
     var subPredPlane: PlaneData420? = nil
     if let pY = pSubY, let pCb = pSubCb, let pCr = pSubCr {
-        subPredPlane = PlaneData420(width: dx / 2, height: dy / 2, y: pY, cb: pCb, cr: pCr)
+        subPredPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: pY, cb: pCb, cr: pCr)
     }
 
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
@@ -552,10 +552,10 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     let (bufCb, subCb, pSubCb, cbBlocks) = await taskBufCb
     let (bufCr, subCr, pSubCr, crBlocks) = await taskBufCr
 
-    let subPlane = PlaneData420(width: dx / 2, height: dy / 2, y: subY, cb: subCb, cr: subCr)
+    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
     var subPredPlane: PlaneData420? = nil
     if let pY = pSubY, let pCb = pSubCb, let pCr = pSubCr {
-        subPredPlane = PlaneData420(width: dx / 2, height: dy / 2, y: pY, cb: pCb, cr: pCr)
+        subPredPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: pY, cb: pCb, cr: pCr)
     }
 
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")

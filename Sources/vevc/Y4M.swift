@@ -53,7 +53,7 @@ public class Y4MReader {
         guard header == frameHeader else { throw Y4MError.invalidFormat }
         
         let ySize = width * height
-        let cSize = (width / 2) * (height / 2)
+        let cSize = ((width + 1) / 2) * ((height + 1) / 2)
         let totalSize = ySize + cSize * 2
         
         let frameData = fileHandle.readData(ofLength: totalSize)
