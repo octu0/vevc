@@ -15,10 +15,12 @@ public class Encoder {
     private let mbSize = 64
     private var frameIndex = 0
     
+    public let isOne: Bool
+    
     // Rate Control
     private var rateController: RateController
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 8) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -26,6 +28,7 @@ public class Encoder {
         self.zeroThreshold = zeroThreshold
         self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
+        self.isOne = isOne
         
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
@@ -83,16 +86,31 @@ public class Encoder {
         guard let qt = self.qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
         
         if forceIFrame {
+            let bytes: [UInt8]
+            let reconstructed: PlaneData420
+            let appliedQtY: QuantizationTable
+            
+            if isOne {
+                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: true)
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: true)
+                (bytes, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+                appliedQtY = qtY
+            } else {
                 let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: false)
                 let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: false)
-                let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-                
-                out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
+                (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+                appliedQtY = qtY
+            }
+                if isOne {
+                    out.append(contentsOf: [0x56, 0x45, 0x4F, 0x49]) // VEOI
+                } else {
+                    out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // VEVI
+                }
                 appendUInt32BE(&out, UInt32(bytes.count))
                 out.append(contentsOf: bytes)
                 debugLog("[Frame \(frameIndex)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
                 
-                rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
+                rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(appliedQtY.step))
                 
                 prevReconstructed = reconstructed
                 framesSinceKeyframe = 1
@@ -104,16 +122,33 @@ public class Encoder {
                 // Adaptive Quantization Factor based on frame motion activity (0 to 10)
                 let activity = min(10, meanSAD)
                 
-                // Luma (Y): Scale baseStep from 0.5x (static) to 1.0x (active)
-                let stepY = max(1, (Int(newStep) * (10 + activity)) / 20)
-                let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: false)
+                let bytes: [UInt8]
+                let reconstructedResidual: PlaneData420
+                let appliedQtY: QuantizationTable
                 
-                // Chroma (Cb/Cr): Scale baseStep from 1.0x (static) to 2.0x (active)
-                let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
-                let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: false)
-                let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-                
-                out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
+                if isOne {
+                    let stepY = max(1, (Int(newStep) * (10 + activity)) / 15)
+                    let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
+                    let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: true)
+                    let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: true)
+                    (bytes, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+                    appliedQtY = qtY
+                } else {
+                    // Luma (Y): Scale baseStep from 0.5x (static) to 1.0x (active)
+                    let stepY = max(1, (Int(newStep) * (10 + activity)) / 20)
+                    let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: false)
+                    
+                    // Chroma (Cb/Cr): Scale baseStep from 1.0x (static) to 2.0x (active)
+                    let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
+                    let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: false)
+                    (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+                    appliedQtY = qtY
+                }
+                    if isOne {
+                    out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
+                } else {
+                    out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // VEVP
+                }
 
                 var mvBw = EntropyEncoder()
                 var grid = MVGrid(width: curr.width, height: curr.height, minSize: 8)
@@ -141,7 +176,7 @@ public class Encoder {
                 out.append(contentsOf: bytes)
                 let totalBytes = bytes.count + mvOut.count
                 
-                rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(qtY.step), sad: Double(meanSAD))
+                rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(appliedQtY.step), sad: Double(meanSAD))
                 
                 if let predicted = predictedPlane {
                     let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)

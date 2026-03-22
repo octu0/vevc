@@ -1136,10 +1136,12 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
 public struct DecodeOptions: Sendable {
     public var maxLayer: Int
     public var maxFrames: Int
+    public var isOne: Bool
     
-    public init(maxLayer: Int = 2, maxFrames: Int = 4) {
+    public init(maxLayer: Int = 2, maxFrames: Int = 4, isOne: Bool = false) {
         self.maxLayer = maxLayer
         self.maxFrames = maxFrames
+        self.isOne = isOne
     }
 }
 
@@ -1156,13 +1158,19 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         offset += 4
         
         switch magic {
-        case [0x56, 0x45, 0x56, 0x49]:
+        case [0x56, 0x45, 0x56, 0x49], [0x56, 0x45, 0x4F, 0x49]: // VEVI, VEOI
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
             let chunk = Array(data[offset..<(offset + len)])
             offset += len
             
-            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            let img16: Image16
+            let isOneBlock = opts.isOne || magic == [0x56, 0x45, 0x4F, 0x49]
+            if isOneBlock {
+                img16 = try await decodeBase32(r: chunk, layer: 0)
+            } else {
+                img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            }
             let pd = PlaneData420(img16: img16)
             out.append(pd.toYCbCr())
             prevReconstructed = pd
@@ -1172,7 +1180,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
             offset += len
 
-        case [0x56, 0x45, 0x56, 0x50]:
+        case [0x56, 0x45, 0x56, 0x50], [0x56, 0x45, 0x4F, 0x50]: // VEVP, VEOP
             let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
             var mvs = MotionVectors(count: mvsCount)
@@ -1225,7 +1233,13 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
             let chunk = Array(data[offset..<(offset + len)])
             offset += len
             
-            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            let img16: Image16
+            let isOneBlock = opts.isOne || magic == [0x56, 0x45, 0x4F, 0x50] // VEOI/VEOP
+            if isOneBlock {
+                img16 = try await decodeBase32(r: chunk, layer: 0)
+            } else {
+                img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            }
             let residual = PlaneData420(img16: img16)
             
             if let prev = prevReconstructed {
@@ -1249,7 +1263,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
 @inline(__always)
 public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
-    return try await decode(data: data, opts: DecodeOptions(maxLayer: 0))
+    return try await decode(data: data, opts: DecodeOptions(maxLayer: 0, maxFrames: 4, isOne: true))
 }
 
 #else

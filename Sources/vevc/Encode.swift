@@ -638,22 +638,6 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
     }
 }
 
-// MARK: - Byte Serialization Helpers
-
-@inline(__always)
-func appendUInt16BE(_ out: inout [UInt8], _ val: UInt16) {
-    out.append(UInt8(val >> 8))
-    out.append(UInt8(val & 0xFF))
-}
-
-@inline(__always)
-func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
-    out.append(UInt8((val >> 24) & 0xFF))
-    out.append(UInt8((val >> 16) & 0xFF))
-    out.append(UInt8((val >> 8) & 0xFF))
-    out.append(UInt8(val & 0xFF))
-}
-
 // MARK: - Transform Functions
 
 @inline(__always)
@@ -1906,7 +1890,8 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
         framerate: framerate,
         zeroThreshold: zeroThreshold,
         keyint: keyint,
-        sceneChangeThreshold: sceneChangeThreshold
+        sceneChangeThreshold: sceneChangeThreshold,
+        isOne: false
     )
     
     var out: [UInt8] = []
@@ -1929,7 +1914,8 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30
         framerate: framerate,
         zeroThreshold: zeroThreshold,
         keyint: keyint,
-        sceneChangeThreshold: sceneChangeThreshold
+        sceneChangeThreshold: sceneChangeThreshold,
+        isOne: true
     )
     
     var out: [UInt8] = []
