@@ -7,7 +7,8 @@ struct DeblockingFilter {
         // Post-processing: out-of-loop like filtering for the whole generated plane.
         // It smooths boundaries between `blockSize` regions.
         
-        let tc = Int16(max(2, qStep / 4)) // Threshold based on quantization step, reduced to prevent over-smoothing
+        let tc = Int16(max(4, qStep / 2)) // Increased clipping limit for stronger smoothing
+        let beta = Int32(max(16, qStep * 2)) // Condition threshold to distinguish edge from block artifact
         
         // Vertical Edges (x = blockSize, 2*blockSize, ...)
         plane.withUnsafeMutableBufferPointer { buffer in
@@ -17,10 +18,10 @@ struct DeblockingFilter {
                 for yStart in stride(from: 0, to: height, by: 16) {
                     let rowsToProcess = min(16, height - yStart)
                     if rowsToProcess == 16 {
-                        filterVerticalEdgeSIMD16(base: base, width: width, x: x, y: yStart, tc: tc)
+                        filterVerticalEdgeSIMD16(base: base, width: width, x: x, y: yStart, tc: tc, beta: beta)
                     } else {
                         // Fallback for non-multiple of 16 heights (rare since we pad to 32)
-                        filterVerticalEdgeScalar(base: base, width: width, x: x, y: yStart, count: rowsToProcess, tc: tc)
+                        filterVerticalEdgeScalar(base: base, width: width, x: x, y: yStart, count: rowsToProcess, tc: tc, beta: beta)
                     }
                 }
             }
@@ -34,9 +35,9 @@ struct DeblockingFilter {
                 for xStart in stride(from: 0, to: width, by: 16) {
                     let colsToProcess = min(16, width - xStart)
                     if colsToProcess == 16 {
-                        filterHorizontalEdgeSIMD16(base: base, width: width, x: xStart, y: y, tc: tc)
+                        filterHorizontalEdgeSIMD16(base: base, width: width, x: xStart, y: y, tc: tc, beta: beta)
                     } else {
-                        filterHorizontalEdgeScalar(base: base, width: width, x: xStart, y: y, count: colsToProcess, tc: tc)
+                        filterHorizontalEdgeScalar(base: base, width: width, x: xStart, y: y, count: colsToProcess, tc: tc, beta: beta)
                     }
                 }
             }
@@ -44,60 +45,101 @@ struct DeblockingFilter {
     }
     
     @inline(__always)
-    private static func filterVerticalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16) {
-        // Vertical edge: p1, p0 | q0, q1
-        // They are adjacent in memory along the row, but we need 16 rows.
-        // To use SIMD, we must gather them.
-        var p1Arr = [Int16](repeating: 0, count: 16)
-        var p0Arr = [Int16](repeating: 0, count: 16)
-        var q0Arr = [Int16](repeating: 0, count: 16)
-        var q1Arr = [Int16](repeating: 0, count: 16)
+    private static func filterVerticalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
+        let off0 = y * width + x
+        let off1 = off0 + width
+        let off2 = off1 + width
+        let off3 = off2 + width
+        let off4 = off3 + width
+        let off5 = off4 + width
+        let off6 = off5 + width
+        let off7 = off6 + width
+        let off8 = off7 + width
+        let off9 = off8 + width
+        let off10 = off9 + width
+        let off11 = off10 + width
+        let off12 = off11 + width
+        let off13 = off12 + width
+        let off14 = off13 + width
+        let off15 = off14 + width
+
+        let p1 = SIMD16<Int16>(
+            base[off0 - 2], base[off1 - 2], base[off2 - 2], base[off3 - 2],
+            base[off4 - 2], base[off5 - 2], base[off6 - 2], base[off7 - 2],
+            base[off8 - 2], base[off9 - 2], base[off10 - 2], base[off11 - 2],
+            base[off12 - 2], base[off13 - 2], base[off14 - 2], base[off15 - 2]
+        )
+        let p0 = SIMD16<Int16>(
+            base[off0 - 1], base[off1 - 1], base[off2 - 1], base[off3 - 1],
+            base[off4 - 1], base[off5 - 1], base[off6 - 1], base[off7 - 1],
+            base[off8 - 1], base[off9 - 1], base[off10 - 1], base[off11 - 1],
+            base[off12 - 1], base[off13 - 1], base[off14 - 1], base[off15 - 1]
+        )
+        let q0 = SIMD16<Int16>(
+            base[off0 + 0], base[off1 + 0], base[off2 + 0], base[off3 + 0],
+            base[off4 + 0], base[off5 + 0], base[off6 + 0], base[off7 + 0],
+            base[off8 + 0], base[off9 + 0], base[off10 + 0], base[off11 + 0],
+            base[off12 + 0], base[off13 + 0], base[off14 + 0], base[off15 + 0]
+        )
+        let q1 = SIMD16<Int16>(
+            base[off0 + 1], base[off1 + 1], base[off2 + 1], base[off3 + 1],
+            base[off4 + 1], base[off5 + 1], base[off6 + 1], base[off7 + 1],
+            base[off8 + 1], base[off9 + 1], base[off10 + 1], base[off11 + 1],
+            base[off12 + 1], base[off13 + 1], base[off14 + 1], base[off15 + 1]
+        )
         
-        for dy in 0..<16 {
-            let offset = (y + dy) * width + x
-            p1Arr[dy] = base[offset - 2]
-            p0Arr[dy] = base[offset - 1]
-            q0Arr[dy] = base[offset + 0]
-            q1Arr[dy] = base[offset + 1]
-        }
+        let (newP1, newP0, newQ0, newQ1) = computeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
         
-        let p1 = SIMD16<Int16>(p1Arr)
-        let p0 = SIMD16<Int16>(p0Arr)
-        let q0 = SIMD16<Int16>(q0Arr)
-        let q1 = SIMD16<Int16>(q1Arr)
-        
-        let (newP0, newQ0) = computeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc)
-        
-        for dy in 0..<16 {
-            let offset = (y + dy) * width + x
-            base[offset - 1] = newP0[dy]
-            base[offset + 0] = newQ0[dy]
-        }
+        base[off0 - 2] = newP1[0]; base[off0 - 1] = newP0[0]; base[off0 + 0] = newQ0[0]; base[off0 + 1] = newQ1[0]
+        base[off1 - 2] = newP1[1]; base[off1 - 1] = newP0[1]; base[off1 + 0] = newQ0[1]; base[off1 + 1] = newQ1[1]
+        base[off2 - 2] = newP1[2]; base[off2 - 1] = newP0[2]; base[off2 + 0] = newQ0[2]; base[off2 + 1] = newQ1[2]
+        base[off3 - 2] = newP1[3]; base[off3 - 1] = newP0[3]; base[off3 + 0] = newQ0[3]; base[off3 + 1] = newQ1[3]
+        base[off4 - 2] = newP1[4]; base[off4 - 1] = newP0[4]; base[off4 + 0] = newQ0[4]; base[off4 + 1] = newQ1[4]
+        base[off5 - 2] = newP1[5]; base[off5 - 1] = newP0[5]; base[off5 + 0] = newQ0[5]; base[off5 + 1] = newQ1[5]
+        base[off6 - 2] = newP1[6]; base[off6 - 1] = newP0[6]; base[off6 + 0] = newQ0[6]; base[off6 + 1] = newQ1[6]
+        base[off7 - 2] = newP1[7]; base[off7 - 1] = newP0[7]; base[off7 + 0] = newQ0[7]; base[off7 + 1] = newQ1[7]
+        base[off8 - 2] = newP1[8]; base[off8 - 1] = newP0[8]; base[off8 + 0] = newQ0[8]; base[off8 + 1] = newQ1[8]
+        base[off9 - 2] = newP1[9]; base[off9 - 1] = newP0[9]; base[off9 + 0] = newQ0[9]; base[off9 + 1] = newQ1[9]
+        base[off10 - 2] = newP1[10]; base[off10 - 1] = newP0[10]; base[off10 + 0] = newQ0[10]; base[off10 + 1] = newQ1[10]
+        base[off11 - 2] = newP1[11]; base[off11 - 1] = newP0[11]; base[off11 + 0] = newQ0[11]; base[off11 + 1] = newQ1[11]
+        base[off12 - 2] = newP1[12]; base[off12 - 1] = newP0[12]; base[off12 + 0] = newQ0[12]; base[off12 + 1] = newQ1[12]
+        base[off13 - 2] = newP1[13]; base[off13 - 1] = newP0[13]; base[off13 + 0] = newQ0[13]; base[off13 + 1] = newQ1[13]
+        base[off14 - 2] = newP1[14]; base[off14 - 1] = newP0[14]; base[off14 + 0] = newQ0[14]; base[off14 + 1] = newQ1[14]
+        base[off15 - 2] = newP1[15]; base[off15 - 1] = newP0[15]; base[off15 + 0] = newQ0[15]; base[off15 + 1] = newQ1[15]
     }
     
     @inline(__always)
-    private static func filterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16) {
+    private static func filterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+        let betah = beta >> 1
         for dy in 0..<count {
             let offset = (y + dy) * width + x
-            let p1 = base[offset - 2]
+            var p1 = base[offset - 2]
             var p0 = base[offset - 1]
             var q0 = base[offset + 0]
-            let q1 = base[offset + 1]
+            var q1 = base[offset + 1]
             
             let delta = Int32(q0) - Int32(p0)
-            if abs(delta) < Int32(tc) {
+            if abs(delta) < beta && abs(Int32(p1) - Int32(p0)) < betah && abs(Int32(q1) - Int32(q0)) < betah {
                 let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
                 let dClipped = Int16(max(-Int32(tc), min(Int32(tc), d)))
+                
                 p0 = p0 &+ dClipped
                 q0 = q0 &- dClipped
+                
+                let dHalf = dClipped / 2
+                p1 = p1 &+ dHalf
+                q1 = q1 &- dHalf
+                
+                base[offset - 2] = p1
                 base[offset - 1] = p0
                 base[offset + 0] = q0
+                base[offset + 1] = q1
             }
         }
     }
     
     @inline(__always)
-    private static func filterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16) {
+    private static func filterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
         // Horizontal edge: p1, p0 | q0, q1
         // Memory layout for 16 columns is continuous!
         let offP1 = (y - 2) * width + x
@@ -110,38 +152,51 @@ struct DeblockingFilter {
         let q0 = SIMD16<Int16>(UnsafeBufferPointer(start: base + offQ0, count: 16))
         let q1 = SIMD16<Int16>(UnsafeBufferPointer(start: base + offQ1, count: 16))
         
-        let (newP0, newQ0) = computeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc)
+        let (newP1, newP0, newQ0, newQ1) = computeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
         
+        let p1Ptr = UnsafeMutableRawPointer(base + offP1).assumingMemoryBound(to: SIMD16<Int16>.self)
         let p0Ptr = UnsafeMutableRawPointer(base + offP0).assumingMemoryBound(to: SIMD16<Int16>.self)
         let q0Ptr = UnsafeMutableRawPointer(base + offQ0).assumingMemoryBound(to: SIMD16<Int16>.self)
+        let q1Ptr = UnsafeMutableRawPointer(base + offQ1).assumingMemoryBound(to: SIMD16<Int16>.self)
         
+        p1Ptr.pointee = newP1
         p0Ptr.pointee = newP0
         q0Ptr.pointee = newQ0
+        q1Ptr.pointee = newQ1
     }
     
     @inline(__always)
-    private static func filterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16) {
+    private static func filterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+        let betah = beta >> 1
         for dx in 0..<count {
             let offset = (y * width) + x + dx
-            let p1 = base[offset - 2 * width]
+            var p1 = base[offset - 2 * width]
             var p0 = base[offset - 1 * width]
             var q0 = base[offset + 0 * width]
-            let q1 = base[offset + 1 * width]
+            var q1 = base[offset + 1 * width]
             
             let delta = Int32(q0) - Int32(p0)
-            if abs(delta) < Int32(tc) {
+            if abs(delta) < beta && abs(Int32(p1) - Int32(p0)) < betah && abs(Int32(q1) - Int32(q0)) < betah {
                 let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
                 let dClipped = Int16(max(-Int32(tc), min(Int32(tc), d)))
+                
                 p0 = p0 &+ dClipped
                 q0 = q0 &- dClipped
+                
+                let dHalf = dClipped / 2
+                p1 = p1 &+ dHalf
+                q1 = q1 &- dHalf
+                
+                base[offset - 2 * width] = p1
                 base[offset - 1 * width] = p0
                 base[offset + 0 * width] = q0
+                base[offset + 1 * width] = q1
             }
         }
     }
     
     @inline(__always)
-    private static func computeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16) -> (SIMD16<Int16>, SIMD16<Int16>) {
+    private static func computeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>) {
         // Extracted integer upcast for overflow prevention
         let p1x = SIMD16<Int32>(truncatingIfNeeded: p1)
         let p0x = SIMD16<Int32>(truncatingIfNeeded: p0)
@@ -151,21 +206,28 @@ struct DeblockingFilter {
         // delta = q0 - p0
         let delta = q0x &- p0x
         
-        // absDelta < tc mask
-        let absDelta: SIMD16<Int32> = SIMD16<Int32>(
-            abs(delta[0]), abs(delta[1]), abs(delta[2]), abs(delta[3]),
-            abs(delta[4]), abs(delta[5]), abs(delta[6]), abs(delta[7]),
-            abs(delta[8]), abs(delta[9]), abs(delta[10]), abs(delta[11]),
-            abs(delta[12]), abs(delta[13]), abs(delta[14]), abs(delta[15])
-        )
+        @inline(__always)
+        func getAbsVector(_ v: SIMD16<Int32>) -> SIMD16<Int32> {
+            return SIMD16<Int32>(
+                abs(v[0]), abs(v[1]), abs(v[2]), abs(v[3]),
+                abs(v[4]), abs(v[5]), abs(v[6]), abs(v[7]),
+                abs(v[8]), abs(v[9]), abs(v[10]), abs(v[11]),
+                abs(v[12]), abs(v[13]), abs(v[14]), abs(v[15])
+            )
+        }
         
-        let threshold = Int32(tc)
-        let mask = absDelta .< threshold // bool mask
+        let absDelta = getAbsVector(delta)
+        let absP = getAbsVector(p1x &- p0x)
+        let absQ = getAbsVector(q1x &- q0x)
+        
+        let betah = beta >> 1
+        let mask = (absDelta .< beta) .& (absP .< betah) .& (absQ .< betah) // bool mask
         
         // d = (9*(q0-p0) - 3*(q1-p1) + 8) >> 4
         let dUnclipped = ((delta &* 9) &- ((q1x &- p1x) &* 3) &+ 8) &>> 4
         
         // clamp: max(-tc, min(tc, d))
+        let threshold = Int32(tc)
         let lower = SIMD16<Int32>(repeating: -threshold)
         let upper = SIMD16<Int32>(repeating: threshold)
         var d = dUnclipped
@@ -177,6 +239,12 @@ struct DeblockingFilter {
         let newP0 = p0 &+ d16
         let newQ0 = q0 &- d16
         
-        return (newP0, newQ0)
+        let dHalfMasked = dMasked &>> 1
+        let dHalf16 = SIMD16<Int16>(truncatingIfNeeded: dHalfMasked)
+        
+        let newP1 = p1 &+ dHalf16
+        let newQ1 = q1 &- dHalf16
+        
+        return (newP1, newP0, newQ0, newQ1)
     }
 }

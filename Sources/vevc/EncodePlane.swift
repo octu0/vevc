@@ -891,7 +891,16 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
     let (bufCb, reconCb) = await taskBufCb
     let (bufCr, reconCr) = await taskBufCr
     
-    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
+    var mutReconY = reconY
+    var mutReconCb = reconCb
+    var mutReconCr = reconCr
+    
+    // Apply deblocking filter
+    DeblockingFilter.apply(plane: &mutReconY, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
+    DeblockingFilter.apply(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    DeblockingFilter.apply(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
@@ -953,7 +962,16 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let reconL2Cb = reconstructPlaneLayer(blocks: l2cbBlocks, prevImg: l1Img, planeType: 1, width: cbDx, height: cbDy, blockSize: 32, qt: qtC2)
     let reconL2Cr = reconstructPlaneLayer(blocks: l2crBlocks, prevImg: l1Img, planeType: 2, width: cbDx, height: cbDy, blockSize: 32, qt: qtC2)
     
-    let reconstructed = PlaneData420(width: dx, height: dy, y: reconL2Y, cb: reconL2Cb, cr: reconL2Cr)
+    var mutReconL2Y = reconL2Y
+    var mutReconL2Cb = reconL2Cb
+    var mutReconL2Cr = reconL2Cr
+    
+    // Apply deblocking filter (blockSize corresponds to Layer32 output)
+    DeblockingFilter.apply(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
+    DeblockingFilter.apply(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    DeblockingFilter.apply(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
     debugLog("  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
     
