@@ -14,7 +14,7 @@ final class SubpixelMotionTests: XCTestCase {
         
         let filtered = source.withUnsafeBufferPointer { ptr -> Int16 in
             // Offset 3 (値100) と Offset 4 (値100) の間を補間する
-            return SubpixelInterpolator.interpolateHalfX(ptr: ptr.baseAddress!, offset: 3)
+            return subpixelInterpolateHalfX(ptr: ptr.baseAddress!, offset: 3)
         }
         
         // 期待値の計算:
@@ -29,7 +29,7 @@ final class SubpixelMotionTests: XCTestCase {
         
         let filtered = source.withUnsafeBufferPointer { ptr -> Int16 in
             // Offset 3 (値100) の1/4ピクセル右を補間する (1/4 pel)
-            return SubpixelInterpolator.interpolateQuarterX(ptr: ptr.baseAddress!, offset: 3)
+            return subpixelInterpolateQuarterX(ptr: ptr.baseAddress!, offset: 3)
         }
         
         // 期待値の計算:
@@ -44,7 +44,7 @@ final class SubpixelMotionTests: XCTestCase {
         
         let filtered = source.withUnsafeBufferPointer { ptr -> Int16 in
             // Offset 3 (値100) の3/4ピクセル右を補間する (3/4 pel)
-            return SubpixelInterpolator.interpolateThreeQuarterX(ptr: ptr.baseAddress!, offset: 3)
+            return subpixelInterpolateThreeQuarterX(ptr: ptr.baseAddress!, offset: 3)
         }
         
         // 期待値の計算:
@@ -71,7 +71,7 @@ final class SubpixelMotionTests: XCTestCase {
         source.withUnsafeBufferPointer { srcPtr in
             dest.withUnsafeMutableBufferPointer { dstPtr in
                 // (3.5, 3.5) の位置から 8x8 ブロックを切り出す (Half-X, Half-Y)
-                SubpixelInterpolator.interpolateBlock(
+                subpixelInterpolateBlock(
                     src: srcPtr.baseAddress!, srcStride: w,
                     dst: dstPtr.baseAddress!, dstStride: 8,
                     width: 8, height: 8,

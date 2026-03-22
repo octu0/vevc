@@ -570,9 +570,9 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
         }
     }
     
-    DeblockingFilter.apply(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    DeblockingFilter.apply(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    DeblockingFilter.apply(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     return sub
 }
 
@@ -1133,9 +1133,9 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
         }
     }
     
-    DeblockingFilter.apply(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    DeblockingFilter.apply(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    DeblockingFilter.apply(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     return sub
 }
 

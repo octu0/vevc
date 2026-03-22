@@ -1,5 +1,5 @@
 
-public enum BinaryError: Error {
+enum BinaryError: Error {
     case eof
     case insufficientData
 }

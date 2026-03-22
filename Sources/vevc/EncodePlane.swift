@@ -896,9 +896,9 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
     var mutReconCr = reconCr
     
     // Apply deblocking filter
-    DeblockingFilter.apply(plane: &mutReconY, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    DeblockingFilter.apply(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    DeblockingFilter.apply(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &mutReconY, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
@@ -967,9 +967,9 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     var mutReconL2Cr = reconL2Cr
     
     // Apply deblocking filter (blockSize corresponds to Layer32 output)
-    DeblockingFilter.apply(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
-    DeblockingFilter.apply(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
-    DeblockingFilter.apply(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
+    applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     

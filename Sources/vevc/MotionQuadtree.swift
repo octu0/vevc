@@ -410,7 +410,7 @@ func applyMotionQuadtreeNode(
         let dstPtrY = pDstY.advanced(by: startY * w + startX)
 
         if isYSafe {
-            SubpixelInterpolator.interpolateBlock(
+            subpixelInterpolateBlock(
                 src: pPrevY, srcStride: w, dst: dstPtrY, dstStride: w,
                 width: actW, height: actH, fracX: fracX, fracY: fracY, startX: refX, startY: refY
             )
@@ -444,7 +444,7 @@ func applyMotionQuadtreeNode(
                 }
             }
             
-            SubpixelInterpolator.interpolateBlock(
+            subpixelInterpolateBlock(
                 src: extBuffer, srcStride: extW, dst: dstPtrY, dstStride: w,
                 width: actW, height: actH, fracX: fracX, fracY: fracY, startX: 3, startY: 3
             )
@@ -474,11 +474,11 @@ func applyMotionQuadtreeNode(
         let dstPtrCr = pDstCr.advanced(by: startCY * cw + startCX)
 
         if isCSafe {
-            SubpixelInterpolator.interpolateBlock(
+            subpixelInterpolateBlock(
                 src: pPrevCb, srcStride: cw, dst: dstPtrCb, dstStride: cw,
                 width: actCW, height: actCH, fracX: cFracX, fracY: cFracY, startX: crefX, startY: crefY
             )
-            SubpixelInterpolator.interpolateBlock(
+            subpixelInterpolateBlock(
                 src: pPrevCr, srcStride: cw, dst: dstPtrCr, dstStride: cw,
                 width: actCW, height: actCH, fracX: cFracX, fracY: cFracY, startX: crefX, startY: crefY
             )
@@ -510,7 +510,7 @@ func applyMotionQuadtreeNode(
                         for x in cMaxSafeX..<extCW { pDstBase[x] = rightEdgeVal }
                     }
                 }
-                SubpixelInterpolator.interpolateBlock(
+                subpixelInterpolateBlock(
                     src: extBuffer, srcStride: extCW, dst: dstC, dstStride: cw,
                     width: actCW, height: actCH, fracX: cFracX, fracY: cFracY, startX: 3, startY: 3
                 )

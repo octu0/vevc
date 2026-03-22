@@ -98,10 +98,10 @@ final class RealPairsRansTests: XCTestCase {
             
             // token分析：最初の差異前後のpairのtoken
             for d in max(0, firstDiff - 3)..<min(realPairs.count, firstDiff + 5) {
-                let encT = ValueTokenizer.tokenize(realPairs[d].val)
-                let encR = ValueTokenizer.tokenizeUnsigned(realPairs[d].run)
-                let decT = d < decPairs.count ? ValueTokenizer.tokenize(decPairs[d].val) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
-                let decR = d < decPairs.count ? ValueTokenizer.tokenizeUnsigned(decPairs[d].run) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
+                let encT = valueTokenize(realPairs[d].val)
+                let encR = valueTokenizeUnsigned(realPairs[d].run)
+                let decT = d < decPairs.count ? valueTokenize(decPairs[d].val) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
+                let decR = d < decPairs.count ? valueTokenizeUnsigned(decPairs[d].run) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
                 print("  [\(d)] enc.run=\(realPairs[d].run)(t\(encR.token)/bp\(encR.bypassLen)) val=\(realPairs[d].val)(t\(encT.token)/bp\(encT.bypassLen)) | dec.run=\(d < decPairs.count ? Int(decPairs[d].run) : -1)(t\(decR.token)/bp\(decR.bypassLen)) val=\(d < decPairs.count ? Int(decPairs[d].val) : -1)(t\(decT.token)/bp\(decT.bypassLen))")
             }
         }

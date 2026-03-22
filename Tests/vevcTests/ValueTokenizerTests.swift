@@ -13,10 +13,10 @@ final class ValueTokenizerTests: XCTestCase {
         ]
         
         for val in testValues {
-            let result = ValueTokenizer.tokenize(val)
-            let bypassLen = ValueTokenizer.bypassLength(for: result.token)
+            let result = valueTokenize(val)
+            let bypassLen = valueBypassLength(for: result.token)
             XCTAssertEqual(bypassLen, result.bypassLen, "bypassLength mismatch for val=\(val)")
-            let restored = ValueTokenizer.detokenize(token: result.token, bypassBits: result.bypassBits)
+            let restored = valueDetokenize(token: result.token, bypassBits: result.bypassBits)
             XCTAssertEqual(val, restored, "Signed roundtrip failed for val=\(val)")
         }
     }
@@ -25,10 +25,10 @@ final class ValueTokenizerTests: XCTestCase {
         let testValues: [UInt32] = [0, 1, 2, 3, 4, 5, 10, 15, 16, 17, 20, 30, 50, 100, 200, 500, 1000]
         
         for val in testValues {
-            let result = ValueTokenizer.tokenizeUnsigned(val)
-            let bypassLen = ValueTokenizer.bypassLengthUnsigned(for: result.token)
+            let result = valueTokenizeUnsigned(val)
+            let bypassLen = valueBypassLengthUnsigned(for: result.token)
             XCTAssertEqual(bypassLen, result.bypassLen, "bypassLength mismatch for val=\(val)")
-            let restored = ValueTokenizer.detokenizeUnsigned(token: result.token, bypassBits: result.bypassBits)
+            let restored = valueDetokenizeUnsigned(token: result.token, bypassBits: result.bypassBits)
             XCTAssertEqual(val, restored, "Unsigned roundtrip failed for val=\(val)")
         }
     }

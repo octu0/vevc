@@ -3,20 +3,20 @@ import Foundation
 // MARK: - ContextModel / Legacy CABAC Support (To be removed)
 
 struct ContextModel {
-    public var pStateIdx: UInt8 = 0
-    public var valMPS: UInt8 = 0
-    public init() {}
+    var pStateIdx: UInt8 = 0
+    var valMPS: UInt8 = 0
+    init() {}
 }
 
 // MARK: - VevcEncoder
 
 struct EntropyEncoder {
     var bypassWriter: BypassWriter
-    public var pairs: [(run: UInt32, val: Int16)]
-    public var trailingZeros: UInt32
-    public private(set) var coeffCount: Int
+    var pairs: [(run: UInt32, val: Int16)]
+    var trailingZeros: UInt32
+    private(set) var coeffCount: Int
 
-    public init() {
+    init() {
         self.bypassWriter = BypassWriter()
         self.pairs = []
         self.trailingZeros = 0
@@ -24,29 +24,29 @@ struct EntropyEncoder {
     }
 
     @inline(__always)
-    public mutating func encodeBypass(binVal: UInt8) {
+    mutating func encodeBypass(binVal: UInt8) {
         bypassWriter.writeBit(binVal != 0)
     }
 
     @inline(__always)
-    public mutating func addPair(run: UInt32, val: Int16) {
+    mutating func addPair(run: UInt32, val: Int16) {
         pairs.append((run: run, val: val))
         coeffCount += Int(run) + 1
     }
     
     @inline(__always)
-    public mutating func addTrailingZeros(_ count: UInt32) {
+    mutating func addTrailingZeros(_ count: UInt32) {
         trailingZeros += count
         coeffCount += Int(count)
     }
 
     @inline(__always)
-    public mutating func flush() {
+    mutating func flush() {
         bypassWriter.flush()
     }
 
     @inline(__always)
-    public mutating func getData() -> [UInt8] {
+    mutating func getData() -> [UInt8] {
         var out = [UInt8]()
         out.reserveCapacity(pairs.count * 4 + 128)
         
@@ -72,7 +72,7 @@ struct EntropyEncoder {
                     rawBypass.writeBit(false)
                 }
                 rawBypass.writeBit(true)
-                let valResult = ValueTokenizer.tokenize(pair.val)
+                let valResult = valueTokenize(pair.val)
                 rawBypass.writeBits(UInt32(valResult.token), count: 6)
                 rawBypass.writeBits(valResult.bypassBits, count: valResult.bypassLen)
             }
@@ -115,12 +115,12 @@ struct EntropyEncoder {
             for idx in start..<end {
                 let pair = pairs[idx]
                 
-                let runResult = ValueTokenizer.tokenizeUnsigned(pair.run)
+                let runResult = valueTokenizeUnsigned(pair.run)
                 runTokenCounts[Int(runResult.token)] += 1
                 chunkRunTokens[lane].append(runResult.token)
                 chunkBypassWriters[lane].writeBits(runResult.bypassBits, count: runResult.bypassLen)
                 
-                let valResult = ValueTokenizer.tokenize(pair.val)
+                let valResult = valueTokenize(pair.val)
                 valTokenCounts[Int(valResult.token)] += 1
                 chunkValTokens[lane].append(valResult.token)
                 chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)
@@ -129,7 +129,7 @@ struct EntropyEncoder {
         
         // trailing zeros: add to lane3
         if hasTrailingZeros {
-            let runResult = ValueTokenizer.tokenizeUnsigned(trailingZeros)
+            let runResult = valueTokenizeUnsigned(trailingZeros)
             runTokenCounts[Int(runResult.token)] += 1
             chunkRunTokens[3].append(runResult.token)
             chunkBypassWriters[3].writeBits(runResult.bypassBits, count: runResult.bypassLen)
@@ -240,10 +240,10 @@ struct EntropyEncoder {
 
 struct EntropyDecoder {
     var bypassReader: BypassReader
-    public var pairs: [(run: UInt32, val: Int16)]
+    var pairs: [(run: UInt32, val: Int16)]
     private var pairIndex: Int = 0
 
-    public init(data: [UInt8]) throws {
+    init(data: [UInt8]) throws {
         var offset = 0
         
         guard 4 <= data.count else { throw DecodeError.insufficientData }
@@ -282,9 +282,9 @@ struct EntropyDecoder {
                 if isNonZero {
                     let tokenBits = rawReader.readBits(count: 6)
                     let token = UInt8(tokenBits)
-                    let bypassLen = ValueTokenizer.bypassLength(for: token)
+                    let bypassLen = valueBypassLength(for: token)
                     let bypassBits = rawReader.readBits(count: bypassLen)
-                    let val = ValueTokenizer.detokenize(token: token, bypassBits: bypassBits)
+                    let val = valueDetokenize(token: token, bypassBits: bypassBits)
                     decodedPairs.append((run: zeroRun, val: val))
                     zeroRun = 0
                 } else {
@@ -347,17 +347,17 @@ struct EntropyDecoder {
                 let rtInfo = runModel.findToken(cf: cfRun)
                 ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
                 
-                let runBypassLen = ValueTokenizer.bypassLengthUnsigned(for: rtInfo.token)
+                let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
                 let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
-                let zeroRun = UInt32(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+                let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
                 
                 let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
                 let vtInfo = valModel.findToken(cf: cfVal)
                 ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
                 
-                let valBypassLen = ValueTokenizer.bypassLength(for: vtInfo.token)
+                let valBypassLen = valueBypassLength(for: vtInfo.token)
                 let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
-                let val = ValueTokenizer.detokenize(token: vtInfo.token, bypassBits: valBypassBits)
+                let val = valueDetokenize(token: vtInfo.token, bypassBits: valBypassBits)
                 
                 chunkPairs[lane].append((run: zeroRun, val: val))
             }
@@ -368,9 +368,9 @@ struct EntropyDecoder {
                 let rtInfo = runModel.findToken(cf: cfRun)
                 ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
                 
-                let runBypassLen = ValueTokenizer.bypassLengthUnsigned(for: rtInfo.token)
+                let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
                 let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
-                let zeroRun = UInt32(ValueTokenizer.detokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+                let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
                 chunkPairs[lane].append((run: zeroRun, val: 0))
             }
         }
@@ -411,12 +411,12 @@ struct EntropyDecoder {
     }
 
     @inline(__always)
-    public mutating func decodeBypass() throws -> UInt8 {
+    mutating func decodeBypass() throws -> UInt8 {
         return bypassReader.readBit() ? 1 : 0
     }
     
     @inline(__always)
-    public mutating func readPair() -> (run: Int, val: Int16) {
+    mutating func readPair() -> (run: Int, val: Int16) {
         guard pairIndex < pairs.count else { return (0, 0) }
         let pair = pairs[pairIndex]
         pairIndex += 1

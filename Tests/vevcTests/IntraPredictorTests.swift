@@ -11,7 +11,7 @@ final class IntraPredictorTests: XCTestCase {
         let left: [Int16] = [5, 15, 25, 35]
 
         // DC should be average of top and left = (10+20+30+40 + 5+15+25+35) / 8 = 180 / 8 = 22.5 => 22
-        IntraPredictor.predict(mode: .dc, block: &block, width: width, height: height, top: top, left: left)
+        intraPredictorPredict(mode: .dc, block: &block, width: width, height: height, top: top, left: left)
 
         for i in 0..<16 {
             XCTAssertEqual(block[i], 22, "DC mode should fill block with average 22")
@@ -26,7 +26,7 @@ final class IntraPredictorTests: XCTestCase {
         let left: [Int16] = [5, 15, 25, 35]
 
         // Vertical should copy top row down
-        IntraPredictor.predict(mode: .vertical, block: &block, width: width, height: height, top: top, left: left)
+        intraPredictorPredict(mode: .vertical, block: &block, width: width, height: height, top: top, left: left)
 
         for y in 0..<height {
             for x in 0..<width {
@@ -43,7 +43,7 @@ final class IntraPredictorTests: XCTestCase {
         let left: [Int16] = [5, 15, 25, 35]
 
         // Horizontal should copy left column right
-        IntraPredictor.predict(mode: .horizontal, block: &block, width: width, height: height, top: top, left: left)
+        intraPredictorPredict(mode: .horizontal, block: &block, width: width, height: height, top: top, left: left)
 
         for y in 0..<height {
             for x in 0..<width {
@@ -65,7 +65,7 @@ final class IntraPredictorTests: XCTestCase {
         // For simplicity, let top_left be top[0] + left[0] / 2 or we can pass it.
         // Let's pass topLeft explicitly to the predictor.
         let topLeft: Int16 = 8
-        IntraPredictor.predict(mode: .planar, block: &block, width: width, height: height, top: top, left: left, topLeft: topLeft)
+        intraPredictorPredict(mode: .planar, block: &block, width: width, height: height, top: top, left: left, topLeft: topLeft)
 
         XCTAssertEqual(block[0 * width + 0], 10 + 5 - 8)
         XCTAssertEqual(block[3 * width + 3], 40 + 35 - 8)

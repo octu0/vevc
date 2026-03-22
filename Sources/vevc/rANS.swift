@@ -8,12 +8,12 @@ let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 // MARK: - rANS Probability Model
 
 struct rANSModel {
-    public private(set) var sigFreq: UInt32
-    public private(set) var tokenFreqs: [UInt32]
-    public private(set) var tokenCumFreqs: [UInt32]
-    public private(set) var tokenLUT: [UInt8]
+    private(set) var sigFreq: UInt32
+    private(set) var tokenFreqs: [UInt32]
+    private(set) var tokenCumFreqs: [UInt32]
+    private(set) var tokenLUT: [UInt8]
     
-    public init() {
+    init() {
         self.sigFreq = RANS_SCALE / 2
         self.tokenFreqs = Array(repeating: RANS_SCALE / 64, count: 64)
         self.tokenCumFreqs = (0..<64).map { UInt32($0) * (RANS_SCALE / 64) }
@@ -21,7 +21,7 @@ struct rANSModel {
         buildLUT()
     }
     
-    public init(sigFreq: UInt32, tokenFreqs: [UInt32]) {
+    init(sigFreq: UInt32, tokenFreqs: [UInt32]) {
         self.sigFreq = sigFreq
         self.tokenFreqs = tokenFreqs
         self.tokenCumFreqs = [UInt32](repeating: 0, count: 64)
@@ -47,7 +47,7 @@ struct rANSModel {
         }
     }
     
-    public mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
+    mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
         let totalSig = sigCounts[0] + sigCounts[1]
         if totalSig == 0 {
             self.sigFreq = RANS_SCALE / 2
@@ -119,7 +119,7 @@ struct rANSModel {
     }
     
     @inline(__always)
-    public func findToken(cf: UInt32) -> (token: UInt8, freq: UInt32, cumFreq: UInt32) {
+    func findToken(cf: UInt32) -> (token: UInt8, freq: UInt32, cumFreq: UInt32) {
         let sym = Int(tokenLUT[Int(cf)])
         return (UInt8(sym), tokenFreqs[sym], tokenCumFreqs[sym])
     }
@@ -128,17 +128,17 @@ struct rANSModel {
 // MARK: - rANS Encoder
 
 struct rANSEncoder {
-    public private(set) var state: UInt32
-    public private(set) var stream: [UInt16]
+    private(set) var state: UInt32
+    private(set) var stream: [UInt16]
     
-    public init() {
+    init() {
         self.state = RANS_L
         self.stream = []
         self.stream.reserveCapacity(4096)
     }
     
     @inline(__always)
-    public mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
+    mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
         let xMax = RANS_XMAX * freq
         while state >= xMax {
             stream.append(UInt16(truncatingIfNeeded: state))
@@ -148,12 +148,12 @@ struct rANSEncoder {
         state = (q << RANS_SCALE_BITS) + (state - q * freq) + cumFreq
     }
     
-    public mutating func flush() {
+    mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: state))
         stream.append(UInt16(truncatingIfNeeded: state >> 16))
     }
     
-    public func getBitstream() -> [UInt8] {
+    func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
         bytes.withUnsafeMutableBufferPointer { ptr in
@@ -172,11 +172,11 @@ struct rANSEncoder {
 // MARK: - rANS Decoder
 
 struct rANSDecoder {
-    public private(set) var state: UInt32
+    private(set) var state: UInt32
     private let stream: [UInt8]
     private var offset: Int
     
-    public init(bitstream: [UInt8]) {
+    init(bitstream: [UInt8]) {
         self.stream = bitstream
         self.offset = 0
         self.state = 0
@@ -194,12 +194,12 @@ struct rANSDecoder {
     }
     
     @inline(__always)
-    public func getCumulativeFreq() -> UInt32 {
+    func getCumulativeFreq() -> UInt32 {
         return state & (RANS_SCALE - 1)
     }
     
     @inline(__always)
-    public mutating func advanceSymbol(cumFreq: UInt32, freq: UInt32) {
+    mutating func advanceSymbol(cumFreq: UInt32, freq: UInt32) {
         let mask = RANS_SCALE - 1
         state = freq * (state >> RANS_SCALE_BITS) + (state & mask) - cumFreq
         
@@ -217,8 +217,11 @@ struct rANSDecoder {
     }
 }
 
-struct rANSCompressor {
-    public static func compress(_ data: [Int16]) -> [UInt8] {
+enum rANSCompressorError: Error {
+    case insufficientData
+}
+
+func rANSCompress(_ data: [Int16]) -> [UInt8] {
         if data.isEmpty {
             return []
         }
@@ -237,7 +240,7 @@ struct rANSCompressor {
         for v in data {
             let isSig = v != 0
             if isSig {
-                let t = ValueTokenizer.tokenize(v)
+                let t = valueTokenize(v)
                 tokenInfos.append((isSignificant: true, token: t.token, bypassBits: t.bypassBits, bypassLen: t.bypassLen))
                 sigCounts[1] += 1
                 tokenCounts[Int(t.token)] += 1
@@ -328,18 +331,14 @@ struct rANSCompressor {
         return outData
     }
     
-    enum DecodeError: Error {
-        case insufficientData
-    }
-
-    public static func decompress(_ data: [UInt8]) throws -> [Int16] {
+func rANSDecompress(_ data: [UInt8]) throws -> [Int16] {
         if data.isEmpty {
             return []
         }
         var offset = 0
         
         func readUInt32() throws -> Int {
-            guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
+            guard offset + 4 <= data.count else { throw rANSCompressorError.insufficientData }
             let b0 = Int(data[offset])
             let b1 = Int(data[offset+1])
             let b2 = Int(data[offset+2])
@@ -363,14 +362,14 @@ struct rANSCompressor {
         model.normalize(sigCounts: sigCounts, tokenCounts: tokenCounts)
         
         let ransStreamLen = try readUInt32()
-        guard offset + ransStreamLen <= data.count else { throw DecodeError.insufficientData }
+        guard offset + ransStreamLen <= data.count else { throw rANSCompressorError.insufficientData }
         let ransStream = Array(data[offset..<offset+ransStreamLen])
         offset += ransStreamLen
         
         var bypassBytes = [[UInt8]](repeating: [], count: 4)
         for i in 0..<4 {
             let len = try readUInt32()
-            guard offset + len <= data.count else { throw DecodeError.insufficientData }
+            guard offset + len <= data.count else { throw rANSCompressorError.insufficientData }
             bypassBytes[i] = Array(data[offset..<offset+len])
             offset += len
         }
@@ -463,9 +462,9 @@ struct rANSCompressor {
             for i in 0..<size {
                 let t = rANSDecodedByLane[lane][i] // DO NOT EXTRACT IN REVERSE! LIFO pop output is already in original forward order.
                 if t.isSignificant {
-                    let bypassLen = ValueTokenizer.bypassLength(for: t.token)
+                    let bypassLen = valueBypassLength(for: t.token)
                     let bypassBits = bypassReaders[lane].readBits(count: bypassLen)
-                    outCoeffs[start + i] = ValueTokenizer.detokenize(token: t.token, bypassBits: bypassBits)
+                    outCoeffs[start + i] = valueDetokenize(token: t.token, bypassBits: bypassBits)
                 } else {
                     outCoeffs[start + i] = 0
                 }
@@ -473,23 +472,22 @@ struct rANSCompressor {
         }
         
         return outCoeffs
-    }
 }
 
 // MARK: - Interleaved 4-way rANS Encoder
 
 struct Interleaved4rANSEncoder {
-    public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
-    public private(set) var stream: [UInt16]
+    private(set) var states: (UInt32, UInt32, UInt32, UInt32)
+    private(set) var stream: [UInt16]
     
-    public init() {
+    init() {
         self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
         self.stream = []
         self.stream.reserveCapacity(4096)
     }
     
     @inline(__always)
-    public mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
+    mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         let xMax = RANS_XMAX * freq
         
         switch lane {
@@ -526,7 +524,7 @@ struct Interleaved4rANSEncoder {
         }
     }
     
-    public mutating func flush() {
+    mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: states.3))
         stream.append(UInt16(truncatingIfNeeded: states.3 >> 16))
         stream.append(UInt16(truncatingIfNeeded: states.2))
@@ -537,7 +535,7 @@ struct Interleaved4rANSEncoder {
         stream.append(UInt16(truncatingIfNeeded: states.0 >> 16))
     }
     
-    public func getBitstream() -> [UInt8] {
+    func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
         bytes.withUnsafeMutableBufferPointer { ptr in
@@ -556,11 +554,11 @@ struct Interleaved4rANSEncoder {
 // MARK: - Interleaved 4-way rANS Decoder
 
 struct Interleaved4rANSDecoder {
-    public private(set) var states: (UInt32, UInt32, UInt32, UInt32)
+    private(set) var states: (UInt32, UInt32, UInt32, UInt32)
     private let stream: [UInt8]
     private var offset: Int
     
-    public init(bitstream: [UInt8]) {
+    init(bitstream: [UInt8]) {
         // Add padding to eliminate bounds checks in readWord
         var padded = bitstream
         padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
@@ -587,7 +585,7 @@ struct Interleaved4rANSDecoder {
     }
     
     @inline(__always)
-    public func getCumulativeFreq(lane: Int) -> UInt32 {
+    func getCumulativeFreq(lane: Int) -> UInt32 {
         let mask = RANS_SCALE - 1
         switch lane {
         case 0: return states.0 & mask
@@ -611,7 +609,7 @@ struct Interleaved4rANSDecoder {
     }
     
     @inline(__always)
-    public mutating func advanceSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
+    mutating func advanceSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         let mask = RANS_SCALE - 1
         
         switch lane {
@@ -638,10 +636,10 @@ struct Interleaved4rANSDecoder {
 // MARK: - 4-way Interleaved rANS Encoder
 
 struct InterleavedrANSEncoder {
-    public private(set) var states: [UInt32]
-    public private(set) var streams: [[UInt16]]
+    private(set) var states: [UInt32]
+    private(set) var streams: [[UInt16]]
     
-    public init() {
+    init() {
         self.states = [RANS_L, RANS_L, RANS_L, RANS_L]
         self.streams = [
             [UInt16](), [UInt16](), [UInt16](), [UInt16]()
@@ -652,7 +650,7 @@ struct InterleavedrANSEncoder {
     }
     
     @inline(__always)
-    public mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
+    mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         var state = states[lane]
         let xMax = RANS_XMAX * freq
         
@@ -665,7 +663,7 @@ struct InterleavedrANSEncoder {
         states[lane] = state
     }
     
-    public mutating func flush() {
+    mutating func flush() {
         for lane in 0..<4 {
             streams[lane].append(UInt16(truncatingIfNeeded: states[lane]))
             streams[lane].append(UInt16(truncatingIfNeeded: states[lane] >> 16))
@@ -674,7 +672,7 @@ struct InterleavedrANSEncoder {
     
     /// merge 4 streams into a single bitstream
     /// format: [len0(4bytes)][len1(4bytes)][len2(4bytes)][len3(4bytes)][stream0][stream1][stream2][stream3]
-    public func getBitstream() -> [UInt8] {
+    func getBitstream() -> [UInt8] {
         var bytes = [UInt8]()
         
         var lengths = [Int](repeating: 0, count: 4)
@@ -706,14 +704,14 @@ struct InterleavedrANSEncoder {
 // MARK: - 4-way Interleaved rANS SIMD Decoder
 
 struct InterleavedrANSDecoder {
-    public private(set) var states: SIMD4<UInt32>
+    private(set) var states: SIMD4<UInt32>
     
     private let stream: [UInt8]
     // 4 lanes independent offsets
     private var offsets: SIMD4<Int>
     private let limits: SIMD4<Int>
     
-    public init(bitstream: [UInt8]) {
+    init(bitstream: [UInt8]) {
         self.stream = bitstream
         
         // Header parse
@@ -764,13 +762,13 @@ struct InterleavedrANSDecoder {
     }
     
     @inline(__always)
-    public func getCumulativeFreqs() -> SIMD4<UInt32> {
+    func getCumulativeFreqs() -> SIMD4<UInt32> {
         let mask = SIMD4<UInt32>(repeating: RANS_SCALE - 1)
         return states & mask
     }
     
     @inline(__always)
-    public mutating func advanceSymbols(cumFreqs: SIMD4<UInt32>, freqs: SIMD4<UInt32>, activeMask: SIMD4<UInt32> = SIMD4<UInt32>(repeating: 0xFFFFFFFF)) {
+    mutating func advanceSymbols(cumFreqs: SIMD4<UInt32>, freqs: SIMD4<UInt32>, activeMask: SIMD4<UInt32> = SIMD4<UInt32>(repeating: 0xFFFFFFFF)) {
         // [SIMD] Data parallel non-dependent update
         let mask = SIMD4<UInt32>(repeating: RANS_SCALE - 1)
         let nextStates = freqs &* (states &>> RANS_SCALE_BITS) &+ (states & mask) &- cumFreqs
@@ -819,11 +817,11 @@ struct InterleavedrANSDecoder {
 
 
 struct BypassWriter {
-    public private(set) var bytes: [UInt8]
+    private(set) var bytes: [UInt8]
     private var buffer: UInt64
     private var bitsInBuffer: Int
     
-    public init() {
+    init() {
         self.bytes = []
         self.bytes.reserveCapacity(256)
         self.buffer = 0
@@ -831,7 +829,7 @@ struct BypassWriter {
     }
     
     @inline(__always)
-    public mutating func writeBit(_ bit: Bool) {
+    mutating func writeBit(_ bit: Bool) {
         buffer = (buffer << 1) | (bit ? 1 : 0)
         bitsInBuffer += 1
         if bitsInBuffer == 32 {
@@ -845,7 +843,7 @@ struct BypassWriter {
     }
     
     @inline(__always)
-    public mutating func writeBits(_ value: UInt32, count: Int) {
+    mutating func writeBits(_ value: UInt32, count: Int) {
         guard 0 < count else { return }
         buffer = (buffer << count) | UInt64(value & ((1 << count) - 1))
         bitsInBuffer += count
@@ -860,7 +858,7 @@ struct BypassWriter {
         }
     }
     
-    public mutating func flush() {
+    mutating func flush() {
         guard 0 < bitsInBuffer else { return }
         while bitsInBuffer >= 8 {
             bitsInBuffer -= 8
@@ -888,7 +886,7 @@ struct BypassReader {
     private var buffer: UInt64
     private var bitsInBuffer: Int
     
-    public init(data: [UInt8]) {
+    init(data: [UInt8]) {
         var padded = data
         padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
         self.bytes = padded
@@ -911,7 +909,7 @@ struct BypassReader {
     }
     
     @inline(__always)
-    public mutating func readBit() -> Bool {
+    mutating func readBit() -> Bool {
         ensureBits(1)
         bitsInBuffer -= 1
         let bit = (buffer >> bitsInBuffer) & 1
@@ -920,7 +918,7 @@ struct BypassReader {
     }
     
     @inline(__always)
-    public mutating func readBits(count: Int) -> UInt32 {
+    mutating func readBits(count: Int) -> UInt32 {
         guard 0 < count else { return 0 }
         ensureBits(count)
         bitsInBuffer -= count
@@ -929,7 +927,7 @@ struct BypassReader {
         return UInt32(value)
     }
     
-    public var consumedBytes: Int {
+    var consumedBytes: Int {
         let totalBitsRead = byteOffset * 8 - bitsInBuffer
         return (totalBitsRead + 7) / 8
     }

@@ -913,7 +913,7 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                                 }
                             }
                         } else {
-                            SubpixelInterpolator.interpolateBlock(
+                            subpixelInterpolateBlock(
                                 src: pData, srcStride: pW,
                                 dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
                                 width: actW, height: actH,
@@ -993,7 +993,7 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
                                 }
                                 
                                 // Now interpolate from extBuffer to pOut
-                                SubpixelInterpolator.interpolateBlock(
+                                subpixelInterpolateBlock(
                                     src: pExt, srcStride: extW,
                                     dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
                                     width: actW, height: actH,

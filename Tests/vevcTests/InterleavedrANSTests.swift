@@ -39,7 +39,7 @@ final class InterleavedrANSTests: XCTestCase {
         for val in testData {
             let isSig = val != 0
             if isSig {
-                let t = ValueTokenizer.tokenize(val)
+                let t = valueTokenize(val)
                 tokens.append(EncodedData(isSignificant: true, token: t.token, bypassBits: t.bypassBits, bypassLen: t.bypassLen))
                 sigCounts[1] += 1
                 tokenCounts[Int(t.token)] += 1
@@ -171,7 +171,7 @@ final class InterleavedrANSTests: XCTestCase {
             
             for t in forwardLaneTokens {
                 if t.isSignificant {
-                    let bypassLen = ValueTokenizer.bypassLength(for: t.token)
+                    let bypassLen = valueBypassLength(for: t.token)
                     let bypassBits = bypassReaders[lane].readBits(count: bypassLen)
                     restoredByLane[lane].append(EncodedData(isSignificant: true, token: t.token, bypassBits: bypassBits, bypassLen: bypassLen))
                 } else {

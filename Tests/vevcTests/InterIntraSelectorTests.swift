@@ -4,7 +4,7 @@ import XCTest
 final class InterIntraSelectorTests: XCTestCase {
     
     // RDO selection logic extracted for testing
-    func selectModeForPFrame(original: [Int16], interPredicted: [Int16], intraPredictions: [(mode: IntraPredictor.Mode, pred: [Int16])]) -> (isInter: Bool, bestIntraMode: IntraPredictor.Mode?) {
+    func selectModeForPFrame(original: [Int16], interPredicted: [Int16], intraPredictions: [(mode: IntraPredictorMode, pred: [Int16])]) -> (isInter: Bool, bestIntraMode: IntraPredictorMode?) {
         // ... will implement in tests based on SAD ...
         var interSAD = 0
         for i in 0..<1024 {
@@ -17,7 +17,7 @@ final class InterIntraSelectorTests: XCTestCase {
         }
         
         var bestIntraSAD = Int.max
-        var bestMode: IntraPredictor.Mode = .dc
+        var bestMode: IntraPredictorMode = .dc
         
         for p in intraPredictions {
             var sad = 0
@@ -43,7 +43,7 @@ final class InterIntraSelectorTests: XCTestCase {
     func testFastInterSelection() {
         let original = [Int16](repeating: 100, count: 1024)
         let inter = [Int16](repeating: 100, count: 1024) // perfect match
-        let intra = [(IntraPredictor.Mode.dc, [Int16](repeating: 50, count: 1024))]
+        let intra = [(IntraPredictorMode.dc, [Int16](repeating: 50, count: 1024))]
         
         let result = selectModeForPFrame(original: original, interPredicted: inter, intraPredictions: intra)
         XCTAssertTrue(result.isInter, "Perfect inter match must use Inter mode")
@@ -56,7 +56,7 @@ final class InterIntraSelectorTests: XCTestCase {
         for i in 0..<1024 { inter[i] = 10 }
         
         // Intra is perfect
-        let intra = [(IntraPredictor.Mode.dc, [Int16](repeating: 100, count: 1024))]
+        let intra = [(IntraPredictorMode.dc, [Int16](repeating: 100, count: 1024))]
         
         let result = selectModeForPFrame(original: original, interPredicted: inter, intraPredictions: intra)
         XCTAssertFalse(result.isInter, "Bad inter match with perfect intra must use Intra mode")

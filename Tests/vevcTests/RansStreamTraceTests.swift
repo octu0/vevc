@@ -68,11 +68,11 @@ final class RansStreamTraceTests: XCTestCase {
             let end = chunkStarts[lane + 1]
             for idx in start..<end {
                 let pair = pairs[idx]
-                let runResult = ValueTokenizer.tokenizeUnsigned(pair.run)
+                let runResult = valueTokenizeUnsigned(pair.run)
                 runTokenCounts[Int(runResult.token)] += 1
                 chunkRunTokens[lane].append(runResult.token)
                 chunkBypassWriters[lane].writeBits(runResult.bypassBits, count: runResult.bypassLen)
-                let valResult = ValueTokenizer.tokenize(pair.val)
+                let valResult = valueTokenize(pair.val)
                 valTokenCounts[Int(valResult.token)] += 1
                 chunkValTokens[lane].append(valResult.token)
                 chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)

@@ -26,7 +26,7 @@ func refineFractionalMBME(
         let isSafe = (refX - 3 >= 0) && (refY - 3 >= 0) && (refX + actW + 4 <= w) && (refY + actH + 4 <= h)
 
         if isSafe {
-            SubpixelInterpolator.interpolateBlock(
+            subpixelInterpolateBlock(
                 src: pPrev, srcStride: w,
                 dst: fracRefBuffer, dstStride: actW,
                 width: actW, height: actH,
@@ -68,7 +68,7 @@ func refineFractionalMBME(
                 }
             }
             
-            SubpixelInterpolator.interpolateBlock(
+            subpixelInterpolateBlock(
                 src: fracExtBuffer, srcStride: extW,
                 dst: fracRefBuffer, dstStride: actW,
                 width: actW, height: actH,

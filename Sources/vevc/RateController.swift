@@ -1,26 +1,26 @@
 import Foundation
 
-public struct RateController {
-    public let maxbitrate: Int
-    public let framerate: Int
-    public let keyint: Int
+struct RateController {
+    let maxbitrate: Int
+    let framerate: Int
+    let keyint: Int
     
-    public private(set) var gopTargetBits: Int = 0
-    public private(set) var gopRemainingBits: Int = 0
-    public private(set) var gopRemainingFrames: Int = 0
+    private(set) var gopTargetBits: Int = 0
+    private(set) var gopRemainingBits: Int = 0
+    private(set) var gopRemainingFrames: Int = 0
     
-    public private(set) var avgPFrameSAD: Double = 0.0
-    public private(set) var lastPFrameBits: Int = 0
-    public private(set) var lastPFrameQStep: Int = 0
-    public private(set) var lastPFrameSAD: Double = 0.0
+    private(set) var avgPFrameSAD: Double = 0.0
+    private(set) var lastPFrameBits: Int = 0
+    private(set) var lastPFrameQStep: Int = 0
+    private(set) var lastPFrameSAD: Double = 0.0
     
-    public init(maxbitrate: Int, framerate: Int, keyint: Int) {
+    init(maxbitrate: Int, framerate: Int, keyint: Int) {
         self.maxbitrate = maxbitrate
         self.framerate = framerate
         self.keyint = keyint
     }
     
-    public mutating func beginGOP() -> Int {
+    mutating func beginGOP() -> Int {
         self.gopTargetBits = Int((Double(maxbitrate) / Double(framerate)) * Double(keyint))
         self.gopRemainingBits = self.gopTargetBits
         self.gopRemainingFrames = self.keyint
@@ -33,7 +33,7 @@ public struct RateController {
         return max(1000, self.gopTargetBits / 4)
     }
     
-    public mutating func consumeIFrame(bits: Int, qStep: Int) {
+    mutating func consumeIFrame(bits: Int, qStep: Int) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         
@@ -42,7 +42,7 @@ public struct RateController {
         self.lastPFrameSAD = 0.0
     }
     
-    public mutating func calculatePFrameQStep(currentSAD: Double, baseStep: Int) -> Int {
+    mutating func calculatePFrameQStep(currentSAD: Double, baseStep: Int) -> Int {
         if self.avgPFrameSAD == 0.0 { self.avgPFrameSAD = currentSAD }
         self.avgPFrameSAD = (self.avgPFrameSAD * 0.8) + (currentSAD * 0.2)
         
@@ -71,7 +71,7 @@ public struct RateController {
         return Int(max(1, min(128, newStepInt)))
     }
     
-    public mutating func consumePFrame(bits: Int, qStep: Int, sad: Double) {
+    mutating func consumePFrame(bits: Int, qStep: Int, sad: Double) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         

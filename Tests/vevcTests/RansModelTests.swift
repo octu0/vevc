@@ -51,9 +51,9 @@ final class RansModelTests: XCTestCase {
         
         // pairs からrunTokenCountsとvalTokenCountsを計算
         for pair in encoder.pairs {
-            let rt = ValueTokenizer.tokenizeUnsigned(pair.run)
+            let rt = valueTokenizeUnsigned(pair.run)
             runTokenCounts[Int(rt.token)] += 1
-            let vt = ValueTokenizer.tokenize(pair.val)
+            let vt = valueTokenize(pair.val)
             valTokenCounts[Int(vt.token)] += 1
         }
         
