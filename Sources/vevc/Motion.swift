@@ -168,7 +168,7 @@ func estimateMBMEBlock64x64(
         }
     }
 
-    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
+    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX * 4), Int16(bestDY * 4))
 }
 
 @inline(__always)
@@ -245,14 +245,15 @@ func estimateMBMEBlock32x32(
         }
     }
 
-    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
+    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX * 4), Int16(bestDY * 4))
 }
 
 @inline(__always)
 func estimateMBMEBlockEdge(
     pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
     startX: Int, startY: Int, actW: Int, actH: Int, searchRange: Int,
-    mvs: inout MotionVectors, mvIdx: Int
+    mvs: inout MotionVectors, mvIdx: Int,
+    fracRefBuf: UnsafeMutablePointer<Int16>, fracExtBuf: UnsafeMutablePointer<Int16>
 ) {
     var bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
     var bestDX = 0
@@ -321,7 +322,14 @@ func estimateMBMEBlockEdge(
         }
     }
 
-    mvs.vectors[mvIdx] = SIMD2(Int16(bestDX), Int16(bestDY))
+    let refinedQMV = refineFractionalMBME(
+        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+        startX: startX, startY: startY, actW: actW, actH: actH,
+        bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD,
+        fracRefBuffer: fracRefBuf, fracExtBuffer: fracExtBuf
+    )
+
+    mvs.vectors[mvIdx] = refinedQMV
 }
 
 // MARK: - Subsampled SAD for Coarse Search
@@ -397,10 +405,17 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
 
     let searchRange = 16
 
+    var fracRefBuffer = [Int16](repeating: 0, count: 64 * 64)
+    var fracExtBuffer = [Int16](repeating: 0, count: 71 * 71)
+
     curr.y.withUnsafeBufferPointer { currPtr in
         guard let pCurr = currPtr.baseAddress else { return }
         prev.y.withUnsafeBufferPointer { prevPtr in
             guard let pPrev = prevPtr.baseAddress else { return }
+            fracRefBuffer.withUnsafeMutableBufferPointer { fracRefPtr in
+                guard let pFracRef = fracRefPtr.baseAddress else { return }
+                fracExtBuffer.withUnsafeMutableBufferPointer { fracExtPtr in
+                    guard let pFracExt = fracExtPtr.baseAddress else { return }
 
             let fullMbCols = w / mbSize
             let fullMbRows = h / mbSize
@@ -421,8 +436,8 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
 
                     // PMVを探索開始点として活用
                     let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                    var bestDX = max(minSafeDX, min(maxSafeDX, pmv.dx))
-                    var bestDY = max(minSafeDY, min(maxSafeDY, pmv.dy))
+                    var bestDX = max(minSafeDX, min(maxSafeDX, pmv.dx >> 2))
+                    var bestDY = max(minSafeDY, min(maxSafeDY, pmv.dy >> 2))
 
                     // 初期SADの計算（サブサンプリング）
                     var bestSAD: Int
@@ -528,7 +543,15 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                         }
                     }
 
-                    mvs.vectors[idx] = SIMD2(Int16(bestDX), Int16(bestDY))
+                    // Fractional Component Refinement
+                    let refinedQMV = refineFractionalMBME(
+                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                        startX: startX, startY: startY, actW: 64, actH: 64,
+                        bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD,
+                        fracRefBuffer: pFracRef, fracExtBuffer: pFracExt
+                    )
+                    
+                    mvs.vectors[idx] = refinedQMV
                 }
             }
 
@@ -542,7 +565,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                     estimateMBMEBlockEdge(
                         pCurr: pCurr, pPrev: pPrev, w: w, h: h,
                         startX: startX, startY: startY, actW: remW, actH: mbSize, searchRange: searchRange,
-                        mvs: &mvs, mvIdx: idx
+                        mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
                     )
                 }
             }
@@ -556,7 +579,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                     estimateMBMEBlockEdge(
                         pCurr: pCurr, pPrev: pPrev, w: w, h: h,
                         startX: startX, startY: startY, actW: mbSize, actH: remH, searchRange: searchRange,
-                        mvs: &mvs, mvIdx: idx
+                        mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
                     )
                 }
             }
@@ -568,10 +591,12 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                 let startY = mbY * mbSize
                 let idx = mbY * mbCols + mbX
                 estimateMBMEBlockEdge(
-                    pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                    startX: startX, startY: startY, actW: remW, actH: remH, searchRange: searchRange,
-                    mvs: &mvs, mvIdx: idx
-                )
+                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                        startX: startX, startY: startY, actW: remW, actH: remH, searchRange: searchRange,
+                        mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
+                    )
+            }
+                }
             }
         }
     }
@@ -670,80 +695,149 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
             out.withUnsafeMutableBufferPointer { oPtr in
                 guard let pOut = oPtr.baseAddress else { return }
 
+                var extBuffer = [Int16](repeating: 0, count: 71 * 71)
+
                 @inline(__always)
                 func applyBlock(mbX: Int, mbY: Int, actW: Int, actH: Int) {
                     let startX = mbX * pMbSize
                     let startY = mbY * pMbSize
                     let idx = mbY * localMbCols + mbX
                     let vec = mvs.vectors[idx]
-                    let dx = Int(vec.x) / div
-                    let dy = Int(vec.y) / div
+                    
+                    let qdx = Int(vec.x) / div
+                    let qdy = Int(vec.y) / div
+                    let dx = qdx >> 2
+                    let dy = qdy >> 2
+                    let fracX = qdx & 3
+                    let fracY = qdy & 3
 
                     let refX = startX + dx
                     let refY = startY + dy
                     
-                    if 0 <= refX && 0 <= refY && (refX + actW) <= pW && (refY + actH) <= pH {
-                        switch actW {
-                        case 64:
-                            for y in 0..<actH {
-                                let dstRow = (startY + y) * pW
-                                let srcRow = (refY + y) * pW
-                                let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let c2 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 32)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let c3 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 48)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
-                                pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
-                                pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
-                                pDst.advanced(by: 64).storeBytes(of: c2, as: SIMD16<Int16>.self)
-                                pDst.advanced(by: 96).storeBytes(of: c3, as: SIMD16<Int16>.self)
+                    let isSafe = (refX - 3 >= 0) && (refY - 3 >= 0) && (refX + actW + 4 <= pW) && (refY + actH + 4 <= pH)
+
+                    if isSafe {
+                        if fracX == 0 && fracY == 0 {
+                            switch actW {
+                            case 64:
+                                for y in 0..<actH {
+                                    let dstRow = (startY + y) * pW
+                                    let srcRow = (refY + y) * pW
+                                    let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                                    let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                                    let c2 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+                                    let c3 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+                                    let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                                    pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                                    pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
+                                    pDst.advanced(by: 64).storeBytes(of: c2, as: SIMD16<Int16>.self)
+                                    pDst.advanced(by: 96).storeBytes(of: c3, as: SIMD16<Int16>.self)
+                                }
+                            case 32:
+                                for y in 0..<actH {
+                                    let dstRow = (startY + y) * pW
+                                    let srcRow = (refY + y) * pW
+                                    let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                                    let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                                    let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                                    pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                                    pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
+                                }
+                            default:
+                                for y in 0..<actH {
+                                    let dstRow = (startY + y) * pW
+                                    let srcRow = (refY + y) * pW
+                                    pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
+                                }
                             }
-                        case 32:
-                            for y in 0..<actH {
-                                let dstRow = (startY + y) * pW
-                                let srcRow = (refY + y) * pW
-                                let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                                let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
-                                pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
-                                pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
-                            }
-                        default:
-                            for y in 0..<actH {
-                                let dstRow = (startY + y) * pW
-                                let srcRow = (refY + y) * pW
-                                pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
-                            }
+                        } else {
+                            SubpixelInterpolator.interpolateBlock(
+                                src: pData, srcStride: pW,
+                                dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
+                                width: actW, height: actH,
+                                fracX: fracX, fracY: fracY,
+                                startX: refX, startY: refY
+                            )
                         }
                     } else {
-                        let minSafeX = max(0, min(actW, -refX))
-                        let maxSafeX = max(0, min(actW, pW - refX))
+                        if fracX == 0 && fracY == 0 {
+                            let minSafeX = max(0, min(actW, -refX))
+                            let maxSafeX = max(0, min(actW, pW - refX))
 
-                        for y in 0..<actH {
-                            let dstY = startY + y
-                            let srcY = max(0, min(pH - 1, dstY + dy))
-                            let dstRow = dstY * pW
-                            let srcRow = srcY * pW
-                            
-                            let pDstBase = pOut.advanced(by: dstRow + startX)
+                            for y in 0..<actH {
+                                let dstY = startY + y
+                                let srcY = max(0, min(pH - 1, dstY + dy))
+                                let dstRow = dstY * pW
+                                let srcRow = srcY * pW
+                                
+                                let pDstBase = pOut.advanced(by: dstRow + startX)
 
-                            if 0 < minSafeX {
-                                let leftEdgeVal = pData[srcRow]
-                                for x in 0..<minSafeX {
-                                    pDstBase[x] = leftEdgeVal
+                                if 0 < minSafeX {
+                                    let leftEdgeVal = pData[srcRow]
+                                    for x in 0..<minSafeX {
+                                        pDstBase[x] = leftEdgeVal
+                                    }
+                                }
+                                
+                                let copyCount = maxSafeX - minSafeX
+                                if 0 < copyCount {
+                                    pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
+                                }
+                                
+                                if maxSafeX < actW {
+                                    let rightEdgeVal = pData[srcRow + pW - 1]
+                                    for x in maxSafeX..<actW {
+                                        pDstBase[x] = rightEdgeVal
+                                    }
                                 }
                             }
+                        } else {
+                            // Extract padded block for fractional interpolation near edge
+                            let extW = actW + 7
+                            let extH = actH + 7
+                            let extStartX = refX - 3
+                            let extStartY = refY - 3
                             
-                            let copyCount = maxSafeX - minSafeX
-                            if 0 < copyCount {
-                                pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
-                            }
-                            
-                            if maxSafeX < actW {
-                                let rightEdgeVal = pData[srcRow + pW - 1]
-                                for x in maxSafeX..<actW {
-                                    pDstBase[x] = rightEdgeVal
+                            extBuffer.withUnsafeMutableBufferPointer { extPtr in
+                                guard let pExt = extPtr.baseAddress else { return }
+                                
+                                let minSafeX = max(0, min(extW, -extStartX))
+                                let maxSafeX = max(0, min(extW, pW - extStartX))
+                                
+                                for y in 0..<extH {
+                                    let srcY = max(0, min(pH - 1, extStartY + y))
+                                    let srcRow = srcY * pW
+                                    let dstRow = y * extW
+                                    let pDstBase = pExt.advanced(by: dstRow)
+                                    
+                                    if 0 < minSafeX {
+                                        let leftEdgeVal = pData[srcRow]
+                                        for x in 0..<minSafeX {
+                                            pDstBase[x] = leftEdgeVal
+                                        }
+                                    }
+                                    
+                                    let copyCount = maxSafeX - minSafeX
+                                    if 0 < copyCount {
+                                        pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + extStartX + minSafeX), count: copyCount)
+                                    }
+                                    
+                                    if maxSafeX < extW {
+                                        let rightEdgeVal = pData[srcRow + pW - 1]
+                                        for x in maxSafeX..<extW {
+                                            pDstBase[x] = rightEdgeVal
+                                        }
+                                    }
                                 }
+                                
+                                // Now interpolate from extBuffer to pOut
+                                SubpixelInterpolator.interpolateBlock(
+                                    src: pExt, srcStride: extW,
+                                    dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
+                                    width: actW, height: actH,
+                                    fracX: fracX, fracY: fracY,
+                                    startX: 3, startY: 3
+                                )
                             }
                         }
                     }
