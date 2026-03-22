@@ -81,6 +81,84 @@ func calculateSAD64x64(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>,
     return Int(total0 &+ total1 &+ total2 &+ total3)
 }
 
+@inline(__always)
+func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
+    let w = pd.width / 8
+    let h = pd.height / 8
+    var out = [Int16](repeating: 0, count: w * h)
+    
+    let pdWidth = pd.width
+    pd.y.withUnsafeBufferPointer { ptr in
+        guard let pY = ptr.baseAddress else { return }
+        out.withUnsafeMutableBufferPointer { oPtr in
+            guard let pOut = oPtr.baseAddress else { return }
+            
+            for y in 0..<h {
+                let py = y * 8
+                let outRow = y * w
+                for x in 0..<w {
+                    let px = x * 8
+                    var sum: Int32 = 0
+                    for dy in 0..<8 {
+                        let off = (py + dy) * pdWidth + px
+                        let v = UnsafeRawPointer(pY.advanced(by: off)).loadUnaligned(as: SIMD8<Int16>.self)
+                        let v32 = SIMD8<Int32>(clamping: v)
+                        sum &+= v32[0] &+ v32[1] &+ v32[2] &+ v32[3] &+ v32[4] &+ v32[5] &+ v32[6] &+ v32[7]
+                    }
+                    pOut[outRow + x] = Int16(sum / 64)
+                }
+            }
+        }
+    }
+    return (out, w, h)
+}
+
+@inline(__always)
+func calculateDownscaledSADStats(layer0Curr: [Int16], layer0Prev: [Int16], w: Int, h: Int) -> (meanSAD: Int, maxBlockSAD: Int) {
+    // 64x64 block is 8x8 in downscaled layer0
+    let mbSize = 8
+    let mbCols = (w + mbSize - 1) / mbSize
+    let mbRows = (h + mbSize - 1) / mbSize
+    
+    var totalSAD = 0
+    var maxSAD = 0
+    
+    layer0Curr.withUnsafeBufferPointer { cPtr in
+        guard let pC = cPtr.baseAddress else { return }
+        layer0Prev.withUnsafeBufferPointer { pPtr in
+            guard let pP = pPtr.baseAddress else { return }
+            
+            for mbY in 0..<mbRows {
+                let startY = mbY * mbSize
+                let actH = min(mbSize, h - startY)
+                for mbX in 0..<mbCols {
+                    let startX = mbX * mbSize
+                    let actW = min(mbSize, w - startX)
+                    
+                    var blockSAD = 0
+                    for y in 0..<actH {
+                        let row = (startY + y) * w
+                        for x in 0..<actW {
+                            let idx = row + startX + x
+                            let diff = Int(pC[idx]) - Int(pP[idx])
+                            blockSAD += diff > 0 ? diff : -diff
+                        }
+                    }
+                    
+                    // Scale up by 64 to closely estimate the original 64x64 block SAD scale 
+                    // (since layer0 has 1/64 the pixel count and the per-pixel diff is comparable)
+                    let scaledSAD = blockSAD * 64
+                    totalSAD += scaledSAD
+                    if scaledSAD > maxSAD { maxSAD = scaledSAD }
+                }
+            }
+        }
+    }
+    
+    let meanSAD = mbCols * mbRows > 0 ? totalSAD / (mbCols * mbRows) : 0
+    return (meanSAD, maxSAD)
+}
+
 struct MotionVector: Sendable {
     let dx: Int
     let dy: Int

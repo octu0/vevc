@@ -456,3 +456,64 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
 
     return blocks
 }
+
+@inline(__always)
+func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throws {
+    var bwFlags = BypassReader(data: data)
+    var tasks: [(Int, Bool)] = []
+    tasks.reserveCapacity(blocks.count)
+    
+    for i in blocks.indices {
+        let isZero = bwFlags.readBit()
+        if isZero {
+            blocks[i].withView { $0.clearAll() }
+            tasks.append((i, true))
+        } else {
+            tasks.append((i, false))
+        }
+    }
+    
+    let consumed = bwFlags.consumedBytes
+    guard consumed <= data.count else { throw DecodeError.insufficientData }
+    let entropyData = Array(data[consumed...])
+    var decoder = try EntropyDecoder(data: entropyData)
+    var lastVal: Int16 = 0
+    
+    for (i, skip) in tasks {
+        if skip {
+            lastVal = 0
+            continue
+        }
+        
+        try blocks[i].withView { view in
+            let hl1 = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: view.stride)
+            let lh1 = BlockView(base: view.base.advanced(by: 16 * view.stride), width: 16, height: 16, stride: view.stride)
+            let hh1 = BlockView(base: view.base.advanced(by: 16 * view.stride + 16), width: 16, height: 16, stride: view.stride)
+            
+            let hl2 = BlockView(base: view.base.advanced(by: 8), width: 8, height: 8, stride: view.stride)
+            let lh2 = BlockView(base: view.base.advanced(by: 8 * view.stride), width: 8, height: 8, stride: view.stride)
+            let hh2 = BlockView(base: view.base.advanced(by: 8 * view.stride + 8), width: 8, height: 8, stride: view.stride)
+            
+            let ll3 = BlockView(base: view.base, width: 4, height: 4, stride: view.stride)
+            let hl3 = BlockView(base: view.base.advanced(by: 4), width: 4, height: 4, stride: view.stride)
+            let lh3 = BlockView(base: view.base.advanced(by: 4 * view.stride), width: 4, height: 4, stride: view.stride)
+            let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
+            
+            var m_ll3 = ll3, m_hl3 = hl3, m_lh3 = lh3, m_hh3 = hh3
+            try blockDecodeDPCM4(decoder: &decoder, block: &m_ll3, lastVal: &lastVal)
+            try blockDecode4(decoder: &decoder, block: &m_hl3)
+            try blockDecode4(decoder: &decoder, block: &m_lh3)
+            try blockDecode4(decoder: &decoder, block: &m_hh3)
+            
+            var m_hl2 = hl2, m_lh2 = lh2, m_hh2 = hh2
+            try blockDecode8(decoder: &decoder, block: &m_hl2)
+            try blockDecode8(decoder: &decoder, block: &m_lh2)
+            try blockDecode8(decoder: &decoder, block: &m_hh2)
+            
+            var m_hl1 = hl1, m_lh1 = lh1, m_hh1 = hh1
+            try blockDecode16(decoder: &decoder, block: &m_hl1)
+            try blockDecode16(decoder: &decoder, block: &m_lh1)
+            try blockDecode16(decoder: &decoder, block: &m_hh1)
+        }
+    }
+}

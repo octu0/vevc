@@ -41,6 +41,7 @@ func calculateSAD8x8(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, c
 func evaluateMotionQuadtreeNode(
     pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
     startX: Int, startY: Int, size: Int, searchRange: Int,
+    coarseDX: Int, coarseDY: Int,
     grid: inout MVGrid,
     fracRefBuf: UnsafeMutablePointer<Int16>,
     fracExtBuf: UnsafeMutablePointer<Int16>
@@ -59,7 +60,16 @@ func evaluateMotionQuadtreeNode(
 
     let pmv = grid.getPMV(x: startX, y: startY, w: size)
     
-    // PMV forms the center of our search. We do not restrict this initial PMV by searchRange.
+    // Layer0 Coarse MV serves as the search center at the root (64x64) level
+    var centerDX = Int(pmv.x)
+    var centerDY = Int(pmv.y)
+    if size == 64 {
+        centerDX = coarseDX
+        centerDY = coarseDY
+    }
+    
+    // Extremely tight fine search around the center
+    // E.g., for ±3 range, we only check 49 points.
     var bestDX = Int(pmv.x) >> 2
     var bestDY = Int(pmv.y) >> 2
     
@@ -116,11 +126,19 @@ func evaluateMotionQuadtreeNode(
         )
         if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
     } else {
-        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: bestDX, dy: bestDY)
+        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: centerDX, dy: centerDY)
         let zeroSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
-        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
+        
+        // Zero-bias (0,0 is generally preferred if close)
+        if zeroSAD <= bestSAD + (actW * actH / 16) {
+            bestDX = 0
+            bestDY = 0
+            bestSAD = zeroSAD
+        } else {
+            bestDX = centerDX
+            bestDY = centerDY
+        }
     }
-
     // Fast Mode: If PMV or ZeroMV already yields an excellent match.
     // Given that typical quantization noise adds SAD=3~5 per pixel, we set the threshold to SAD=8 per pixel.
     // If the error is under this, it's mostly quantization noise and the MV is correct.
@@ -223,12 +241,11 @@ func evaluateMotionQuadtreeNode(
         
         // Hierarchical ME (HME): Reduce the search range exponentially for child nodes.
         // Parent already found the bulk motion vector. Children only need to slightly refine it.
-        let childSearchRange = max(2, searchRange / 4)
-        
-        let tl = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, size: half, searchRange: childSearchRange, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        let tr = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + half, startY: startY, size: half, searchRange: childSearchRange, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        let bl = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY + half, size: half, searchRange: childSearchRange, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        let br = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + half, startY: startY + half, size: half, searchRange: childSearchRange, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let childSearchRange = max(1, searchRange / 2) // Drastically shrink for children
+        let tl = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let tr = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + half, startY: startY, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let bl = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY + half, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let br = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + half, startY: startY + half, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
         // Penalty for sending 4 MVs instead of 1 MV.
         // It must scale with area to prevent overfitting to quantization noise!
         let splitPenalty = (actW * actH) * 1 // Requires at least an average of SAD=1 reduction per pixel to justify a split
@@ -259,7 +276,43 @@ func evaluateMotionQuadtreeNode(
     }
 }
 
-func estimateMotionQuadtree(curr: PlaneData420, prev: PlaneData420) -> MotionTree {
+@inline(__always)
+func evaluateLayer0Motion(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, size: Int, searchRange: Int
+) -> (dx: Int, dy: Int) {
+    if startX >= w || startY >= h { return (0, 0) }
+    
+    let actW = min(size, w - startX)
+    let actH = min(size, h - startY)
+    
+    var bestSAD = Int.max
+    var bestDX = 0
+    var bestDY = 0
+
+    // Evaluate Center (from Coarse MV or PMV depending on size)
+    let zeroSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
+    bestSAD = zeroSAD
+    
+    for dy in -searchRange...searchRange {
+        for dx in -searchRange...searchRange {
+            if dx == 0 && dy == 0 { continue }
+            
+            let sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
+            let penalty = (abs(dx) + abs(dy)) * 2
+            
+            if sad + penalty < bestSAD {
+                bestSAD = sad + penalty
+                bestDX = dx
+                bestDY = dy
+            }
+        }
+    }
+    
+    return (bestDX, bestDY)
+}
+
+func estimateMotionQuadtree(curr: PlaneData420, prev: PlaneData420, layer0Curr: (data: [Int16], w: Int, h: Int), layer0Prev: (data: [Int16], w: Int, h: Int)) -> MotionTree {
     let mbSize = 64
     let w = curr.width
     let h = curr.height
@@ -281,18 +334,36 @@ func estimateMotionQuadtree(curr: PlaneData420, prev: PlaneData420) -> MotionTre
                 fracExtBuffer.withUnsafeMutableBufferPointer { fracExtPtr in
                     guard let pFracExt = fracExtPtr.baseAddress else { return }
 
+            layer0Curr.data.withUnsafeBufferPointer { layer0CPtr in
+                guard let pLayer0C = layer0CPtr.baseAddress else { return }
+                layer0Prev.data.withUnsafeBufferPointer { layer0PPtr in
+                    guard let pLayer0P = layer0PPtr.baseAddress else { return }
+                    
                     for mbY in 0..<mbRows {
                         let startY = mbY * mbSize
                         for mbX in 0..<mbCols {
                             let startX = mbX * mbSize
+                            
+                            // 1. DWT/Layer0 Coarse ME: Search in the 1/8 downscaled plane
+                            // The 64x64 block maps to an 8x8 block in Layer0. Search range ±3 means ±24 in full res!
+                            let cDXDY = evaluateLayer0Motion(
+                                pCurr: pLayer0C, pPrev: pLayer0P, w: layer0Curr.w, h: layer0Curr.h,
+                                startX: mbX * 8, startY: mbY * 8, size: 8, searchRange: 3
+                            )
+                            
+                            // 2. Full-res Fine ME: Refine around the scaled Coarse MV
+                            // Fine search range of ±3 is extremely light (49 evaluations) instead of ±16 (1089 evaluations)
                             let nodeEval = evaluateMotionQuadtreeNode(
                                 pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                                startX: startX, startY: startY, size: mbSize, searchRange: 16,
+                                startX: startX, startY: startY, size: mbSize, searchRange: 3,
+                                coarseDX: cDXDY.dx * 8, coarseDY: cDXDY.dy * 8,
                                 grid: &grid, fracRefBuf: pFracRef, fracExtBuf: pFracExt
                             )
                             ctuNodes.append(nodeEval.node)
                         }
                     }
+                }
+            }
                 }
             }
         }

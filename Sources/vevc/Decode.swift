@@ -368,40 +368,6 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, la
     lastVal = last
 }
 
-@inline(__always)
-func readUInt8FromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt8 {
-    guard (offset + 1) <= r.count else { throw DecodeError.insufficientData }
-    let val = r[offset]
-    offset += 1
-    return val
-}
-
-@inline(__always)
-func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt16 {
-    guard (offset + 2) <= r.count else { throw DecodeError.insufficientData }
-    let val = (UInt16(r[offset]) << 8) | UInt16(r[offset + 1])
-    offset += 2
-    return val
-}
-
-@inline(__always)
-func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
-    guard (offset + 4) <= r.count else { throw DecodeError.insufficientData }
-    let val = (UInt32(r[offset]) << 24) | (UInt32(r[offset + 1]) << 16) | (UInt32(r[offset + 2]) << 8) | UInt32(r[offset + 3])
-    offset += 4
-    return val
-}
-
-@inline(__always)
-func readBlockFromBytes(_ r: [UInt8], offset: inout Int) throws -> [UInt8] {
-    let len = try readUInt16BEFromBytes(r, offset: &offset)
-    let intLen = Int(len)
-    guard (offset + intLen) <= r.count else { throw DecodeError.invalidBlockData }
-    let block = Array(r[offset..<(offset + intLen)])
-    offset += intLen
-    return block
-}
-
 // MARK: - Internal Decode Functions
 
 @inline(__always)
@@ -989,191 +955,6 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> Image16 {
     return sub
 }
 
-public struct DecodeOptions: Sendable {
-    public var maxLayer: Int
-    public var maxFrames: Int
-    
-    public init(maxLayer: Int = 2, maxFrames: Int = 4) {
-        self.maxLayer = maxLayer
-        self.maxFrames = maxFrames
-    }
-}
-
-#if (arch(arm64) || arch(x86_64) || arch(wasm32))
-@inline(__always)
-public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
-    if data.isEmpty { return [] }
-    var out: [YCbCrImage] = []
-    var offset = 0
-    var prevReconstructed: PlaneData420? = nil
-    
-    while offset + 4 <= data.count {
-        let magic = Array(data[offset..<(offset + 4)])
-        offset += 4
-        
-        switch magic {
-        case [0x56, 0x45, 0x56, 0x49]:
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            let chunk = Array(data[offset..<(offset + len)])
-            offset += len
-            
-            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
-            let pd = PlaneData420(img16: img16)
-            out.append(pd.toYCbCr())
-            prevReconstructed = pd
-
-        case [0x56, 0x45, 0x56, 0x48]: // VEVH
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            offset += len
-
-        case [0x56, 0x45, 0x56, 0x50]:
-            let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            var mvs = MotionVectors(count: mvsCount)
-            guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
-
-            let mvData = Array(data[offset..<(offset + mvDataLen)])
-            offset += mvDataLen
-            var mvBr = try EntropyDecoder(data: mvData)
-
-            let mbSize = 64
-            // We need width to compute mbCols. We can infer width from previous frame.
-            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
-            let mbCols = (prevWidth + mbSize - 1) / mbSize
-
-            for i in 0..<mvsCount {
-                let mbX = i % mbCols
-                let mbY = i / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-
-                let isSig = try mvBr.decodeBypass()
-                if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(clamping: pmv.dx), Int16(clamping: pmv.dy))
-                } else {
-                    let sx = try mvBr.decodeBypass()
-                    let mx = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdX: Int
-                    if sx == 1 {
-                        mvdX = -1 * Int(mx)
-                    } else {
-                        mvdX = Int(mx)
-                    }
-
-                    let sy = try mvBr.decodeBypass()
-                    let my = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdY: Int
-                    if sy == 1 {
-                        mvdY = -1 * Int(my)
-                    } else {
-                        mvdY = Int(my)
-                    }
-
-                    mvs.vectors[i] = SIMD2(Int16(clamping: mvdX + pmv.dx), Int16(clamping: mvdY + pmv.dy))
-                }
-            }
-            
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            let chunk = Array(data[offset..<(offset + len)])
-            offset += len
-            
-            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
-            let residual = PlaneData420(img16: img16)
-            
-            if let prev = prevReconstructed {
-                let predicted = await applyMBME(prev: prev, mvs: mvs)
-                let curr = await addPlanes(residual: residual, predicted: predicted)
-                out.append(curr.toYCbCr())
-                prevReconstructed = curr
-            } else {
-                out.append(residual.toYCbCr())
-            }
-            
-        case [0x56, 0x45, 0x4F, 0x49]: // VEOI
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            let chunk = Array(data[offset..<(offset + len)])
-            offset += len
-            
-            let pd = try await decodeBase32Causal(r: chunk, layer: 0, predictedPd: nil)
-            out.append(pd.toYCbCr())
-            prevReconstructed = pd
-
-        case [0x56, 0x45, 0x4F, 0x50]: // VEOP
-            let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            var mvs = MotionVectors(count: mvsCount)
-            guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
-
-            let mvData = Array(data[offset..<(offset + mvDataLen)])
-            offset += mvDataLen
-            var mvBr = try EntropyDecoder(data: mvData)
-
-            let mbSize = 64
-            // We need width to compute mbCols. We can infer width from previous frame.
-            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
-            let mbCols = (prevWidth + mbSize - 1) / mbSize
-
-            for i in 0..<mvsCount {
-                let mbX = i % mbCols
-                let mbY = i / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-
-                let isSig = try mvBr.decodeBypass()
-                if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(clamping: pmv.dx), Int16(clamping: pmv.dy))
-                } else {
-                    let sx = try mvBr.decodeBypass()
-                    let mx = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdX: Int
-                    if sx == 1 {
-                        mvdX = -1 * Int(mx)
-                    } else {
-                        mvdX = Int(mx)
-                    }
-
-                    let sy = try mvBr.decodeBypass()
-                    let my = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdY: Int
-                    if sy == 1 {
-                        mvdY = -1 * Int(my)
-                    } else {
-                        mvdY = Int(my)
-                    }
-
-                    mvs.vectors[i] = SIMD2(Int16(clamping: mvdX + pmv.dx), Int16(clamping: mvdY + pmv.dy))
-                }
-            }
-            
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            let chunk = Array(data[offset..<(offset + len)])
-            offset += len
-            
-            let predicted: PlaneData420?
-            if let prev = prevReconstructed {
-                predicted = await applyMBME(prev: prev, mvs: mvs)
-            } else {
-                predicted = nil
-            }
-            let curr = try await decodeBase32Causal(r: chunk, layer: 0, predictedPd: predicted)
-            out.append(curr.toYCbCr())
-            prevReconstructed = curr
-            
-        default: 
-             throw DecodeError.invalidHeader
-        }
-    }
-    
-    return out
-}
-
 @inline(__always)
 func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
     var offset = 0
@@ -1352,6 +1133,120 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
     return sub
 }
 
+public struct DecodeOptions: Sendable {
+    public var maxLayer: Int
+    public var maxFrames: Int
+    
+    public init(maxLayer: Int = 2, maxFrames: Int = 4) {
+        self.maxLayer = maxLayer
+        self.maxFrames = maxFrames
+    }
+}
+
+#if (arch(arm64) || arch(x86_64) || arch(wasm32))
+@inline(__always)
+public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
+    if data.isEmpty { return [] }
+    var out: [YCbCrImage] = []
+    var offset = 0
+    var prevReconstructed: PlaneData420? = nil
+    
+    while offset + 4 <= data.count {
+        let magic = Array(data[offset..<(offset + 4)])
+        offset += 4
+        
+        switch magic {
+        case [0x56, 0x45, 0x56, 0x49]:
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+            let chunk = Array(data[offset..<(offset + len)])
+            offset += len
+            
+            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            let pd = PlaneData420(img16: img16)
+            out.append(pd.toYCbCr())
+            prevReconstructed = pd
+
+        case [0x56, 0x45, 0x56, 0x48]: // VEVH
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+            offset += len
+
+        case [0x56, 0x45, 0x56, 0x50]:
+            let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            var mvs = MotionVectors(count: mvsCount)
+            guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
+
+            let mvData = Array(data[offset..<(offset + mvDataLen)])
+            offset += mvDataLen
+            var mvBr = try EntropyDecoder(data: mvData)
+
+            let mbSize = 64
+            // We need width to compute mbCols. We can infer width from previous frame.
+            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
+            let mbCols = (prevWidth + mbSize - 1) / mbSize
+
+            for i in 0..<mvsCount {
+                let mbX = i % mbCols
+                let mbY = i / mbCols
+                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
+
+                let isSig = try mvBr.decodeBypass()
+                if isSig == 0 {
+                    mvs.vectors[i] = SIMD2(Int16(clamping: pmv.dx), Int16(clamping: pmv.dy))
+                } else {
+                    let sx = try mvBr.decodeBypass()
+                    let mx = try decodeExpGolomb(decoder: &mvBr)
+
+                    let mvdX: Int
+                    if sx == 1 {
+                        mvdX = -1 * Int(mx)
+                    } else {
+                        mvdX = Int(mx)
+                    }
+
+                    let sy = try mvBr.decodeBypass()
+                    let my = try decodeExpGolomb(decoder: &mvBr)
+
+                    let mvdY: Int
+                    if sy == 1 {
+                        mvdY = -1 * Int(my)
+                    } else {
+                        mvdY = Int(my)
+                    }
+
+                    mvs.vectors[i] = SIMD2(Int16(clamping: mvdX + pmv.dx), Int16(clamping: mvdY + pmv.dy))
+                }
+            }
+            
+            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+            let chunk = Array(data[offset..<(offset + len)])
+            offset += len
+            
+            let img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
+            let residual = PlaneData420(img16: img16)
+            
+            if let prev = prevReconstructed {
+                let predicted = await applyMBME(prev: prev, mvs: mvs)
+                let curr = await addPlanes(residual: residual, predicted: predicted)
+                out.append(curr.toYCbCr())
+                prevReconstructed = curr
+            } else {
+                out.append(residual.toYCbCr())
+            }
+            
+
+            
+        default: 
+             throw DecodeError.invalidHeader
+        }
+    }
+    
+    return out
+}
+
 @inline(__always)
 public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
     return try await decode(data: data, opts: DecodeOptions(maxLayer: 0))
@@ -1365,65 +1260,3 @@ public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
     throw DecodeError.unsupportedArchitecture
 }
 #endif
-// MARK: - Cascaded Decoding
-
-@inline(__always)
-func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throws {
-    var bwFlags = BypassReader(data: data)
-    var tasks: [(Int, Bool)] = []
-    tasks.reserveCapacity(blocks.count)
-    
-    for i in blocks.indices {
-        let isZero = bwFlags.readBit()
-        if isZero {
-            blocks[i].withView { $0.clearAll() }
-            tasks.append((i, true))
-        } else {
-            tasks.append((i, false))
-        }
-    }
-    
-    let consumed = bwFlags.consumedBytes
-    guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let entropyData = Array(data[consumed...])
-    var decoder = try EntropyDecoder(data: entropyData)
-    var lastVal: Int16 = 0
-    
-    for (i, skip) in tasks {
-        if skip {
-            lastVal = 0
-            continue
-        }
-        
-        try blocks[i].withView { view in
-            let hl1 = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: view.stride)
-            let lh1 = BlockView(base: view.base.advanced(by: 16 * view.stride), width: 16, height: 16, stride: view.stride)
-            let hh1 = BlockView(base: view.base.advanced(by: 16 * view.stride + 16), width: 16, height: 16, stride: view.stride)
-            
-            let hl2 = BlockView(base: view.base.advanced(by: 8), width: 8, height: 8, stride: view.stride)
-            let lh2 = BlockView(base: view.base.advanced(by: 8 * view.stride), width: 8, height: 8, stride: view.stride)
-            let hh2 = BlockView(base: view.base.advanced(by: 8 * view.stride + 8), width: 8, height: 8, stride: view.stride)
-            
-            let ll3 = BlockView(base: view.base, width: 4, height: 4, stride: view.stride)
-            let hl3 = BlockView(base: view.base.advanced(by: 4), width: 4, height: 4, stride: view.stride)
-            let lh3 = BlockView(base: view.base.advanced(by: 4 * view.stride), width: 4, height: 4, stride: view.stride)
-            let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
-            
-            var m_ll3 = ll3, m_hl3 = hl3, m_lh3 = lh3, m_hh3 = hh3
-            try blockDecodeDPCM4(decoder: &decoder, block: &m_ll3, lastVal: &lastVal)
-            try blockDecode4(decoder: &decoder, block: &m_hl3)
-            try blockDecode4(decoder: &decoder, block: &m_lh3)
-            try blockDecode4(decoder: &decoder, block: &m_hh3)
-            
-            var m_hl2 = hl2, m_lh2 = lh2, m_hh2 = hh2
-            try blockDecode8(decoder: &decoder, block: &m_hl2)
-            try blockDecode8(decoder: &decoder, block: &m_lh2)
-            try blockDecode8(decoder: &decoder, block: &m_hh2)
-            
-            var m_hl1 = hl1, m_lh1 = lh1, m_hh1 = hh1
-            try blockDecode16(decoder: &decoder, block: &m_hl1)
-            try blockDecode16(decoder: &decoder, block: &m_lh1)
-            try blockDecode16(decoder: &decoder, block: &m_hh1)
-        }
-    }
-}

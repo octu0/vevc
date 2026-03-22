@@ -1,6 +1,6 @@
 import Foundation
 
-public struct DeblockingFilter {
+struct DeblockingFilter {
     /// In-place applies deblocking filter to the reconstructed image.
     @inline(__always)
     public static func apply(plane: inout [Int16], width: Int, height: Int, blockSize: Int, qStep: Int) {

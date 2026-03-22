@@ -99,8 +99,7 @@ do {
         framerate: fps,
         zeroThreshold: zeroThreshold,
         keyint: keyint,
-        sceneChangeThreshold: sceneThreshold,
-        isOne: isOne
+        sceneChangeThreshold: sceneThreshold
     )
 
     var frameCount = 0

@@ -83,7 +83,9 @@ final class MotionQuadtreeTests: XCTestCase {
             }
         }
         
-        let motionTree = estimateMotionQuadtree(curr: curr, prev: prev)
+        let layer0Curr = downscale8x(pd: curr)
+        let layer0Prev = downscale8x(pd: prev)
+        let motionTree = estimateMotionQuadtree(curr: curr, prev: prev, layer0Curr: layer0Curr, layer0Prev: layer0Prev)
         XCTAssertEqual(motionTree.ctuNodes.count, 1)
         
         let rootNode = motionTree.ctuNodes[0]

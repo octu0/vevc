@@ -129,14 +129,7 @@ public class Decoder {
              throw DecodeError.invalidHeader
         }
     }
-    
-    @inline(__always)
-    private func readUInt32BEFromBytes(_ data: [UInt8], offset: inout Int) throws -> UInt32 {
-        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
-        let val = (UInt32(data[offset]) << 24) | (UInt32(data[offset+1]) << 16) | (UInt32(data[offset+2]) << 8) | UInt32(data[offset+3])
-        offset += 4
-        return val
-    }
+
 #else
     public func decode(chunk: [UInt8]) async throws -> YCbCrImage {
         throw DecodeError.unsupportedArchitecture

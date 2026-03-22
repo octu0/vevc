@@ -1906,8 +1906,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
         framerate: framerate,
         zeroThreshold: zeroThreshold,
         keyint: keyint,
-        sceneChangeThreshold: sceneChangeThreshold,
-        isOne: false
+        sceneChangeThreshold: sceneChangeThreshold
     )
     
     var out: [UInt8] = []
@@ -1930,8 +1929,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30
         framerate: framerate,
         zeroThreshold: zeroThreshold,
         keyint: keyint,
-        sceneChangeThreshold: sceneChangeThreshold,
-        isOne: true
+        sceneChangeThreshold: sceneChangeThreshold
     )
     
     var out: [UInt8] = []

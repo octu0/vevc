@@ -131,33 +131,47 @@ struct SubpixelInterpolator {
             return
         }
         
-        // For simplicity and speed in this PoC, we will compute it sequentially.
-        
         let extraLines = 7
         let intermediateCount = width * (height + extraLines)
         
         withUnsafeTemporaryAllocation(of: Int16.self, capacity: intermediateCount) { interPtr in
             guard let intBase = interPtr.baseAddress else { return }
             
-            for y in 0..<(height + extraLines) {
-                let srcYOffset = (startY + y - 3) * srcStride
-                let intYOffset = y * width
-                for x in 0..<width {
-                    let rx = startX + x
-                    switch fracX {
-                    case 1: intBase[intYOffset + x] = interpolateQuarterX(ptr: src, offset: srcYOffset + rx)
-                    case 2: intBase[intYOffset + x] = interpolateHalfX(ptr: src, offset: srcYOffset + rx)
-                    case 3: intBase[intYOffset + x] = interpolateThreeQuarterX(ptr: src, offset: srcYOffset + rx)
-                    default: break
+            // パフォーマンス指針：「2. ループ深部からの条件分岐の排除」に従って外側に分岐を引き上げ
+            switch fracX {
+            case 1:
+                for y in 0..<(height + extraLines) {
+                    let srcYOffset = (startY + y - 3) * srcStride
+                    let intYOffset = y * width
+                    for x in 0..<width {
+                        intBase[intYOffset + x] = interpolateQuarterX(ptr: src, offset: srcYOffset + startX + x)
                     }
                 }
+            case 2:
+                for y in 0..<(height + extraLines) {
+                    let srcYOffset = (startY + y - 3) * srcStride
+                    let intYOffset = y * width
+                    for x in 0..<width {
+                        intBase[intYOffset + x] = interpolateHalfX(ptr: src, offset: srcYOffset + startX + x)
+                    }
+                }
+            case 3:
+                for y in 0..<(height + extraLines) {
+                    let srcYOffset = (startY + y - 3) * srcStride
+                    let intYOffset = y * width
+                    for x in 0..<width {
+                        intBase[intYOffset + x] = interpolateThreeQuarterX(ptr: src, offset: srcYOffset + startX + x)
+                    }
+                }
+            default:
+                break
             }
             
             for y in 0..<height {
                 let dstYOffset = y * dstStride
+                let intYOffset = (y + 3) * width
                 for x in 0..<width {
-                    let offset = (y + 3) * width + x
-                    dst[dstYOffset + x] = interpolateY(ptr: intBase, offset: offset, stride: width, fracY: fracY)
+                    dst[dstYOffset + x] = interpolateY(ptr: intBase, offset: intYOffset + x, stride: width, fracY: fracY)
                 }
             }
         }
