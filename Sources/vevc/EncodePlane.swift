@@ -921,9 +921,16 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    let (layer2, sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await encodePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-    let (layer1, sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-    let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2, isOne: false)
+    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2, isOne: false)
+    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1, isOne: false)
+    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1, isOne: false)
+    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0, isOne: false)
+    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0, isOne: false)
+    
+    let (layer2, sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await encodePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    let (layer1, sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
     
     // Layer chain reconstruction: Base8 → Layer16 → Layer32
     // Build Image16 from base reconstruction for boundaryRepeat support

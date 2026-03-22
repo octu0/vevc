@@ -844,7 +844,7 @@ struct CompareApp {
             let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
             print("Warmup complete.\n")
 
-            print("Running vevc...")
+            print("Running vevc (layers)...")
             let vevcResult = try await runVEVC(images: localImages, config: localConfig)
             
             print("Running vevc (One)...")
@@ -893,12 +893,12 @@ struct CompareApp {
             
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
-            chartResults.append(printStats(name: "VEVC", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (Layers)", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             chartResults.append(printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
             chartResults.append(printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             chartResults.append(printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-
+            
             chartResults.append(printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             chartResults.append(printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
@@ -906,12 +906,8 @@ struct CompareApp {
             print("---------------")
             
             if localConfig.outputGraph {
-                if #available(macOS 13.0, *) {
-                    await MainActor.run {
-                        generateAndSaveCharts(results: chartResults)
-                    }
-                } else {
-                    print("Graph output requires macOS 13.0 or newer.")
+                await MainActor.run {
+                    generateAndSaveCharts(results: chartResults)
                 }
             }
             

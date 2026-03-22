@@ -1586,6 +1586,77 @@ func calculateSADAndMaxBlockSAD(res: PlaneData420, mbSize: Int) -> (meanSAD: Int
     return (meanSAD, maxBlockSAD)
 }
 
+
+// MARK: - Cascaded Encoding
+
+@inline(__always)
+func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+    var bwFlags = BypassWriter()
+    var tasks: [(Int, Bool)] = []
+    tasks.reserveCapacity(blocks.count)
+    
+    var zeroCount = 0
+    for i in blocks.indices {
+        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
+        }
+        if isZero {
+            bwFlags.writeBit(true)
+            blocks[i].withView { $0.clearAll() }
+            tasks.append((i, true))
+            zeroCount += 1
+        } else {
+            bwFlags.writeBit(false)
+            tasks.append((i, false))
+        }
+    }
+    bwFlags.flush()
+    debugLog("    [CascadedSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
+    
+    var encoder = EntropyEncoder()
+    var lastVal: Int16 = 0
+    
+    for (i, skip) in tasks {
+        if skip {
+            lastVal = 0
+            continue
+        }
+        
+        blocks[i].withView { view in
+            let hl1 = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: view.stride)
+            let lh1 = BlockView(base: view.base.advanced(by: 16 * view.stride), width: 16, height: 16, stride: view.stride)
+            let hh1 = BlockView(base: view.base.advanced(by: 16 * view.stride + 16), width: 16, height: 16, stride: view.stride)
+            
+            let hl2 = BlockView(base: view.base.advanced(by: 8), width: 8, height: 8, stride: view.stride)
+            let lh2 = BlockView(base: view.base.advanced(by: 8 * view.stride), width: 8, height: 8, stride: view.stride)
+            let hh2 = BlockView(base: view.base.advanced(by: 8 * view.stride + 8), width: 8, height: 8, stride: view.stride)
+            
+            let ll3 = BlockView(base: view.base, width: 4, height: 4, stride: view.stride)
+            let hl3 = BlockView(base: view.base.advanced(by: 4), width: 4, height: 4, stride: view.stride)
+            let lh3 = BlockView(base: view.base.advanced(by: 4 * view.stride), width: 4, height: 4, stride: view.stride)
+            let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
+            
+            blockEncodeDPCM4(encoder: &encoder, block: ll3, lastVal: &lastVal)
+            blockEncode4(encoder: &encoder, block: hl3)
+            blockEncode4(encoder: &encoder, block: lh3)
+            blockEncode4(encoder: &encoder, block: hh3)
+            
+            blockEncode8(encoder: &encoder, block: hl2)
+            blockEncode8(encoder: &encoder, block: lh2)
+            blockEncode8(encoder: &encoder, block: hh2)
+            
+            blockEncode16(encoder: &encoder, block: hl1)
+            blockEncode16(encoder: &encoder, block: lh1)
+            blockEncode16(encoder: &encoder, block: hh1)
+        }
+    }
+    
+    encoder.flush()
+    var out = bwFlags.bytes
+    out.append(contentsOf: encoder.getData())
+    return out
+}
+
 @inline(__always)
 private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in

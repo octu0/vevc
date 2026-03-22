@@ -23,25 +23,58 @@ struct Quantizer: Sendable {
 
 struct QuantizationTable: Sendable {
     let step: Int16
-    let qLow: Quantizer
-    let qMid: Quantizer
-    let qHigh: Quantizer
+    let isChroma: Bool
+    public let qLow: Quantizer
+    public let qMid: Quantizer
+    public let qHigh: Quantizer
     
-    init(baseStep: Int, isChroma: Bool = false) {
+    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0, isOne: Bool = false) {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
+        self.isChroma = isChroma
         
-        if isChroma {
-            self.qLow = Quantizer(step: Int(min(4, max(1, baseStep / 8))), roundToNearest: true)
-            // Widen deadzone slightly for mid/high chroma to drop barely-visible color variations
-            self.qMid = Quantizer(step: Int(min(16, max(1, baseStep))), deadZoneRatio: -0.1)
-            self.qHigh = Quantizer(step: Int(min(32, max(1, baseStep * 2))), deadZoneRatio: -0.2)
+        if isOne {
+            // isOne=true (VEVC One): Try to smash size down to a few MB while keeping SSIM ~0.95
+            if isChroma {
+                self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 2))), roundToNearest: true)
+                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * 2.0)))), deadZoneRatio: -0.1)
+                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * 4.0)))), deadZoneRatio: -0.2)
+            } else {
+                // LL band (Residuals) can be heavily quantized because Spatial DC preserves the mean
+                self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep))), roundToNearest: true)
+                self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * 2.0)))), deadZoneRatio: -0.1)
+                self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * 4.0)))), deadZoneRatio: -0.3)
+            }
         } else {
-            // Luma LL band holds structural integrity, keep it very high quality
-            self.qLow = Quantizer(step: Int(min(8, max(1, baseStep / 6))), roundToNearest: true)
-            // Widen deadzone for higher luma frequencies
-            self.qMid = Quantizer(step: Int(min(256, max(1, baseStep))), deadZoneRatio: -0.1)
-            self.qHigh = Quantizer(step: Int(min(512, max(1, Int(Double(baseStep) * 2.5)))), deadZoneRatio: -0.3)
+            // isOne=false (VEVC Layers): Scale quantization strengths carefully across hierarchy
+            var qMidScale = 1.0
+            var qHighScale = 2.0
+            var qLowDivisor = 6
+
+            if layerIndex == 2 {
+                // Layer 32 (High frequencies): Strongly quantize
+                qMidScale = 1.5
+                qHighScale = 3.0
+            } else if layerIndex == 1 {
+                // Layer 16 (Mid frequencies): Preserve structure
+                qMidScale = 0.75
+                qHighScale = 1.5
+            } else if layerIndex == 0 {
+                // Layer 8 (Low frequencies - Base): Preserve perfectly
+                qMidScale = 0.25
+                qHighScale = 0.5
+                qLowDivisor = 16
+            }
+
+            if isChroma {
+                self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
+                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: -0.1)
+                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: -0.2)
+            } else {
+                self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
+                self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: -0.1)
+                self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: -0.3)
+            }
         }
     }
 }
@@ -521,3 +554,95 @@ private func dequantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Qua
 }
 
 
+// MARK: - Cascaded Quantization
+
+@inline(__always)
+func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
+    let step = Int(qt.step)
+    let qLL3 = Quantizer(step: max(1, step), roundToNearest: true)
+    let qHL3 = Quantizer(step: max(1, step * 5 / 4), roundToNearest: true)
+    let qHL2 = Quantizer(step: max(1, step * 6 / 4), roundToNearest: true)
+    let qHL1 = Quantizer(step: max(1, step * 8 / 4), roundToNearest: true)
+
+    block.data.withUnsafeMutableBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { return }
+        
+        for y in 0..<32 {
+            let rowOffset = y * 32
+            for x in 0..<32 {
+                let v = base[rowOffset + x]
+                var denom = qHL1
+                
+                if y < 16 && x < 16 {
+                    if y < 8 && x < 8 {
+                        if y < 4 && x < 4 {
+                            denom = qLL3
+                        } else {
+                            denom = qHL3
+                        }
+                    } else {
+                        denom = qHL2
+                    }
+                }
+                
+                let q = denom
+                let absVal = abs(Int32(v))
+                let qVal = max(0, (((absVal &* q.mul) &+ q.bias) &>> q.shift))
+                var res: Int32 = qVal
+                if v <= -1 {
+                    res = -1 * qVal
+                }
+                if y < 4 && x < 4 {
+                    base[rowOffset + x] = Int16(res)
+                } else {
+                    let mask = ((res &<< 1) ^ (res &>> 15))
+                    base[rowOffset + x] = Int16(mask)
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
+    let step = Int(qt.step)
+    let qLL3 = Quantizer(step: max(1, step), roundToNearest: true)
+    let qHL3 = Quantizer(step: max(1, step * 5 / 4), roundToNearest: true)
+    let qHL2 = Quantizer(step: max(1, step * 6 / 4), roundToNearest: true)
+    let qHL1 = Quantizer(step: max(1, step * 8 / 4), roundToNearest: true)
+
+    block.data.withUnsafeMutableBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { return }
+        
+        for y in 0..<32 {
+            let rowOffset = y * 32
+            for x in 0..<32 {
+                let v = base[rowOffset + x]
+                var denom = qHL1
+                
+                if y < 16 && x < 16 {
+                    if y < 8 && x < 8 {
+                        if y < 4 && x < 4 {
+                            denom = qLL3
+                        } else {
+                            denom = qHL3
+                        }
+                    } else {
+                        denom = qHL2
+                    }
+                }
+                
+                let q = denom
+                let step = Int32(q.step)
+                if y < 4 && x < 4 {
+                    base[rowOffset + x] = Int16(clamping: Int32(v) &* step)
+                } else {
+                    let uVal = UInt16(bitPattern: v)
+                    let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+                    let decoded = Int16(bitPattern: decodedUInt)
+                    base[rowOffset + x] = Int16(clamping: Int32(decoded) &* step)
+                }
+            }
+        }
+    }
+}

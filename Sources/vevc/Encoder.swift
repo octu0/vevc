@@ -76,10 +76,10 @@ public class Encoder {
         
         if isOne {
             if forceIFrame {
-                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true)
+                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: true)
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: true)
                 
-                let (layer0, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+                let (layer0, reconstructed) = try await encodePlaneBase32Causal(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x4F, 0x49]) // VEOI
                 
@@ -105,14 +105,14 @@ public class Encoder {
                 
                 let fineQuantizationThreshold = mbSize * mbSize * 1
                 if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true)
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false, layerIndex: 0, isOne: true)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true, layerIndex: 0, isOne: true)
                 } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true)
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false, layerIndex: 0, isOne: true)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true, layerIndex: 0, isOne: true)
                 }
                 
-                let (layer0, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+                let (layer0, reconstructedPlane) = try await encodePlaneBase32Causal(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
 
@@ -157,18 +157,14 @@ public class Encoder {
                 
                 rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(qtY.step), sad: Double(meanSAD))
                 
-                if let predicted = predictedPlane {
-                    let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
-                    prevReconstructed = reconstructed
-                } else {
-                    prevReconstructed = reconstructedResidual
-                }
+                // encodePlaneBase32Causal already adds the predicted plane internally and returns fully reconstructed pixels!
+                prevReconstructed = reconstructedPlane
                 gopCount += 1
             }
         } else {
             if forceIFrame {
-                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)))
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true)
+                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: false)
+                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: false)
                 let (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x56, 0x49])
@@ -190,11 +186,11 @@ public class Encoder {
                 
                 let fineQuantizationThreshold = mbSize * mbSize * 1
                 if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true)
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false, layerIndex: 0, isOne: false)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true, layerIndex: 0, isOne: false)
                 } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true)
+                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false, layerIndex: 0, isOne: false)
+                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true, layerIndex: 0, isOne: false)
                 }
                 let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
