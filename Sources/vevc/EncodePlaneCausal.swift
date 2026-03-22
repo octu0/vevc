@@ -26,35 +26,29 @@ func encodeCausalPlaneComponent32(r: Int16Reader, predictedR: Int16Reader?, widt
             }
             
             // 2. Prediction
-            if let pR = predictedR {
-                // Inter Prediction
-                var pBlock = Block2D(width: 32, height: 32)
-                pBlock.withView { view in
-                    pR.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+            // Setup buffers for Intra Prediction regardless of frame type
+            var hasTop = false
+            var hasLeft = false
+            if row > 0 {
+                hasTop = true
+                for x in 0..<32 {
+                    let rx = min(w + x, width - 1)
+                    topBuffer[x] = reconData[(h - 1) * width + rx]
                 }
-                for i in 0..<(32*32) { predictedBlock[i] = pBlock.data[i] }
-            } else {
-                // Intra Prediction with RDO (Rate-Distortion Optimization based on SAD)
-                var hasTop = false
-                var hasLeft = false
-                if row > 0 {
-                    hasTop = true
-                    for x in 0..<32 {
-                        let rx = min(w + x, width - 1)
-                        topBuffer[x] = reconData[(h - 1) * width + rx]
-                    }
+            }
+            if col > 0 {
+                hasLeft = true
+                for y in 0..<32 {
+                    let ry = min(h + y, height - 1)
+                    leftBuffer[y] = reconData[ry * width + w - 1]
                 }
-                if col > 0 {
-                    hasLeft = true
-                    for y in 0..<32 {
-                        let ry = min(h + y, height - 1)
-                        leftBuffer[y] = reconData[ry * width + w - 1]
-                    }
-                }
-                
+            }
+            
+            // Define closure to evaluate Intra modes
+            let evaluateIntra = { () -> (IntraPredictor.Mode, Int, [Int16]) in
                 var bestMode = IntraPredictor.Mode.dc
                 var bestSATD = Int.max
-                var bestPredictedBlock = [Int16](repeating: 0, count: 32 * 32)
+                var bestPred = [Int16](repeating: 0, count: 32 * 32)
                 
                 let modesToTest: [IntraPredictor.Mode] = [.dc, .vertical, .horizontal, .planar]
                 for mode in modesToTest {
@@ -72,7 +66,6 @@ func encodeCausalPlaneComponent32(r: Int16Reader, predictedR: Int16Reader?, widt
                         var ll2 = BlockView(base: view.base, width: 8, height: 8, stride: view.stride)
                         dwt2d_8(&ll2)
                     }
-                    
                     var satd = 0
                     testBlock.withView { view in
                         var ll3Sum = 0, hl3Sum = 0, lh3Sum = 0, hh3Sum = 0
@@ -107,22 +100,52 @@ func encodeCausalPlaneComponent32(r: Int16Reader, predictedR: Int16Reader?, widt
                         let level2 = (hl2Sum * 4) + (lh2Sum * 4) + (hh2Sum * 6)
                         let level1 = (hl1Sum * 8) + (lh1Sum * 8) + (hh1Sum * 16)
                         satd = level3 + level2 + level1
-                        
-                        // Small penalty for complex modes to favor DC if similar
-                        if mode != .dc {
-                            satd += 64
-                        }
+                        if mode != .dc { satd += 64 }
                     }
-                    
                     if satd < bestSATD {
                         bestSATD = satd
                         bestMode = mode
-                        bestPredictedBlock = pred
+                        bestPred = pred
                     }
                 }
+                return (bestMode, bestSATD, bestPred)
+            }
+            
+            if let pR = predictedR {
+                // P-Frame: Evaluate Inter vs Intra
+                var pBlock = Block2D(width: 32, height: 32)
+                pBlock.withView { view in
+                    pR.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                }
+                var interSAD = 0
+                for i in 0..<(32*32) {
+                    interSAD += Int(abs(Int32(block.data[i]) - Int32(pBlock.data[i])))
+                }
                 
-                predictedBlock = bestPredictedBlock
-                let m = bestMode.rawValue
+                // Adaptive Threshold for Early Exit (Save CPU)
+                if interSAD < 500 {
+                    // Inter is highly likely to be optimal
+                    predictedBlock = pBlock.data
+                    modeWriter.writeBit(false) // isInter = true
+                } else {
+                    let intraResult = evaluateIntra()
+                    // Apply penalty to Intra because it takes more bits (1 bit vs 3 bits)
+                    if interSAD <= intraResult.1 + 128 {
+                        predictedBlock = pBlock.data
+                        modeWriter.writeBit(false) // isInter = true
+                    } else {
+                        predictedBlock = intraResult.2
+                        modeWriter.writeBit(true) // isIntra = true
+                        let m = intraResult.0.rawValue
+                        modeWriter.writeBit((m & 0b10) != 0)
+                        modeWriter.writeBit((m & 0b01) != 0)
+                    }
+                }
+            } else {
+                // I-Frame: Only Intra
+                let intraResult = evaluateIntra()
+                predictedBlock = intraResult.2
+                let m = intraResult.0.rawValue
                 modeWriter.writeBit((m & 0b10) != 0)
                 modeWriter.writeBit((m & 0b01) != 0)
             }
@@ -226,12 +249,10 @@ func encodeCausalPlaneComponent32(r: Int16Reader, predictedR: Int16Reader?, widt
     buf.append(contentsOf: encoder.getData())
     
     var out: [UInt8] = []
-    if predictedR == nil {
-        modeWriter.flush()
-        let modeBytes = modeWriter.bytes
-        appendUInt32BE(&out, UInt32(modeBytes.count))
-        out.append(contentsOf: modeBytes)
-    }
+    modeWriter.flush()
+    let modeBytes = modeWriter.bytes
+    appendUInt32BE(&out, UInt32(modeBytes.count))
+    out.append(contentsOf: modeBytes)
     out.append(contentsOf: buf)
     
     return (out, reconData)

@@ -1,6 +1,6 @@
 import Foundation
 
-func reconstructCausalPlaneComponent32(blocks: [Block2D], width: Int, height: Int, qt: QuantizationTable, predictedR: Int16Reader?, modes: [IntraPredictor.Mode]?) -> [Int16] {
+func reconstructCausalPlaneComponent32(blocks: [Block2D], width: Int, height: Int, qt: QuantizationTable, predictedR: Int16Reader?, modes: [IntraPredictor.Mode?]) -> [Int16] {
     let colCount = (width + 31) / 32
     var reconData = [Int16](repeating: 0, count: width * height)
     var topBuffer = [Int16](repeating: 0, count: 32)
@@ -15,14 +15,10 @@ func reconstructCausalPlaneComponent32(blocks: [Block2D], width: Int, height: In
         let w = col * 32
         
         // 1. Prediction
-        if let pR = predictedR {
-            // Inter Prediction
-            var pBlock = Block2D(width: 32, height: 32)
-            pBlock.withView { view in
-                pR.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-            }
-            for i in 0..<(32*32) { predictedBlock[i] = pBlock.data[i] }
-        } else {
+        let isPFrame = predictedR != nil
+        let isIntraMode = !isPFrame || (modes[idx] != nil)
+        
+        if isIntraMode {
             // Intra Prediction
             var hasTop = false
             var hasLeft = false
@@ -40,8 +36,17 @@ func reconstructCausalPlaneComponent32(blocks: [Block2D], width: Int, height: In
                     leftBuffer[y] = reconData[ry * width + w - 1]
                 }
             }
-            let mode = modes?[idx] ?? .dc
+            let mode = modes[idx] ?? .dc
             IntraPredictor.predict(mode: mode, block: &predictedBlock, width: 32, height: 32, top: hasTop ? topBuffer : nil, left: hasLeft ? leftBuffer : nil)
+        } else {
+            // Inter Prediction
+            if let pR = predictedR {
+                var pBlock = Block2D(width: 32, height: 32)
+                pBlock.withView { view in
+                    pR.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                }
+                for i in 0..<(32*32) { predictedBlock[i] = pBlock.data[i] }
+            }
         }
         
         // 2. Inverse Quantization
@@ -102,27 +107,35 @@ func parseDecodePlaneBase32Causal(data: [UInt8], dx: Int, dy: Int, qtY: Quantiza
     @inline(__always)
     func parseComponent(data: [UInt8], dx: Int, dy: Int, pR: Int16Reader?, qt: QuantizationTable) throws -> [Int16] {
         var inx = 0
-        var modes: [IntraPredictor.Mode]? = nil
-        if pR == nil {
-            let modeBytesCount = Int(try readUInt32BEFromBytes(data, offset: &inx))
-            let modeBytes = Array(data[inx..<inx+modeBytesCount])
-            inx += modeBytesCount
-            
-            var modeReader = BypassReader(data: modeBytes)
-            let blockCount = ((dy + 31) / 32) * ((dx + 31) / 32)
-            var mList = [IntraPredictor.Mode]()
-            mList.reserveCapacity(blockCount)
-            for _ in 0..<blockCount {
+        let modeBytesCount = Int(try readUInt32BEFromBytes(data, offset: &inx))
+        let modeBytes = Array(data[inx..<inx+modeBytesCount])
+        inx += modeBytesCount
+        
+        var modeReader = BypassReader(data: modeBytes)
+        let blockCount = ((dy + 31) / 32) * ((dx + 31) / 32)
+        var mList = [IntraPredictor.Mode?]()
+        mList.reserveCapacity(blockCount)
+        for _ in 0..<blockCount {
+            if pR == nil {
                 let b1 = modeReader.readBit() ? 1 : 0
                 let b0 = modeReader.readBit() ? 1 : 0
                 let mVal = UInt8((b1 << 1) | b0)
                 mList.append(IntraPredictor.Mode(rawValue: mVal) ?? .dc)
+            } else {
+                let isIntra = modeReader.readBit()
+                if isIntra {
+                    let b1 = modeReader.readBit() ? 1 : 0
+                    let b0 = modeReader.readBit() ? 1 : 0
+                    let mVal = UInt8((b1 << 1) | b0)
+                    mList.append(IntraPredictor.Mode(rawValue: mVal) ?? .dc)
+                } else {
+                    mList.append(nil)
+                }
             }
-            modes = mList
         }
+        let modes = mList
         
         let subbandsData = Array(data[inx...])
-        let blockCount = ((dy + 31) / 32) * ((dx + 31) / 32)
         var blocks: [Block2D] = []
         blocks.reserveCapacity(blockCount)
         for _ in 0..<blockCount {
