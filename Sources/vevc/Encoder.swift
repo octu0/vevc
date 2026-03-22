@@ -39,7 +39,7 @@ public class Encoder {
         
         var forceIFrame = false
         var predictedPlane: PlaneData420? = nil
-        var mvs = MotionVectors(count: 0)
+        var motionTree = MotionTree(ctuNodes: [], width: 0, height: 0)
         var meanSAD: Int = 0
         var maxBlockSAD: Int = 0
         
@@ -54,8 +54,8 @@ public class Encoder {
                 meanSAD = 999999
                 debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to Scene Change (Fast Detector)")
             } else {
-                mvs = estimateMBME(curr: curr, prev: prev)
-                let predicted = await applyMBME(prev: prev, mvs: mvs)
+                motionTree = estimateMotionQuadtree(curr: curr, prev: prev)
+                let predicted = await applyMotionQuadtree(prev: prev, tree: motionTree)
                 predictedPlane = predicted
                 let res = await subPlanes(curr: curr, predicted: predicted)
                 
@@ -105,52 +105,42 @@ public class Encoder {
                 // Adaptive Quantization (isOne mode)
                 let currentSAD = Double(meanSAD)
                 let newStepInt = rateController.calculatePFrameQStep(currentSAD: currentSAD, baseStep: Int(qt.step))
-                let newStep = Int16(newStepInt)
+                let newStep = Int16(clamping: newStepInt)
                 
-                var qtY: QuantizationTable
-                var qtC: QuantizationTable
+                // Adaptive Quantization Factor based on frame motion activity (0 to 10)
+                let activity = min(10, meanSAD)
                 
-                let fineQuantizationThreshold = mbSize * mbSize * 1
-                if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false, layerIndex: 0, isOne: true)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true, layerIndex: 0, isOne: true)
-                } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false, layerIndex: 0, isOne: true)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true, layerIndex: 0, isOne: true)
-                }
+                // Luma (Y): Scale baseStep from 0.5x (static) to 1.0x (active)
+                let stepY = max(1, (Int(newStep) * (10 + activity)) / 20)
+                let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: true)
+                
+                // Chroma (Cb/Cr): Scale baseStep from 1.0x (static) to 2.0x (active)
+                let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
+                let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: true)
                 
                 let (layer0, reconstructedPlane) = try await encodePlaneBase32Causal(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
 
                 var mvBw = EntropyEncoder()
+                var grid = MVGrid(width: curr.width, height: curr.height, minSize: 8)
                 let mbCols = (curr.width + mbSize - 1) / mbSize
-                for mvIdx in 0..<mvs.vectors.count {
-                    let mbX = mvIdx % mbCols
-                    let mbY = mvIdx / mbCols
-                    let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                    let vec = mvs.vectors[mvIdx]
-                    let mvdX = Int(vec.x) - pmv.dx
-                    let mvdY = Int(vec.y) - pmv.dy
-
-                    if mvdX == 0 && mvdY == 0 {
-                        mvBw.encodeBypass(binVal: 0)
-                    } else {
-                        mvBw.encodeBypass(binVal: 1)
-                        let sx: UInt8 = mvdX <= -1 ? 1 : 0
-                        mvBw.encodeBypass(binVal: sx)
-                        let mx = UInt32(abs(mvdX))
-                        encodeExpGolomb(val: mx, encoder: &mvBw)
-
-                        let sy: UInt8 = mvdY <= -1 ? 1 : 0
-                        mvBw.encodeBypass(binVal: sy)
-                        let my = UInt32(abs(mvdY))
-                        encodeExpGolomb(val: my, encoder: &mvBw)
+                let mbRows = (curr.height + mbSize - 1) / mbSize
+                
+                for mbY in 0..<mbRows {
+                    let startY = mbY * mbSize
+                    for mbX in 0..<mbCols {
+                        let startX = mbX * mbSize
+                        let nodeIdx = mbY * mbCols + mbX
+                        if nodeIdx < motionTree.ctuNodes.count {
+                            let node = motionTree.ctuNodes[nodeIdx]
+                            encodeMotionQuadtreeNode(node: node, w: curr.width, h: curr.height, startX: startX, startY: startY, size: mbSize, grid: &grid, bw: &mvBw)
+                        }
                     }
                 }
                 mvBw.flush()
                 let mvOut = mvBw.getData()
-                appendUInt32BE(&out, UInt32(mvs.vectors.count))
+                appendUInt32BE(&out, UInt32(motionTree.ctuNodes.count)) // Keep compatible format header or just count of CTU nodes
                 appendUInt32BE(&out, UInt32(mvOut.count))
                 out.append(contentsOf: mvOut)
 
@@ -160,7 +150,7 @@ public class Encoder {
                 appendUInt32BE(&out, UInt32(chunkOut.count))
                 out.append(contentsOf: chunkOut)
                 let totalBytes = chunkOut.count + mvOut.count
-                debugLog("[Frame \(frameIndex)] P-Frame (One): \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(chunkOut.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) [PMV & LSCP applied]")
+                debugLog("[Frame \(frameIndex)] P-Frame (One): \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(chunkOut.count) bytes) CTUs=\(motionTree.ctuNodes.count) meanSAD=\(meanSAD) [Quadtree & LSCP applied]")
                 
                 rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(qtY.step), sad: Double(meanSAD))
                 
@@ -186,58 +176,47 @@ public class Encoder {
             } else {
                 let currentSAD = Double(meanSAD)
                 let newStepInt = rateController.calculatePFrameQStep(currentSAD: currentSAD, baseStep: Int(qt.step))
-                let newStep = Int16(newStepInt)
+                let newStep = Int16(clamping: newStepInt)
                 
-                var qtY: QuantizationTable
-                var qtC: QuantizationTable
+                // Adaptive Quantization Factor based on frame motion activity (0 to 10)
+                let activity = min(10, meanSAD)
                 
-                let fineQuantizationThreshold = mbSize * mbSize * 1
-                if meanSAD > 1 || maxBlockSAD > fineQuantizationThreshold {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: false, layerIndex: 0, isOne: false)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep) * 2), isChroma: true, layerIndex: 0, isOne: false)
-                } else {
-                    qtY = QuantizationTable(baseStep: max(1, Int(newStep) / 2), isChroma: false, layerIndex: 0, isOne: false)
-                    qtC = QuantizationTable(baseStep: max(1, Int(newStep)), isChroma: true, layerIndex: 0, isOne: false)
-                }
+                // Luma (Y): Scale baseStep from 0.5x (static) to 1.0x (active)
+                let stepY = max(1, (Int(newStep) * (10 + activity)) / 20)
+                let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: false)
+                
+                // Chroma (Cb/Cr): Scale baseStep from 1.0x (static) to 2.0x (active)
+                let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
+                let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: false)
                 let (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
                 
                 out.append(contentsOf: [0x56, 0x45, 0x56, 0x50])
 
                 var mvBw = EntropyEncoder()
+                var grid = MVGrid(width: curr.width, height: curr.height, minSize: 8)
                 let mbCols = (curr.width + mbSize - 1) / mbSize
-                for mvIdx in 0..<mvs.vectors.count {
-                    let mbX = mvIdx % mbCols
-                    let mbY = mvIdx / mbCols
-                    let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                    let vec = mvs.vectors[mvIdx]
-                    let mvdX = Int(vec.x) - pmv.dx
-                    let mvdY = Int(vec.y) - pmv.dy
-
-                    if mvdX == 0 && mvdY == 0 {
-                        mvBw.encodeBypass(binVal: 0)
-                    } else {
-                        mvBw.encodeBypass(binVal: 1)
-                        let sx: UInt8 = mvdX <= -1 ? 1 : 0
-                        mvBw.encodeBypass(binVal: sx)
-                        let mx = UInt32(abs(mvdX))
-                        encodeExpGolomb(val: mx, encoder: &mvBw)
-
-                        let sy: UInt8 = mvdY <= -1 ? 1 : 0
-                        mvBw.encodeBypass(binVal: sy)
-                        let my = UInt32(abs(mvdY))
-                        encodeExpGolomb(val: my, encoder: &mvBw)
+                let mbRows = (curr.height + mbSize - 1) / mbSize
+                
+                for mbY in 0..<mbRows {
+                    let startY = mbY * mbSize
+                    for mbX in 0..<mbCols {
+                        let startX = mbX * mbSize
+                        let nodeIdx = mbY * mbCols + mbX
+                        if nodeIdx < motionTree.ctuNodes.count {
+                            let node = motionTree.ctuNodes[nodeIdx]
+                            encodeMotionQuadtreeNode(node: node, w: curr.width, h: curr.height, startX: startX, startY: startY, size: mbSize, grid: &grid, bw: &mvBw)
+                        }
                     }
                 }
                 mvBw.flush()
                 let mvOut = mvBw.getData()
-                appendUInt32BE(&out, UInt32(mvs.vectors.count))
+                appendUInt32BE(&out, UInt32(motionTree.ctuNodes.count))
                 appendUInt32BE(&out, UInt32(mvOut.count))
                 out.append(contentsOf: mvOut)
 
                 appendUInt32BE(&out, UInt32(bytes.count))
                 out.append(contentsOf: bytes)
                 let totalBytes = bytes.count + mvOut.count
-                debugLog("[Frame \(frameIndex)] P-Frame: \(totalBytes) bytes (MV: \(mvOut.count) bytes, Data: \(bytes.count) bytes) MVs=\(mvs.vectors.count) meanSAD=\(meanSAD) maxBlockSAD=\(maxBlockSAD) [PMV & LSCP applied]")
                 
                 rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(qtY.step), sad: Double(meanSAD))
                 

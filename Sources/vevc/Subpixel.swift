@@ -1,12 +1,9 @@
 import Foundation
 
-public struct SubpixelInterpolator {
-    // HEVC Luma 8-tap filter coefficients
-    // Denominator = 64 (shift by 6)
-    
+struct SubpixelInterpolator {
     // Quarter-pel: alpha = 1/4
     @inline(__always)
-    public static func interpolateQuarterX(ptr: UnsafePointer<Int16>, offset: Int) -> Int16 {
+    static func interpolateQuarterX(ptr: UnsafePointer<Int16>, offset: Int) -> Int16 {
         let p = ptr.advanced(by: offset - 3)
         // [-1, 4, -10, 58, 17, -5, 1, 0]
         let sum = -1 * Int(p[0])
@@ -25,7 +22,7 @@ public struct SubpixelInterpolator {
 
     // Half-pel: alpha = 2/4 = 1/2
     @inline(__always)
-    public static func interpolateHalfX(ptr: UnsafePointer<Int16>, offset: Int) -> Int16 {
+    static func interpolateHalfX(ptr: UnsafePointer<Int16>, offset: Int) -> Int16 {
         let p = ptr.advanced(by: offset - 3)
         // [-1, 4, -11, 40, 40, -11, 4, -1]
         let sum = -1 * Int(p[0])
@@ -43,7 +40,7 @@ public struct SubpixelInterpolator {
 
     // Three Quarter-pel: alpha = 3/4
     @inline(__always)
-    public static func interpolateThreeQuarterX(ptr: UnsafePointer<Int16>, offset: Int) -> Int16 {
+    static func interpolateThreeQuarterX(ptr: UnsafePointer<Int16>, offset: Int) -> Int16 {
         let p = ptr.advanced(by: offset - 3)
         // [0, 1, -5, 17, 58, -10, 4, -1]
         let sum =  0 * Int(p[0])
@@ -61,7 +58,7 @@ public struct SubpixelInterpolator {
     
     // Y-direction interpolation
     @inline(__always)
-    public static func interpolateY(ptr: UnsafePointer<Int16>, offset: Int, stride: Int, fracY: Int) -> Int16 {
+    static func interpolateY(ptr: UnsafePointer<Int16>, offset: Int, stride: Int, fracY: Int) -> Int16 {
         let p0 = ptr.advanced(by: offset - 3 * stride)
         let p1 = ptr.advanced(by: offset - 2 * stride)
         let p2 = ptr.advanced(by: offset - 1 * stride)
@@ -90,7 +87,7 @@ public struct SubpixelInterpolator {
     // 2D Interpolation routine
     // fracX, fracY = [0, 1, 2, 3] representing 0, 1/4, 2/4, 3/4 pel offset
     @inline(__always)
-    public static func interpolateBlock(
+    static func interpolateBlock(
         src: UnsafePointer<Int16>, srcStride: Int,
         dst: UnsafeMutablePointer<Int16>, dstStride: Int,
         width: Int, height: Int,
@@ -134,9 +131,6 @@ public struct SubpixelInterpolator {
             return
         }
         
-        // 2D Fractional: First interpolate vertically (with extra lines), then horizontally
-        // HEVC typically does horizontal first then vertical with intermediate 16-bit values (with 6-bit shift intermediate precision).
-        // Since we are operating on int16 arrays directly, we can do intermediate buffering using standard shifts.
         // For simplicity and speed in this PoC, we will compute it sequentially.
         
         let extraLines = 7

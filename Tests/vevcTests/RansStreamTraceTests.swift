@@ -60,8 +60,8 @@ final class RansStreamTraceTests: XCTestCase {
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-        var runTokenCounts = [Int](repeating: 0, count: 32)
-        var valTokenCounts = [Int](repeating: 0, count: 32)
+        var runTokenCounts = [Int](repeating: 0, count: 64)
+        var valTokenCounts = [Int](repeating: 0, count: 64)
         
         for lane in 0..<4 {
             let start = chunkStarts[lane]

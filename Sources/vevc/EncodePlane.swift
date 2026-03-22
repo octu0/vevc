@@ -941,17 +941,17 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY)
-    let reconL1Cb = reconstructPlaneLayer(blocks: l1cbBlocks, prevImg: baseImg, planeType: 1, width: l1cbDx, height: l1cbDy, blockSize: 16, qt: qtC)
-    let reconL1Cr = reconstructPlaneLayer(blocks: l1crBlocks, prevImg: baseImg, planeType: 2, width: l1cbDx, height: l1cbDy, blockSize: 16, qt: qtC)
+    let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY1)
+    let reconL1Cb = reconstructPlaneLayer(blocks: l1cbBlocks, prevImg: baseImg, planeType: 1, width: l1cbDx, height: l1cbDy, blockSize: 16, qt: qtC1)
+    let reconL1Cr = reconstructPlaneLayer(blocks: l1crBlocks, prevImg: baseImg, planeType: 2, width: l1cbDx, height: l1cbDy, blockSize: 16, qt: qtC1)
     
     // Build Image16 from Layer16 reconstruction
     let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
     
     // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
-    let reconL2Y = reconstructPlaneLayer(blocks: l2yBlocks, prevImg: l1Img, planeType: 0, width: dx, height: dy, blockSize: 32, qt: qtY)
-    let reconL2Cb = reconstructPlaneLayer(blocks: l2cbBlocks, prevImg: l1Img, planeType: 1, width: cbDx, height: cbDy, blockSize: 32, qt: qtC)
-    let reconL2Cr = reconstructPlaneLayer(blocks: l2crBlocks, prevImg: l1Img, planeType: 2, width: cbDx, height: cbDy, blockSize: 32, qt: qtC)
+    let reconL2Y = reconstructPlaneLayer(blocks: l2yBlocks, prevImg: l1Img, planeType: 0, width: dx, height: dy, blockSize: 32, qt: qtY2)
+    let reconL2Cb = reconstructPlaneLayer(blocks: l2cbBlocks, prevImg: l1Img, planeType: 1, width: cbDx, height: cbDy, blockSize: 32, qt: qtC2)
+    let reconL2Cr = reconstructPlaneLayer(blocks: l2crBlocks, prevImg: l1Img, planeType: 2, width: cbDx, height: cbDy, blockSize: 32, qt: qtC2)
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: reconL2Y, cb: reconL2Cb, cr: reconL2Cr)
     

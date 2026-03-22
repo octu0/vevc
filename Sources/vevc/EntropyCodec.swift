@@ -73,7 +73,7 @@ struct EntropyEncoder {
                 }
                 rawBypass.writeBit(true)
                 let valResult = ValueTokenizer.tokenize(pair.val)
-                rawBypass.writeBits(UInt32(valResult.token), count: 5)
+                rawBypass.writeBits(UInt32(valResult.token), count: 6)
                 rawBypass.writeBits(valResult.bypassBits, count: valResult.bypassLen)
             }
             // for trailing zeros
@@ -280,7 +280,7 @@ struct EntropyDecoder {
             for _ in 0..<coeffCount {
                 let isNonZero = rawReader.readBit()
                 if isNonZero {
-                    let tokenBits = rawReader.readBits(count: 5)
+                    let tokenBits = rawReader.readBits(count: 6)
                     let token = UInt8(tokenBits)
                     let bypassLen = ValueTokenizer.bypassLength(for: token)
                     let bypassBits = rawReader.readBits(count: bypassLen)

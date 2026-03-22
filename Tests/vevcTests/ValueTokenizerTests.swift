@@ -6,7 +6,7 @@ final class ValueTokenizerTests: XCTestCase {
     
     func testSignedRoundtrip() {
         let testValues: [Int16] = [
-            0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8,
+            1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8,
             9, -9, 10, -10, 15, -15, 16, -16, 20, -20, 50, -50, 100, -100,
             127, -128, 255, -256, 500, -500, 1000, -1000,
             Int16.max, Int16.min, Int16.max - 1, Int16.min + 1

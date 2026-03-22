@@ -84,19 +84,25 @@ final class LayerDriftTests: XCTestCase {
         }
         
         let pd = toPlaneData420(images: [img])[0]
-        let qtY = QuantizationTable(baseStep: 2)
-        let qtC = QuantizationTable(baseStep: 6)
         
         // encodeSpatialLayersのLayer2→Layer1→Base8 チェーンの部分実行と同等
-        let (_, sub2, subPred2, _, _, _) = try await encodePlaneLayer32(pd: pd, predictedPd: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (layer1, sub1, subPred1, l1yBlocks, _, _) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let qtY2 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 2, isOne: false)
+        let qtC2 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 2, isOne: false)
+        let (_, sub2, subPred2, _, _, _) = try await encodePlaneLayer32(pd: pd, predictedPd: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: 3)
+        
+        let qtY1 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 1, isOne: false)
+        let qtC1 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 1, isOne: false)
+        let (layer1, sub1, subPred1, l1yBlocks, _, _) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3)
+        
+        let qtY0 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0, isOne: false)
+        let qtC0 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 0, isOne: false)
+        let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 3)
         
         // エンコーダ再構築: Base8 → Layer16
         let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
         let l1dx = sub2.width
         let l1dy = sub2.height
-        let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY)
+        let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY1)
         
         // デコーダ: Base8 → Layer16
         let decBase = try await decodeBase8(r: layer0, layer: 0)

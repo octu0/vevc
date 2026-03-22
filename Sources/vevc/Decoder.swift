@@ -29,7 +29,6 @@ public class Decoder {
         case [0x56, 0x45, 0x56, 0x50]:
             let mvsCount = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            var mvs = MotionVectors(count: mvsCount)
             guard (offset + mvDataLen) <= chunk.count else { throw DecodeError.insufficientData }
 
             let mvData = Array(chunk[offset..<(offset + mvDataLen)])
@@ -37,31 +36,23 @@ public class Decoder {
             var mvBr = try EntropyDecoder(data: mvData)
 
             let mbSize = 64
-            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
+            guard let prevWidth = prevReconstructed?.width, let prevHeight = prevReconstructed?.height else { throw DecodeError.invalidHeader }
             let mbCols = (prevWidth + mbSize - 1) / mbSize
+            let mbRows = (prevHeight + mbSize - 1) / mbSize
 
-            for i in 0..<mvsCount {
-                let mbX = i % mbCols
-                let mbY = i / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-
-                let isSig = try mvBr.decodeBypass()
-                if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(pmv.dx), Int16(pmv.dy))
-                } else {
-                    let sx = try mvBr.decodeBypass()
-                    let mx = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdX = sx == 1 ? -1 * Int(mx) : Int(mx)
-                    
-                    let sy = try mvBr.decodeBypass()
-                    let my = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdY = sy == 1 ? -1 * Int(my) : Int(my)
-
-                    mvs.vectors[i] = SIMD2(Int16(mvdX + pmv.dx), Int16(mvdY + pmv.dy))
+            var grid = MVGrid(width: prevWidth, height: prevHeight, minSize: 8)
+            var ctuNodes = [MotionNode]()
+            for mbY in 0..<mbRows {
+                let startY = mbY * mbSize
+                for mbX in 0..<mbCols {
+                    let startX = mbX * mbSize
+                    if ctuNodes.count < mvsCount {
+                        let node = try decodeMotionQuadtreeNode(w: prevWidth, h: prevHeight, startX: startX, startY: startY, size: mbSize, grid: &grid, br: &mvBr)
+                        ctuNodes.append(node)
+                    }
                 }
             }
+            let motionTree = MotionTree(ctuNodes: ctuNodes, width: prevWidth, height: prevHeight)
             
             let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
             guard (offset + len) <= chunk.count else { throw DecodeError.insufficientData }
@@ -71,7 +62,7 @@ public class Decoder {
             let residual = PlaneData420(img16: img16)
             
             if let prev = prevReconstructed {
-                let predicted = await applyMBME(prev: prev, mvs: mvs)
+                let predicted = await applyMotionQuadtree(prev: prev, tree: motionTree)
                 let curr = await addPlanes(residual: residual, predicted: predicted)
                 prevReconstructed = curr
                 return curr.toYCbCr()
@@ -92,7 +83,7 @@ public class Decoder {
         case [0x56, 0x45, 0x4F, 0x50]: // VEOP
             let mvsCount = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
             let mvDataLen = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            var mvs = MotionVectors(count: mvsCount)
+
             guard (offset + mvDataLen) <= chunk.count else { throw DecodeError.insufficientData }
 
             let mvData = Array(chunk[offset..<(offset + mvDataLen)])
@@ -100,29 +91,23 @@ public class Decoder {
             var mvBr = try EntropyDecoder(data: mvData)
 
             let mbSize = 64
-            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
+            guard let prevWidth = prevReconstructed?.width, let prevHeight = prevReconstructed?.height else { throw DecodeError.invalidHeader }
             let mbCols = (prevWidth + mbSize - 1) / mbSize
+            let mbRows = (prevHeight + mbSize - 1) / mbSize
 
-            for i in 0..<mvsCount {
-                let mbX = i % mbCols
-                let mbY = i / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-
-                let isSig = try mvBr.decodeBypass()
-                if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(pmv.dx), Int16(pmv.dy))
-                } else {
-                    let sx = try mvBr.decodeBypass()
-                    let mx = try decodeExpGolomb(decoder: &mvBr)
-                    let mvdX = sx == 1 ? -1 * Int(mx) : Int(mx)
-
-                    let sy = try mvBr.decodeBypass()
-                    let my = try decodeExpGolomb(decoder: &mvBr)
-                    let mvdY = sy == 1 ? -1 * Int(my) : Int(my)
-
-                    mvs.vectors[i] = SIMD2(Int16(mvdX + pmv.dx), Int16(mvdY + pmv.dy))
+            var grid = MVGrid(width: prevWidth, height: prevHeight, minSize: 8)
+            var ctuNodes = [MotionNode]()
+            for mbY in 0..<mbRows {
+                let startY = mbY * mbSize
+                for mbX in 0..<mbCols {
+                    let startX = mbX * mbSize
+                    if ctuNodes.count < mvsCount {
+                        let node = try decodeMotionQuadtreeNode(w: prevWidth, h: prevHeight, startX: startX, startY: startY, size: mbSize, grid: &grid, br: &mvBr)
+                        ctuNodes.append(node)
+                    }
                 }
             }
+            let motionTree = MotionTree(ctuNodes: ctuNodes, width: prevWidth, height: prevHeight)
             
             let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
             guard (offset + len) <= chunk.count else { throw DecodeError.insufficientData }
@@ -132,7 +117,7 @@ public class Decoder {
             let residual = PlaneData420(img16: img16)
             
             if let prev = prevReconstructed {
-                let predicted = await applyMBME(prev: prev, mvs: mvs)
+                let predicted = await applyMotionQuadtree(prev: prev, tree: motionTree)
                 let curr = await addPlanes(residual: residual, predicted: predicted)
                 prevReconstructed = curr
                 return curr.toYCbCr()

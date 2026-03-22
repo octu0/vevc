@@ -219,11 +219,12 @@ final class ChromaBlockTests: XCTestCase {
         // テスト対象: 量子化→逆量子化のラウンドトリップでの情報損失
         let blockSize = 8
 
-        // 色差パターン: 中間的なグラデーション（実際のクロマ値に近い）
+        // 色差パターン: 高周波成分を含むグラデーション（量子化ステップの差異が出やすいようにする）
         var originalValues = [Int16](repeating: 0, count: blockSize * blockSize)
+        var rng = LCG(seed: 12345)
         for y in 0..<blockSize {
             for x in 0..<blockSize {
-                originalValues[y * blockSize + x] = Int16(((x + y) * 60) / (blockSize + blockSize) - 30)
+                originalValues[y * blockSize + x] = Int16(Int(rng.next() % 100) - 50)
             }
         }
 
@@ -293,3 +294,14 @@ final class ChromaBlockTests: XCTestCase {
         XCTAssertLessThan(proposedRatio, 4.0, "提案クロマ/輝度MSE比が4倍以内であるべき")
     }
 }
+
+// 簡易的な決定論的乱数生成器
+private struct LCG {
+    var state: UInt32
+    init(seed: UInt32) { self.state = seed }
+    mutating func next() -> UInt32 {
+        state = state &* 1664525 &+ 1013904223
+        return state
+    }
+}
+

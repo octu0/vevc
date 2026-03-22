@@ -94,6 +94,90 @@ struct MotionVectors: Sendable {
     }
 }
 
+enum MotionNode: Sendable {
+    case leaf(mv: SIMD2<Int16>)
+    indirect case split(tl: MotionNode, tr: MotionNode, bl: MotionNode, br: MotionNode)
+}
+
+struct MotionTree: Sendable {
+    var ctuNodes: [MotionNode]
+    var width: Int
+    var height: Int
+}
+
+struct MVGrid {
+    var grid: [SIMD2<Int16>]
+    let stride: Int
+    let minSize: Int
+
+    init(width: Int, height: Int, minSize: Int) {
+        self.stride = (width + minSize - 1) / minSize
+        let rows = (height + minSize - 1) / minSize
+        self.grid = [SIMD2<Int16>](repeating: .zero, count: stride * rows)
+        self.minSize = minSize
+    }
+
+    func getPMV(x: Int, y: Int, w: Int) -> SIMD2<Int16> {
+        let gx = x / minSize
+        let gy = y / minSize
+        let gw = w / minSize
+        
+        let hasLeft = gx > 0
+        let hasTop = gy > 0
+        let hasTopRight = gy > 0 && (gx + gw) < stride
+
+        let idxLeft = hasLeft ? (gy * stride + (gx - 1)) : -1
+        let idxTop = hasTop ? ((gy - 1) * stride + gx) : -1
+        let idxTopRight = hasTopRight ? ((gy - 1) * stride + (gx + gw)) : -1
+
+        var count = 0
+        if hasLeft { count += 1 }
+        if hasTop { count += 1 }
+        if hasTopRight { count += 1 }
+
+        if count == 0 { return .zero }
+        if count == 1 {
+            return grid[hasLeft ? idxLeft : (hasTop ? idxTop : idxTopRight)]
+        }
+        if count == 2 {
+            var dxSum = 0
+            var dySum = 0
+            if hasLeft { let v = grid[idxLeft]; dxSum += Int(v.x); dySum += Int(v.y) }
+            if hasTop { let v = grid[idxTop]; dxSum += Int(v.x); dySum += Int(v.y) }
+            if hasTopRight { let v = grid[idxTopRight]; dxSum += Int(v.x); dySum += Int(v.y) }
+            return SIMD2<Int16>(Int16(dxSum / 2), Int16(dySum / 2))
+        }
+
+        let lvec = grid[idxLeft]
+        let tvec = grid[idxTop]
+        let rvec = grid[idxTopRight]
+
+        let minX = min(lvec.x, min(tvec.x, rvec.x))
+        let maxX = max(lvec.x, max(tvec.x, rvec.x))
+        let pmvX = lvec.x + tvec.x + rvec.x - minX - maxX
+
+        let minY = min(lvec.y, min(tvec.y, rvec.y))
+        let maxY = max(lvec.y, max(tvec.y, rvec.y))
+        let pmvY = lvec.y + tvec.y + rvec.y - minY - maxY
+
+        return SIMD2<Int16>(pmvX, pmvY)
+    }
+
+    mutating func fill(x: Int, y: Int, w: Int, h: Int, mv: SIMD2<Int16>) {
+        let gx = x / minSize
+        let gy = y / minSize
+        let gw = w / minSize
+        let gh = h / minSize
+        
+        for i in 0..<gh {
+            let row = (gy + i) * stride
+            for j in 0..<gw {
+                grid[row + gx + j] = mv
+            }
+        }
+    }
+}
+
 @inline(__always)
 func estimateMBMEBlock64x64(
     pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,

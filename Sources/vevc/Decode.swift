@@ -1050,7 +1050,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
                 let isSig = try mvBr.decodeBypass()
                 if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(pmv.dx), Int16(pmv.dy))
+                    mvs.vectors[i] = SIMD2(Int16(clamping: pmv.dx), Int16(clamping: pmv.dy))
                 } else {
                     let sx = try mvBr.decodeBypass()
                     let mx = try decodeExpGolomb(decoder: &mvBr)
@@ -1072,7 +1072,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                         mvdY = Int(my)
                     }
 
-                    mvs.vectors[i] = SIMD2(Int16(mvdX + pmv.dx), Int16(mvdY + pmv.dy))
+                    mvs.vectors[i] = SIMD2(Int16(clamping: mvdX + pmv.dx), Int16(clamping: mvdY + pmv.dy))
                 }
             }
             
@@ -1125,7 +1125,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
 
                 let isSig = try mvBr.decodeBypass()
                 if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(pmv.dx), Int16(pmv.dy))
+                    mvs.vectors[i] = SIMD2(Int16(clamping: pmv.dx), Int16(clamping: pmv.dy))
                 } else {
                     let sx = try mvBr.decodeBypass()
                     let mx = try decodeExpGolomb(decoder: &mvBr)
@@ -1147,7 +1147,7 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                         mvdY = Int(my)
                     }
 
-                    mvs.vectors[i] = SIMD2(Int16(mvdX + pmv.dx), Int16(mvdY + pmv.dy))
+                    mvs.vectors[i] = SIMD2(Int16(clamping: mvdX + pmv.dx), Int16(clamping: mvdY + pmv.dy))
                 }
             }
             

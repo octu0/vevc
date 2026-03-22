@@ -22,7 +22,7 @@ final class DeblockingFilterTests: XCTestCase {
             }
         }
         
-        let qStep = 16 // Medium quantization, threshold should easily catch delta of 10
+        let qStep = 48 // Threshold `tc=qStep/4=12` easily catches delta of 10
         DeblockingFilter.apply(plane: &plane, width: width, height: height, blockSize: 32, qStep: qStep)
         
         // After filtering, the boundary pixels (x=31 and x=32) should be smoothed
@@ -47,7 +47,7 @@ final class DeblockingFilterTests: XCTestCase {
             }
         }
         
-        let qStep = 16
+        let qStep = 48
         DeblockingFilter.apply(plane: &plane, width: width, height: height, blockSize: 32, qStep: qStep)
         
         // After filtering, the boundary pixels should be untouched because delta 100 > threshold
@@ -70,7 +70,7 @@ final class DeblockingFilterTests: XCTestCase {
             }
         }
         
-        let qStep = 16
+        let qStep = 48
         DeblockingFilter.apply(plane: &plane, width: width, height: height, blockSize: 32, qStep: qStep)
         
         // After filtering, the boundary pixels (y=31 and y=32) should be smoothed

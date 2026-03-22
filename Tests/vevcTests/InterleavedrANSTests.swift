@@ -34,7 +34,7 @@ final class InterleavedrANSTests: XCTestCase {
         tokens.reserveCapacity(count)
         
         var sigCounts: [Int] = [0, 0]
-        var tokenCounts: [Int] = Array(repeating: 0, count: 32)
+        var tokenCounts: [Int] = Array(repeating: 0, count: 64)
         
         for val in testData {
             let isSig = val != 0
