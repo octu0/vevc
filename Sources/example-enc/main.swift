@@ -7,7 +7,7 @@ var bitrate = 500
 var positionalArgs: [String] = []
 var outPath = "a.vevc"
 var zeroThreshold = 0
-var gopSize = 15
+var keyint = 60
 var sceneThreshold = 8
 var isOne = false
 
@@ -30,9 +30,9 @@ while i < args.count {
             if let v = Int(args[i + 1]) { zeroThreshold = v }
             i += 1
         }
-    case "-gopSize":
+    case "-keyint":
         if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { gopSize = v }
+            if let v = Int(args[i + 1]) { keyint = v }
             i += 1
         }
     case "-sceneThreshold":
@@ -49,7 +49,7 @@ while i < args.count {
 }
 
 if positionalArgs.isEmpty {
-    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-one] <input1.png> [input2.png ...]")
+    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-one] <input1.png> [input2.png ...]")
     exit(1)
 }
 
@@ -80,9 +80,9 @@ do {
     let startTime = Date()
     let out: [UInt8]
     if isOne {
-        out = try await vevc.encodeOne(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize, sceneChangeThreshold: sceneThreshold)
+        out = try await vevc.encodeOne(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneThreshold)
     } else {
-        out = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, gopSize: gopSize, sceneChangeThreshold: sceneThreshold)
+        out = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneThreshold)
     }
     let elapsed = Date().timeIntervalSince(startTime)
     

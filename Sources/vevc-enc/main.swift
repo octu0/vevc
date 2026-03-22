@@ -5,7 +5,7 @@ var inputPath = ""
 var outPath = ""
 var bitrate = 500
 var zeroThreshold = 3
-var gopSize = 15
+var keyint = 60
 var sceneThreshold = 8
 var isOne = false
 
@@ -29,9 +29,9 @@ while i < args.count {
             if let v = Int(args[i + 1]) { bitrate = v }
             i += 1
         }
-    case "-I":
+    case "-keyint":
         if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { gopSize = v }
+            if let v = Int(args[i + 1]) { keyint = v }
             i += 1
         }
     case "-zeroThreshold":
@@ -53,7 +53,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc [-one] -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-I <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>]\n", stderr)
+    fputs("Usage: vevc-enc [-one] -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>]\n", stderr)
     exit(1)
 }
 
@@ -98,7 +98,7 @@ do {
         maxbitrate: bitrate * 1000,
         framerate: fps,
         zeroThreshold: zeroThreshold,
-        gopSize: gopSize,
+        keyint: keyint,
         sceneChangeThreshold: sceneThreshold,
         isOne: isOne
     )

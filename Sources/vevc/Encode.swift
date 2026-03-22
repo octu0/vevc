@@ -1895,7 +1895,7 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
 }
 
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {    
+public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {    
     if images.isEmpty { return [] }
     guard let first = images.first else { return [] }
     
@@ -1905,7 +1905,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
         maxbitrate: maxbitrate,
         framerate: framerate,
         zeroThreshold: zeroThreshold,
-        gopSize: gopSize,
+        keyint: keyint,
         sceneChangeThreshold: sceneChangeThreshold,
         isOne: false
     )
@@ -1919,7 +1919,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
 }
 
 @inline(__always)
-public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {
+public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {
     if images.isEmpty { return [] }
     guard let first = images.first else { return [] }
     
@@ -1929,7 +1929,7 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30
         maxbitrate: maxbitrate,
         framerate: framerate,
         zeroThreshold: zeroThreshold,
-        gopSize: gopSize,
+        keyint: keyint,
         sceneChangeThreshold: sceneChangeThreshold,
         isOne: true
     )

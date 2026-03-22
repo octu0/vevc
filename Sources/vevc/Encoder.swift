@@ -6,12 +6,12 @@ public class Encoder {
     public let maxbitrate: Int
     public let framerate: Int
     public let zeroThreshold: Int
-    public let gopSize: Int
+    public let keyint: Int
     public let sceneChangeThreshold: Int
     public let isOne: Bool
     
     private var prevReconstructed: PlaneData420? = nil
-    private var gopCount = 0
+    private var framesSinceKeyframe = 0
     private var qt: QuantizationTable? = nil
     private let mbSize = 64
     private var frameIndex = 0
@@ -19,17 +19,17 @@ public class Encoder {
     // Rate Control
     private var rateController: RateController
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
         self.framerate = framerate
         self.zeroThreshold = zeroThreshold
-        self.gopSize = gopSize
+        self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
         self.isOne = isOne
         
-        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, gopSize: gopSize)
+        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
@@ -43,23 +43,30 @@ public class Encoder {
         var meanSAD: Int = 0
         var maxBlockSAD: Int = 0
         
-        if gopSize <= gopCount || prevReconstructed == nil {
+        if keyint <= framesSinceKeyframe || prevReconstructed == nil {
             forceIFrame = true
         } else {
             guard let prev = prevReconstructed else { throw NSError(domain: "vevc.Encoder", code: 2, userInfo: nil) }
             
-            mvs = estimateMBME(curr: curr, prev: prev)
-            let predicted = await applyMBME(prev: prev, mvs: mvs)
-            predictedPlane = predicted
-            let res = await subPlanes(curr: curr, predicted: predicted)
-            
-            let stats = calculateSADAndMaxBlockSAD(res: res, mbSize: mbSize)
-            meanSAD = stats.meanSAD
-            maxBlockSAD = stats.maxBlockSAD
-            
-            if sceneChangeThreshold < meanSAD {
+            let detector = SceneChangeDetector(threshold: sceneChangeThreshold * 4) // Raw SAD requires higher threshold than Residual SAD
+            if detector.isSceneChanged(prev: prev, curr: curr) {
                 forceIFrame = true
-                debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
+                meanSAD = 999999
+                debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to Scene Change (Fast Detector)")
+            } else {
+                mvs = estimateMBME(curr: curr, prev: prev)
+                let predicted = await applyMBME(prev: prev, mvs: mvs)
+                predictedPlane = predicted
+                let res = await subPlanes(curr: curr, predicted: predicted)
+                
+                let stats = calculateSADAndMaxBlockSAD(res: res, mbSize: mbSize)
+                meanSAD = stats.meanSAD
+                maxBlockSAD = stats.maxBlockSAD
+                
+                if sceneChangeThreshold < meanSAD {
+                    forceIFrame = true
+                    debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to high meanSAD (\(meanSAD) > \(sceneChangeThreshold))")
+                }
             }
         }
         
@@ -93,7 +100,7 @@ public class Encoder {
                 rateController.consumeIFrame(bits: chunkOut.count * 8, qStep: Int(qtY.step))
                 
                 prevReconstructed = reconstructed
-                gopCount = 1
+                framesSinceKeyframe = 1
             } else {
                 // Adaptive Quantization (isOne mode)
                 let currentSAD = Double(meanSAD)
@@ -159,7 +166,7 @@ public class Encoder {
                 
                 // encodePlaneBase32Causal already adds the predicted plane internally and returns fully reconstructed pixels!
                 prevReconstructed = reconstructedPlane
-                gopCount += 1
+                framesSinceKeyframe += 1
             }
         } else {
             if forceIFrame {
@@ -175,7 +182,7 @@ public class Encoder {
                 rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
                 
                 prevReconstructed = reconstructed
-                gopCount = 1
+                framesSinceKeyframe = 1
             } else {
                 let currentSAD = Double(meanSAD)
                 let newStepInt = rateController.calculatePFrameQStep(currentSAD: currentSAD, baseStep: Int(qt.step))
@@ -240,7 +247,7 @@ public class Encoder {
                 } else {
                     prevReconstructed = reconstructedResidual
                 }
-                gopCount += 1
+                framesSinceKeyframe += 1
             }
         }
         

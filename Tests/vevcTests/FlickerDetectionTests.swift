@@ -109,7 +109,7 @@ final class FlickerDetectionTests: XCTestCase {
             height: height,
             maxbitrate: 500 * 1000,
             zeroThreshold: 3,
-            gopSize: 30,  // 全フレームが1GOP内に入るようにする
+            keyint: 30,  // 全フレームが1GOP内に入るようにする
             sceneChangeThreshold: 8
         )
         let decoder = Decoder()
@@ -184,7 +184,7 @@ final class FlickerDetectionTests: XCTestCase {
             height: height,
             maxbitrate: 500 * 1000,
             zeroThreshold: 3,
-            gopSize: 30,
+            keyint: 30,
             sceneChangeThreshold: 8
         )
 

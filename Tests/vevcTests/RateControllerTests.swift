@@ -5,10 +5,10 @@ final class RateControllerTests: XCTestCase {
     
     func testRateControllerLogic() {
         let framerate = 30
-        let gopSize = 15
+        let keyint = 15
         let bitrateParam = 1000 * 1000 // 1Mbps
         
-        var controller = RateController(maxbitrate: bitrateParam, framerate: framerate, gopSize: gopSize)
+        var controller = RateController(maxbitrate: bitrateParam, framerate: framerate, keyint: keyint)
         
         let iFrameTarget = controller.beginGOP()
         

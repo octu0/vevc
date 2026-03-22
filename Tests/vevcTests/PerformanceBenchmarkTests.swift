@@ -17,7 +17,7 @@ final class PerformanceBenchmarkTests: XCTestCase {
             let exp = expectation(description: "encode")
             let images = _images
             Task {
-                _ = try! await vevc.encodeOne(images: images, maxbitrate: 5000 * 1024, zeroThreshold: 0, gopSize: 10, sceneChangeThreshold: 100)
+                _ = try! await vevc.encodeOne(images: images, maxbitrate: 5000 * 1024, zeroThreshold: 0, keyint: 10, sceneChangeThreshold: 100)
                 exp.fulfill()
             }
             wait(for: [exp], timeout: 10.0)

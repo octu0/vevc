@@ -8,7 +8,7 @@ struct Config {
     var bitrate: Int = 500
     var framerate: Int = 60
     var zeroThreshold: Int = 0
-    var gopSize: Int = 15
+    var keyint: Int = 60
     var sceneThreshold: Int = 32
     var maxLayer: Int = 2
     var quality: Bool = false
@@ -79,7 +79,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     // Encode
     print("  -> runVEVC Encoding...")
     let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
+    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold)
     let encTime = Date().timeIntervalSince(encStart)
     print("  -> runVEVC Encoded \(outBytes.count) bytes")
     
@@ -110,7 +110,7 @@ func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: 
     
     // Encode
     let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encodeOne(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, gopSize: config.gopSize, sceneChangeThreshold: config.sceneThreshold)
+    let outBytes: [UInt8] = try await vevc.encodeOne(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold)
     let encTime = Date().timeIntervalSince(encStart)
     
     // Decode
@@ -756,9 +756,9 @@ struct CompareApp {
                 if let v = Int(args[i + 1]) { config.zeroThreshold = v }
                 i += 1
             }
-        case "-gopSize":
+        case "-keyint":
             if (i + 1) < args.count {
-                if let v = Int(args[i + 1]) { config.gopSize = v }
+                if let v = Int(args[i + 1]) { config.keyint = v }
                 i += 1
             }
         case "-sceneThreshold":
@@ -787,7 +787,7 @@ struct CompareApp {
     }
 
     if positionalArgs.isEmpty && y4mPath == nil {
-        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-gopSize <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [<input1.png> input2.png ...]")
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [<input1.png> input2.png ...]")
         exit(1)
     }
 

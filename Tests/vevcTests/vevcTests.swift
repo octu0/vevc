@@ -161,7 +161,7 @@ final class VevcTests: XCTestCase {
         let height = 1080
         let frameCount = 4
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, gopSize: 15)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
         let decoder = Decoder()
         
         for i in 0..<frameCount {
@@ -188,7 +188,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 8
         
         // maxbitrateを10倍に
-        let encoder = Encoder(width: width, height: height, maxbitrate: 10000 * 1024, gopSize: 15)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 10000 * 1024, keyint: 15)
         let decoder = Decoder()
         
         var failedFrames: [(Int, Double)] = []
@@ -246,7 +246,7 @@ final class VevcTests: XCTestCase {
         let height = 480
         let frameCount = 20 // GOPサイズ(15)を超えるフレーム数
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, gopSize: 15)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
         let decoder = Decoder()
         
         var failedFrames: [(Int, Double)] = []
@@ -321,7 +321,7 @@ final class VevcTests: XCTestCase {
             }
         }
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, gopSize: 15)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
         let decoder = Decoder()
         
         for i in 0..<frameCount {
@@ -340,7 +340,7 @@ final class VevcTests: XCTestCase {
         let height = 480
         let frameCount = 5
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, gopSize: 15)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
         let decoder = Decoder()
         
         for i in 0..<frameCount {
@@ -547,7 +547,7 @@ final class VevcTests: XCTestCase {
         let height = 1080
         let frameCount = 6
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, gopSize: 15, sceneChangeThreshold: 8)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15, sceneChangeThreshold: 8)
         let decoder = Decoder()
         
         for i in 0..<frameCount {

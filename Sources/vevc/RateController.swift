@@ -3,7 +3,7 @@ import Foundation
 public struct RateController {
     public let maxbitrate: Int
     public let framerate: Int
-    public let gopSize: Int
+    public let keyint: Int
     
     public private(set) var gopTargetBits: Int = 0
     public private(set) var gopRemainingBits: Int = 0
@@ -14,16 +14,16 @@ public struct RateController {
     public private(set) var lastPFrameQStep: Int = 0
     public private(set) var lastPFrameSAD: Double = 0.0
     
-    public init(maxbitrate: Int, framerate: Int, gopSize: Int) {
+    public init(maxbitrate: Int, framerate: Int, keyint: Int) {
         self.maxbitrate = maxbitrate
         self.framerate = framerate
-        self.gopSize = gopSize
+        self.keyint = keyint
     }
     
     public mutating func beginGOP() -> Int {
-        self.gopTargetBits = Int((Double(maxbitrate) / Double(framerate)) * Double(gopSize))
+        self.gopTargetBits = Int((Double(maxbitrate) / Double(framerate)) * Double(keyint))
         self.gopRemainingBits = self.gopTargetBits
-        self.gopRemainingFrames = self.gopSize
+        self.gopRemainingFrames = self.keyint
         
         self.lastPFrameBits = 0
         self.lastPFrameQStep = 0

@@ -126,7 +126,7 @@ final class ChromaBlockTests: XCTestCase {
             height: height,
             maxbitrate: 500 * 1000,
             zeroThreshold: 3,
-            gopSize: 15,
+            keyint: 15,
             sceneChangeThreshold: 8
         )
         let decoder = Decoder()
@@ -173,7 +173,7 @@ final class ChromaBlockTests: XCTestCase {
             height: height,
             maxbitrate: 500 * 1000,
             zeroThreshold: 3,
-            gopSize: 15,
+            keyint: 15,
             sceneChangeThreshold: 8
         )
         let decoder = Decoder()
