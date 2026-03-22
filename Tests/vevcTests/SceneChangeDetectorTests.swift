@@ -20,7 +20,7 @@ final class SceneChangeDetectorTests: XCTestCase {
     
     func testDetectNoSceneChangeMinorDiff() {
         // Two planes that have minor differences (e.g. slight movement or noise)
-        var plane1 = createSolidPlane(width: 256, height: 256, value: 50)
+        let plane1 = createSolidPlane(width: 256, height: 256, value: 50)
         var plane2 = createSolidPlane(width: 256, height: 256, value: 50)
         // Add minor differences
         for i in 0..<plane1.y.count {
