@@ -9,8 +9,7 @@ var packageProducts: [Product] = [
 ]
 
 var packageDeps: [Package.Dependency] = [
-    .package(url: "https://github.com/tayloraswift/swift-png", from: "4.4.9"),
-    .package(url: "https://github.com/apple/swift-system", from: "1.3.0")
+    .package(url: "https://github.com/tayloraswift/swift-png", from: "4.4.9")
 ]
 
 var packageTargets: [Target] = [
@@ -42,11 +41,11 @@ var packageTargets: [Target] = [
     ),
     .executableTarget(
         name: "vevc-enc",
-        dependencies: ["vevc", .product(name: "SystemPackage", package: "swift-system")]
+        dependencies: ["vevc"]
     ),
     .executableTarget(
         name: "vevc-dec",
-        dependencies: ["vevc", .product(name: "SystemPackage", package: "swift-system")]
+        dependencies: ["vevc"]
     ),
     .executableTarget(
         name: "compare",

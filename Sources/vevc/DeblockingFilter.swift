@@ -220,10 +220,17 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     let absQ = getAbsVector(q1x &- q0x)
     
     let betah = beta >> 1
-    let mask = (absDelta .< beta) .& (absP .< betah) .& (absQ .< betah) // bool mask
+    let maskDelta = absDelta .< beta
+    let maskP = absP .< betah
+    let maskQ = absQ .< betah
+    let mask = maskDelta .& maskP .& maskQ // bool mask
     
     // d = (9*(q0-p0) - 3*(q1-p1) + 8) >> 4
-    let dUnclipped = ((delta &* 9) &- ((q1x &- p1x) &* 3) &+ 8) &>> 4
+    let delta9 = delta &* 9
+    let diffQ1P1 = q1x &- p1x
+    let diffQ1P1_3 = diffQ1P1 &* 3
+    let dSum = (delta9 &- diffQ1P1_3) &+ 8
+    let dUnclipped = dSum &>> 4
     
     // clamp: max(-tc, min(tc, d))
     let threshold = Int32(tc)

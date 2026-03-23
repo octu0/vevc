@@ -72,7 +72,6 @@ struct Block2D: Sendable {
     }
 }
 
-
 public enum VEVCReaderError: Error {
     case invalidHeader
     case unexpectedEOF
@@ -102,7 +101,8 @@ public class VEVCReader {
             guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
             chunk.append(contentsOf: lenData)
             
-            let len = Int((UInt32(lenData[0]) << 24) | (UInt32(lenData[1]) << 16) | (UInt32(lenData[2]) << 8) | UInt32(lenData[3]))
+            var lenOffset = 0
+            let len = Int(try readUInt32BEFromBytes([UInt8](lenData), offset: &lenOffset))
             
             guard len >= 0 else { throw VEVCReaderError.invalidHeader }
             let payload = readFully(count: len)
@@ -116,7 +116,8 @@ public class VEVCReader {
             guard headerData.count == 8 else { throw VEVCReaderError.unexpectedEOF }
             chunk.append(contentsOf: headerData)
             
-            let mvDataLen = Int((UInt32(headerData[4]) << 24) | (UInt32(headerData[5]) << 16) | (UInt32(headerData[6]) << 8) | UInt32(headerData[7]))
+            var mvLenOffset = 4
+            let mvDataLen = Int(try readUInt32BEFromBytes([UInt8](headerData), offset: &mvLenOffset))
             
             if mvDataLen > 0 {
                 let mvData = readFully(count: mvDataLen)
@@ -128,7 +129,8 @@ public class VEVCReader {
             guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
             chunk.append(contentsOf: lenData)
             
-            let len = Int((UInt32(lenData[0]) << 24) | (UInt32(lenData[1]) << 16) | (UInt32(lenData[2]) << 8) | UInt32(lenData[3]))
+            var lenOffset = 0
+            let len = Int(try readUInt32BEFromBytes([UInt8](lenData), offset: &lenOffset))
             
             guard len >= 0 else { throw VEVCReaderError.invalidHeader }
             let payload = readFully(count: len)
@@ -141,7 +143,8 @@ public class VEVCReader {
             let lenData = readFully(count: 4)
             guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
             
-            let len = Int((UInt32(lenData[0]) << 24) | (UInt32(lenData[1]) << 16) | (UInt32(lenData[2]) << 8) | UInt32(lenData[3]))
+            var lenOffset = 0
+            let len = Int(try readUInt32BEFromBytes([UInt8](lenData), offset: &lenOffset))
             guard len >= 0 else { throw VEVCReaderError.invalidHeader }
             
             if len > 0 {

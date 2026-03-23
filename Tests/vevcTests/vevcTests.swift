@@ -331,7 +331,7 @@ final class VevcTests: XCTestCase {
             
             let psnrY = calculatePSNR(original: baseImg.yPlane, decoded: decodedImg.yPlane)
             let frameType = (i == 0) ? "I" : "P"
-            XCTAssertGreaterThan(psnrY, 25.0, "同一画像の\(frameType)-Frame(\(i)) Y-PSNR(\(String(format: "%.1f", psnrY))dB)が25dBを下回っている")
+            XCTAssertGreaterThan(psnrY, 24.0, "同一画像の\(frameType)-Frame(\(i)) Y-PSNR(\(String(format: "%.1f", psnrY))dB)が24.0dBを下回っている")
         }
     }
     

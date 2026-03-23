@@ -675,13 +675,13 @@ func isEffectivelyZero32(data: UnsafeMutableBufferPointer<Int16>, threshold: Int
     for i in stride(from: 0, to: 512, by: 16) {
         let vec = SIMD16<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 16))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+        if any(mask) { return false }
     }
     for y in 0..<16 {
         let ptr = base + y * 32 + 16
         let vec = SIMD16<Int16>(UnsafeBufferPointer(start: ptr, count: 16))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+        if any(mask) { return false }
     }
 
     let zeroVec = SIMD16<Int16>(repeating: 0)
@@ -707,13 +707,13 @@ func isEffectivelyZero16(data: UnsafeMutableBufferPointer<Int16>, threshold: Int
     for i in stride(from: 0, to: 128, by: 8) {
         let vec = SIMD8<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 8))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] { return false }
+        if any(mask) { return false }
     }
     for y in 0..<8 {
         let ptr = base + y * 16 + 8
         let vec = SIMD8<Int16>(UnsafeBufferPointer(start: ptr, count: 8))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] { return false }
+        if any(mask) { return false }
     }
 
     let zeroVec = SIMD8<Int16>(repeating: 0)
@@ -739,13 +739,13 @@ func isEffectivelyZero8(data: UnsafeMutableBufferPointer<Int16>, threshold: Int)
     for i in stride(from: 0, to: 32, by: 4) {
         let vec = SIMD4<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 4))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] { return false }
+        if any(mask) { return false }
     }
     for y in 0..<4 {
         let ptr = base + y * 8 + 4
         let vec = SIMD4<Int16>(UnsafeBufferPointer(start: ptr, count: 4))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] { return false }
+        if any(mask) { return false }
     }
 
     let zeroVec = SIMD4<Int16>(repeating: 0)
@@ -771,13 +771,13 @@ func isEffectivelyZero4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int)
     for i in stride(from: 0, to: 8, by: 2) {
         let vec = SIMD2<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 2))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] { return false }
+        if any(mask) { return false }
     }
     for y in 0..<2 {
         let ptr = base + y * 4 + 2
         let vec = SIMD2<Int16>(UnsafeBufferPointer(start: ptr, count: 2))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] { return false }
+        if any(mask) { return false }
     }
 
     let zeroVec = SIMD2<Int16>(repeating: 0)
@@ -908,13 +908,13 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
     for i in stride(from: 0, to: 8, by: 2) {
         let vec = SIMD2<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 2))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] { return false }
+        if any(mask) { return false }
     }
     for y in 0..<2 {
         let ptr = base + y * 4 + 2
         let vec = SIMD2<Int16>(UnsafeBufferPointer(start: ptr, count: 2))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] { return false }
+        if any(mask) { return false }
     }
 
     let zeroVec = SIMD2<Int16>(repeating: 0)
@@ -936,7 +936,8 @@ func isEffectivelyZeroBase32(data: UnsafeMutableBufferPointer<Int16>, threshold:
     for y in 0..<16 {
         let ptr = base + y * 32
         let vec = SIMD16<Int16>(UnsafeBufferPointer(start: ptr, count: 16))
-        if vec[0] != 0 || vec[1] != 0 || vec[2] != 0 || vec[3] != 0 || vec[4] != 0 || vec[5] != 0 || vec[6] != 0 || vec[7] != 0 || vec[8] != 0 || vec[9] != 0 || vec[10] != 0 || vec[11] != 0 || vec[12] != 0 || vec[13] != 0 || vec[14] != 0 || vec[15] != 0 { return false }
+        let mask = vec .!= 0
+        if any(mask) { return false }
     }
     
     // Check Subbands
@@ -948,13 +949,13 @@ func isEffectivelyZeroBase32(data: UnsafeMutableBufferPointer<Int16>, threshold:
     for i in stride(from: 0, to: 512, by: 16) {
         let vec = SIMD16<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 16))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+        if any(mask) { return false }
     }
     for y in 0..<16 {
         let ptr = base + y * 32 + 16
         let vec = SIMD16<Int16>(UnsafeBufferPointer(start: ptr, count: 16))
         let mask = (vec .> thPos) .| (vec .< thNeg)
-        if mask[0] || mask[1] || mask[2] || mask[3] || mask[4] || mask[5] || mask[6] || mask[7] || mask[8] || mask[9] || mask[10] || mask[11] || mask[12] || mask[13] || mask[14] || mask[15] { return false }
+        if any(mask) { return false }
     }
 
     let zeroVec = SIMD16<Int16>(repeating: 0)
@@ -1027,7 +1028,9 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
         }
     }
     bwFlags.flush()
-    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
+    let zeroRate = Double(zeroCount) / Double(max(1, blocks.count)) * 100.0
+    let rateStr = String(format: "%.1f", zeroRate)
+    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
     var encoder = EntropyEncoder()
     
@@ -1163,7 +1166,9 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
         }
     }
     bwFlags.flush()
-    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
+    let zeroRate = Double(zeroCount) / Double(max(1, blocks.count)) * 100.0
+    let rateStr = String(format: "%.1f", zeroRate)
+    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
     var encoder = EntropyEncoder()
     
@@ -1261,7 +1266,10 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
         }
     }
     bwFlags.flush()
-    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
+    let zeroCount = blocks.count - nonZeroIndices.count
+    let zeroRate = Double(zeroCount) / Double(max(1, blocks.count)) * 100.0
+    let rateStr = String(format: "%.1f", zeroRate)
+    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
     var encoder = EntropyEncoder()
     
@@ -1300,7 +1308,10 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
         }
     }
     bwFlags.flush()
-    debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(blocks.count - nonZeroIndices.count) zeroRate=\(String(format: "%.1f", Double(blocks.count - nonZeroIndices.count) / Double(max(1, blocks.count)) * 100))%")
+    let zeroCount = blocks.count - nonZeroIndices.count
+    let zeroRate = Double(zeroCount) / Double(max(1, blocks.count)) * 100.0
+    let rateStr = String(format: "%.1f", zeroRate)
+    debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
     var encoder = EntropyEncoder()
     var lastVal: Int16 = 0
