@@ -15,12 +15,14 @@ struct EntropyEncoder {
     var pairs: [(run: UInt32, val: Int16, isParentZero: Bool)]
     var trailingZeros: UInt32
     private(set) var coeffCount: Int
+    var useStaticTable: Bool
 
-    init() {
+    init(useStaticTable: Bool = true) {
         self.bypassWriter = BypassWriter()
         self.pairs = []
         self.trailingZeros = 0
         self.coeffCount = 0
+        self.useStaticTable = useStaticTable
     }
 
     @inline(__always)
@@ -154,17 +156,38 @@ struct EntropyEncoder {
             if valTokenCounts1[i] > 65535 { valTokenCounts1[i] = 65535 }
         }
         
-        var runModel0 = rANSModel()
-        var valModel0 = rANSModel()
-        var runModel1 = rANSModel()
-        var valModel1 = rANSModel()
-        runModel0.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts0)
-        valModel0.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts0)
-        runModel1.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts1)
-        valModel1.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts1)
+        let runModel0: rANSModel
+        let valModel0: rANSModel
+        let runModel1: rANSModel
+        let valModel1: rANSModel
         
-        // header
-        out.append(hasTrailingZeros ? 1 : 0)
+        if useStaticTable {
+            // Static models — no per-stream frequency table headers
+            runModel0 = staticRunModel0
+            valModel0 = staticValModel0
+            runModel1 = staticRunModel1
+            valModel1 = staticValModel1
+            
+            // header: flag (0x40 = static table mode, bit 0 = hasTrailingZeros)
+            out.append(hasTrailingZeros ? 0x41 : 0x40)
+        } else {
+            // Dynamic models — compute from actual data, write table headers
+            var rm0 = rANSModel()
+            var vm0 = rANSModel()
+            var rm1 = rANSModel()
+            var vm1 = rANSModel()
+            rm0.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts0)
+            vm0.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts0)
+            rm1.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts1)
+            vm1.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts1)
+            runModel0 = rm0
+            valModel0 = vm0
+            runModel1 = rm1
+            valModel1 = vm1
+            
+            // header: flag (0x00 = dynamic table mode, bit 0 = hasTrailingZeros)
+            out.append(hasTrailingZeros ? 1 : 0)
+        }
         appendUInt32BE(&out, UInt32(totalPairEntries))
         
         // chunk size (4B × 4)
@@ -174,11 +197,13 @@ struct EntropyEncoder {
             appendUInt32BE(&out, UInt32(chunkPairCount + extraTrailing))
         }
         
-        // compressed frequency table
-        writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
-        writeCompressedFreqTable(&out, freqs: valModel0.tokenFreqs)
-        writeCompressedFreqTable(&out, freqs: runModel1.tokenFreqs)
-        writeCompressedFreqTable(&out, freqs: valModel1.tokenFreqs)
+        if useStaticTable != true {
+            // Write frequency tables for dynamic mode
+            writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
+            writeCompressedFreqTable(&out, freqs: valModel0.tokenFreqs)
+            writeCompressedFreqTable(&out, freqs: runModel1.tokenFreqs)
+            writeCompressedFreqTable(&out, freqs: valModel1.tokenFreqs)
+        }
         
         // 4-way bypass data
         for lane in 0..<4 {
@@ -339,6 +364,7 @@ struct EntropyDecoder {
         }
         
         // rANS mode
+        let isStaticTable = (flags & 0x40) != 0
         let hasTrailingZeros = (flags & 1) != 0
         self.hasTrailingZeros = hasTrailingZeros
         
@@ -359,17 +385,26 @@ struct EntropyDecoder {
         }
         self.chunkStarts = starts
         
-        let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-        self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
-        
-        let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-        self.valModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs0)
-        
-        let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-        self.runModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs1)
-        
-        let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-        self.valModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs1)
+        if isStaticTable {
+            // Static table mode: no frequency tables in bitstream
+            self.runModel0 = staticRunModel0
+            self.valModel0 = staticValModel0
+            self.runModel1 = staticRunModel1
+            self.valModel1 = staticValModel1
+        } else {
+            // Legacy dynamic table mode: read frequency tables from bitstream
+            let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
+            
+            let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.valModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs0)
+            
+            let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.runModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs1)
+            
+            let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.valModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs1)
+        }
         
         // 4-way bypass data
         var chunkBypassReaders = [BypassReader]()

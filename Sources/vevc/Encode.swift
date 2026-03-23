@@ -1381,7 +1381,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     bwFlags.flush()
     debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = EntropyEncoder()
+    var encoder = EntropyEncoder(useStaticTable: false)
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {
@@ -1669,7 +1669,7 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     bwFlags.flush()
     debugLog("    [CascadedSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = EntropyEncoder()
+    var encoder = EntropyEncoder(useStaticTable: false)
     var lastVal: Int16 = 0
     
     for (i, skip) in tasks {

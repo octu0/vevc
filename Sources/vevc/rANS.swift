@@ -5,6 +5,101 @@ let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
 let RANS_L: UInt32 = 1 << 15
 let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 
+// MARK: - Static rANS Frequency Tables
+// Derived from actual encoding of 34M pairs (7453 encoder calls, ToS-4k-1080 test sequence).
+// These tables replace per-stream frequency table headers (~120B savings per encoder).
+// Each table contains raw frequency counts normalized to RANS_SCALE=16384.
+//
+// Token mapping:
+//   val tokens: 0..31 = values ±1..±16 (even=positive, odd=negative)
+//   val tokens: 32..63 = values ±17+ (exp-golomb)
+//   run tokens: 0..31 = run lengths 0..31
+//   run tokens: 32..63 = run lengths 32+ (exp-golomb)
+
+/// Build static rANS model from predetermined frequency data.
+/// Normalizes the provided raw frequency array to sum exactly to RANS_SCALE.
+private func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
+    var freqs = rawFreqs
+    var sum: UInt32 = freqs.reduce(0, +)
+    
+    // Adjust the largest element to make sum == RANS_SCALE
+    if sum != RANS_SCALE {
+        var maxIdx = 0
+        var maxVal: UInt32 = 0
+        for i in 0..<64 {
+            if freqs[i] > maxVal {
+                maxVal = freqs[i]
+                maxIdx = i
+            }
+        }
+        if sum < RANS_SCALE {
+            freqs[maxIdx] += (RANS_SCALE - sum)
+        } else {
+            let diff = sum - RANS_SCALE
+            if freqs[maxIdx] > diff {
+                freqs[maxIdx] -= diff
+            }
+        }
+    }
+    
+    return rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqs)
+}
+
+// Static tables derived from actual data:
+// runNorm0: run tokens, isParentZero=false (34M pairs)
+//   Dominated by token 0 (run=0, ~68%), exponential decay
+let staticRunModel0 = buildStaticModel(rawFreqs: [
+    11172, 2025, 1036, 793, 299, 185, 165, 181,
+      104,   62,   52,  54,  57,  36,  32,  37,
+        9,    7,    5,   4,   4,   3,   4,   4,
+        3,    2,    2,   2,   2,   1,   1,   2,
+        1,    1,    2,   4,   5,   6,   1,   1,
+        1,    1,    1,   1,   1,   1,   1,   1,
+        1,    1,    1,   1,   1,   1,   1,   1,
+        1,    1,    1,   1,   1,   1,   1,   1,
+])
+
+// valNorm0: value tokens, isParentZero=false
+//   Asymmetric: positive values 3-6x more frequent than negative
+//   Token 0(+1)=3235, token 2(+2)=2731, token 6(+4)=1134 (sharp right-decay)
+let staticValModel0 = buildStaticModel(rawFreqs: [
+    3235,  964, 2731,  425, 1173,  289, 1134,  222,
+     618,  179,  610,  151,  379,  129,  373,  111,
+     254,   97,  251,   86,  181,   76,  180,   69,
+     135,   63,  136,   56,  103,   52,  104,   47,
+     124,  123,  201,  302,  363,  337,  221,   76,
+       3,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+])
+
+// runNorm1: run tokens, isParentZero=true
+//   Less concentrated: token 3(run=3)=2459 is the mode (not token 0)
+let staticRunModel1 = buildStaticModel(rawFreqs: [
+    3339, 1389, 1644, 2459, 822, 668, 725, 1009,
+     417,  306,  338,  429, 512, 332, 329,  435,
+      82,   66,   61,   63,  48,  50,  46,   67,
+      56,   37,   33,   36,  26,  26,  28,   42,
+      23,   16,   32,   77, 103, 195,   1,    1,
+       1,    1,    1,    1,   1,   1,   1,    1,
+       1,    1,    1,    1,   1,   1,   1,    1,
+       1,    1,    1,    1,   1,   1,   1,    1,
+])
+
+// valNorm1: value tokens, isParentZero=true
+//   Almost exclusively positive values (odd tokens ≈ 0)
+//   Token 2(+2) is the mode, not token 0(+1)
+let staticValModel1 = buildStaticModel(rawFreqs: [
+    5838,    1, 6989,    1, 1004,   1, 1582,   1,
+     219,    1,  465,    1,   52,   1,  141,   1,
+      13,    1,   44,    1,    5,   1,   17,   1,
+       1,    1,    5,    1,    1,   1,    1,   1,
+       1,    1,    1,    1,    1,   1,    1,   1,
+       1,    1,    1,    1,    1,   1,    1,   1,
+       1,    1,    1,    1,    1,   1,    1,   1,
+       1,    1,    1,    1,    1,   1,    1,   1,
+])
+
 // MARK: - rANS Probability Model
 
 struct rANSModel {
