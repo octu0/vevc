@@ -5,7 +5,7 @@ enum DecodeTask32 {
 }
 
 @inline(__always)
-func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentImage: Image16?, dx: Int, planeType: Int) throws -> [Block2D] {
+func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentBlocks: [Block2D]?) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
@@ -55,22 +55,7 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentImage: Image16?
     let half = 32 / 2
     
     for (i, task) in tasks {
-        let colCount = (dx + 32 - 1) / 32
-        let r = i / colCount
-        let c = i % colCount
-        let pbX = c * 16
-        let pbY = r * 16
-        
-        var parentBlock2D: Block2D? = nil
-        if let pImg = parentImage {
-            switch planeType {
-            case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 16)
-            case 1: parentBlock2D = pImg.getCb(x: pbX, y: pbY, size: 16)
-            default: parentBlock2D = pImg.getCr(x: pbX, y: pbY, size: 16)
-            }
-        }
-        
-        let decodeAction = { (parentBlock: BlockView?) throws in
+        let decodeAction = { (parentHL: BlockView?, parentLH: BlockView?, parentHH: BlockView?) throws in
             try blocks[i].withView { view in
                 let hlBase = view.base.advanced(by: half)
                 let lhBase = view.base.advanced(by: half * 32)
@@ -81,58 +66,70 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentImage: Image16?
                     break
                 case .decode16:
                     var hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
-                    try blockDecode16(decoder: &decoder, block: &hlView, parentBlock: parentBlock)
+                    try blockDecode16(decoder: &decoder, block: &hlView, parentBlock: parentHL)
                     
                     var lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
-                    try blockDecode16(decoder: &decoder, block: &lhView, parentBlock: parentBlock)
+                    try blockDecode16(decoder: &decoder, block: &lhView, parentBlock: parentLH)
                     
                     var hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
-                    try blockDecode16(decoder: &decoder, block: &hhView, parentBlock: parentBlock)
+                    try blockDecode16(decoder: &decoder, block: &hhView, parentBlock: parentHH)
                 case .split8(let tl, let tr, let bl, let br):
                     if tl {
-                        let pb = parentBlock.map { BlockView(base: $0.base, width: 8, height: 8, stride: 16) }
+                        let pbHL = parentHL.map { BlockView(base: $0.base, width: 4, height: 4, stride: $0.stride) }
+                        let pbLH = parentLH.map { BlockView(base: $0.base, width: 4, height: 4, stride: $0.stride) }
+                        let pbHH = parentHH.map { BlockView(base: $0.base, width: 4, height: 4, stride: $0.stride) }
                         var hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
                         var lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
                         var hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pb)
+                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pbHH)
                     }
                     if tr {
-                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 8), width: 8, height: 8, stride: 16) }
+                        let pbHL = parentHL.map { BlockView(base: $0.base.advanced(by: 4), width: 4, height: 4, stride: $0.stride) }
+                        let pbLH = parentLH.map { BlockView(base: $0.base.advanced(by: 4), width: 4, height: 4, stride: $0.stride) }
+                        let pbHH = parentHH.map { BlockView(base: $0.base.advanced(by: 4), width: 4, height: 4, stride: $0.stride) }
                         var hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                         var lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                         var hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pb)
+                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pbHH)
                     }
                     if bl {
-                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16) }
+                        let pbHL = parentHL.map { BlockView(base: $0.base.advanced(by: 4 * $0.stride), width: 4, height: 4, stride: $0.stride) }
+                        let pbLH = parentLH.map { BlockView(base: $0.base.advanced(by: 4 * $0.stride), width: 4, height: 4, stride: $0.stride) }
+                        let pbHH = parentHH.map { BlockView(base: $0.base.advanced(by: 4 * $0.stride), width: 4, height: 4, stride: $0.stride) }
                         var hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                         var lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                         var hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pb)
+                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pbHH)
                     }
                     if br {
-                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16) }
+                        let pbHL = parentHL.map { BlockView(base: $0.base.advanced(by: 4 * $0.stride + 4), width: 4, height: 4, stride: $0.stride) }
+                        let pbLH = parentLH.map { BlockView(base: $0.base.advanced(by: 4 * $0.stride + 4), width: 4, height: 4, stride: $0.stride) }
+                        let pbHH = parentHH.map { BlockView(base: $0.base.advanced(by: 4 * $0.stride + 4), width: 4, height: 4, stride: $0.stride) }
                         var hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                         var lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                         var hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pb)
-                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pb)
+                        try blockDecode8(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                        try blockDecode8(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                        try blockDecode8(decoder: &decoder, block: &hh, parentBlock: pbHH)
                     }
                 }
             }
         }
         
-        if var pb2d = parentBlock2D {
-            try pb2d.withView { pb in try decodeAction(pb) }
+        if let pBlocks = parentBlocks, i < pBlocks.count {
+            var pBlock = pBlocks[i]
+            try pBlock.withView { pView in
+                let pSubs = getSubbands16(view: pView)
+                try decodeAction(pSubs.hl, pSubs.lh, pSubs.hh)
+            }
         } else {
-            try decodeAction(nil)
+            try decodeAction(nil, nil, nil)
         }
     }
 
@@ -146,7 +143,7 @@ enum DecodeTask16 {
 }
 
 @inline(__always)
-func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentImage: Image16?, dx: Int, planeType: Int) throws -> [Block2D] {
+func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [Block2D]?) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
@@ -199,22 +196,7 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentImage: Image16?
     let half = 16 / 2
 
     for (i, task) in tasks {
-        let colCount = (dx + 16 - 1) / 16
-        let r = i / colCount
-        let c = i % colCount
-        let pbX = c * 8
-        let pbY = r * 8
-        
-        var parentBlock2D: Block2D? = nil
-        if let pImg = parentImage {
-            switch planeType {
-            case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 8)
-            case 1: parentBlock2D = pImg.getCb(x: pbX, y: pbY, size: 8)
-            default: parentBlock2D = pImg.getCr(x: pbX, y: pbY, size: 8)
-            }
-        }
-        
-        let decodeAction = { (parentBlock: BlockView?) throws in
+        let decodeAction = { (parentHL: BlockView?, parentLH: BlockView?, parentHH: BlockView?) throws in
             try blocks[i].withView { view in
                 let hlBase = view.base.advanced(by: half)
                 let lhBase = view.base.advanced(by: half * 16)
@@ -225,58 +207,70 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentImage: Image16?
                 break
             case .decode8:
                 var hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
-                try blockDecode8(decoder: &decoder, block: &hlView, parentBlock: parentBlock)
+                try blockDecode8(decoder: &decoder, block: &hlView, parentBlock: parentHL)
                 
                 var lhView = BlockView(base: lhBase, width: half, height: half, stride: 16)
-                try blockDecode8(decoder: &decoder, block: &lhView, parentBlock: parentBlock)
+                try blockDecode8(decoder: &decoder, block: &lhView, parentBlock: parentLH)
                 
                 var hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
-                try blockDecode8(decoder: &decoder, block: &hhView, parentBlock: parentBlock)
+                try blockDecode8(decoder: &decoder, block: &hhView, parentBlock: parentHH)
             case .split4(let tl, let tr, let bl, let br):
                 if tl {
-                    let pb = parentBlock.map { BlockView(base: $0.base, width: 4, height: 4, stride: 8) }
+                    let pbHL = parentHL.map { BlockView(base: $0.base, width: 2, height: 2, stride: $0.stride) }
+                    let pbLH = parentLH.map { BlockView(base: $0.base, width: 2, height: 2, stride: $0.stride) }
+                    let pbHH = parentHH.map { BlockView(base: $0.base, width: 2, height: 2, stride: $0.stride) }
                     var hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
                     var lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
                     var hh = BlockView(base: hhBase, width: 4, height: 4, stride: 16)
-                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pb)
+                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pbHH)
                 }
                 if tr {
-                    let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 4), width: 4, height: 4, stride: 8) }
+                    let pbHL = parentHL.map { BlockView(base: $0.base.advanced(by: 2), width: 2, height: 2, stride: $0.stride) }
+                    let pbLH = parentLH.map { BlockView(base: $0.base.advanced(by: 2), width: 2, height: 2, stride: $0.stride) }
+                    let pbHH = parentHH.map { BlockView(base: $0.base.advanced(by: 2), width: 2, height: 2, stride: $0.stride) }
                     var hl = BlockView(base: hlBase.advanced(by: 4), width: 4, height: 4, stride: 16)
                     var lh = BlockView(base: lhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
                     var hh = BlockView(base: hhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
-                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pb)
+                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pbHH)
                 }
                 if bl {
-                    let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 4 * 8), width: 4, height: 4, stride: 8) }
+                    let pbHL = parentHL.map { BlockView(base: $0.base.advanced(by: 2 * $0.stride), width: 2, height: 2, stride: $0.stride) }
+                    let pbLH = parentLH.map { BlockView(base: $0.base.advanced(by: 2 * $0.stride), width: 2, height: 2, stride: $0.stride) }
+                    let pbHH = parentHH.map { BlockView(base: $0.base.advanced(by: 2 * $0.stride), width: 2, height: 2, stride: $0.stride) }
                     var hl = BlockView(base: hlBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                     var lh = BlockView(base: lhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                     var hh = BlockView(base: hhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pb)
+                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pbHH)
                 }
                 if br {
-                    let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 4 * 8 + 4), width: 4, height: 4, stride: 8) }
+                    let pbHL = parentHL.map { BlockView(base: $0.base.advanced(by: 2 * $0.stride + 2), width: 2, height: 2, stride: $0.stride) }
+                    let pbLH = parentLH.map { BlockView(base: $0.base.advanced(by: 2 * $0.stride + 2), width: 2, height: 2, stride: $0.stride) }
+                    let pbHH = parentHH.map { BlockView(base: $0.base.advanced(by: 2 * $0.stride + 2), width: 2, height: 2, stride: $0.stride) }
                     var hl = BlockView(base: hlBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                     var lh = BlockView(base: lhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                     var hh = BlockView(base: hhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pb)
-                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pb)
+                    try blockDecode4(decoder: &decoder, block: &hl, parentBlock: pbHL)
+                    try blockDecode4(decoder: &decoder, block: &lh, parentBlock: pbLH)
+                    try blockDecode4(decoder: &decoder, block: &hh, parentBlock: pbHH)
                 }
             }
         }
         }
         
-        if var pb2d = parentBlock2D {
-            try pb2d.withView { pb in try decodeAction(pb) }
+        if let pBlocks = parentBlocks, i < pBlocks.count {
+            var pBlock = pBlocks[i]
+            try pBlock.withView { pView in
+                let pSubs = getSubbands8(view: pView)
+                try decodeAction(pSubs.hl, pSubs.lh, pSubs.hh)
+            }
         } else {
-            try decodeAction(nil)
+            try decodeAction(nil, nil, nil)
         }
     }
 

@@ -24,7 +24,11 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
     offset += Int(len0)
     
     // Base layer (layer 0) is always Base8
-    var current = try await decodeBase8(r: layer0Data, layer: 0)
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, layer: 0)
+    var current = baseImg
+    var parentYBlocks: [Block2D]? = base8YBlocks
+    var parentCbBlocks: [Block2D]? = base8CbBlocks
+    var parentCrBlocks: [Block2D]? = base8CrBlocks
     
     if 1 <= maxLayer {
         let len1 = try readUInt32BEFromBytes(r, offset: &offset)
@@ -32,7 +36,11 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
         
-        current = try await decodeLayer16(r: layer1Data, layer: 1, prev: current)
+        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, layer: 1, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+        current = l16Img
+        parentYBlocks = l16YBlocks
+        parentCbBlocks = l16CbBlocks
+        parentCrBlocks = l16CrBlocks
     }
     
     if 2 <= maxLayer {
@@ -41,7 +49,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         
-        current = try await decodeLayer32(r: layer2Data, layer: 2, prev: current)
+        current = try await decodeLayer32(r: layer2Data, layer: 2, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
     }
     
     return current
@@ -103,7 +111,7 @@ func blockDecode32(decoder: inout EntropyDecoder, block: inout BlockView, parent
         if let pb = parentBlock {
             let y = currentIdx / 32
             let x = currentIdx % 32
-            isParentZero = (pb.rowPointer(y: y)[x] == 0)
+            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
         } else {
             isParentZero = false
         }
@@ -142,7 +150,7 @@ func blockDecode16(decoder: inout EntropyDecoder, block: inout BlockView, parent
         if let pb = parentBlock {
             let y = currentIdx / 16
             let x = currentIdx % 16
-            isParentZero = (pb.rowPointer(y: y)[x] == 0)
+            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
         } else {
             isParentZero = false
         }
@@ -180,7 +188,7 @@ func blockDecode8(decoder: inout EntropyDecoder, block: inout BlockView, parentB
         if let pb = parentBlock {
             let y = currentIdx / 8
             let x = currentIdx % 8
-            isParentZero = (pb.rowPointer(y: y)[x] == 0)
+            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
         } else {
             isParentZero = false
         }
@@ -219,7 +227,7 @@ func blockDecode4(decoder: inout EntropyDecoder, block: inout BlockView, parentB
         if let pb = parentBlock {
             let y = currentIdx / 4
             let x = currentIdx % 4
-            isParentZero = (pb.rowPointer(y: y)[x] == 0)
+            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
         } else {
             isParentZero = false
         }
@@ -403,7 +411,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, la
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> Image16 {
     var offset = 0
     
     guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
@@ -441,17 +449,17 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
     
     let rowCountY = (dy + 32 - 1) / 32
     let colCountY = (dx + 32 - 1) / 32
-    let yBlocks = try decodePlaneSubbands32(data: bufY, blockCount: rowCountY * colCountY, parentImage: prev, dx: dx, planeType: 0)
+    let yBlocks = try decodePlaneSubbands32(data: bufY, blockCount: rowCountY * colCountY, parentBlocks: parentYBlocks)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 32 - 1) / 32
     let colCountCb = (cbDx + 32 - 1) / 32
-    let cbBlocks = try decodePlaneSubbands32(data: bufCb, blockCount: rowCountCb * colCountCb, parentImage: prev, dx: cbDx, planeType: 1)
+    let cbBlocks = try decodePlaneSubbands32(data: bufCb, blockCount: rowCountCb * colCountCb, parentBlocks: parentCbBlocks)
     
     let rowCountCr = (cbDy + 32 - 1) / 32
     let colCountCr = (cbDx + 32 - 1) / 32
-    let crBlocks = try decodePlaneSubbands32(data: bufCr, blockCount: rowCountCr * colCountCr, parentImage: prev, dx: cbDx, planeType: 2)
+    let crBlocks = try decodePlaneSubbands32(data: bufCr, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
     let chunkSize = 4
     
@@ -609,7 +617,7 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
 }
 
 @inline(__always)
-func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Image16 {
+func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
     
     guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
@@ -647,17 +655,17 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
     
     let rowCountY = (dy + 16 - 1) / 16
     let colCountY = (dx + 16 - 1) / 16
-    let yBlocks = try decodePlaneSubbands16(data: bufY, blockCount: rowCountY * colCountY, parentImage: prev, dx: dx, planeType: 0)
+    let yBlocks = try decodePlaneSubbands16(data: bufY, blockCount: rowCountY * colCountY, parentBlocks: parentYBlocks)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 16 - 1) / 16
     let colCountCb = (cbDx + 16 - 1) / 16
-    let cbBlocks = try decodePlaneSubbands16(data: bufCb, blockCount: rowCountCb * colCountCb, parentImage: prev, dx: cbDx, planeType: 1)
+    let cbBlocks = try decodePlaneSubbands16(data: bufCb, blockCount: rowCountCb * colCountCb, parentBlocks: parentCbBlocks)
     
     let rowCountCr = (cbDy + 16 - 1) / 16
     let colCountCr = (cbDx + 16 - 1) / 16
-    let crBlocks = try decodePlaneSubbands16(data: bufCr, blockCount: rowCountCr * colCountCr, parentImage: prev, dx: cbDx, planeType: 2)
+    let crBlocks = try decodePlaneSubbands16(data: bufCr, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
     let chunkSize = 4
     
@@ -808,11 +816,11 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16) async throws -> Imag
         }
     }
     
-    return sub
+    return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], layer: UInt8) async throws -> Image16 {
+func decodeBase8(r: [UInt8], layer: UInt8) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
     
     guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
@@ -987,7 +995,7 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> Image16 {
         }
     }
     
-    return sub
+    return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
 @inline(__always)

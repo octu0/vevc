@@ -54,10 +54,10 @@ final class LayerDriftTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 6)
         
         // エンコーダ: Base8のみ
-        let (bytes, encRecon) = try await encodePlaneBase8(pd: pd, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (bytes, encRecon, _, _, _) = try await encodePlaneBase8(pd: pd, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
         // デコーダ: Base8のみ
-        let decImg = try await decodeBase8(r: bytes, layer: 0)
+        let (decImg, _, _, _) = try await decodeBase8(r: bytes, layer: 0)
         
         let d = diffStats(encRecon.y, decImg.y)
         XCTAssertEqual(d.maxDiff, 0, "Base8 Y不一致: maxDiff=\(d.maxDiff) diffPixels=\(d.diffCount)/\(d.count) enc=[\(stats(encRecon.y))] dec=[\(stats(decImg.y))]")
@@ -96,10 +96,10 @@ final class LayerDriftTests: XCTestCase {
         
         let qtY0 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0, isOne: false)
         let qtC0 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 0, isOne: false)
-        let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 3)
+        let (layer0, baseRecon, _, _, _) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 3)
 
         let testBaseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
-        let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentImage: testBaseImg)
+        let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
         // エンコーダ再構築: Base8 → Layer16
         let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
@@ -108,8 +108,8 @@ final class LayerDriftTests: XCTestCase {
         let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY1)
         
         // デコーダ: Base8 → Layer16
-        let decBase = try await decodeBase8(r: layer0, layer: 0)
-        let decL1 = try await decodeLayer16(r: layer1, layer: 1, prev: decBase)
+        let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0)
+        let (decL1, _, _, _) = try await decodeLayer16(r: layer1, layer: 1, prev: decBase, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
         let d = diffStats(reconL1Y, decL1.y)
         XCTAssertEqual(d.maxDiff, 0, "Base8+Layer16 Y不一致: maxDiff=\(d.maxDiff) diffPixels=\(d.diffCount)/\(d.count) enc=[\(stats(reconL1Y))] dec=[\(stats(decL1.y))]")
