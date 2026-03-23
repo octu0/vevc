@@ -104,60 +104,58 @@ final class InterleavedrANSTests: XCTestCase {
         
         var finalDecodingResult = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
         
-        measure {
-            decoder = InterleavedrANSDecoder(bitstream: ransStream)
-            var rANSDecodedByLane = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
-            for i in 0..<4 {
-                rANSDecodedByLane[i].reserveCapacity(chunkSize)
+        decoder = InterleavedrANSDecoder(bitstream: ransStream)
+        var rANSDecodedByLane = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
+        for i in 0..<4 {
+            rANSDecodedByLane[i].reserveCapacity(chunkSize)
+        }
+        
+        // Decoding loop (LIFO Order)
+        for _ in 0..<chunkSize {
+            let cfs = decoder.getCumulativeFreqs()
+            var isSigs = [Bool](repeating: false, count: 4)
+            
+            var sigAdvanceCumFreq = SIMD4<UInt32>(repeating: 0)
+            var sigAdvanceFreq = SIMD4<UInt32>(repeating: 0)
+            
+            for lane in 0..<4 {
+                if cfs[lane] < model.sigFreq {
+                    isSigs[lane] = true
+                    sigAdvanceFreq[lane] = sigFreqVec[lane]
+                    sigAdvanceCumFreq[lane] = zeroVec[lane]
+                } else {
+                    isSigs[lane] = false
+                    sigAdvanceFreq[lane] = invSigFreqVec[lane]
+                    sigAdvanceCumFreq[lane] = sigFreqVec[lane]
+                }
             }
             
-            // Decoding loop (LIFO Order)
-            for _ in 0..<chunkSize {
-                let cfs = decoder.getCumulativeFreqs()
-                var isSigs = [Bool](repeating: false, count: 4)
-                
-                var sigAdvanceCumFreq = SIMD4<UInt32>(repeating: 0)
-                var sigAdvanceFreq = SIMD4<UInt32>(repeating: 0)
-                
-                for lane in 0..<4 {
-                    if cfs[lane] < model.sigFreq {
-                        isSigs[lane] = true
-                        sigAdvanceFreq[lane] = sigFreqVec[lane]
-                        sigAdvanceCumFreq[lane] = zeroVec[lane]
-                    } else {
-                        isSigs[lane] = false
-                        sigAdvanceFreq[lane] = invSigFreqVec[lane]
-                        sigAdvanceCumFreq[lane] = sigFreqVec[lane]
-                    }
-                }
-                
-                decoder.advanceSymbols(cumFreqs: sigAdvanceCumFreq, freqs: sigAdvanceFreq)
-                
-                let cfTokens = decoder.getCumulativeFreqs()
-                var tokenAdvanceCumFreq = SIMD4<UInt32>(repeating: 0)
-                var tokenAdvanceFreq = SIMD4<UInt32>(repeating: 0)
-                var readToken = [UInt8](repeating: 0, count: 4)
-                
-                var advanceMask = SIMD4<UInt32>(repeating: 0)
-                for lane in 0..<4 {
-                    if isSigs[lane] {
-                        let tInfo = model.findToken(cf: cfTokens[lane])
-                        readToken[lane] = tInfo.token
-                        tokenAdvanceCumFreq[lane] = tInfo.cumFreq
-                        tokenAdvanceFreq[lane] = tInfo.freq
-                        advanceMask[lane] = 0xFFFFFFFF
-                    }
-                }
-                
-                decoder.advanceSymbols(cumFreqs: tokenAdvanceCumFreq, freqs: tokenAdvanceFreq, activeMask: advanceMask)
-                
-                // Read bypass ではなくまずは rANS 結果のみ保存
-                for lane in 0..<4 {
-                    rANSDecodedByLane[lane].append((isSignificant: isSigs[lane], token: readToken[lane]))
+            decoder.advanceSymbols(cumFreqs: sigAdvanceCumFreq, freqs: sigAdvanceFreq)
+            
+            let cfTokens = decoder.getCumulativeFreqs()
+            var tokenAdvanceCumFreq = SIMD4<UInt32>(repeating: 0)
+            var tokenAdvanceFreq = SIMD4<UInt32>(repeating: 0)
+            var readToken = [UInt8](repeating: 0, count: 4)
+            
+            var advanceMask = SIMD4<UInt32>(repeating: 0)
+            for lane in 0..<4 {
+                if isSigs[lane] {
+                    let tInfo = model.findToken(cf: cfTokens[lane])
+                    readToken[lane] = tInfo.token
+                    tokenAdvanceCumFreq[lane] = tInfo.cumFreq
+                    tokenAdvanceFreq[lane] = tInfo.freq
+                    advanceMask[lane] = 0xFFFFFFFF
                 }
             }
-            finalDecodingResult = rANSDecodedByLane
+            
+            decoder.advanceSymbols(cumFreqs: tokenAdvanceCumFreq, freqs: tokenAdvanceFreq, activeMask: advanceMask)
+            
+            // Read bypass ではなくまずは rANS 結果のみ保存
+            for lane in 0..<4 {
+                rANSDecodedByLane[lane].append((isSignificant: isSigs[lane], token: readToken[lane]))
+            }
         }
+        finalDecodingResult = rANSDecodedByLane
         
         // Assemble and read Bypass in Forward Order
         var restoredByLane = [[EncodedData]](repeating: [], count: 4)

@@ -43,7 +43,6 @@ public class Encoder {
         var motionTree = MotionTree(ctuNodes: [], width: 0, height: 0)
         var meanSAD: Int = 0
 
-        
         if keyint <= framesSinceKeyframe || prevReconstructed == nil {
             forceIFrame = true
         } else {
@@ -66,7 +65,6 @@ public class Encoder {
                 let res = await subPlanes(curr: curr, predicted: predicted)
                 let resStats = calculateSADAndMaxBlockSAD(res: res, mbSize: mbSize)
                 
-                // User requirement: "この値[Layer0 SAD]を使って変化量も検出してビットレートの計算に使っていた"
                 // Use structural Layer0 raw SAD as the primary global activity metric for stable Rate Control (AQ)
                 meanSAD = rawStats.meanSAD
                 

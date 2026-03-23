@@ -202,7 +202,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     }
     let frameBox = FrameBox()
     
-    // HWA無効化用のエンコーダ/デコーダ仕様
+    // Encoder/decoder spec to disable HWA
     let encoderSpec: CFDictionary? = disableHWA ? ([
         kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
         kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
@@ -292,7 +292,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
-    // HWA無効化用のデコーダ仕様
+    // Decoder spec to disable HWA
     let decoderSpec: CFDictionary? = disableHWA ? ([
         kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
         kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
@@ -387,7 +387,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     }
     let frameBox = FrameBox()
     
-    // HWA無効化用のエンコーダ/デコーダ仕様
+    // Encoder/decoder spec to disable HWA
     let encoderSpec: CFDictionary? = disableHWA ? ([
         kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
         kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
@@ -475,7 +475,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
-    // HWA無効化用のデコーダ仕様
+    // Decoder spec to disable HWA
     let decoderSpec: CFDictionary? = disableHWA ? ([
         kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
         kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
@@ -831,7 +831,7 @@ struct CompareApp {
         let rawTotalSizeKB = Double(localImages.count * localWidth * localHeight * 3) / 1024.0 // Assuming YCbCr size calculation standard. H264 is YUV 4:2:0 mostly.
         
         do {
-            // ウォームアップ: CPUキャッシュ・コードキャッシュを暖機するため、最大5フレームでダミー実行
+            // Warmup: dummy run for up to 5 frames to warm up CPU/code cache
             let warmupCount = min(5, localImages.count)
             let warmupImages = Array(localImages[0..<warmupCount])
             print("Warming up (\(warmupCount) frames)...")

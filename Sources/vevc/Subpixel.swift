@@ -136,7 +136,7 @@ func subpixelInterpolateBlock(
     withUnsafeTemporaryAllocation(of: Int16.self, capacity: intermediateCount) { interPtr in
         guard let intBase = interPtr.baseAddress else { return }
         
-        // パフォーマンス指針：「2. ループ深部からの条件分岐の排除」に従って外側に分岐を引き上げ
+        // Performance Guideline: "2. Eliminate conditional branches from inner loops" -> hoisting branches outside
         switch fracX {
         case 1:
             for y in 0..<(height + extraLines) {

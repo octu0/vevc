@@ -59,20 +59,20 @@ struct QuantizationTable: Sendable {
             var deadZoneHigh = -0.3 // HH dead zone (wider = more zeros)
 
             if layerIndex == 2 {
-                // Layer 32 (高周波): CSF感度が低い → 粗く量子化
-                // ビット予算をLayer 0/1の精密化に再配分
+                // Layer 32 (High Freq): low CSF sensitivity -> quantize coarsely
+                // Reallocate bit budget for precision of Layer 0/1
                 qMidScale = 2.2
                 qHighScale = 4.5
                 deadZoneMid = -0.20
                 deadZoneHigh = -0.40
             } else if layerIndex == 1 {
-                // Layer 16 (中周波): 構造保存が重要
+                // Layer 16 (Mid Freq): structure preservation is important
                 qMidScale = 0.65
                 qHighScale = 1.2
                 deadZoneMid = -0.10
                 deadZoneHigh = -0.25
             } else if layerIndex == 0 {
-                // Layer 8 (低周波 - Base): CSF感度最高 → 精密に保存
+                // Layer 8 (Low Freq - Base): highest CSF sensitivity -> preserve precisely
                 qMidScale = 0.20
                 qHighScale = 0.35
                 qLowDivisor = 16

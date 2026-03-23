@@ -132,7 +132,7 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView, parentBlock:
 
     if lscpX == -1 {
         encoder.encodeBypass(binVal: 0)
-        // デコーダはclearAll()するため、エンコーダ側もゼロクリアして再構築時の一致を保証
+        // Decoder invokes clearAll(), so encoder side must also zero clear to guarantee match during reconstruction
         for y in 0..<16 {
             let ptr = block.rowPointer(y: y)
             for x in 0..<16 {
@@ -167,8 +167,8 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView, parentBlock:
         }
     }
     
-    // lscp超の位置をゼロクリア（デコーダはclearAll→lscpまでデコードするためlscp超は0）
-    // エンコーダ側もlscp超をゼロにして再構築時のデコーダとの一致を保証
+    // Zero clear positions beyond LSCP (Decoder clearAll -> decodes up to lscp, so beyond lscp is 0)
+    // Encoder side also zeros beyond lscp to guarantee match with decoder during reconstruction
     let lscpPtr = block.rowPointer(y: lscpY)
     for x in (lscpX + 1)..<16 {
         lscpPtr[x] = 0
@@ -215,7 +215,7 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView, parentBlock: 
 
     if lscpX == -1 {
         encoder.encodeBypass(binVal: 0)
-        // デコーダはclearAll()するため、エンコーダ側もゼロクリアして再構築時の一致を保証
+        // Decoder invokes clearAll(), so encoder side must also zero clear to guarantee match during reconstruction
         for y in 0..<8 {
             let ptr = block.rowPointer(y: y)
             for x in 0..<8 {
@@ -250,7 +250,7 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView, parentBlock: 
         }
     }
     
-    // lscp超の位置をゼロクリア（デコーダはclearAll→lscpまでデコードするためlscp超は0）
+    // Zero clear positions beyond LSCP (Decoder clearAll -> decodes up to lscp, so beyond lscp is 0)
     let lscpPtr = block.rowPointer(y: lscpY)
     for x in (lscpX + 1)..<8 {
         lscpPtr[x] = 0
@@ -331,7 +331,7 @@ func blockEncode4(encoder: inout EntropyEncoder, block: BlockView, parentBlock: 
         }
     }
     
-    // lscp超ゼロクリア
+    // Zero clear beyond LSCP
     let lscpPtr = block.rowPointer(y: lscpY)
     for x in (lscpX + 1)..<4 {
         lscpPtr[x] = 0

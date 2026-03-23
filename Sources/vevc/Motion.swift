@@ -496,9 +496,9 @@ func estimateMBMEBlockEdge(
 
 // MARK: - Subsampled SAD for Coarse Search
 
-/// 64x64ブロックのSADを1行おき（32行分）で計算する。
-/// ダウンスケールバッファを必要としないゼロコストの粗探索用SAD。
-/// 結果は近似値であり、正確なSADの約50%の値を返す。
+/// Calculate SAD of 64x64 block on every other row (32 rows total).
+/// Zero-cost coarse search SAD that requires no downscale buffer.
+/// The result is an approximation, returning about 50% of the exact SAD value.
 @inline(__always)
 func calculateSAD64x64_Subsample(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, currStride: Int, prevStride: Int) -> Int {
     var sumVec0 = SIMD16<UInt16>()
@@ -506,7 +506,7 @@ func calculateSAD64x64_Subsample(pCurr: UnsafePointer<Int16>, pPrev: UnsafePoint
     var sumVec2 = SIMD16<UInt16>()
     var sumVec3 = SIMD16<UInt16>()
 
-    // 1行おきに計算（y=0,2,4,...62の32行分）
+    // Calculate on every other row (y=0,2,4...62, 32 rows total)
     for y in stride(from: 0, to: 64, by: 2) {
         let currRow = pCurr.advanced(by: y * currStride)
         let prevRow = pPrev.advanced(by: y * prevStride)
@@ -552,10 +552,10 @@ func calculateSAD64x64_Subsample(pCurr: UnsafePointer<Int16>, pPrev: UnsafePoint
 
 // MARK: - estimateMBME (Subsample SAD + PMV)
 
-/// サブサンプリングSADによる高速動き推定。
-/// 従来のステップサーチ構造をそのまま維持し、SADの計算を1行おき（50%計算量）にすることで高速化。
-/// 加えて、PMV（周辺ブロックのMV中央値）を探索開始点として使用し、収束を加速。
-/// デコーダへの出力フォーマットは従来と同一（変更不要）。
+/// High-speed motion estimation using subsampled SAD.
+/// Maintains the conventional step search structure while accelerating by calculating SAD on every other row (50% computation).
+/// In addition, PMV (median of neighboring block MVs) is used as the starting point to accelerate convergence.
+/// Output format to decoder is identical to the conventional method (no changes required).
 @inline(__always)
 func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
     let mbSize = 64
@@ -584,7 +584,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
             let remW = w % mbSize
             let remH = h % mbSize
 
-            // --- フルサイズブロック: サブサンプリングSAD + PMV初期値 ---
+            // --- Full Size Block: Subsampled SAD + initial PMV ---
             for mbY in 0..<fullMbRows {
                 let startY = mbY * mbSize
                 for mbX in 0..<fullMbCols {
@@ -596,12 +596,12 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                     let minSafeDY = max(-1 * searchRange, -startY)
                     let maxSafeDY = min(searchRange, h - 64 - startY)
 
-                    // PMVを探索開始点として活用
+                    // Use PMV as the search starting point
                     let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
                     var bestDX = max(minSafeDX, min(maxSafeDX, pmv.dx >> 2))
                     var bestDY = max(minSafeDY, min(maxSafeDY, pmv.dy >> 2))
 
-                    // 初期SADの計算（サブサンプリング）
+                    // Initial SAD calculation (subsampling)
                     var bestSAD: Int
                     if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
                         bestSAD = calculateSAD64x64_Subsample(
@@ -613,7 +613,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                         bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
                     }
 
-                    // (0,0)のSADも必ず評価（PMVより良い場合があるため）
+                    // Always evaluate SAD at (0,0) (may be better than PMV)
                     if bestDX != 0 || bestDY != 0 {
                         let zeroSAD = calculateSAD64x64_Subsample(
                             pCurr: pCurr.advanced(by: startY * w + startX),
@@ -627,7 +627,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                         }
                     }
 
-                    // earlyExitの閾値（サブサンプリングは半分の行数なので閾値も調整）
+                    // earlyExit threshold (subsampling uses half the rows, so threshold is adjusted accordingly)
                     let earlyExitThreshold = 64 * 32 * 1
                     if earlyExitThreshold < bestSAD {
                         let negSearchRange = -1 * searchRange
@@ -639,7 +639,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                             var currentBestDY = bestDY
                             var currentBestSAD = bestSAD
 
-                            // step==1のとき: フルSADでbestSADを再計算（サブサンプリング→フルの精度補正）
+                            // When step==1: recalculate bestSAD with full SAD (Subsampling -> Full precision correction)
                             if step == 1 {
                                 if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
                                     currentBestSAD = calculateSAD64x64(
@@ -670,14 +670,14 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                                     let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
                                     if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
                                         if step == 1 {
-                                            // 最終ステップ: フルSADで精密比較
+                                            // Final Step: exact comparison using full SAD
                                             sad = calculateSAD64x64(
                                                 pCurr: pCurr.advanced(by: startY * w + startX),
                                                 pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
                                                 currStride: w, prevStride: w
                                             )
                                         } else {
-                                            // 粗ステップ: サブサンプリングSADで高速比較
+                                            // Coarse Step: high-speed comparison using subsampled SAD
                                             sad = calculateSAD64x64_Subsample(
                                                 pCurr: pCurr.advanced(by: startY * w + startX),
                                                 pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
@@ -717,7 +717,7 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
                 }
             }
 
-            // --- 端部ブロック: 従来方式にフォールバック ---
+            // --- Edge blocks: fallback to conventional method ---
             if 0 < remW {
                 let mbX = fullMbCols
                 let startX = mbX * mbSize

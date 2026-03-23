@@ -155,12 +155,12 @@ struct rANSModel {
         if totalTokens == 0 {
             self.tokenFreqs = Array(repeating: RANS_SCALE / 64, count: 64)
         } else {
-            // 未使用トークン数をカウントし、有効トークンへのスケール配分を最大化
+            // Count unused tokens to maximize scale allocation for valid tokens
             var zeroCount: UInt32 = 0
             for i in 0..<64 {
                 if tokenCounts[i] == 0 { zeroCount += 1 }
             }
-            // 未使用トークンは最小freq=1を割り当て、残りを有効トークンに配分
+            // Assign minimum freq=1 to unused tokens, allocating the rest to valid tokens
             let availableScale = RANS_SCALE - zeroCount
             
             var sum: UInt32 = 0
