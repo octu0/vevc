@@ -31,12 +31,12 @@ func encodeExpGolomb(val: UInt32, encoder: inout EntropyEncoder) {
 }
 
 @inline(__always)
-func encodeCoeffRun(val: Int16, encoder: inout EntropyEncoder, run: Int) {
-    encoder.addPair(run: UInt32(run), val: val)
+func encodeCoeffRun(val: Int16, encoder: inout EntropyEncoder, run: Int, isParentZero: Bool = false) {
+    encoder.addPair(run: UInt32(run), val: val, isParentZero: isParentZero)
 }
 
 @inline(__always)
-func blockEncode32(encoder: inout EntropyEncoder, block: BlockView) {
+func blockEncode32(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero16 = SIMD16<Int16>(repeating: 0)
@@ -77,15 +77,21 @@ func blockEncode32(encoder: inout EntropyEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var isParentZero = false
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (32 - 1)
         for x in 0...endX {
+            if run == 0 {
+                if let pb = parentBlock {
+                    isParentZero = pb.rowPointer(y: y)[x] == 0
+                }
+            }
             let val = ptr[x]
             if val == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZero)
                 run = 0
             }
         }
@@ -93,7 +99,7 @@ func blockEncode32(encoder: inout EntropyEncoder, block: BlockView) {
 }
 
 @inline(__always)
-func blockEncode16(encoder: inout EntropyEncoder, block: BlockView) {
+func blockEncode16(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -141,15 +147,21 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var isParentZero = false
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (16 - 1)
         for x in 0...endX {
+            if run == 0 {
+                if let pb = parentBlock {
+                    isParentZero = pb.rowPointer(y: y)[x] == 0
+                }
+            }
             let val = ptr[x]
             if val == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZero)
                 run = 0
             }
         }
@@ -170,7 +182,7 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView) {
 }
 
 @inline(__always)
-func blockEncode8(encoder: inout EntropyEncoder, block: BlockView) {
+func blockEncode8(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -218,15 +230,21 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var isParentZero = false
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (8 - 1)
         for x in 0...endX {
+            if run == 0 {
+                if let pb = parentBlock {
+                    isParentZero = pb.rowPointer(y: y)[x] == 0
+                }
+            }
             let val = ptr[x]
             if val == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZero)
                 run = 0
             }
         }
@@ -246,7 +264,7 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView) {
 }
 
 @inline(__always)
-func blockEncode4(encoder: inout EntropyEncoder, block: BlockView) {
+func blockEncode4(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero2 = SIMD2<Int16>(repeating: 0)
@@ -293,15 +311,21 @@ func blockEncode4(encoder: inout EntropyEncoder, block: BlockView) {
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var isParentZero = false
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
         let endX = (y == lscpY) ? lscpX : (4 - 1)
         for x in 0...endX {
+            if run == 0 {
+                if let pb = parentBlock {
+                    isParentZero = pb.rowPointer(y: y)[x] == 0
+                }
+            }
             let val = ptr[x]
             if val == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZero)
                 run = 0
             }
         }
@@ -951,7 +975,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentImage: Image16?, dx: Int, planeType: Int) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1008,47 +1032,74 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     var encoder = EntropyEncoder()
     
     for (i, task) in tasks {
-        blocks[i].withView { view in
-            let subs = getSubbands32(view: view)
-            switch task {
-            case .encode16:
-                blockEncode16(encoder: &encoder, block: subs.hl)
-                blockEncode16(encoder: &encoder, block: subs.lh)
-                blockEncode16(encoder: &encoder, block: subs.hh)
-            case .split8(let tl, let tr, let bl, let br):
-                if tl {
-                    let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
-                }
-                if tr {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
-                }
-                if bl {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
-                }
-                if br {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
+        let colCount = (dx + 32 - 1) / 32
+        let r = i / colCount
+        let c = i % colCount
+        let pbX = c * 16
+        let pbY = r * 16
+        
+        var parentBlock2D: Block2D? = nil
+        if let pImg = parentImage {
+            switch planeType {
+            case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 16)
+            case 1: parentBlock2D = pImg.getCb(x: pbX, y: pbY, size: 16)
+            default: parentBlock2D = pImg.getCr(x: pbX, y: pbY, size: 16)
+            }
+        }
+        
+        func encodeAction(_ parentBlock: BlockView?) {
+            blocks[i].withView { view in
+                let subs = getSubbands32(view: view)
+                switch task {
+                case .encode16:
+                    blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: parentBlock)
+                    blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: parentBlock)
+                    blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: parentBlock)
+                case .split8(let tl, let tr, let bl, let br):
+                    if tl {
+                        let pb = parentBlock.map { BlockView(base: $0.base, width: 8, height: 8, stride: 16) }
+                        let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
+                        blockEncode8(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
+                    if tr {
+                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 8), width: 8, height: 8, stride: 16) }
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                        blockEncode8(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
+                    if bl {
+                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16) }
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                        blockEncode8(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
+                    if br {
+                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16) }
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                        blockEncode8(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode8(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
                 }
             }
+        }
+        
+        if var pb2d = parentBlock2D {
+            pb2d.withView { pb in encodeAction(pb) }
+        } else {
+            encodeAction(nil)
         }
     }
     
@@ -1064,7 +1115,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentImage: Image16?, dx: Int, planeType: Int) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1120,47 +1171,74 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt
     var encoder = EntropyEncoder()
     
     for (i, task) in tasks {
-        blocks[i].withView { view in
-            let subs = getSubbands16(view: view)
-            switch task {
-            case .encode8:
-                blockEncode8(encoder: &encoder, block: subs.hl)
-                blockEncode8(encoder: &encoder, block: subs.lh)
-                blockEncode8(encoder: &encoder, block: subs.hh)
-            case .split4(let tl, let tr, let bl, let br):
-                if tl {
-                    let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
-                    let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
-                    let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl)
-                    blockEncode4(encoder: &encoder, block: lh)
-                    blockEncode4(encoder: &encoder, block: hh)
-                }
-                if tr {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl)
-                    blockEncode4(encoder: &encoder, block: lh)
-                    blockEncode4(encoder: &encoder, block: hh)
-                }
-                if bl {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl)
-                    blockEncode4(encoder: &encoder, block: lh)
-                    blockEncode4(encoder: &encoder, block: hh)
-                }
-                if br {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                    blockEncode4(encoder: &encoder, block: hl)
-                    blockEncode4(encoder: &encoder, block: lh)
-                    blockEncode4(encoder: &encoder, block: hh)
+        let colCount = (dx + 16 - 1) / 16
+        let r = i / colCount
+        let c = i % colCount
+        let pbX = c * 8
+        let pbY = r * 8
+        
+        var parentBlock2D: Block2D? = nil
+        if let pImg = parentImage {
+            switch planeType {
+            case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 8)
+            case 1: parentBlock2D = pImg.getCb(x: pbX, y: pbY, size: 8)
+            default: parentBlock2D = pImg.getCr(x: pbX, y: pbY, size: 8)
+            }
+        }
+        
+        func encodeAction(_ parentBlock: BlockView?) {
+            blocks[i].withView { view in
+                let subs = getSubbands16(view: view)
+                switch task {
+                case .encode8:
+                    blockEncode8(encoder: &encoder, block: subs.hl, parentBlock: parentBlock)
+                    blockEncode8(encoder: &encoder, block: subs.lh, parentBlock: parentBlock)
+                    blockEncode8(encoder: &encoder, block: subs.hh, parentBlock: parentBlock)
+                case .split4(let tl, let tr, let bl, let br):
+                    if tl {
+                        let pb = parentBlock.map { BlockView(base: $0.base, width: 4, height: 4, stride: 8) }
+                        let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
+                        let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
+                        let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
+                        blockEncode4(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
+                    if tr {
+                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 4), width: 4, height: 4, stride: 8) }
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
+                        blockEncode4(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
+                    if bl {
+                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 4 * 8), width: 4, height: 4, stride: 8) }
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                        blockEncode4(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
+                    if br {
+                        let pb = parentBlock.map { BlockView(base: $0.base.advanced(by: 4 * 8 + 4), width: 4, height: 4, stride: 8) }
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                        blockEncode4(encoder: &encoder, block: hl, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: lh, parentBlock: pb)
+                        blockEncode4(encoder: &encoder, block: hh, parentBlock: pb)
+                    }
                 }
             }
+        }
+        
+        if var pb2d = parentBlock2D {
+            pb2d.withView { pb in encodeAction(pb) }
+        } else {
+            encodeAction(nil)
         }
     }
     
@@ -1196,9 +1274,9 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
     for i in nonZeroIndices {
         blocks[i].withView { view in
             let subs = getSubbands8(view: view)
-            blockEncode4(encoder: &encoder, block: subs.hl)
-            blockEncode4(encoder: &encoder, block: subs.lh)
-            blockEncode4(encoder: &encoder, block: subs.hh)
+            blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
         }
     }
     
@@ -1242,9 +1320,9 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
             blocks[i].withView { view in
                 let subs = getSubbands8(view: view)
                 blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-                blockEncode4(encoder: &encoder, block: subs.hl)
-                blockEncode4(encoder: &encoder, block: subs.lh)
-                blockEncode4(encoder: &encoder, block: subs.hh)
+                blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
         } else {
             lastVal = 0
@@ -1321,9 +1399,9 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)
                 blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-                blockEncode16(encoder: &encoder, block: subs.hl)
-                blockEncode16(encoder: &encoder, block: subs.lh)
-                blockEncode16(encoder: &encoder, block: subs.hh)
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
 
         case .split8(let tl, let tr, let bl, let br):
@@ -1335,9 +1413,9 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
                     let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
                     blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
+                    blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
                 }
                 if tr {
                     let ll = BlockView(base: subs.ll.base.advanced(by: 8), width: 8, height: 8, stride: 32)
@@ -1345,9 +1423,9 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                     blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
+                    blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
                 }
                 if bl {
                     let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
@@ -1355,9 +1433,9 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
+                    blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
                 }
                 if br {
                     let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
@@ -1365,9 +1443,9 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
                     let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                    blockEncode8(encoder: &encoder, block: hl)
-                    blockEncode8(encoder: &encoder, block: lh)
-                    blockEncode8(encoder: &encoder, block: hh)
+                    blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
                 }
             }
         }
@@ -1621,17 +1699,17 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
             let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
             
             blockEncodeDPCM4(encoder: &encoder, block: ll3, lastVal: &lastVal)
-            blockEncode4(encoder: &encoder, block: hl3)
-            blockEncode4(encoder: &encoder, block: lh3)
-            blockEncode4(encoder: &encoder, block: hh3)
+            blockEncode4(encoder: &encoder, block: hl3, parentBlock: nil)
+            blockEncode4(encoder: &encoder, block: lh3, parentBlock: nil)
+            blockEncode4(encoder: &encoder, block: hh3, parentBlock: nil)
             
-            blockEncode8(encoder: &encoder, block: hl2)
-            blockEncode8(encoder: &encoder, block: lh2)
-            blockEncode8(encoder: &encoder, block: hh2)
+            blockEncode8(encoder: &encoder, block: hl2, parentBlock: nil)
+            blockEncode8(encoder: &encoder, block: lh2, parentBlock: nil)
+            blockEncode8(encoder: &encoder, block: hh2, parentBlock: nil)
             
-            blockEncode16(encoder: &encoder, block: hl1)
-            blockEncode16(encoder: &encoder, block: lh1)
-            blockEncode16(encoder: &encoder, block: hh1)
+            blockEncode16(encoder: &encoder, block: hl1, parentBlock: nil)
+            blockEncode16(encoder: &encoder, block: lh1, parentBlock: nil)
+            blockEncode16(encoder: &encoder, block: hh1, parentBlock: nil)
         }
     }
     

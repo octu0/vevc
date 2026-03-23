@@ -14,7 +14,7 @@ final class EntropyCodecTests: XCTestCase {
             let run = UInt32(i % 5)
             let val = Int16(clamping: (i * 7 - 175) % 100)
             if val == 0 { continue }
-            encoder.addPair(run: run, val: val)
+            encoder.addPair(run: run, val: val, isParentZero: false)
             expectedPairs.append((run: run, val: val))
         }
         
@@ -52,7 +52,7 @@ final class EntropyCodecTests: XCTestCase {
             for j in 0..<3 {
                 let run = UInt32(j)
                 let val = Int16(block * 3 + j + 1)
-                encoder.addPair(run: run, val: val)
+                encoder.addPair(run: run, val: val, isParentZero: false)
                 expectedPairs.append((run: run, val: val))
             }
         }
@@ -97,7 +97,7 @@ final class EntropyCodecTests: XCTestCase {
         var encoder = EntropyEncoder()
         for i in 0..<16 {
             blocks[i].withView { view in
-                blockEncode16(encoder: &encoder, block: view)
+                blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
             }
         }
         
@@ -108,7 +108,7 @@ final class EntropyCodecTests: XCTestCase {
         var decoder = try EntropyDecoder(data: data)
         for i in 0..<16 {
             decBlocks[i].withView { view in
-                try! blockDecode16(decoder: &decoder, block: &view)
+                try! blockDecode16(decoder: &decoder, block: &view, parentBlock: nil)
             }
         }
         

@@ -12,7 +12,7 @@ struct ContextModel {
 
 struct EntropyEncoder {
     var bypassWriter: BypassWriter
-    var pairs: [(run: UInt32, val: Int16)]
+    var pairs: [(run: UInt32, val: Int16, isParentZero: Bool)]
     var trailingZeros: UInt32
     private(set) var coeffCount: Int
 
@@ -29,8 +29,8 @@ struct EntropyEncoder {
     }
 
     @inline(__always)
-    mutating func addPair(run: UInt32, val: Int16) {
-        pairs.append((run: run, val: val))
+    mutating func addPair(run: UInt32, val: Int16, isParentZero: Bool = false) {
+        pairs.append((run: run, val: val, isParentZero: isParentZero))
         coeffCount += Int(run) + 1
     }
     
@@ -102,8 +102,10 @@ struct EntropyEncoder {
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-        var runTokenCounts = Array(repeating: 0, count: 64)
-        var valTokenCounts = Array(repeating: 0, count: 64)
+        var runTokenCounts0 = Array(repeating: 0, count: 64)
+        var valTokenCounts0 = Array(repeating: 0, count: 64)
+        var runTokenCounts1 = Array(repeating: 0, count: 64)
+        var valTokenCounts1 = Array(repeating: 0, count: 64)
         
         for lane in 0..<4 {
             let start = chunkStarts[lane]
@@ -116,21 +118,27 @@ struct EntropyEncoder {
                 let pair = pairs[idx]
                 
                 let runResult = valueTokenizeUnsigned(pair.run)
-                runTokenCounts[Int(runResult.token)] += 1
                 chunkRunTokens[lane].append(runResult.token)
                 chunkBypassWriters[lane].writeBits(runResult.bypassBits, count: runResult.bypassLen)
                 
                 let valResult = valueTokenize(pair.val)
-                valTokenCounts[Int(valResult.token)] += 1
                 chunkValTokens[lane].append(valResult.token)
                 chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)
+
+                if pair.isParentZero {
+                    runTokenCounts1[Int(runResult.token)] += 1
+                    valTokenCounts1[Int(valResult.token)] += 1
+                } else {
+                    runTokenCounts0[Int(runResult.token)] += 1
+                    valTokenCounts0[Int(valResult.token)] += 1
+                }
             }
         }
         
         // trailing zeros: add to lane3
         if hasTrailingZeros {
             let runResult = valueTokenizeUnsigned(trailingZeros)
-            runTokenCounts[Int(runResult.token)] += 1
+            runTokenCounts0[Int(runResult.token)] += 1
             chunkRunTokens[3].append(runResult.token)
             chunkBypassWriters[3].writeBits(runResult.bypassBits, count: runResult.bypassLen)
         }
@@ -140,14 +148,20 @@ struct EntropyEncoder {
         }
         // Cap frequencies to 16-bit to ensure bitstream serialization perfectly matches what the decoder reads
         for i in 0..<64 {
-            if runTokenCounts[i] > 65535 { runTokenCounts[i] = 65535 }
-            if valTokenCounts[i] > 65535 { valTokenCounts[i] = 65535 }
+            if runTokenCounts0[i] > 65535 { runTokenCounts0[i] = 65535 }
+            if valTokenCounts0[i] > 65535 { valTokenCounts0[i] = 65535 }
+            if runTokenCounts1[i] > 65535 { runTokenCounts1[i] = 65535 }
+            if valTokenCounts1[i] > 65535 { valTokenCounts1[i] = 65535 }
         }
         
-        var runModel = rANSModel()
-        var valModel = rANSModel()
-        runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
-        valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
+        var runModel0 = rANSModel()
+        var valModel0 = rANSModel()
+        var runModel1 = rANSModel()
+        var valModel1 = rANSModel()
+        runModel0.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts0)
+        valModel0.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts0)
+        runModel1.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts1)
+        valModel1.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts1)
         
         // header
         out.append(hasTrailingZeros ? 1 : 0)
@@ -161,8 +175,10 @@ struct EntropyEncoder {
         }
         
         // compressed frequency table
-        writeCompressedFreqTable(&out, freqs: runModel.tokenFreqs)
-        writeCompressedFreqTable(&out, freqs: valModel.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: valModel0.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: runModel1.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: valModel1.tokenFreqs)
         
         // 4-way bypass data
         for lane in 0..<4 {
@@ -178,7 +194,7 @@ struct EntropyEncoder {
         // trailing zeros (lane 3)
         if hasTrailingZeros {
             let trailingRunToken = chunkRunTokens[3].last!
-            enc.encodeSymbol(lane: 3, cumFreq: runModel.tokenCumFreqs[Int(trailingRunToken)], freq: runModel.tokenFreqs[Int(trailingRunToken)])
+            enc.encodeSymbol(lane: 3, cumFreq: runModel0.tokenCumFreqs[Int(trailingRunToken)], freq: runModel0.tokenFreqs[Int(trailingRunToken)])
         }
         
         // encode each lane in reverse order
@@ -186,13 +202,24 @@ struct EntropyEncoder {
             let runTokens = chunkRunTokens[lane]
             let valTokens = chunkValTokens[lane]
             let pairEnd = valTokens.count
+            let chunkStartIdx = chunkStarts[lane]
             
             for i in stride(from: pairEnd - 1, through: 0, by: -1) {
+                let pairIdx = chunkStartIdx + i
+                let isParentZero = pairs[pairIdx].isParentZero
                 let vt = valTokens[i]
-                enc.encodeSymbol(lane: lane, cumFreq: valModel.tokenCumFreqs[Int(vt)], freq: valModel.tokenFreqs[Int(vt)])
+                if isParentZero {
+                    enc.encodeSymbol(lane: lane, cumFreq: valModel1.tokenCumFreqs[Int(vt)], freq: valModel1.tokenFreqs[Int(vt)])
+                } else {
+                    enc.encodeSymbol(lane: lane, cumFreq: valModel0.tokenCumFreqs[Int(vt)], freq: valModel0.tokenFreqs[Int(vt)])
+                }
                 
                 let rt = runTokens[i]
-                enc.encodeSymbol(lane: lane, cumFreq: runModel.tokenCumFreqs[Int(rt)], freq: runModel.tokenFreqs[Int(rt)])
+                if isParentZero {
+                    enc.encodeSymbol(lane: lane, cumFreq: runModel1.tokenCumFreqs[Int(rt)], freq: runModel1.tokenFreqs[Int(rt)])
+                } else {
+                    enc.encodeSymbol(lane: lane, cumFreq: runModel0.tokenCumFreqs[Int(rt)], freq: runModel0.tokenFreqs[Int(rt)])
+                }
             }
         }
         
@@ -240,8 +267,19 @@ struct EntropyEncoder {
 
 struct EntropyDecoder {
     var bypassReader: BypassReader
-    var pairs: [(run: UInt32, val: Int16)]
+    var pairs: [(run: UInt32, val: Int16)] = []
     private var pairIndex: Int = 0
+    
+    private var isRawMode: Bool = false
+    private var totalPairEntries: Int = 0
+    private var chunkStarts: [Int] = []
+    private var hasTrailingZeros: Bool = false
+    private var runModel0: rANSModel!
+    private var valModel0: rANSModel!
+    private var runModel1: rANSModel!
+    private var valModel1: rANSModel!
+    private var chunkBypassReaders: [BypassReader] = []
+    private var ransDecoder: Interleaved4rANSDecoder!
 
     init(data: [UInt8]) throws {
         var offset = 0
@@ -267,6 +305,7 @@ struct EntropyDecoder {
         offset += 1
         
         let isRawMode = (flags & 0x80) != 0
+        self.isRawMode = isRawMode
         
         if isRawMode {
             guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
@@ -301,9 +340,11 @@ struct EntropyDecoder {
         
         // rANS mode
         let hasTrailingZeros = (flags & 1) != 0
+        self.hasTrailingZeros = hasTrailingZeros
         
         guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
         let totalPairEntries = Int(vevc.readUInt32BE(data, at: &offset))
+        self.totalPairEntries = totalPairEntries
         
         // chunk size (4 lanes)
         guard offset + 16 <= data.count else { throw DecodeError.insufficientData }
@@ -312,11 +353,23 @@ struct EntropyDecoder {
             chunkSizes[lane] = Int(vevc.readUInt32BE(data, at: &offset))
         }
         
-        let runTokenFreqs = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-        let runModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs)
+        var starts = [Int](repeating: 0, count: 5)
+        for i in 0..<4 {
+            starts[i+1] = starts[i] + chunkSizes[i]
+        }
+        self.chunkStarts = starts
         
-        let valTokenFreqs = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-        let valModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs)
+        let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+        self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
+        
+        let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+        self.valModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs0)
+        
+        let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+        self.runModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs1)
+        
+        let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+        self.valModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs1)
         
         // 4-way bypass data
         var chunkBypassReaders = [BypassReader]()
@@ -328,61 +381,11 @@ struct EntropyDecoder {
             chunkBypassReaders.append(BypassReader(data: bpData))
             offset += bpLen
         }
+        self.chunkBypassReaders = chunkBypassReaders
         
         // rANS stream
         let ransData = Array(data[offset...])
-        var ransDecoder = Interleaved4rANSDecoder(bitstream: ransData)
-        
-        // decode pairs from each lane
-        var chunkPairs = [[(run: UInt32, val: Int16)]](repeating: [], count: 4)
-        
-        for lane in 0..<4 {
-            let chunkSize = chunkSizes[lane]
-            let hasTZ = (lane == 3 && hasTrailingZeros)
-            let pairCountInChunk = hasTZ ? chunkSize - 1 : chunkSize
-            chunkPairs[lane].reserveCapacity(chunkSize)
-            
-            for _ in 0..<pairCountInChunk {
-                let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-                let rtInfo = runModel.findToken(cf: cfRun)
-                ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
-                
-                let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
-                let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
-                let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
-                
-                let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
-                let vtInfo = valModel.findToken(cf: cfVal)
-                ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
-                
-                let valBypassLen = valueBypassLength(for: vtInfo.token)
-                let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
-                let val = valueDetokenize(token: vtInfo.token, bypassBits: valBypassBits)
-                
-                chunkPairs[lane].append((run: zeroRun, val: val))
-            }
-            
-            // trailing zeros (lane 3)
-            if hasTZ {
-                let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-                let rtInfo = runModel.findToken(cf: cfRun)
-                ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
-                
-                let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
-                let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
-                let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
-                chunkPairs[lane].append((run: zeroRun, val: 0))
-            }
-        }
-        
-        // combine 4 chunks to generate pairs array
-        var allPairs = [(run: UInt32, val: Int16)]()
-        allPairs.reserveCapacity(totalPairEntries)
-        for lane in 0..<4 {
-            allPairs.append(contentsOf: chunkPairs[lane])
-        }
-        
-        self.pairs = allPairs
+        self.ransDecoder = Interleaved4rANSDecoder(bitstream: ransData)
     }
     
     @inline(__always)
@@ -416,11 +419,54 @@ struct EntropyDecoder {
     }
     
     @inline(__always)
-    mutating func readPair() -> (run: Int, val: Int16) {
-        guard pairIndex < pairs.count else { return (0, 0) }
-        let pair = pairs[pairIndex]
-        pairIndex += 1
-        return (Int(pair.run), pair.val)
+    mutating func readPair(isParentZero: Bool = false) -> (run: Int, val: Int16) {
+        if isRawMode {
+            guard pairIndex < pairs.count else { return (0, 0) }
+            let pair = pairs[pairIndex]
+            pairIndex += 1
+            return (Int(pair.run), pair.val)
+        }
+        
+        guard pairIndex < totalPairEntries else { return (0, 0) }
+        
+        var lane = 0
+        if pairIndex >= chunkStarts[3] { lane = 3 }
+        else if pairIndex >= chunkStarts[2] { lane = 2 }
+        else if pairIndex >= chunkStarts[1] { lane = 1 }
+        
+        let isTZPair = (lane == 3 && hasTrailingZeros && pairIndex == chunkStarts[4] - 1)
+        
+        if isTZPair {
+            let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
+            let rtInfo = runModel0.findToken(cf: cfRun)
+            ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+            
+            let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
+            let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
+            let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+            
+            pairIndex += 1
+            return (Int(zeroRun), 0)
+        } else {
+            let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
+            let rtInfo = isParentZero ? runModel1.findToken(cf: cfRun) : runModel0.findToken(cf: cfRun)
+            ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+            
+            let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
+            let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
+            let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+            
+            let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
+            let vtInfo = isParentZero ? valModel1.findToken(cf: cfVal) : valModel0.findToken(cf: cfVal)
+            ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
+            
+            let valBypassLen = valueBypassLength(for: vtInfo.token)
+            let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
+            let val = valueDetokenize(token: vtInfo.token, bypassBits: valBypassBits)
+            
+            pairIndex += 1
+            return (Int(zeroRun), val)
+        }
     }
 }
 

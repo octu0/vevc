@@ -26,15 +26,19 @@ final class LargeRansTests: XCTestCase {
             else if raw < 93 { val = Int16(raw - 85) }
             else { val = Int16(-(raw - 85)) }
             
-            encoder.addPair(run: run, val: val)
+            encoder.addPair(run: run, val: val, isParentZero: false)
             expected.append((run: run, val: val))
         }
         
         print("=== Encoder: pairs=\(encoder.pairs.count) coeffCount=\(encoder.coeffCount) trailingZeros=\(encoder.trailingZeros) ===")
         
         let data = encoder.getData()
-        let decoder = try EntropyDecoder(data: data)
-        let decPairs = decoder.pairs
+        var decoder = try EntropyDecoder(data: data)
+        var decPairs: [(run: Int, val: Int16)] = []
+        for i in 0..<encoder.pairs.count {
+            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+            decPairs.append(pair)
+        }
         
         print("=== Decoder: pairs=\(decPairs.count) ===")
         
@@ -72,7 +76,7 @@ final class LargeRansTests: XCTestCase {
             let run = UInt32(i % 5)
             let val = Int16(clamping: ((i &* 7 + 3) % 30) - 15)
             if val == 0 { continue }
-            encoder.addPair(run: run, val: val)
+            encoder.addPair(run: run, val: val, isParentZero: false)
             expected.append((run: run, val: val))
         }
         
@@ -87,7 +91,11 @@ final class LargeRansTests: XCTestCase {
         }
         
         // pairs比較
-        let decPairs = decoder.pairs
+        var decPairs: [(run: Int, val: Int16)] = []
+        for i in 0..<encoder.pairs.count {
+            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+            decPairs.append(pair)
+        }
         XCTAssertEqual(expected.count, decPairs.count, "pairs count")
         
         var diffCount = 0

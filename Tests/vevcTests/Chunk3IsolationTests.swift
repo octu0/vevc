@@ -4,7 +4,7 @@ import XCTest
 /// chunk[3]のpairsだけを独立にエンコード/デコードして問題を分離
 final class Chunk3IsolationTests: XCTestCase {
     
-    private func generateRealPairs() -> [(run: UInt32, val: Int16)] {
+    private func generateRealPairs() -> [(run: UInt32, val: Int16, isParentZero: Bool)] {
         let width = 128
         let height = 128
         
@@ -43,9 +43,9 @@ final class Chunk3IsolationTests: XCTestCase {
             if isZero { continue }
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)
-                blockEncode16(encoder: &encoder, block: subs.hl)
-                blockEncode16(encoder: &encoder, block: subs.lh)
-                blockEncode16(encoder: &encoder, block: subs.hh)
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
         }
         return encoder.pairs
@@ -69,12 +69,16 @@ final class Chunk3IsolationTests: XCTestCase {
         // chunk[3]のpairsだけを新しいEntropyEncoderに渡す
         var encoder = EntropyEncoder()
         for pair in chunk3Pairs {
-            encoder.addPair(run: pair.run, val: pair.val)
+            encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
         }
         
         let data = encoder.getData()
-        let decoder = try EntropyDecoder(data: data)
-        let decPairs = decoder.pairs
+        var decoder = try EntropyDecoder(data: data)
+        var decPairs: [(run: Int, val: Int16)] = []
+        for i in 0..<encoder.pairs.count {
+            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+            decPairs.append(pair)
+        }
         
         XCTAssertEqual(chunk3Pairs.count, decPairs.count, "pairs count: \(chunk3Pairs.count) vs \(decPairs.count)")
         
@@ -109,12 +113,16 @@ final class Chunk3IsolationTests: XCTestCase {
             
             var encoder = EntropyEncoder()
             for pair in chunkPairs {
-                encoder.addPair(run: pair.run, val: pair.val)
+                encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
             }
             
             let data = encoder.getData()
-            let decoder = try EntropyDecoder(data: data)
-            let decPairs = decoder.pairs
+            var decoder = try EntropyDecoder(data: data)
+            var decPairs: [(run: Int, val: Int16)] = []
+        for i in 0..<encoder.pairs.count {
+            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+            decPairs.append(pair)
+        }
             
             var diffCount = 0
             for i in 0..<min(chunkPairs.count, decPairs.count) {

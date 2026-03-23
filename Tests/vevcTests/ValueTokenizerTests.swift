@@ -75,9 +75,9 @@ final class ValueTokenizerTests: XCTestCase {
             
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)
-                blockEncode16(encoder: &encoder, block: subs.hl)
-                blockEncode16(encoder: &encoder, block: subs.lh)
-                blockEncode16(encoder: &encoder, block: subs.hh)
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
         }
         
@@ -86,8 +86,12 @@ final class ValueTokenizerTests: XCTestCase {
         let encPairs = encoder.pairs
         let data = encoder.getData()
         
-        let decoder = try EntropyDecoder(data: data)
-        let decPairs = decoder.pairs
+        var decoder = try EntropyDecoder(data: data)
+        var decPairs: [(run: Int, val: Int16)] = []
+        for i in 0..<encPairs.count {
+            let pair = decoder.readPair(isParentZero: encPairs[i].isParentZero)
+            decPairs.append(pair)
+        }
         
         print("=== Decoder: pairs=\(decPairs.count) ===")
         

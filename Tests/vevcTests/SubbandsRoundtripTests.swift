@@ -53,7 +53,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
         
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentImage: nil, dx: 96, planeType: 0)
         
         // エンコード後のHL
         var encAfterHL: [[Int16]] = []
@@ -71,7 +71,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: 3)
+        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: 3, parentImage: nil, dx: 96, planeType: 0)
         
         // デコード後のHL
         var decHL: [[Int16]] = []
@@ -164,10 +164,10 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
         
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentImage: nil, dx: 96, planeType: 0)
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: 3)
+        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: 3, parentImage: nil, dx: 96, planeType: 0)
         
         // 各ブロックのHL/LH/HH比較
         for bi in 0..<3 {
@@ -223,10 +223,10 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         // encodePlaneSubbands32
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentImage: nil, dx: width, planeType: 0)
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count)
+        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count, parentImage: nil, dx: width, planeType: 0)
         
         // 比較
         XCTAssertEqual(blocks.count, decBlocks.count, "blocks count mismatch")
@@ -287,8 +287,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentImage: nil, dx: width, planeType: 0)
+        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count, parentImage: nil, dx: width, planeType: 0)
         
         var totalDiff = 0
         var firstDiffBlock = -1
@@ -350,8 +350,8 @@ final class SubbandsRoundtripTests: XCTestCase {
             }
             
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-            let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-            let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count)
+            let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentImage: nil, dx: w, planeType: 0)
+            let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count, parentImage: nil, dx: w, planeType: 0)
             
             var totalDiff = 0
             var firstDiffBlock = -1

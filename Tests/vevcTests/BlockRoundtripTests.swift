@@ -19,7 +19,7 @@ final class BlockRoundtripTests: XCTestCase {
         // blockEncode16
         var encoder = EntropyEncoder()
         block.withView { view in
-            blockEncode16(encoder: &encoder, block: view)
+            blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
         }
         encoder.flush()
         let encoded = encoder.getData()
@@ -31,7 +31,7 @@ final class BlockRoundtripTests: XCTestCase {
         var decBlock = Block2D(width: 16, height: 16)
         var decoder = try EntropyDecoder(data: encoded)
         decBlock.withView { view in
-            try! blockDecode16(decoder: &decoder, block: &view)
+            try! blockDecode16(decoder: &decoder, block: &view, parentBlock: nil)
         }
         
         // エンコード後のデータとデコード後のデータを比較
@@ -51,7 +51,7 @@ final class BlockRoundtripTests: XCTestCase {
         
         var encoder = EntropyEncoder()
         block.withView { view in
-            blockEncode8(encoder: &encoder, block: view)
+            blockEncode8(encoder: &encoder, block: view, parentBlock: nil)
         }
         encoder.flush()
         let encoded = encoder.getData()
@@ -61,7 +61,7 @@ final class BlockRoundtripTests: XCTestCase {
         var decBlock = Block2D(width: 8, height: 8)
         var decoder = try EntropyDecoder(data: encoded)
         decBlock.withView { view in
-            try! blockDecode8(decoder: &decoder, block: &view)
+            try! blockDecode8(decoder: &decoder, block: &view, parentBlock: nil)
         }
         
         for i in 0..<64 {
@@ -91,7 +91,7 @@ final class BlockRoundtripTests: XCTestCase {
         
         var encoder = EntropyEncoder()
         block.withView { view in
-            blockEncode16(encoder: &encoder, block: view)
+            blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
         }
         
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
@@ -128,7 +128,7 @@ final class BlockRoundtripTests: XCTestCase {
         var encoder = EntropyEncoder()
         block32.withView { view in
             let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            blockEncode16(encoder: &encoder, block: hlView)
+            blockEncode16(encoder: &encoder, block: hlView, parentBlock: nil)
         }
         encoder.flush()
         let encoded = encoder.getData()
@@ -150,7 +150,7 @@ final class BlockRoundtripTests: XCTestCase {
         var decoder = try EntropyDecoder(data: encoded)
         decBlock32.withView { view in
             var hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            try! blockDecode16(decoder: &decoder, block: &hlView)
+            try! blockDecode16(decoder: &decoder, block: &hlView, parentBlock: nil)
         }
         
         // デコード後のHLデータ

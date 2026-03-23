@@ -37,9 +37,9 @@ final class RansStreamTraceTests: XCTestCase {
             if isZero { continue }
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)
-                blockEncode16(encoder: &encoder, block: subs.hl)
-                blockEncode16(encoder: &encoder, block: subs.lh)
-                blockEncode16(encoder: &encoder, block: subs.hh)
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
         }
         

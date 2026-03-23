@@ -4,7 +4,7 @@ import XCTest
 /// 実DWTデータのpairs配列を直接EntropyEncoderに渡してrANSラウンドトリップテスト
 final class RealPairsRansTests: XCTestCase {
     
-    private func generateRealPairs() -> (pairs: [(run: UInt32, val: Int16)], bypass: [UInt8]) {
+    private func generateRealPairs() -> (pairs: [(run: UInt32, val: Int16, isParentZero: Bool)], bypass: [UInt8]) {
         let width = 128
         let height = 128
         
@@ -44,9 +44,9 @@ final class RealPairsRansTests: XCTestCase {
             
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)
-                blockEncode16(encoder: &encoder, block: subs.hl)
-                blockEncode16(encoder: &encoder, block: subs.lh)
-                blockEncode16(encoder: &encoder, block: subs.hh)
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
         }
         
@@ -63,12 +63,16 @@ final class RealPairsRansTests: XCTestCase {
         // 新しいエンコーダに同じpairsを追加
         var encoder = EntropyEncoder()
         for pair in realPairs {
-            encoder.addPair(run: pair.run, val: pair.val)
+            encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
         }
         
         let data = encoder.getData()
-        let decoder = try EntropyDecoder(data: data)
-        let decPairs = decoder.pairs
+        var decoder = try EntropyDecoder(data: data)
+        var decPairs: [(run: Int, val: Int16)] = []
+        for i in 0..<encoder.pairs.count {
+            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+            decPairs.append(pair)
+        }
         
         XCTAssertEqual(realPairs.count, decPairs.count, "pairs count: enc=\(realPairs.count) dec=\(decPairs.count)")
         
@@ -101,7 +105,7 @@ final class RealPairsRansTests: XCTestCase {
                 let encT = valueTokenize(realPairs[d].val)
                 let encR = valueTokenizeUnsigned(realPairs[d].run)
                 let decT = d < decPairs.count ? valueTokenize(decPairs[d].val) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
-                let decR = d < decPairs.count ? valueTokenizeUnsigned(decPairs[d].run) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
+                let decR = d < decPairs.count ? valueTokenizeUnsigned(UInt32(decPairs[d].run)) : (token: UInt8(255), bypassBits: UInt32(0), bypassLen: 0)
                 print("  [\(d)] enc.run=\(realPairs[d].run)(t\(encR.token)/bp\(encR.bypassLen)) val=\(realPairs[d].val)(t\(encT.token)/bp\(encT.bypassLen)) | dec.run=\(d < decPairs.count ? Int(decPairs[d].run) : -1)(t\(decR.token)/bp\(decR.bypassLen)) val=\(d < decPairs.count ? Int(decPairs[d].val) : -1)(t\(decT.token)/bp\(decT.bypassLen))")
             }
         }

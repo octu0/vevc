@@ -412,7 +412,7 @@ func subtractCoeffsBase32(currBlocks: inout [Block2D], predBlocks: inout [Block2
 }
 
 @inline(__always)
-func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
+func preparePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -429,9 +429,7 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
-        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
-        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        return (buf, subband, predSubband, blocks)
+        return (subband, predSubband, blocks)
     }()
     
     async let taskBufCb = {
@@ -445,9 +443,7 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
-        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        return (buf, subband, predSubband, blocks)
+        return (subband, predSubband, blocks)
     }()
     
     async let taskBufCr = {
@@ -461,14 +457,12 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
-        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        return (buf, subband, predSubband, blocks)
+        return (subband, predSubband, blocks)
     }()
 
-    let (bufY, subY, pSubY, yBlocks) = await taskBufY
-    let (bufCb, subCb, pSubCb, cbBlocks) = await taskBufCb
-    let (bufCr, subCr, pSubCr, crBlocks) = await taskBufCr
+    let (subY, pSubY, yBlocks) = await taskBufY
+    let (subCb, pSubCb, cbBlocks) = await taskBufCb
+    let (subCr, pSubCr, crBlocks) = await taskBufCr
 
     let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
     var subPredPlane: PlaneData420? = nil
@@ -476,29 +470,11 @@ func encodePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         subPredPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: pY, cb: pCb, cr: pCr)
     }
 
-    debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
-    
-    var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
-    appendUInt16BE(&out, UInt16(dx))
-    appendUInt16BE(&out, UInt16(dy))
-    appendUInt16BE(&out, UInt16(qtY.step))
-    appendUInt16BE(&out, UInt16(qtC.step))
-    
-    appendUInt32BE(&out, UInt32(bufY.count))
-    out.append(contentsOf: bufY)
-    
-    appendUInt32BE(&out, UInt32(bufCb.count))
-    out.append(contentsOf: bufCb)
-    
-    appendUInt32BE(&out, UInt32(bufCr.count))
-    out.append(contentsOf: bufCr)
-    
-    return (out, subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
+    return (subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
 }
 
 @inline(__always)
-func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
+func preparePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -515,9 +491,7 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtY)
         }
-        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
-        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: safeThreshold)
-        return (buf, subband, predSubband, blocks)
+        return (subband, predSubband, blocks)
     }()
     
     async let taskBufCb = {
@@ -531,9 +505,7 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
-        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: safeThreshold)
-        return (buf, subband, predSubband, blocks)
+        return (subband, predSubband, blocks)
     }()
     
     async let taskBufCr = {
@@ -547,14 +519,12 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
-        let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneSubbands16(blocks: &blocks, zeroThreshold: safeThreshold)
-        return (buf, subband, predSubband, blocks)
+        return (subband, predSubband, blocks)
     }()
 
-    let (bufY, subY, pSubY, yBlocks) = await taskBufY
-    let (bufCb, subCb, pSubCb, cbBlocks) = await taskBufCb
-    let (bufCr, subCr, pSubCr, crBlocks) = await taskBufCr
+    let (subY, pSubY, yBlocks) = await taskBufY
+    let (subCb, pSubCb, cbBlocks) = await taskBufCb
+    let (subCr, pSubCr, crBlocks) = await taskBufCr
 
     let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
     var subPredPlane: PlaneData420? = nil
@@ -562,6 +532,22 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
         subPredPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: pY, cb: pCb, cr: pCr)
     }
 
+    return (subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
+}
+
+// encoder-side reconstruction for base 8x8 blocks
+@inline(__always)
+func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentImage: Image16?) -> [UInt8] {
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    
+    let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
+    let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
+    
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentImage: parentImage, dx: dx, planeType: 0)
+    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentImage: parentImage, dx: cbDx, planeType: 1)
+    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentImage: parentImage, dx: cbDx, planeType: 2)
+    
     debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
@@ -580,7 +566,40 @@ func encodePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UIn
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return (out, subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
+    return out
+}
+
+@inline(__always)
+func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentImage: Image16?) -> [UInt8] {
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    
+    let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
+    let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
+    
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentImage: parentImage, dx: dx, planeType: 0)
+    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentImage: parentImage, dx: cbDx, planeType: 1)
+    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentImage: parentImage, dx: cbDx, planeType: 2)
+    
+    debugLog("  [Layer \(layer)] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
+    
+    var out: [UInt8] = []
+    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
+    appendUInt16BE(&out, UInt16(dx))
+    appendUInt16BE(&out, UInt16(dy))
+    appendUInt16BE(&out, UInt16(qtY.step))
+    appendUInt16BE(&out, UInt16(qtC.step))
+    
+    appendUInt32BE(&out, UInt32(bufY.count))
+    out.append(contentsOf: bufY)
+    
+    appendUInt32BE(&out, UInt32(bufCb.count))
+    out.append(contentsOf: bufCb)
+    
+    appendUInt32BE(&out, UInt32(bufCr.count))
+    out.append(contentsOf: bufCr)
+    
+    return out
 }
 
 // encoder-side reconstruction for base 8x8 blocks
@@ -937,8 +956,8 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0, isOne: false)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0, isOne: false)
     
-    let (layer2, sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await encodePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
-    let (layer1, sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await encodePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    let (sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    let (sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
     let (layer0, baseRecon) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
     
     // Layer chain reconstruction: Base8 → Layer16 → Layer32
@@ -956,6 +975,16 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     
     // Build Image16 from Layer16 reconstruction
     let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
+    
+    var l1yBlocksMut = l1yBlocks
+    var l1cbBlocksMut = l1cbBlocks
+    var l1crBlocksMut = l1crBlocks
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentImage: baseImg)
+    
+    var l2yBlocksMut = l2yBlocks
+    var l2cbBlocksMut = l2cbBlocks
+    var l2crBlocksMut = l2crBlocks
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocksMut, cbBlocks: &l2cbBlocksMut, crBlocks: &l2crBlocksMut, parentImage: l1Img)
     
     // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
     let reconL2Y = reconstructPlaneLayer(blocks: l2yBlocks, prevImg: l1Img, planeType: 0, width: dx, height: dy, blockSize: 32, qt: qtY2)
