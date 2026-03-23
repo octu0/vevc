@@ -137,31 +137,38 @@ The `vevc` package includes command-line tools: `vevc-enc` (encoder) and `vevc-d
 
 ### Encode (`vevc-enc`)
 
-Specify multiple PNG images (e.g., a sequence of files) to encode them into a single `vevc` binary file.
+Takes a `y4m` format file as input and outputs the encoded `vevc` binary file. Standard Input (`-`) is also supported for piping.
 
 ```bash
-$ swift run -c release vevc-enc -o out.vevc docs/sample_frames/frame_0*.png
+$ swift run -c release vevc-enc -i input.y4m -o out.vevc
 ```
 
-- `-bitrate`: Specifies the target bitrate (desired compression ratio/quality).
+- `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
+- `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
+- `-b <kilobit>`: Specifies the target bitrate (desired compression ratio/quality) in kilobit per second.
 - `-one`: Enables single-layer (Layer 0) mode, bypassing multi-resolution overhead for maximum encoding/decoding speed and optimal compression for fixed-resolution targets.
-- `-o`: Specifies the output `.vevc` file path.
+- `-keyint <keyint>`: Specifies the keyframe interval (GOP size).
+- `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size).
+- `-sceneThreshold <sad>`: Sets the SAD threshold for scene change detection (forces I-frame).
 
 ### Decode (`vevc-dec`)
 
-Takes a `vevc` format file as input and outputs the decoded PNG images into a specified directory.
+Takes a `vevc` format file as input and outputs the decoded `y4m` video stream. Standard I/O (`-`) is also supported.
 
 ```bash
-$ swift run -c release vevc-dec -i output.vevc -o .out/
+$ swift run -c release vevc-dec -i output.vevc -o output.y4m
 ```
 
 **Multi-Resolution / Multi-Framerate Options**:
 
+- `-i <path|->`: Specifies the input `.vevc` file path or standard input (`-`).
+- `-o <path|->`: Specifies the output `.y4m` file path or standard output (`-`).
 - `-one`: Decodes the stream assuming it was encoded with the single-layer (Layer 0) mode.
 - `-maxLayer <0-2>`: Specifies the maximum level of spatial layers to decode.
   - `0`: 1/4 size (for rough thumbnails)
   - `1`: 1/2 size (for previews)
   - `2`: Original size (default)
+- `-maxFrames <1|2|4>`: Decodes the specified sub-sampled framerate by skipping inter frames.
 
 ---
 
