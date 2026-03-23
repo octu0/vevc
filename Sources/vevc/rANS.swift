@@ -20,7 +20,7 @@ let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 /// Normalizes the provided raw frequency array to sum exactly to RANS_SCALE.
 private func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
     var freqs = rawFreqs
-    var sum: UInt32 = freqs.reduce(0, +)
+    let sum: UInt32 = freqs.reduce(0, +)
     
     // Adjust the largest element to make sum == RANS_SCALE
     if sum != RANS_SCALE {
