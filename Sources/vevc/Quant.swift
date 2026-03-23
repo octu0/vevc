@@ -333,9 +333,7 @@ private func quantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Quant
     }
 }
 
-
 // MARK: - Dequantization
-
 
 @inline(__always)
 internal func dequantize(_ block: inout BlockView, q: Quantizer) {

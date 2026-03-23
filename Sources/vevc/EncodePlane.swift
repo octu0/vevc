@@ -568,9 +568,6 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 
 @inline(__always)
 func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-    
     let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
     let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
     
