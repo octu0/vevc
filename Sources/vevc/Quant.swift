@@ -46,34 +46,48 @@ struct QuantizationTable: Sendable {
                 self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * 4.0)))), deadZoneRatio: -0.3)
             }
         } else {
-            // isOne=false (VEVC Layers): Scale quantization strengths carefully across hierarchy
-            var qMidScale = 1.0
-            var qHighScale = 2.0
+            // isOne=false (VEVC Layers): CSF-based perceptual quantization
+            // DWT subbands map to spatial frequency bands:
+            //   Layer 0 (Base8)  = lowest freq  → high CSF sensitivity → fine quantization
+            //   Layer 1 (L16)    = mid freq      → moderate sensitivity
+            //   Layer 2 (L32)    = highest freq  → low sensitivity → coarse quantization
+            //   HH (diagonal) = √2× higher freq than HL/LH → even less perceptible
+            var qMidScale = 1.0    // HL/LH scale
+            var qHighScale = 2.0   // HH scale
             var qLowDivisor = 6
+            var deadZoneMid = -0.1  // HL/LH dead zone
+            var deadZoneHigh = -0.3 // HH dead zone (wider = more zeros)
 
             if layerIndex == 2 {
-                // Layer 32 (High frequencies): Strongly quantize
-                qMidScale = 1.5
-                qHighScale = 3.0
+                // Layer 32 (高周波): CSF感度が低い → 粗く量子化
+                // ビット予算をLayer 0/1の精密化に再配分
+                qMidScale = 2.2
+                qHighScale = 4.5
+                deadZoneMid = -0.20
+                deadZoneHigh = -0.40
             } else if layerIndex == 1 {
-                // Layer 16 (Mid frequencies): Preserve structure
-                qMidScale = 0.75
-                qHighScale = 1.5
+                // Layer 16 (中周波): 構造保存が重要
+                qMidScale = 0.65
+                qHighScale = 1.2
+                deadZoneMid = -0.10
+                deadZoneHigh = -0.25
             } else if layerIndex == 0 {
-                // Layer 8 (Low frequencies - Base): Preserve perfectly
-                qMidScale = 0.25
-                qHighScale = 0.5
+                // Layer 8 (低周波 - Base): CSF感度最高 → 精密に保存
+                qMidScale = 0.20
+                qHighScale = 0.35
                 qLowDivisor = 16
+                deadZoneMid = -0.05
+                deadZoneHigh = -0.15
             }
 
             if isChroma {
                 self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: -0.1)
-                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: -0.2)
+                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
+                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
             } else {
                 self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: -0.1)
-                self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: -0.3)
+                self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
+                self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
             }
         }
     }
