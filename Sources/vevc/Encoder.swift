@@ -355,14 +355,14 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     return QuantizationTable(baseStep: q)
 }
 
-public class Encoder {
-    public let width: Int
-    public let height: Int
-    public let maxbitrate: Int
-    public let framerate: Int
-    public let zeroThreshold: Int
-    public let keyint: Int
-    public let sceneChangeThreshold: Int
+class CoreEncoder {
+    let width: Int
+    let height: Int
+    let maxbitrate: Int
+    let framerate: Int
+    let zeroThreshold: Int
+    let keyint: Int
+    let sceneChangeThreshold: Int
     
     private var prevReconstructed: PlaneData420? = nil
     private var framesSinceKeyframe = 0
@@ -370,12 +370,12 @@ public class Encoder {
     private let mbSize = 64
     private var frameIndex = 0
     
-    public let isOne: Bool
+    let isOne: Bool
     
     // Rate Control
     private var rateController: RateController
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
+    init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 8, isOne: Bool = false) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -389,7 +389,7 @@ public class Encoder {
     }
     
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-    public func encode(image: YCbCrImage) async throws -> [UInt8] {
+    func encode(image: YCbCrImage) async throws -> [UInt8] {
         var out: [UInt8] = []
         let curr = toPlaneData420(images: [image])[0]
         
@@ -545,9 +545,145 @@ public class Encoder {
         return out
     }
     #else
-    public func encode(image: YCbCrImage) async throws -> [UInt8] {
+    func encode(image: YCbCrImage) async throws -> [UInt8] {
         throw EncodeError.unsupportedArchitecture
     }
     #endif
+}
 
+public struct Encoder: Sendable {
+    public let width: Int
+    public let height: Int
+    public let maxbitrate: Int
+    public let framerate: Int
+    public let zeroThreshold: Int
+    public let keyint: Int
+    public let sceneChangeThreshold: Int
+    public let isOne: Bool
+    public let maxConcurrency: Int
+
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 8, isOne: Bool = false, maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount) {
+        self.width = width
+        self.height = height
+        self.maxbitrate = maxbitrate
+        self.framerate = framerate
+        self.zeroThreshold = zeroThreshold
+        self.keyint = keyint
+        self.sceneChangeThreshold = sceneChangeThreshold
+        self.isOne = isOne
+        self.maxConcurrency = maxConcurrency
+    }
+
+    #if (arch(arm64) || arch(x86_64) || arch(wasm32))
+    /// Encodes a stream of frames into a stream of bitstream chunks using GOP-level parallelization.
+    public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                var iterator = stream.makeAsyncIterator()
+                var currentGOPIndex = 0
+                var nextGOPIndexToYield = 0
+                var completedGOPs: [Int: [[UInt8]]] = [:]
+                
+                func readNextGOP() async -> [YCbCrImage]? {
+                    var gop: [YCbCrImage] = []
+                    for _ in 0..<self.keyint {
+                        if let img = await iterator.next() {
+                            gop.append(img)
+                        } else {
+                            break
+                        }
+                    }
+                    return gop.isEmpty ? nil : gop
+                }
+                
+                do {
+                    try await withThrowingTaskGroup(of: (Int, [[UInt8]]).self) { group in
+                        var activeTasks = 0
+                        
+                        while activeTasks < self.maxConcurrency {
+                            guard let gop = await readNextGOP() else { break }
+                            let idx = currentGOPIndex
+                            currentGOPIndex += 1
+                            group.addTask {
+                                let encoder = CoreEncoder(
+                                    width: self.width,
+                                    height: self.height,
+                                    maxbitrate: self.maxbitrate,
+                                    framerate: self.framerate,
+                                    zeroThreshold: self.zeroThreshold,
+                                    keyint: self.keyint,
+                                    sceneChangeThreshold: self.sceneChangeThreshold,
+                                    isOne: self.isOne
+                                )
+                                var chunks: [[UInt8]] = []
+                                for img in gop {
+                                    let chunk = try await encoder.encode(image: img)
+                                    chunks.append(chunk)
+                                }
+                                return (idx, chunks)
+                            }
+                            activeTasks += 1
+                        }
+                        
+                        while let result = try await group.next() {
+                            activeTasks -= 1
+                            let (idx, chunks) = result
+                            completedGOPs[idx] = chunks
+                            
+                            while let consecutiveChunks = completedGOPs[nextGOPIndexToYield] {
+                                for chunk in consecutiveChunks {
+                                    continuation.yield(chunk)
+                                }
+                                completedGOPs.removeValue(forKey: nextGOPIndexToYield)
+                                nextGOPIndexToYield += 1
+                            }
+                            
+                            if let gop = await readNextGOP() {
+                                let newIdx = currentGOPIndex
+                                currentGOPIndex += 1
+                                group.addTask {
+                                    let encoder = CoreEncoder(
+                                        width: self.width,
+                                        height: self.height,
+                                        maxbitrate: self.maxbitrate,
+                                        framerate: self.framerate,
+                                        zeroThreshold: self.zeroThreshold,
+                                        keyint: self.keyint,
+                                        sceneChangeThreshold: self.sceneChangeThreshold,
+                                        isOne: self.isOne
+                                    )
+                                    var newChunks: [[UInt8]] = []
+                                    for img in gop {
+                                        let chunk = try await encoder.encode(image: img)
+                                        newChunks.append(chunk)
+                                    }
+                                    return (newIdx, newChunks)
+                                }
+                                activeTasks += 1
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Encodes an array of images. Convenience for tests and compare tool.
+    public func encode(images: [YCbCrImage]) async throws -> [[UInt8]] {
+        let stream = AsyncStream<YCbCrImage> { continuation in
+            for img in images {
+                continuation.yield(img)
+            }
+            continuation.finish()
+        }
+        var chunks: [[UInt8]] = []
+        for try await chunk in self.encode(stream: stream) {
+            chunks.append(chunk)
+        }
+        return chunks
+    }
+    #endif
 }

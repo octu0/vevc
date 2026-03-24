@@ -856,11 +856,12 @@ public struct DecodeOptions: Sendable {
 @inline(__always)
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
     if data.isEmpty { return [] }
-    var out: [YCbCrImage] = []
+    
     var offset = 0
-    var prevReconstructed: PlaneData420? = nil
+    var chunks: [[UInt8]] = []
     
     while offset + 4 <= data.count {
+        let startOffset = offset
         let magic = Array(data[offset..<(offset + 4)])
         offset += 4
         
@@ -868,101 +869,33 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
         case [0x56, 0x45, 0x56, 0x49], [0x56, 0x45, 0x4F, 0x49]: // VEVI, VEOI
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            let chunk = Array(data[offset..<(offset + len)])
             offset += len
+            chunks.append(Array(data[startOffset..<offset]))
             
-            let img16: Image16
-            let isOneBlock = opts.isOne || magic == [0x56, 0x45, 0x4F, 0x49]
-            if isOneBlock {
-                img16 = try await decodeBase32(r: chunk, layer: 0)
-            } else {
-                img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
-            }
-            let pd = PlaneData420(img16: img16)
-            out.append(pd.toYCbCr())
-            prevReconstructed = pd
-
         case [0x56, 0x45, 0x56, 0x48]: // VEVH
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
             offset += len
-
+            // VEVH is just header (FPS), we skip adding it to chunks because Decoder handles individual frame chunks
+            
         case [0x56, 0x45, 0x56, 0x50], [0x56, 0x45, 0x4F, 0x50]: // VEVP, VEOP
-            let mvsCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let _ = Int(try readUInt32BEFromBytes(data, offset: &offset)) // mvsCount
             let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            var mvs = MotionVectors(count: mvsCount)
             guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
-
-            let mvData = Array(data[offset..<(offset + mvDataLen)])
             offset += mvDataLen
-            var mvBr = try EntropyDecoder(data: mvData)
-
-            let mbSize = 64
-            // We need width to compute mbCols. We can infer width from previous frame.
-            guard let prevWidth = prevReconstructed?.width else { throw DecodeError.invalidHeader }
-            let mbCols = (prevWidth + mbSize - 1) / mbSize
-
-            for i in 0..<mvsCount {
-                let mbX = i % mbCols
-                let mbY = i / mbCols
-                let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-
-                let isSig = try mvBr.decodeBypass()
-                if isSig == 0 {
-                    mvs.vectors[i] = SIMD2(Int16(clamping: pmv.dx), Int16(clamping: pmv.dy))
-                } else {
-                    let sx = try mvBr.decodeBypass()
-                    let mx = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdX: Int
-                    if sx == 1 {
-                        mvdX = -1 * Int(mx)
-                    } else {
-                        mvdX = Int(mx)
-                    }
-
-                    let sy = try mvBr.decodeBypass()
-                    let my = try decodeExpGolomb(decoder: &mvBr)
-
-                    let mvdY: Int
-                    if sy == 1 {
-                        mvdY = -1 * Int(my)
-                    } else {
-                        mvdY = Int(my)
-                    }
-
-                    mvs.vectors[i] = SIMD2(Int16(clamping: mvdX + pmv.dx), Int16(clamping: mvdY + pmv.dy))
-                }
-            }
             
             let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
             guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            let chunk = Array(data[offset..<(offset + len)])
             offset += len
+            chunks.append(Array(data[startOffset..<offset]))
             
-            let img16: Image16
-            let isOneBlock = opts.isOne || magic == [0x56, 0x45, 0x4F, 0x50] // VEOI/VEOP
-            if isOneBlock {
-                img16 = try await decodeBase32(r: chunk, layer: 0)
-            } else {
-                img16 = try await decodeSpatialLayers(r: chunk, maxLayer: opts.maxLayer)
-            }
-            let residual = PlaneData420(img16: img16)
-            
-            if let prev = prevReconstructed {
-                let predicted = await applyMBME(prev: prev, mvs: mvs)
-                let curr = await addPlanes(residual: residual, predicted: predicted)
-                out.append(curr.toYCbCr())
-                prevReconstructed = curr
-            } else {
-                out.append(residual.toYCbCr())
-            }
         default: 
              throw DecodeError.invalidHeader
         }
     }
     
-    return out
+    let decoder = Decoder(maxLayer: opts.maxLayer)
+    return try await decoder.decode(chunks: chunks)
 }
 
 @inline(__always)

@@ -112,7 +112,7 @@ final class FlickerDetectionTests: XCTestCase {
             keyint: 30,  // 全フレームが1GOP内に入るようにする
             sceneChangeThreshold: 8
         )
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
 
         var originals: [YCbCrImage] = []
         var decoded: [YCbCrImage] = []
@@ -182,12 +182,12 @@ final class FlickerDetectionTests: XCTestCase {
         let encoder = Encoder(
             width: width,
             height: height,
-            maxbitrate: 500 * 1000,
-            zeroThreshold: 3,
-            keyint: 30,
-            sceneChangeThreshold: 8
+            maxbitrate: 500 * 1024,
+            zeroThreshold: 20,
+            keyint: 15,
+            sceneChangeThreshold: 10
         )
-
+        let decoder = CoreDecoder()
         let img = generateGradientFrame(width: width, height: height, frameIndex: 0)
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)
 

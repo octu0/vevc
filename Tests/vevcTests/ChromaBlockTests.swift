@@ -129,7 +129,7 @@ final class ChromaBlockTests: XCTestCase {
             keyint: 15,
             sceneChangeThreshold: 8
         )
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
 
         let original = generateColorBarFrame(width: width, height: height)
         let chunk = try await encoder.encode(image: original)
@@ -176,7 +176,7 @@ final class ChromaBlockTests: XCTestCase {
             keyint: 15,
             sceneChangeThreshold: 8
         )
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
 
         // I-frame
         let frame0 = generateDiagonalGradientFrame(width: width, height: height)

@@ -119,8 +119,22 @@ do {
         outFileHandle.write(vevh)
     }
 
-    while let image = try y4mReader.readFrame() {
-        let chunk = try await encoder.encode(image: image)
+    let frameStream = AsyncStream<YCbCrImage> { continuation in
+        Task {
+            do {
+                while let image = try y4mReader.readFrame() {
+                    continuation.yield(image)
+                }
+                continuation.finish()
+            } catch {
+                fputs("Failed to read frame: \(error)\n", stderr)
+                continuation.finish()
+            }
+        }
+    }
+
+    let chunkStream = encoder.encode(stream: frameStream)
+    for try await chunk in chunkStream {
         outFileHandle.write(Data(chunk))
         frameCount += 1
     }

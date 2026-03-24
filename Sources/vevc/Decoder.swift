@@ -1,15 +1,15 @@
 import Foundation
 
-public class Decoder {
-    public let maxLayer: Int
+class CoreDecoder {
+    let maxLayer: Int
     private var prevReconstructed: PlaneData420? = nil
     
-    public init(maxLayer: Int = 2) {
+    init(maxLayer: Int = 2) {
         self.maxLayer = maxLayer
     }
     
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-    public func decode(chunk: [UInt8]) async throws -> YCbCrImage {
+    func decode(chunk: [UInt8]) async throws -> YCbCrImage {
         guard chunk.count >= 4 else { throw DecodeError.insufficientData }
         var offset = 0
         let magic = Array(chunk[offset..<(offset + 4)])
@@ -131,8 +131,128 @@ public class Decoder {
     }
 
 #else
-    public func decode(chunk: [UInt8]) async throws -> YCbCrImage {
+    func decode(chunk: [UInt8]) async throws -> YCbCrImage {
         throw DecodeError.unsupportedArchitecture
     }
 #endif
+}
+
+public struct Decoder: Sendable {
+    public let maxLayer: Int
+    public let maxConcurrency: Int
+
+    public init(maxLayer: Int = 2, maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount) {
+        self.maxLayer = maxLayer
+        self.maxConcurrency = maxConcurrency
+    }
+
+    #if (arch(arm64) || arch(x86_64) || arch(wasm32))
+    /// Decodes a stream of bitstream chunks into a stream of images using GOP-level parallelization.
+    public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                var iterator = stream.makeAsyncIterator()
+                var currentGOPIndex = 0
+                var nextGOPIndexToYield = 0
+                var completedGOPs: [Int: [YCbCrImage]] = [:]
+                
+                var bufferedChunk: [UInt8]? = nil
+                
+                func readNextGOP() async throws -> [[UInt8]]? {
+                    var gop: [[UInt8]] = []
+                    
+                    if let first = bufferedChunk {
+                        gop.append(first)
+                        bufferedChunk = nil
+                    } else if let chunk = await iterator.next() {
+                        gop.append(chunk)
+                    } else {
+                        return nil // EOF
+                    }
+                    
+                    while let chunk = await iterator.next() {
+                        guard chunk.count >= 4 else { throw DecodeError.insufficientData }
+                        let magic = Array(chunk[0..<4])
+                        if magic == [0x56, 0x45, 0x56, 0x49] || magic == [0x56, 0x45, 0x4F, 0x49] {
+                            bufferedChunk = chunk
+                            return gop
+                        }
+                        gop.append(chunk)
+                    }
+                    
+                    return gop
+                }
+                
+                do {
+                    try await withThrowingTaskGroup(of: (Int, [YCbCrImage]).self) { group in
+                        var activeTasks = 0
+                        
+                        while activeTasks < self.maxConcurrency {
+                            guard let gop = try await readNextGOP() else { break }
+                            let idx = currentGOPIndex
+                            currentGOPIndex += 1
+                            group.addTask {
+                                let decoder = CoreDecoder(maxLayer: self.maxLayer)
+                                var decodedFrames: [YCbCrImage] = []
+                                for chunk in gop {
+                                    let img = try await decoder.decode(chunk: chunk)
+                                    decodedFrames.append(img)
+                                }
+                                return (idx, decodedFrames)
+                            }
+                            activeTasks += 1
+                        }
+                        
+                        while let result = try await group.next() {
+                            activeTasks -= 1
+                            let (idx, frames) = result
+                            completedGOPs[idx] = frames
+                            
+                            while let consecutiveFrames = completedGOPs[nextGOPIndexToYield] {
+                                for frame in consecutiveFrames {
+                                    continuation.yield(frame)
+                                }
+                                completedGOPs.removeValue(forKey: nextGOPIndexToYield)
+                                nextGOPIndexToYield += 1
+                            }
+                            
+                            if let gop = try await readNextGOP() {
+                                let newIdx = currentGOPIndex
+                                currentGOPIndex += 1
+                                group.addTask {
+                                    let decoder = CoreDecoder(maxLayer: self.maxLayer)
+                                    var newFrames: [YCbCrImage] = []
+                                    for chunk in gop {
+                                        let img = try await decoder.decode(chunk: chunk)
+                                        newFrames.append(img)
+                                    }
+                                    return (newIdx, newFrames)
+                                }
+                                activeTasks += 1
+                            }
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Decodes an array of chunks. Convenience for tests and compare tool.
+    public func decode(chunks: [[UInt8]]) async throws -> [YCbCrImage] {
+        let stream = AsyncStream<[UInt8]> { continuation in
+            for chunk in chunks {
+                continuation.yield(chunk)
+            }
+            continuation.finish()
+        }
+        var images: [YCbCrImage] = []
+        for try await img in self.decode(stream: stream) {
+            images.append(img)
+        }
+        return images
+    }
+    #endif
 }

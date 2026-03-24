@@ -163,7 +163,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 4
         
         let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
         
         for i in 0..<frameCount {
             let img = generateGradientImage(width: width, height: height, seed: i * 5)
@@ -190,7 +190,7 @@ final class VevcTests: XCTestCase {
         
         // maxbitrateを10倍に
         let encoder = Encoder(width: width, height: height, maxbitrate: 10000 * 1024, keyint: 15)
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
         
         var failedFrames: [(Int, Double)] = []
         
@@ -248,7 +248,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 20 // GOPサイズ(15)を超えるフレーム数
         
         let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
         
         var failedFrames: [(Int, Double)] = []
         
@@ -323,7 +323,7 @@ final class VevcTests: XCTestCase {
         }
         
         let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
         
         for i in 0..<frameCount {
             let chunk = try await encoder.encode(image: baseImg)
@@ -342,7 +342,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 5
         
         let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
         
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)
@@ -549,7 +549,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 6
         
         let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15, sceneChangeThreshold: 8)
-        let decoder = Decoder()
+        let decoder = CoreDecoder()
         
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)

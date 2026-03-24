@@ -1620,12 +1620,8 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
         isOne: false
     )
     
-    var out: [UInt8] = []
-    for img in images {
-        let chunk = try await encoder.encode(image: img)
-        out.append(contentsOf: chunk)
-    }
-    return out
+    let chunks = try await encoder.encode(images: images)
+    return chunks.flatMap { $0 }
 }
 
 @inline(__always)
@@ -1644,12 +1640,8 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30
         isOne: true
     )
     
-    var out: [UInt8] = []
-    for img in images {
-        let chunk = try await encoder.encode(image: img)
-        out.append(contentsOf: chunk)
-    }
-    return out
+    let chunks = try await encoder.encode(images: images)
+    return chunks.flatMap { $0 }
 }
             
 #else

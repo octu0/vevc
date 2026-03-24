@@ -79,9 +79,22 @@ do {
     var frameCount = 0
     let startTime = Date()
 
-    while let chunk = try vevcReader.readFrameChunk() {
-        let image = try await decoder.decode(chunk: chunk)
-        
+    let encodedStream = AsyncStream<[UInt8]> { continuation in
+        Task {
+            do {
+                while let chunk = try vevcReader.readFrameChunk() {
+                    continuation.yield(chunk)
+                }
+                continuation.finish()
+            } catch {
+                fputs("Failed to read chunk: \(error)\n", stderr)
+                continuation.finish()
+            }
+        }
+    }
+
+    let imageStream = decoder.decode(stream: encodedStream)
+    for try await image in imageStream {
         if y4mWriter == nil {
             let fpsHeader = vevcReader.fpsHeader ?? "F30:1"
             y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
