@@ -503,7 +503,7 @@ public class Encoder {
                     out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // VEVP
                 }
 
-                var mvBw = EntropyEncoder()
+                var mvBw = EntropyEncoder<StaticEntropyModel>()
                 var grid = MVGrid(width: curr.width, height: curr.height, minSize: 8)
                 let mbCols = (curr.width + mbSize - 1) / mbSize
                 let mbRows = (curr.height + mbSize - 1) / mbSize

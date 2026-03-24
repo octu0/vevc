@@ -5,7 +5,7 @@ import XCTest
 final class LargeRansTests: XCTestCase {
     
     func testRansRoundtrip_6500Pairs() throws {
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         var expected: [(run: UInt32, val: Int16)] = []
         
         for i in 0..<6500 {
@@ -61,7 +61,7 @@ final class LargeRansTests: XCTestCase {
     
     /// bypass + pairs 混合で大量データ
     func testRansWithBypass_6500() throws {
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         
         // bypassビット（blockEncode16のhasNonZero + lscp相当）
         for block in 0..<48 {

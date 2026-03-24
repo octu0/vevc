@@ -35,7 +35,7 @@ final class Chunk3IsolationTests: XCTestCase {
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in blocks.indices {
             let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
                 return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
@@ -67,7 +67,7 @@ final class Chunk3IsolationTests: XCTestCase {
         print("=== Chunk[3]: \(chunk3Pairs.count) pairs (indices \(chunkStarts[3])..\(chunkStarts[4]-1)) ===")
         
         // chunk[3]のpairsだけを新しいEntropyEncoderに渡す
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         for pair in chunk3Pairs {
             encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
         }
@@ -111,7 +111,7 @@ final class Chunk3IsolationTests: XCTestCase {
         for chunk in 0..<4 {
             let chunkPairs = Array(allPairs[chunkStarts[chunk]..<chunkStarts[chunk + 1]])
             
-            var encoder = EntropyEncoder()
+            var encoder = EntropyEncoder<DynamicEntropyModel>()
             for pair in chunkPairs {
                 encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
             }

@@ -77,7 +77,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         bwFlags.flush()
         
         // エンコーダ: EntropyEncoderを直接使って blockEncode16 を呼ぶ
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         
         for (i, task) in tasks {
             blocks[i].withView { view in

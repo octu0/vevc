@@ -29,7 +29,7 @@ final class RansStreamTraceTests: XCTestCase {
         var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtY) }
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in blocks.indices {
             let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
                 return isEffectivelyZero32(data: ptr, threshold: safeThreshold)

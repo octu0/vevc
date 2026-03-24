@@ -65,7 +65,7 @@ final class ValueTokenizerTests: XCTestCase {
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         
         for i in blocks.indices {
             let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in

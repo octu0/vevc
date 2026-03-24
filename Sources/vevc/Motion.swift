@@ -88,10 +88,7 @@ func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
     var out = [Int16](repeating: 0, count: w * h)
     
     let pdWidth = pd.width
-    pd.y.withUnsafeBufferPointer { ptr in
-        guard let pY = ptr.baseAddress else { return }
-        out.withUnsafeMutableBufferPointer { oPtr in
-            guard let pOut = oPtr.baseAddress else { return }
+    withUnsafePointers(pd.y, mut: &out) { pY, pOut in
             
             for y in 0..<h {
                 let py = y * 8
@@ -108,7 +105,6 @@ func downscale8x(pd: PlaneData420) -> (data: [Int16], w: Int, h: Int) {
                     pOut[outRow + x] = Int16(sum / 64)
                 }
             }
-        }
     }
     return (out, w, h)
 }
@@ -123,10 +119,7 @@ func calculateDownscaledSADStats(layer0Curr: [Int16], layer0Prev: [Int16], w: In
     var totalSAD = 0
     var maxSAD = 0
     
-    layer0Curr.withUnsafeBufferPointer { cPtr in
-        guard let pC = cPtr.baseAddress else { return }
-        layer0Prev.withUnsafeBufferPointer { pPtr in
-            guard let pP = pPtr.baseAddress else { return }
+    withUnsafePointers(layer0Curr, layer0Prev) { pC, pP in
             
             for mbY in 0..<mbRows {
                 let startY = mbY * mbSize
@@ -153,7 +146,6 @@ func calculateDownscaledSADStats(layer0Curr: [Int16], layer0Prev: [Int16], w: In
                 }
             }
         }
-    }
     
     let meanSAD = mbCols * mbRows > 0 ? totalSAD / (mbCols * mbRows) : 0
     return (meanSAD, maxSAD)
@@ -570,199 +562,189 @@ func estimateMBME(curr: PlaneData420, prev: PlaneData420) -> MotionVectors {
     var fracRefBuffer = [Int16](repeating: 0, count: 64 * 64)
     var fracExtBuffer = [Int16](repeating: 0, count: 71 * 71)
 
-    curr.y.withUnsafeBufferPointer { currPtr in
-        guard let pCurr = currPtr.baseAddress else { return }
-        prev.y.withUnsafeBufferPointer { prevPtr in
-            guard let pPrev = prevPtr.baseAddress else { return }
-            fracRefBuffer.withUnsafeMutableBufferPointer { fracRefPtr in
-                guard let pFracRef = fracRefPtr.baseAddress else { return }
-                fracExtBuffer.withUnsafeMutableBufferPointer { fracExtPtr in
-                    guard let pFracExt = fracExtPtr.baseAddress else { return }
+    withUnsafePointers(curr.y, prev.y, mut: &fracRefBuffer, mut: &fracExtBuffer) { pCurr, pPrev, pFracRef, pFracExt in
 
-            let fullMbCols = w / mbSize
-            let fullMbRows = h / mbSize
-            let remW = w % mbSize
-            let remH = h % mbSize
+                    let fullMbCols = w / mbSize
+                    let fullMbRows = h / mbSize
+                    let remW = w % mbSize
+                    let remH = h % mbSize
 
-            // --- Full Size Block: Subsampled SAD + initial PMV ---
-            for mbY in 0..<fullMbRows {
-                let startY = mbY * mbSize
-                for mbX in 0..<fullMbCols {
-                    let startX = mbX * mbSize
-                    let idx = mbY * mbCols + mbX
+                    // --- Full Size Block: Subsampled SAD + initial PMV ---
+                    for mbY in 0..<fullMbRows {
+                        let startY = mbY * mbSize
+                        for mbX in 0..<fullMbCols {
+                            let startX = mbX * mbSize
+                            let idx = mbY * mbCols + mbX
 
-                    let minSafeDX = max(-1 * searchRange, -startX)
-                    let maxSafeDX = min(searchRange, w - 64 - startX)
-                    let minSafeDY = max(-1 * searchRange, -startY)
-                    let maxSafeDY = min(searchRange, h - 64 - startY)
+                            let minSafeDX = max(-1 * searchRange, -startX)
+                            let maxSafeDX = min(searchRange, w - 64 - startX)
+                            let minSafeDY = max(-1 * searchRange, -startY)
+                            let maxSafeDY = min(searchRange, h - 64 - startY)
 
-                    // Use PMV as the search starting point
-                    let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
-                    var bestDX = max(minSafeDX, min(maxSafeDX, pmv.dx >> 2))
-                    var bestDY = max(minSafeDY, min(maxSafeDY, pmv.dy >> 2))
+                            // Use PMV as the search starting point
+                            let pmv = calculatePMV(mvs: mvs, mbX: mbX, mbY: mbY, mbCols: mbCols)
+                            var bestDX = max(minSafeDX, min(maxSafeDX, pmv.dx >> 2))
+                            var bestDY = max(minSafeDY, min(maxSafeDY, pmv.dy >> 2))
 
-                    // Initial SAD calculation (subsampling)
-                    var bestSAD: Int
-                    if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
-                        bestSAD = calculateSAD64x64_Subsample(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-                            currStride: w, prevStride: w
-                        )
-                    } else {
-                        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
-                    }
+                            // Initial SAD calculation (subsampling)
+                            var bestSAD: Int
+                            if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
+                                bestSAD = calculateSAD64x64_Subsample(
+                                    pCurr: pCurr.advanced(by: startY * w + startX),
+                                    pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
+                                    currStride: w, prevStride: w
+                                )
+                            } else {
+                                bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
+                            }
 
-                    // Always evaluate SAD at (0,0) (may be better than PMV)
-                    if bestDX != 0 || bestDY != 0 {
-                        let zeroSAD = calculateSAD64x64_Subsample(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: startY * w + startX),
-                            currStride: w, prevStride: w
-                        )
-                        if zeroSAD < bestSAD {
-                            bestSAD = zeroSAD
-                            bestDX = 0
-                            bestDY = 0
-                        }
-                    }
-
-                    // earlyExit threshold (subsampling uses half the rows, so threshold is adjusted accordingly)
-                    let earlyExitThreshold = 64 * 32 * 1
-                    if earlyExitThreshold < bestSAD {
-                        let negSearchRange = -1 * searchRange
-                        let posSearchRange = searchRange
-
-                        var step = searchRange / 2
-                        while 1 <= step {
-                            var currentBestDX = bestDX
-                            var currentBestDY = bestDY
-                            var currentBestSAD = bestSAD
-
-                            // When step==1: recalculate bestSAD with full SAD (Subsampling -> Full precision correction)
-                            if step == 1 {
-                                if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
-                                    currentBestSAD = calculateSAD64x64(
-                                        pCurr: pCurr.advanced(by: startY * w + startX),
-                                        pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-                                        currStride: w, prevStride: w
-                                    )
-                                } else {
-                                    currentBestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
+                            // Always evaluate SAD at (0,0) (may be better than PMV)
+                            if bestDX != 0 || bestDY != 0 {
+                                let zeroSAD = calculateSAD64x64_Subsample(
+                                    pCurr: pCurr.advanced(by: startY * w + startX),
+                                    pPrev: pPrev.advanced(by: startY * w + startX),
+                                    currStride: w, prevStride: w
+                                )
+                                if zeroSAD < bestSAD {
+                                    bestSAD = zeroSAD
+                                    bestDX = 0
+                                    bestDY = 0
                                 }
                             }
 
-                            for j in -1...1 {
-                                for i in -1...1 {
-                                    if i == 0 && j == 0 { continue }
+                            // earlyExit threshold (subsampling uses half the rows, so threshold is adjusted accordingly)
+                            let earlyExitThreshold = 64 * 32 * 1
+                            if earlyExitThreshold < bestSAD {
+                                let negSearchRange = -1 * searchRange
+                                let posSearchRange = searchRange
 
-                                    let dx = bestDX + i * step
-                                    let dy = bestDY + j * step
+                                var step = searchRange / 2
+                                while 1 <= step {
+                                    var currentBestDX = bestDX
+                                    var currentBestDY = bestDY
+                                    var currentBestSAD = bestSAD
 
-                                    if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
-
-                                    let diffX = dx >= 0 ? dx : -1 * dx
-                                    let diffY = dy >= 0 ? dy : -1 * dy
-                                    let penalty = diffX + diffY
-                                    if currentBestSAD <= penalty { continue }
-
-                                    let sad: Int
-                                    let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
-                                    if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
-                                        if step == 1 {
-                                            // Final Step: exact comparison using full SAD
-                                            sad = calculateSAD64x64(
+                                    // When step==1: recalculate bestSAD with full SAD (Subsampling -> Full precision correction)
+                                    if step == 1 {
+                                        if bestDY >= minSafeDY && bestDY <= maxSafeDY && bestDX >= minSafeDX && bestDX <= maxSafeDX {
+                                            currentBestSAD = calculateSAD64x64(
                                                 pCurr: pCurr.advanced(by: startY * w + startX),
-                                                pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
+                                                pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
                                                 currStride: w, prevStride: w
                                             )
                                         } else {
-                                            // Coarse Step: high-speed comparison using subsampled SAD
-                                            sad = calculateSAD64x64_Subsample(
-                                                pCurr: pCurr.advanced(by: startY * w + startX),
-                                                pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
-                                                currStride: w, prevStride: w
-                                            )
+                                            currentBestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: bestDX, dy: bestDY)
                                         }
-                                    } else {
-                                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: dx, dy: dy)
                                     }
 
-                                    let totalSad = sad &+ penalty
-                                    if totalSad < currentBestSAD {
-                                        currentBestSAD = totalSad
-                                        currentBestDX = dx
-                                        currentBestDY = dy
+                                    for j in -1...1 {
+                                        for i in -1...1 {
+                                            if i == 0 && j == 0 { continue }
+
+                                            let dx = bestDX + i * step
+                                            let dy = bestDY + j * step
+
+                                            if dx < negSearchRange || posSearchRange < dx || dy < negSearchRange || posSearchRange < dy { continue }
+
+                                            let diffX = dx >= 0 ? dx : -1 * dx
+                                            let diffY = dy >= 0 ? dy : -1 * dy
+                                            let penalty = diffX + diffY
+                                            if currentBestSAD <= penalty { continue }
+
+                                            let sad: Int
+                                            let isDYSafe = dy >= minSafeDY && dy <= maxSafeDY
+                                            if isDYSafe && dx >= minSafeDX && dx <= maxSafeDX {
+                                                if step == 1 {
+                                                    // Final Step: exact comparison using full SAD
+                                                    sad = calculateSAD64x64(
+                                                        pCurr: pCurr.advanced(by: startY * w + startX),
+                                                        pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
+                                                        currStride: w, prevStride: w
+                                                    )
+                                                } else {
+                                                    // Coarse Step: high-speed comparison using subsampled SAD
+                                                    sad = calculateSAD64x64_Subsample(
+                                                        pCurr: pCurr.advanced(by: startY * w + startX),
+                                                        pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
+                                                        currStride: w, prevStride: w
+                                                    )
+                                                }
+                                            } else {
+                                                sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: 64, actH: 64, dx: dx, dy: dy)
+                                            }
+
+                                            let totalSad = sad &+ penalty
+                                            if totalSad < currentBestSAD {
+                                                currentBestSAD = totalSad
+                                                currentBestDX = dx
+                                                currentBestDY = dy
+                                            }
+                                        }
                                     }
+
+                                    bestDX = currentBestDX
+                                    bestDY = currentBestDY
+                                    bestSAD = currentBestSAD
+
+                                    step /= 2
                                 }
                             }
 
-                            bestDX = currentBestDX
-                            bestDY = currentBestDY
-                            bestSAD = currentBestSAD
-
-                            step /= 2
+                            // Fractional Component Refinement
+                            let refinedQMV = refineFractionalMBME(
+                                pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                                startX: startX, startY: startY, actW: 64, actH: 64,
+                                bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD,
+                                fracRefBuffer: pFracRef, fracExtBuffer: pFracExt
+                            )
+                            
+                            mvs.vectors[idx] = refinedQMV
                         }
                     }
 
-                    // Fractional Component Refinement
-                    let refinedQMV = refineFractionalMBME(
-                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                        startX: startX, startY: startY, actW: 64, actH: 64,
-                        bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD,
-                        fracRefBuffer: pFracRef, fracExtBuffer: pFracExt
-                    )
-                    
-                    mvs.vectors[idx] = refinedQMV
-                }
-            }
+                    // --- Edge blocks: fallback to conventional method ---
+                    if 0 < remW {
+                        let mbX = fullMbCols
+                        let startX = mbX * mbSize
+                        for mbY in 0..<fullMbRows {
+                            let startY = mbY * mbSize
+                            let idx = mbY * mbCols + mbX
+                            estimateMBMEBlockEdge(
+                                pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                                startX: startX, startY: startY, actW: remW, actH: mbSize, searchRange: searchRange,
+                                mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
+                            )
+                        }
+                    }
 
-            // --- Edge blocks: fallback to conventional method ---
-            if 0 < remW {
-                let mbX = fullMbCols
-                let startX = mbX * mbSize
-                for mbY in 0..<fullMbRows {
-                    let startY = mbY * mbSize
-                    let idx = mbY * mbCols + mbX
-                    estimateMBMEBlockEdge(
-                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                        startX: startX, startY: startY, actW: remW, actH: mbSize, searchRange: searchRange,
-                        mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
-                    )
-                }
-            }
+                    if 0 < remH {
+                        let mbY = fullMbRows
+                        let startY = mbY * mbSize
+                        for mbX in 0..<fullMbCols {
+                            let startX = mbX * mbSize
+                            let idx = mbY * mbCols + mbX
+                            estimateMBMEBlockEdge(
+                                pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                                startX: startX, startY: startY, actW: mbSize, actH: remH, searchRange: searchRange,
+                                mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
+                            )
+                        }
+                    }
 
-            if 0 < remH {
-                let mbY = fullMbRows
-                let startY = mbY * mbSize
-                for mbX in 0..<fullMbCols {
-                    let startX = mbX * mbSize
-                    let idx = mbY * mbCols + mbX
-                    estimateMBMEBlockEdge(
-                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                        startX: startX, startY: startY, actW: mbSize, actH: remH, searchRange: searchRange,
-                        mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
-                    )
-                }
-            }
-
-            if 0 < remW && 0 < remH {
-                let mbX = fullMbCols
-                let mbY = fullMbRows
-                let startX = mbX * mbSize
-                let startY = mbY * mbSize
-                let idx = mbY * mbCols + mbX
-                estimateMBMEBlockEdge(
-                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                        startX: startX, startY: startY, actW: remW, actH: remH, searchRange: searchRange,
-                        mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
-                    )
-            }
-                }
-            }
-        }
+                    if 0 < remW && 0 < remH {
+                        let mbX = fullMbCols
+                        let mbY = fullMbRows
+                        let startX = mbX * mbSize
+                        let startY = mbY * mbSize
+                        let idx = mbY * mbCols + mbX
+                        estimateMBMEBlockEdge(
+                                pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                                startX: startX, startY: startY, actW: remW, actH: remH, searchRange: searchRange,
+                                mvs: &mvs, mvIdx: idx, fracRefBuf: pFracRef, fracExtBuf: pFracExt
+                            )
+                    }
     }
-
+    
     return mvs
 }
 
@@ -852,184 +834,31 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
         let remW = pW % pMbSize
         let remH = pH % pMbSize
 
-        data.withUnsafeBufferPointer { pPtr in
-            guard let pData = pPtr.baseAddress else { return }
-            out.withUnsafeMutableBufferPointer { oPtr in
-                guard let pOut = oPtr.baseAddress else { return }
+        var extBuffer = [Int16](repeating: 0, count: 71 * 71)
 
-                var extBuffer = [Int16](repeating: 0, count: 71 * 71)
-
-                @inline(__always)
-                func applyBlock(mbX: Int, mbY: Int, actW: Int, actH: Int) {
-                    let startX = mbX * pMbSize
-                    let startY = mbY * pMbSize
-                    let idx = mbY * localMbCols + mbX
-                    let vec = mvs.vectors[idx]
-                    
-                    let qdx = Int(vec.x) / div
-                    let qdy = Int(vec.y) / div
-                    let dx = qdx >> 2
-                    let dy = qdy >> 2
-                    let fracX = qdx & 3
-                    let fracY = qdy & 3
-
-                    let refX = startX + dx
-                    let refY = startY + dy
-                    
-                    let isSafe = (refX - 3 >= 0) && (refY - 3 >= 0) && (refX + actW + 4 <= pW) && (refY + actH + 4 <= pH)
-
-                    if isSafe {
-                        if fracX == 0 && fracY == 0 {
-                            switch actW {
-                            case 64:
-                                for y in 0..<actH {
-                                    let dstRow = (startY + y) * pW
-                                    let srcRow = (refY + y) * pW
-                                    let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
-                                    let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                                    let c2 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 32)).loadUnaligned(as: SIMD16<Int16>.self)
-                                    let c3 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 48)).loadUnaligned(as: SIMD16<Int16>.self)
-                                    let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
-                                    pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
-                                    pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
-                                    pDst.advanced(by: 64).storeBytes(of: c2, as: SIMD16<Int16>.self)
-                                    pDst.advanced(by: 96).storeBytes(of: c3, as: SIMD16<Int16>.self)
-                                }
-                            case 32:
-                                for y in 0..<actH {
-                                    let dstRow = (startY + y) * pW
-                                    let srcRow = (refY + y) * pW
-                                    let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
-                                    let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                                    let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
-                                    pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
-                                    pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
-                                }
-                            default:
-                                for y in 0..<actH {
-                                    let dstRow = (startY + y) * pW
-                                    let srcRow = (refY + y) * pW
-                                    pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
-                                }
-                            }
-                        } else {
-                            subpixelInterpolateBlock(
-                                src: pData, srcStride: pW,
-                                dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
-                                width: actW, height: actH,
-                                fracX: fracX, fracY: fracY,
-                                startX: refX, startY: refY
-                            )
-                        }
-                    } else {
-                        if fracX == 0 && fracY == 0 {
-                            let minSafeX = max(0, min(actW, -refX))
-                            let maxSafeX = max(0, min(actW, pW - refX))
-
-                            for y in 0..<actH {
-                                let dstY = startY + y
-                                let srcY = max(0, min(pH - 1, dstY + dy))
-                                let dstRow = dstY * pW
-                                let srcRow = srcY * pW
-                                
-                                let pDstBase = pOut.advanced(by: dstRow + startX)
-
-                                if 0 < minSafeX {
-                                    let leftEdgeVal = pData[srcRow]
-                                    for x in 0..<minSafeX {
-                                        pDstBase[x] = leftEdgeVal
-                                    }
-                                }
-                                
-                                let copyCount = maxSafeX - minSafeX
-                                if 0 < copyCount {
-                                    pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
-                                }
-                                
-                                if maxSafeX < actW {
-                                    let rightEdgeVal = pData[srcRow + pW - 1]
-                                    for x in maxSafeX..<actW {
-                                        pDstBase[x] = rightEdgeVal
-                                    }
-                                }
-                            }
-                        } else {
-                            // Extract padded block for fractional interpolation near edge
-                            let extW = actW + 7
-                            let extH = actH + 7
-                            let extStartX = refX - 3
-                            let extStartY = refY - 3
-                            
-                            extBuffer.withUnsafeMutableBufferPointer { extPtr in
-                                guard let pExt = extPtr.baseAddress else { return }
-                                
-                                let minSafeX = max(0, min(extW, -extStartX))
-                                let maxSafeX = max(0, min(extW, pW - extStartX))
-                                
-                                for y in 0..<extH {
-                                    let srcY = max(0, min(pH - 1, extStartY + y))
-                                    let srcRow = srcY * pW
-                                    let dstRow = y * extW
-                                    let pDstBase = pExt.advanced(by: dstRow)
-                                    
-                                    if 0 < minSafeX {
-                                        let leftEdgeVal = pData[srcRow]
-                                        for x in 0..<minSafeX {
-                                            pDstBase[x] = leftEdgeVal
-                                        }
-                                    }
-                                    
-                                    let copyCount = maxSafeX - minSafeX
-                                    if 0 < copyCount {
-                                        pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + extStartX + minSafeX), count: copyCount)
-                                    }
-                                    
-                                    if maxSafeX < extW {
-                                        let rightEdgeVal = pData[srcRow + pW - 1]
-                                        for x in maxSafeX..<extW {
-                                            pDstBase[x] = rightEdgeVal
-                                        }
-                                    }
-                                }
-                                
-                                // Now interpolate from extBuffer to pOut
-                                subpixelInterpolateBlock(
-                                    src: pExt, srcStride: extW,
-                                    dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
-                                    width: actW, height: actH,
-                                    fracX: fracX, fracY: fracY,
-                                    startX: 3, startY: 3
-                                )
-                            }
-                        }
-                    }
+        withUnsafePointers(data, mut: &out, mut: &extBuffer) { pData, pOut, pExt in
+            for mbY in 0..<fullMbRows {
+                for mbX in 0..<fullMbCols {
+                    applyMotionBlock(mbX: mbX, mbY: mbY, actW: pMbSize, actH: pMbSize, pMbSize: pMbSize, localMbCols: localMbCols, mvs: mvs, div: div, pW: pW, pH: pH, pData: pData, pOut: pOut, pExt: pExt)
                 }
+            }
 
+            if 0 < remW {
+                let mbX = fullMbCols
                 for mbY in 0..<fullMbRows {
-                    for mbX in 0..<fullMbCols {
-                        applyBlock(mbX: mbX, mbY: mbY, actW: pMbSize, actH: pMbSize)
-                    }
+                    applyMotionBlock(mbX: mbX, mbY: mbY, actW: remW, actH: pMbSize, pMbSize: pMbSize, localMbCols: localMbCols, mvs: mvs, div: div, pW: pW, pH: pH, pData: pData, pOut: pOut, pExt: pExt)
                 }
+            }
 
-                if 0 < remW {
-                    let mbX = fullMbCols
-                    for mbY in 0..<fullMbRows {
-                        applyBlock(mbX: mbX, mbY: mbY, actW: remW, actH: pMbSize)
-                    }
+            if 0 < remH {
+                let mbY = fullMbRows
+                for mbX in 0..<fullMbCols {
+                    applyMotionBlock(mbX: mbX, mbY: mbY, actW: pMbSize, actH: remH, pMbSize: pMbSize, localMbCols: localMbCols, mvs: mvs, div: div, pW: pW, pH: pH, pData: pData, pOut: pOut, pExt: pExt)
                 }
+            }
 
-                if 0 < remH {
-                    let mbY = fullMbRows
-                    for mbX in 0..<fullMbCols {
-                        applyBlock(mbX: mbX, mbY: mbY, actW: pMbSize, actH: remH)
-                    }
-                }
-
-                if 0 < remW && 0 < remH {
-                    let mbX = fullMbCols
-                    let mbY = fullMbRows
-                    applyBlock(mbX: mbX, mbY: mbY, actW: remW, actH: remH)
-                }
+            if 0 < remW && 0 < remH {
+                applyMotionBlock(mbX: fullMbCols, mbY: fullMbRows, actW: remW, actH: remH, pMbSize: pMbSize, localMbCols: localMbCols, mvs: mvs, div: div, pW: pW, pH: pH, pData: pData, pOut: pOut, pExt: pExt)
             }
         }
         return out
@@ -1040,6 +869,153 @@ func applyMBME(prev: PlaneData420, mvs: MotionVectors) async -> PlaneData420 {
     async let crTask = apply(data: prev.cr, pW: (w + 1) / 2, pH: (h + 1) / 2, div: 2)
 
     return PlaneData420(width: w, height: h, y: await yTask, cb: await cbTask, cr: await crTask)
+}
+
+@inline(__always)
+private func applyMotionBlock(
+    mbX: Int, mbY: Int, actW: Int, actH: Int,
+    pMbSize: Int, localMbCols: Int, mvs: MotionVectors, div: Int,
+    pW: Int, pH: Int,
+    pData: UnsafePointer<Int16>, pOut: UnsafeMutablePointer<Int16>, pExt: UnsafeMutablePointer<Int16>
+) {
+    let startX = mbX * pMbSize
+    let startY = mbY * pMbSize
+    let idx = mbY * localMbCols + mbX
+    let vec = mvs.vectors[idx]
+    
+    let qdx = Int(vec.x) / div
+    let qdy = Int(vec.y) / div
+    let dx = qdx >> 2
+    let dy = qdy >> 2
+    let fracX = qdx & 3
+    let fracY = qdy & 3
+
+    let refX = startX + dx
+    let refY = startY + dy
+    
+    let isSafe = (refX - 3 >= 0) && (refY - 3 >= 0) && (refX + actW + 4 <= pW) && (refY + actH + 4 <= pH)
+
+    if isSafe {
+        if fracX == 0 && fracY == 0 {
+            switch actW {
+            case 64:
+                for y in 0..<actH {
+                    let dstRow = (startY + y) * pW
+                    let srcRow = (refY + y) * pW
+                    let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let c2 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let c3 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                    pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                    pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
+                    pDst.advanced(by: 64).storeBytes(of: c2, as: SIMD16<Int16>.self)
+                    pDst.advanced(by: 96).storeBytes(of: c3, as: SIMD16<Int16>.self)
+                }
+            case 32:
+                for y in 0..<actH {
+                    let dstRow = (startY + y) * pW
+                    let srcRow = (refY + y) * pW
+                    let c0 = UnsafeRawPointer(pData.advanced(by: srcRow + refX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let c1 = UnsafeRawPointer(pData.advanced(by: srcRow + refX + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let pDst = UnsafeMutableRawPointer(pOut.advanced(by: dstRow + startX))
+                    pDst.storeBytes(of: c0, as: SIMD16<Int16>.self)
+                    pDst.advanced(by: 32).storeBytes(of: c1, as: SIMD16<Int16>.self)
+                }
+            default:
+                for y in 0..<actH {
+                    let dstRow = (startY + y) * pW
+                    let srcRow = (refY + y) * pW
+                    pOut.advanced(by: dstRow + startX).update(from: pData.advanced(by: srcRow + refX), count: actW)
+                }
+            }
+        } else {
+            subpixelInterpolateBlock(
+                src: pData, srcStride: pW,
+                dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
+                width: actW, height: actH,
+                fracX: fracX, fracY: fracY,
+                startX: refX, startY: refY
+            )
+        }
+    } else {
+        if fracX == 0 && fracY == 0 {
+            let minSafeX = max(0, min(actW, -refX))
+            let maxSafeX = max(0, min(actW, pW - refX))
+
+            for y in 0..<actH {
+                let dstY = startY + y
+                let srcY = max(0, min(pH - 1, dstY + dy))
+                let dstRow = dstY * pW
+                let srcRow = srcY * pW
+                
+                let pDstBase = pOut.advanced(by: dstRow + startX)
+
+                if 0 < minSafeX {
+                    let leftEdgeVal = pData[srcRow]
+                    for x in 0..<minSafeX {
+                        pDstBase[x] = leftEdgeVal
+                    }
+                }
+                
+                let copyCount = maxSafeX - minSafeX
+                if 0 < copyCount {
+                    pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + refX + minSafeX), count: copyCount)
+                }
+                
+                if maxSafeX < actW {
+                    let rightEdgeVal = pData[srcRow + pW - 1]
+                    for x in maxSafeX..<actW {
+                        pDstBase[x] = rightEdgeVal
+                    }
+                }
+            }
+        } else {
+            // Extract padded block for fractional interpolation near edge
+            let extW = actW + 7
+            let extH = actH + 7
+            let extStartX = refX - 3
+            let extStartY = refY - 3
+            
+            let minSafeX = max(0, min(extW, -extStartX))
+            let maxSafeX = max(0, min(extW, pW - extStartX))
+            
+            for y in 0..<extH {
+                let srcY = max(0, min(pH - 1, extStartY + y))
+                let srcRow = srcY * pW
+                let dstRow = y * extW
+                let pDstBase = pExt.advanced(by: dstRow)
+                
+                if 0 < minSafeX {
+                    let leftEdgeVal = pData[srcRow]
+                    for x in 0..<minSafeX {
+                        pDstBase[x] = leftEdgeVal
+                    }
+                }
+                
+                let copyCount = maxSafeX - minSafeX
+                if 0 < copyCount {
+                    pDstBase.advanced(by: minSafeX).update(from: pData.advanced(by: srcRow + extStartX + minSafeX), count: copyCount)
+                }
+                
+                if maxSafeX < extW {
+                    let rightEdgeVal = pData[srcRow + pW - 1]
+                    for x in maxSafeX..<extW {
+                        pDstBase[x] = rightEdgeVal
+                    }
+                }
+            }
+            
+            // Now interpolate from extBuffer to pOut
+            subpixelInterpolateBlock(
+                src: pExt, srcStride: extW,
+                dst: pOut.advanced(by: startY * pW + startX), dstStride: pW,
+                width: actW, height: actH,
+                fracX: fracX, fracY: fracY,
+                startX: 3, startY: 3
+            )
+        }
+    }
 }
 
 @inline(__always)
@@ -1415,49 +1391,39 @@ func estimateMotionQuadtree(curr: PlaneData420, prev: PlaneData420, layer0Curr: 
     var fracRefBuffer = [Int16](repeating: 0, count: 64 * 64)
     var fracExtBuffer = [Int16](repeating: 0, count: 71 * 71)
 
-    curr.y.withUnsafeBufferPointer { currPtr in
-        guard let pCurr = currPtr.baseAddress else { return }
-        prev.y.withUnsafeBufferPointer { prevPtr in
-            guard let pPrev = prevPtr.baseAddress else { return }
-            fracRefBuffer.withUnsafeMutableBufferPointer { fracRefPtr in
-                guard let pFracRef = fracRefPtr.baseAddress else { return }
-                fracExtBuffer.withUnsafeMutableBufferPointer { fracExtPtr in
-                    guard let pFracExt = fracExtPtr.baseAddress else { return }
+    withUnsafePointers(curr.y, prev.y, mut: &fracRefBuffer, mut: &fracExtBuffer) { pCurr, pPrev, pFracRef, pFracExt in
 
-            layer0Curr.data.withUnsafeBufferPointer { layer0CPtr in
-                guard let pLayer0C = layer0CPtr.baseAddress else { return }
-                layer0Prev.data.withUnsafeBufferPointer { layer0PPtr in
-                    guard let pLayer0P = layer0PPtr.baseAddress else { return }
-                    
-                    for mbY in 0..<mbRows {
-                        let startY = mbY * mbSize
-                        for mbX in 0..<mbCols {
-                            let startX = mbX * mbSize
+                    layer0Curr.data.withUnsafeBufferPointer { layer0CPtr in
+                        guard let pLayer0C = layer0CPtr.baseAddress else { return }
+                        layer0Prev.data.withUnsafeBufferPointer { layer0PPtr in
+                            guard let pLayer0P = layer0PPtr.baseAddress else { return }
                             
-                            // 1. DWT/Layer0 Coarse ME: Search in the 1/8 downscaled plane
-                            // The 64x64 block maps to an 8x8 block in Layer0. Search range ±3 means ±24 in full res!
-                            let cDXDY = evaluateLayer0Motion(
-                                pCurr: pLayer0C, pPrev: pLayer0P, w: layer0Curr.w, h: layer0Curr.h,
-                                startX: mbX * 8, startY: mbY * 8, size: 8, searchRange: 3
-                            )
-                            
-                            // 2. Full-res Fine ME: Refine around the scaled Coarse MV
-                            // Fine search range of ±3 is extremely light (49 evaluations) instead of ±16 (1089 evaluations)
-                            let nodeEval = evaluateMotionQuadtreeNode(
-                                pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                                startX: startX, startY: startY, size: mbSize, searchRange: 3,
-                                coarseDX: cDXDY.dx * 8, coarseDY: cDXDY.dy * 8,
-                                grid: &grid, fracRefBuf: pFracRef, fracExtBuf: pFracExt
-                            )
-                            ctuNodes.append(nodeEval.node)
+                            for mbY in 0..<mbRows {
+                                let startY = mbY * mbSize
+                                for mbX in 0..<mbCols {
+                                    let startX = mbX * mbSize
+                                    
+                                    // 1. DWT/Layer0 Coarse ME: Search in the 1/8 downscaled plane
+                                    // The 64x64 block maps to an 8x8 block in Layer0. Search range ±3 means ±24 in full res!
+                                    let cDXDY = evaluateLayer0Motion(
+                                        pCurr: pLayer0C, pPrev: pLayer0P, w: layer0Curr.w, h: layer0Curr.h,
+                                        startX: mbX * 8, startY: mbY * 8, size: 8, searchRange: 3
+                                    )
+                                    
+                                    // 2. Full-res Fine ME: Refine around the scaled Coarse MV
+                                    // Fine search range of ±3 is extremely light (49 evaluations) instead of ±16 (1089 evaluations)
+                                    let nodeEval = evaluateMotionQuadtreeNode(
+                                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                                        startX: startX, startY: startY, size: mbSize, searchRange: 3,
+                                        coarseDX: cDXDY.dx * 8, coarseDY: cDXDY.dy * 8,
+                                        grid: &grid, fracRefBuf: pFracRef, fracExtBuf: pFracExt
+                                    )
+                                    ctuNodes.append(nodeEval.node)
+                                }
+                            }
                         }
                     }
                 }
-            }
-                }
-            }
-        }
-    }
     return MotionTree(ctuNodes: ctuNodes, width: w, height: h)
 }
 
@@ -1626,22 +1592,8 @@ func applyMotionQuadtree(prev: PlaneData420, tree: MotionTree) async -> PlaneDat
     let mbCols = (w + mbSize - 1) / mbSize
     let mbRows = (h + mbSize - 1) / mbSize
 
-    result.y.withUnsafeMutableBufferPointer { resYPtr in
-        guard let pResY = resYPtr.baseAddress else { return }
-        result.cb.withUnsafeMutableBufferPointer { resCbPtr in
-            guard let pResCb = resCbPtr.baseAddress else { return }
-            result.cr.withUnsafeMutableBufferPointer { resCrPtr in
-                guard let pResCr = resCrPtr.baseAddress else { return }
-                prev.y.withUnsafeBufferPointer { prevYPtr in
-                    guard let pPrevY = prevYPtr.baseAddress else { return }
-                    prev.cb.withUnsafeBufferPointer { prevCbPtr in
-                        guard let pPrevCb = prevCbPtr.baseAddress else { return }
-                        prev.cr.withUnsafeBufferPointer { prevCrPtr in
-                            guard let pPrevCr = prevCrPtr.baseAddress else { return }
-                            
-                            var extBuffer = [Int16](repeating: 0, count: 71 * 71)
-                            extBuffer.withUnsafeMutableBufferPointer { extPtr in
-                                guard let pExt = extPtr.baseAddress else { return }
+    var extBuffer = [Int16](repeating: 0, count: 71 * 71)
+    withUnsafePointers(prev.y, prev.cb, prev.cr, mut: &result.y, mut: &result.cb, mut: &result.cr, mut: &extBuffer) { pPrevY, pPrevCb, pPrevCr, pResY, pResCb, pResCr, pExt in
 
                                 for mbY in 0..<mbRows {
                                     let startY = mbY * mbSize
@@ -1661,22 +1613,16 @@ func applyMotionQuadtree(prev: PlaneData420, tree: MotionTree) async -> PlaneDat
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-        }
     }
     return result
 }
 
-func encodeMotionQuadtreeNode(
+func encodeMotionQuadtreeNode<M: EntropyModelProvider>(
     node: MotionNode,
     w: Int, h: Int,
     startX: Int, startY: Int, size: Int,
     grid: inout MVGrid,
-    bw: inout EntropyEncoder
+    bw: inout EntropyEncoder<M>
 ) {
     if startX >= w || startY >= h { return }
     let minSize = 8

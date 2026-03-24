@@ -55,7 +55,7 @@ func invDwt2dScalar(_ block: inout BlockView, size: Int) {
     }
 }
 
-func blockEncode(encoder: inout EntropyEncoder, block: BlockView, size: Int) {
+func blockEncode(encoder: inout EntropyEncoder<DynamicEntropyModel>, block: BlockView, size: Int) {
     switch size {
     case 32: blockEncode32(encoder: &encoder, block: block, parentBlock: nil)
     case 16: blockEncode16(encoder: &encoder, block: block, parentBlock: nil)

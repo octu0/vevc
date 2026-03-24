@@ -51,11 +51,4 @@ final class ImageTests: XCTestCase {
         XCTAssertEqual(boundaryRepeat(w1, h1, -1, -1).0, 0)
     }
 
-    func testClampU8() {
-        XCTAssertEqual(clampU8(-1), 0)
-        XCTAssertEqual(clampU8(0), 0)
-        XCTAssertEqual(clampU8(128), 128)
-        XCTAssertEqual(clampU8(255), 255)
-        XCTAssertEqual(clampU8(256), 255)
-    }
 }

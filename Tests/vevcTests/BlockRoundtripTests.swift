@@ -17,7 +17,7 @@ final class BlockRoundtripTests: XCTestCase {
         let originalData = block.data
         
         // blockEncode16
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         block.withView { view in
             blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
         }
@@ -49,7 +49,7 @@ final class BlockRoundtripTests: XCTestCase {
         
         let originalData = block.data
         
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         block.withView { view in
             blockEncode8(encoder: &encoder, block: view, parentBlock: nil)
         }
@@ -89,7 +89,7 @@ final class BlockRoundtripTests: XCTestCase {
         
         let beforeData = block.data
         
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         block.withView { view in
             blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
         }
@@ -125,7 +125,7 @@ final class BlockRoundtripTests: XCTestCase {
         }
         
         // エンコード (stride=32)
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         block32.withView { view in
             let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
             blockEncode16(encoder: &encoder, block: hlView, parentBlock: nil)

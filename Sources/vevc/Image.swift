@@ -371,17 +371,6 @@ func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, 
     return (x, y)
 }
 
-@inline(__always)
-func clampU8(_ v: Int16) -> UInt8 {
-    if v <= -1 {
-        return 0
-    }
-    if 255 < v {
-        return 255
-    }
-    return UInt8(v)
-}
-
 // MARK: - Image Structures
 
 public enum YCbCrRatio: Sendable {

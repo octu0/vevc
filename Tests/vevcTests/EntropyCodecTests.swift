@@ -6,7 +6,7 @@ final class EntropyCodecTests: XCTestCase {
     
     /// 50個以上のpairsでrANSモードのラウンドトリップ
     func testRansRoundtrip() throws {
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         
         // 50個のpairを追加（nonZeroCount > 32でrANSモード）
         var expectedPairs: [(run: UInt32, val: Int16)] = []
@@ -31,7 +31,7 @@ final class EntropyCodecTests: XCTestCase {
 
     /// bypassWriter + pairs の混合テスト (blockEncode16と同じパターン)
     func testBypassAndPairsMixed() throws {
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         
         // blockEncode16が16ブロック×3サブバンド=48回呼ばれるシミュレーション
         var expectedBits: [UInt8] = []
@@ -94,7 +94,7 @@ final class EntropyCodecTests: XCTestCase {
         }
         
         // 全ブロックをエンコード
-        var encoder = EntropyEncoder()
+        var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in 0..<16 {
             blocks[i].withView { view in
                 blockEncode16(encoder: &encoder, block: view, parentBlock: nil)

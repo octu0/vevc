@@ -464,8 +464,6 @@ struct Interleaved4rANSDecoder {
     }
 }
 
-
-
 // MARK: - 4-way Interleaved rANS Encoder
 
 struct InterleavedrANSEncoder {

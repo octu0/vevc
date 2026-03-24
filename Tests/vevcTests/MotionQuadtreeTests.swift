@@ -101,7 +101,7 @@ final class MotionQuadtreeTests: XCTestCase {
         }
         
         // Test Encoding and Decoding symmetry
-        var bw = EntropyEncoder()
+        var bw = EntropyEncoder<DynamicEntropyModel>()
         var encodeGrid = MVGrid(width: 64, height: 64, minSize: 8)
         let mbSize = 64
         encodeMotionQuadtreeNode(node: rootNode, w: 64, h: 64, startX: 0, startY: 0, size: mbSize, grid: &encodeGrid, bw: &bw)

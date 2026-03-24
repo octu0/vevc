@@ -14,7 +14,7 @@ func debugLog(_ message: String) {
 }
 
 @inline(__always)
-func encodeExpGolomb(val: UInt32, encoder: inout EntropyEncoder) {
+func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout EntropyEncoder<M>) {
     var q = val
     var bits = 0
     while q > 0 {
@@ -31,12 +31,12 @@ func encodeExpGolomb(val: UInt32, encoder: inout EntropyEncoder) {
 }
 
 @inline(__always)
-func encodeCoeffRun(val: Int16, encoder: inout EntropyEncoder, run: Int, isParentZero: Bool = false) {
+func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, isParentZero: Bool = false) {
     encoder.addPair(run: UInt32(run), val: val, isParentZero: isParentZero)
 }
 
 @inline(__always)
-func blockEncode32(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
+func blockEncode32<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero16 = SIMD16<Int16>(repeating: 0)
@@ -99,7 +99,7 @@ func blockEncode32(encoder: inout EntropyEncoder, block: BlockView, parentBlock:
 }
 
 @inline(__always)
-func blockEncode16(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
+func blockEncode16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -182,7 +182,7 @@ func blockEncode16(encoder: inout EntropyEncoder, block: BlockView, parentBlock:
 }
 
 @inline(__always)
-func blockEncode8(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
+func blockEncode8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -264,7 +264,7 @@ func blockEncode8(encoder: inout EntropyEncoder, block: BlockView, parentBlock: 
 }
 
 @inline(__always)
-func blockEncode4(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView?) {
+func blockEncode4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
     let zero2 = SIMD2<Int16>(repeating: 0)
@@ -384,7 +384,7 @@ func getSubbands8(view: BlockView) -> Subbands {
 }
 
 @inline(__always)
-func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
     let ptr0 = block.rowPointer(y: 0)
     let ptr1 = block.rowPointer(y: 1)
     let ptr2 = block.rowPointer(y: 2)
@@ -470,7 +470,7 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
 }
 
 @inline(__always)
-func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -550,7 +550,7 @@ func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
 }
 
 @inline(__always)
-func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
         let ia = Int(a), ib = Int(b), ic = Int(c)
@@ -1032,7 +1032,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder()
+    var encoder = EntropyEncoder<StaticEntropyModel>()
     
     for (i, task) in tasks {
         func encodeAction(_ parentHL: BlockView?, _ parentLH: BlockView?, _ parentHH: BlockView?) {
@@ -1170,7 +1170,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder()
+    var encoder = EntropyEncoder<StaticEntropyModel>()
     
     for (i, task) in tasks {
         func encodeAction(_ parentHL: BlockView?, _ parentLH: BlockView?, _ parentHH: BlockView?) {
@@ -1271,7 +1271,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder()
+    var encoder = EntropyEncoder<StaticEntropyModel>()
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
@@ -1313,7 +1313,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder()
+    var encoder = EntropyEncoder<StaticEntropyModel>()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -1392,7 +1392,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     bwFlags.flush()
     debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = EntropyEncoder(useStaticTable: false)
+    var encoder = EntropyEncoder<DynamicEntropyModel>()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {
@@ -1560,7 +1560,7 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     bwFlags.flush()
     debugLog("    [CascadedSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = EntropyEncoder(useStaticTable: false)
+    var encoder = EntropyEncoder<DynamicEntropyModel>()
     var lastVal: Int16 = 0
     
     for (i, skip) in tasks {

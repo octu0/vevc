@@ -17,16 +17,14 @@ struct SceneChangeDetector {
         let yCount = min(curr.y.count, prev.y.count)
         if yCount == 0 { return false }
         
-        curr.y.withUnsafeBufferPointer { currPtr in
-            prev.y.withUnsafeBufferPointer { prevPtr in
-                var i = 0
-                while i < yCount {
-                    let c = Int(currPtr[i])
-                    let p = Int(prevPtr[i])
-                    diffSum += abs(c - p)
-                    count += 1
-                    i += step
-                }
+        withUnsafePointers(curr.y, prev.y) { currPtr, prevPtr in
+            var i = 0
+            while i < yCount {
+                let c = Int(currPtr[i])
+                let p = Int(prevPtr[i])
+                diffSum += abs(c - p)
+                count += 1
+                i += step
             }
         }
         

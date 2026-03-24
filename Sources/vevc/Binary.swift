@@ -21,6 +21,12 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
 }
 
 @inline(__always)
+func appendUInt64BE(_ out: inout [UInt8], _ val: UInt64) {
+    appendUInt32BE(&out, UInt32((val >> 32) & 0xFFFFFFFF))
+    appendUInt32BE(&out, UInt32(val & 0xFFFFFFFF))
+}
+
+@inline(__always)
 func readUInt8FromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt8 {
     guard (offset + 1) <= r.count else { throw BinaryError.insufficientData }
     let val = r[offset]
@@ -44,3 +50,9 @@ func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
     return val
 }
 
+@inline(__always)
+func readUInt64BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt64 {
+    let high = try readUInt32BEFromBytes(r, offset: &offset)
+    let low = try readUInt32BEFromBytes(r, offset: &offset)
+    return (UInt64(high) << 32) | UInt64(low)
+}
