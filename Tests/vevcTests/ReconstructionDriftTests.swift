@@ -108,7 +108,7 @@ final class ReconstructionDriftTests: XCTestCase {
         let width = 640
         let height = 480
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 500 * 1024, keyint: 15)
+        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 500 * 1024, keyint: 15)
         let decoder = CoreDecoder()
         
         var img0 = YCbCrImage(width: width, height: height)

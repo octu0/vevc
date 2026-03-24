@@ -104,7 +104,7 @@ final class FlickerDetectionTests: XCTestCase {
         let height = 240
         let frameCount = 20  // I-frame + P-frames（gopSize=15以内）
 
-        let encoder = Encoder(
+        let encoder = CoreEncoder(
             width: width,
             height: height,
             maxbitrate: 500 * 1000,
@@ -179,7 +179,7 @@ final class FlickerDetectionTests: XCTestCase {
 
         // 同じフレームを連続で送った場合、動きが無いのでmeanSADは低くなるはず
         // → 粗い量子化ケースに入る
-        let encoder = Encoder(
+        let encoder = CoreEncoder(
             width: width,
             height: height,
             maxbitrate: 500 * 1024,
@@ -187,7 +187,6 @@ final class FlickerDetectionTests: XCTestCase {
             keyint: 15,
             sceneChangeThreshold: 10
         )
-        let decoder = CoreDecoder()
         let img = generateGradientFrame(width: width, height: height, frameIndex: 0)
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)
 

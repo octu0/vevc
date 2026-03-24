@@ -121,7 +121,7 @@ final class ChromaBlockTests: XCTestCase {
         let width = 320
         let height = 240
 
-        let encoder = Encoder(
+        let encoder = CoreEncoder(
             width: width,
             height: height,
             maxbitrate: 500 * 1000,
@@ -168,7 +168,7 @@ final class ChromaBlockTests: XCTestCase {
         let width = 320
         let height = 240
 
-        let encoder = Encoder(
+        let encoder = CoreEncoder(
             width: width,
             height: height,
             maxbitrate: 500 * 1000,

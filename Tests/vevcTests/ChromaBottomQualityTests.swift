@@ -144,7 +144,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
+        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
         let decoder = CoreDecoder()
         
         let chunk = try await encoder.encode(image: img)
@@ -177,7 +177,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let cHeight = (height + 1) / 2
         let frameCount = 8
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
+        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
         let decoder = CoreDecoder()
         
         var bottomCbPsnrs: [Double] = []
@@ -333,7 +333,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
-        let encoder = Encoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
+        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
         let decoder = CoreDecoder()
         
         let chunk = try await encoder.encode(image: img)
