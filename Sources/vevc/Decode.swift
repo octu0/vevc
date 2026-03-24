@@ -464,46 +464,10 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
     let chunkSize = 4
     
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processY(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountY)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCountY + xIdx
-                var block: Block2D = yBlocks[blockIndex]
-                let half: Int = 32 / 2
-                var ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
-                ll.withView { srcView in
-                    block.withView { destView in
-                        for yi in 0..<half {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: half)
-                        }
-                    }
-                }
-                block.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSignedMapping(&hlView, q: qtY.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtY.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtY.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return processY(taskIdx: taskIdx) }
+            group.addTask { return decodeLayer32ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -516,46 +480,10 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
     }
     
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCb(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCb)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCountCb + xIdx
-                var block: Block2D = cbBlocks[blockIndex]
-                let half: Int = 32 / 2
-                var ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
-                ll.withView { srcView in
-                    block.withView { destView in
-                        for yi in 0..<half {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: half)
-                        }
-                    }
-                }
-                block.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return processCb(taskIdx: taskIdx) }
+            group.addTask { return decodeLayer32ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -568,46 +496,10 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
     }
     
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCr(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCr)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCountCr + xIdx
-                var block: Block2D = crBlocks[blockIndex]
-                let half: Int = 32 / 2
-                var ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
-                ll.withView { srcView in
-                    block.withView { destView in
-                        for yi in 0..<half {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: half)
-                        }
-                    }
-                }
-                block.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return processCr(taskIdx: taskIdx) }
+            group.addTask { return decodeLayer32ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -679,125 +571,17 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
     let chunkSize = 4
     
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processY(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountY)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 16
-            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
-                let blockIndex: Int = i * colCountY + xIdx
-                var block: Block2D = yBlocks[blockIndex]
-                let half: Int = 16 / 2
-                var ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
-                ll.withView { srcView in
-                    block.withView { destView in
-                        for yi in 0..<half {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: half)
-                        }
-                    }
-                }
-                block.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                    var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                    var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                    dequantizeSignedMapping(&hlView, q: qtY.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtY.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtY.qHigh)
-                    invDwt2d_16(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
     
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCb(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCb)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 16
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 16).enumerated() {
-                let blockIndex: Int = i * colCountCb + xIdx
-                var block: Block2D = cbBlocks[blockIndex]
-                let half: Int = 16 / 2
-                var ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
-                ll.withView { srcView in
-                    block.withView { destView in
-                        for yi in 0..<half {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: half)
-                        }
-                    }
-                }
-                block.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                    var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                    var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_16(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
 
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCr(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCr)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 16
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 16).enumerated() {
-                let blockIndex: Int = i * colCountCr + xIdx
-                var block: Block2D = crBlocks[blockIndex]
-                let half: Int = 16 / 2
-                var ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
-                ll.withView { srcView in
-                    block.withView { destView in
-                        for yi in 0..<half {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: half)
-                        }
-                    }
-                }
-                block.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                    var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                    var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_16(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return processY(taskIdx: taskIdx) }
+            group.addTask { return decodeLayer16ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -811,7 +595,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return processCb(taskIdx: taskIdx) }
+            group.addTask { return decodeLayer16ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -825,7 +609,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
     
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return processCr(taskIdx: taskIdx) }
+            group.addTask { return decodeLayer16ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -894,101 +678,17 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> (Image16, [Block2D], 
     let chunkSize = 4
     
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processY(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountY)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
-                let blockIndex: Int = i * colCountY + xIdx
-                var block: Block2D = yBlocks[blockIndex]
-                let half: Int = 8 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 8)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                    var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                    var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                    dequantize(&llView, q: qtY.qLow)
-                    dequantizeSignedMapping(&hlView, q: qtY.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtY.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtY.qHigh)
-                    invDwt2d_8(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
     
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCb(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCb)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 8).enumerated() {
-                let blockIndex: Int = i * colCountCb + xIdx
-                var block: Block2D = cbBlocks[blockIndex]
-                let half: Int = 8 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 8)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                    var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                    var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                    dequantize(&llView, q: qtC.qLow)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_8(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
 
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCr(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCr)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 8).enumerated() {
-                let blockIndex: Int = i * colCountCr + xIdx
-                var block: Block2D = crBlocks[blockIndex]
-                let half: Int = 8 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 8)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                    var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                    var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                    dequantize(&llView, q: qtC.qLow)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_8(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return processY(taskIdx: taskIdx) }
+            group.addTask { return decodeBase8ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -1002,7 +702,7 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> (Image16, [Block2D], 
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return processCb(taskIdx: taskIdx) }
+            group.addTask { return decodeBase8ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -1016,7 +716,7 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> (Image16, [Block2D], 
     
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return processCr(taskIdx: taskIdx) }
+            group.addTask { return decodeBase8ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -1084,101 +784,17 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
     let chunkSize = 4
     
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processY(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountY)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCountY + xIdx
-                var block: Block2D = yBlocks[blockIndex]
-                let half: Int = 32 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantize(&llView, q: qtY.qLow)
-                    dequantizeSignedMapping(&hlView, q: qtY.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtY.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtY.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
     
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCb(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCb)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCountCb + xIdx
-                var block: Block2D = cbBlocks[blockIndex]
-                let half: Int = 32 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantize(&llView, q: qtC.qLow)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
 
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    @Sendable @inline(__always)
-    func processCr(taskIdx: Int) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCountCr)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: cbDx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCountCr + xIdx
-                var block: Block2D = crBlocks[blockIndex]
-                let half: Int = 32 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantize(&llView, q: qtC.qLow)
-                    dequantizeSignedMapping(&hlView, q: qtC.qMid)
-                    dequantizeSignedMapping(&lhView, q: qtC.qMid)
-                    dequantizeSignedMapping(&hhView, q: qtC.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-    }
+
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return processY(taskIdx: taskIdx) }
+            group.addTask { return decodeBase32ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -1192,7 +808,7 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return processCb(taskIdx: taskIdx) }
+            group.addTask { return decodeBase32ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -1206,7 +822,7 @@ func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
     
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return processCr(taskIdx: taskIdx) }
+            group.addTask { return decodeBase32ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -1362,3 +978,423 @@ public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
     throw DecodeError.unsupportedArchitecture
 }
 #endif
+
+
+@Sendable @inline(__always)
+func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 32 / 2
+                var ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
+                ll.withView { srcView in
+                    block.withView { destView in
+                        for yi in 0..<half {
+                            let srcPtr = srcView.rowPointer(y: yi)
+                            let destPtr = destView.rowPointer(y: yi)
+                            destPtr.update(from: srcPtr, count: half)
+                        }
+                    }
+                }
+                block.withView { view in
+                    let base = view.base
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 32 / 2
+                var ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
+                ll.withView { srcView in
+                    block.withView { destView in
+                        for yi in 0..<half {
+                            let srcPtr = srcView.rowPointer(y: yi)
+                            let destPtr = destView.rowPointer(y: yi)
+                            destPtr.update(from: srcPtr, count: half)
+                        }
+                    }
+                }
+                block.withView { view in
+                    let base = view.base
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 32 / 2
+                var ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
+                ll.withView { srcView in
+                    block.withView { destView in
+                        for yi in 0..<half {
+                            let srcPtr = srcView.rowPointer(y: yi)
+                            let destPtr = destView.rowPointer(y: yi)
+                            destPtr.update(from: srcPtr, count: half)
+                        }
+                    }
+                }
+                block.withView { view in
+                    let base = view.base
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 16
+            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 16 / 2
+                var ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
+                ll.withView { srcView in
+                    block.withView { destView in
+                        for yi in 0..<half {
+                            let srcPtr = srcView.rowPointer(y: yi)
+                            let destPtr = destView.rowPointer(y: yi)
+                            destPtr.update(from: srcPtr, count: half)
+                        }
+                    }
+                }
+                block.withView { view in
+                    let base = view.base
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+                    var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+                    var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_16(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 16
+            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 16 / 2
+                var ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
+                ll.withView { srcView in
+                    block.withView { destView in
+                        for yi in 0..<half {
+                            let srcPtr = srcView.rowPointer(y: yi)
+                            let destPtr = destView.rowPointer(y: yi)
+                            destPtr.update(from: srcPtr, count: half)
+                        }
+                    }
+                }
+                block.withView { view in
+                    let base = view.base
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+                    var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+                    var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_16(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 16
+            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 16 / 2
+                var ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
+                ll.withView { srcView in
+                    block.withView { destView in
+                        for yi in 0..<half {
+                            let srcPtr = srcView.rowPointer(y: yi)
+                            let destPtr = destView.rowPointer(y: yi)
+                            destPtr.update(from: srcPtr, count: half)
+                        }
+                    }
+                }
+                block.withView { view in
+                    let base = view.base
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+                    var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+                    var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_16(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 8
+            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 8 / 2
+                block.withView { view in
+                    let base = view.base
+                    var llView = BlockView(base: base, width: half, height: half, stride: 8)
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+                    var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+                    var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+                    dequantizeSIMD(&llView, q: qt.qLow)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_8(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 8
+            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 8 / 2
+                block.withView { view in
+                    let base = view.base
+                    var llView = BlockView(base: base, width: half, height: half, stride: 8)
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+                    var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+                    var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+                    dequantizeSIMD(&llView, q: qt.qLow)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_8(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 8
+            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 8 / 2
+                block.withView { view in
+                    let base = view.base
+                    var llView = BlockView(base: base, width: half, height: half, stride: 8)
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+                    var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+                    var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+                    dequantizeSIMD(&llView, q: qt.qLow)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_8(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeBase32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 32 / 2
+                block.withView { view in
+                    let base = view.base
+                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    dequantizeSIMD(&llView, q: qt.qLow)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeBase32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 32 / 2
+                block.withView { view in
+                    let base = view.base
+                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    dequantizeSIMD(&llView, q: qt.qLow)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}
+
+
+@Sendable @inline(__always)
+func decodeBase32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
+        let startRow: Int = taskIdx * chunkSize
+        let endRow: Int = min(startRow + chunkSize, rowCount)
+        guard startRow < endRow else { return [] }
+        var rowResults: [(Block2D, Int, Int)] = []
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = i * colCount + xIdx
+                var block: Block2D = blocks[blockIndex]
+                let half: Int = 32 / 2
+                block.withView { view in
+                    let base = view.base
+                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
+                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    dequantizeSIMD(&llView, q: qt.qLow)
+                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                    invDwt2d_32(&view)
+                }
+                rowResults.append((block, w, h))
+            }
+        }
+        return rowResults
+}

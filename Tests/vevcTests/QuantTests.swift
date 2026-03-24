@@ -36,11 +36,11 @@ final class QuantTests: XCTestCase {
             }
             
             if signedMapping {
-                quantizeSignedMapping(&view, q: q)
-                dequantizeSignedMapping(&view, q: q)
+                quantizeSIMDSignedMapping(&view, q: q)
+                dequantizeSIMDSignedMapping(&view, q: q)
             } else {
-                quantize(&view, q: q)
-                dequantize(&view, q: q)
+                quantizeSIMD(&view, q: q)
+                dequantizeSIMD(&view, q: q)
             }
             
             for y in 0..<height {

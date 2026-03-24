@@ -1,5 +1,360 @@
 import Foundation
 
+@inline(__always)
+private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> Int {
+    let count = 4 * 4
+    let ptr0 = block.rowPointer(y: 0)
+    let ptr1 = block.rowPointer(y: 1)
+    let ptr2 = block.rowPointer(y: 2)
+    let ptr3 = block.rowPointer(y: 3)
+    
+    @inline(__always)
+    func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        let predicted: Int
+        if ia <= ic && ib <= ic {
+            predicted = min(ia, ib)
+        } else if ic <= ia && ic <= ib {
+            predicted = max(ia, ib)
+        } else {
+            predicted = ia + ib - ic
+        }
+        return abs(Int(x) - predicted)
+    }
+
+    var sumDiffAbs = abs(Int(ptr0[0]) - Int(lastVal))
+    sumDiffAbs += abs(Int(ptr0[1]) - Int(ptr0[0]))
+    sumDiffAbs += abs(Int(ptr0[2]) - Int(ptr0[1]))
+    sumDiffAbs += abs(Int(ptr0[3]) - Int(ptr0[2]))
+
+    sumDiffAbs += abs(Int(ptr1[0]) - Int(ptr0[0]))
+    sumDiffAbs += errorMED(ptr1[1], ptr1[0], ptr0[1], ptr0[0])
+    sumDiffAbs += errorMED(ptr1[2], ptr1[1], ptr0[2], ptr0[1])
+    sumDiffAbs += errorMED(ptr1[3], ptr1[2], ptr0[3], ptr0[2])
+    
+    sumDiffAbs += abs(Int(ptr2[0]) - Int(ptr1[0]))
+    sumDiffAbs += errorMED(ptr2[1], ptr2[0], ptr1[1], ptr1[0])
+    sumDiffAbs += errorMED(ptr2[2], ptr2[1], ptr1[2], ptr1[1])
+    sumDiffAbs += errorMED(ptr2[3], ptr2[2], ptr1[3], ptr1[2])
+
+    sumDiffAbs += abs(Int(ptr3[0]) - Int(ptr2[0]))
+    sumDiffAbs += errorMED(ptr3[1], ptr3[0], ptr2[1], ptr2[0])
+    sumDiffAbs += errorMED(ptr3[2], ptr3[1], ptr2[2], ptr2[1])
+    sumDiffAbs += errorMED(ptr3[3], ptr3[2], ptr2[3], ptr2[2])
+
+    lastVal = ptr3[3]
+    
+    let meanInt = sumDiffAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumDiffAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBitsDPCM16(block: BlockView, lastVal: inout Int16) -> Int {
+    let count = 16 * 16
+    
+    @inline(__always)
+    func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
+        let ia = Int(a), ib = Int(b), ic = Int(c)
+        let predicted: Int
+        if ia <= ic && ib <= ic {
+            predicted = min(ia, ib)
+        } else if ic <= ia && ic <= ib {
+            predicted = max(ia, ib)
+        } else {
+            predicted = ia + ib - ic
+        }
+        return abs(Int(x) - predicted)
+    }
+
+    var sumDiffAbs = 0
+    var last = lastVal
+    for y in 0..<16 {
+        let ptrY = block.rowPointer(y: y)
+        if y == 0 {
+            for x in 0..<16 {
+                if x == 0 {
+                    sumDiffAbs += abs(Int(ptrY[0]) - Int(last))
+                } else {
+                    sumDiffAbs += abs(Int(ptrY[x]) - Int(ptrY[x - 1]))
+                }
+            }
+        } else {
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            for x in 0..<16 {
+                if x == 0 {
+                    sumDiffAbs += abs(Int(ptrY[0]) - Int(ptrPrevY[0]))
+                } else {
+                    sumDiffAbs += errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                }
+            }
+        }
+        last = ptrY[15]
+    }
+    lastVal = last
+    
+    let meanInt = sumDiffAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumDiffAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
+    var sub = block.withView { view in
+        return dwt2d_8_sb(&view)
+    }
+    
+    quantizeSIMD(&sub.ll, q: qt.qLow)
+    quantizeSIMD(&sub.hl, q: qt.qMid)
+    quantizeSIMD(&sub.lh, q: qt.qMid)
+    quantizeSIMD(&sub.hh, q: qt.qHigh)
+    
+    let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
+        return isEffectivelyZeroBase4(data: ptr, threshold: 0)
+    }
+    if isZero {
+        return 1
+    }
+    
+    var bits = 1
+    var lastVal: Int16 = 0
+    bits += estimateRiceBitsDPCM4(block: sub.ll, lastVal: &lastVal)
+    bits += estimateRiceBits4(block: sub.hl)
+    bits += estimateRiceBits4(block: sub.lh)
+    bits += estimateRiceBits4(block: sub.hh)
+    
+    return bits
+}
+
+@inline(__always)
+private func estimateRiceBits32(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (32 * 32)
+    
+    for y in 0..<32 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<32 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBits16(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (16 * 16)
+    
+    for y in 0..<16 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<16 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBits8(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (8 * 8)
+    
+    for y in 0..<8 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<8 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func estimateRiceBits4(block: BlockView) -> Int {
+    var sumAbs = 0
+    let count = (4 * 4)
+    
+    for y in 0..<4 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<4 {
+            sumAbs += abs(Int(ptr[x]))
+        }
+    }
+    let meanInt = sumAbs / count
+    let k: Int
+    if meanInt < 1 {
+        k = 0
+    } else {
+        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
+    }
+    
+    let divisorShift = max(0, k - 1)
+    let bodyBits = sumAbs >> divisorShift
+    let headerBits = count * (1 + k)
+    
+    return bodyBits + headerBits
+}
+
+@inline(__always)
+private func measureBlockBits32(block: inout Block2D, qt: QuantizationTable) -> Int {
+    var sub = block.withView { view in
+        return dwt2d_32_sb(&view)
+    }
+    
+    quantizeSIMD(&sub.ll, q: qt.qLow)
+    quantizeSIMD(&sub.hl, q: qt.qMid)
+    quantizeSIMD(&sub.lh, q: qt.qMid)
+    quantizeSIMD(&sub.hh, q: qt.qHigh)
+    
+    let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
+        return isEffectivelyZeroBase32(data: ptr, threshold: 0)
+    }
+    if isZero {
+        return 1
+    }
+    
+    var bits = 1
+    var lastVal: Int16 = 0
+    bits += estimateRiceBitsDPCM16(block: sub.ll, lastVal: &lastVal)
+    bits += estimateRiceBits16(block: sub.hl)
+    bits += estimateRiceBits16(block: sub.lh)
+    bits += estimateRiceBits16(block: sub.hh)
+    
+    return bits
+}
+
+@inline(__always)
+func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
+    let probeStep = 64
+    let qt = QuantizationTable(baseStep: probeStep)
+    
+    let w = (img.width / 8)
+    let h = (img.height / 8)
+    
+    let points: [(Int, Int)] = [
+        (0, 0),
+        ((img.width - w), 0),
+        (0, (img.height - h)),
+        ((img.width - w), (img.height - h)),
+        (((img.width - w) / 2), 0),
+        ((img.width - w), ((img.height - h) / 2)),
+        (((img.width - w) / 2), (img.height - h)),
+        (0, ((img.height - h) / 2)),
+    ]
+    
+    var totalSampleBits = 0
+    let reader = ImageReader(img: img)
+    @inline(__always)
+    func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+        var block = Block2D(width: w, height: h)
+        block.withView { view in
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
+            }
+        }
+        return block
+    }
+
+    @inline(__always)
+    func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+        var block = Block2D(width: w, height: h)
+        block.withView { view in
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
+            }
+        }
+        return block
+    }
+
+    @inline(__always)
+    func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
+        var block = Block2D(width: w, height: h)
+        block.withView { view in
+            for i in 0..<h {
+                view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
+            }
+        }
+        return block
+    }
+    
+    for (sx, sy) in points {
+        var blockY = fetchBlockY(reader: reader, x: sx, y: sy, w: w, h: h)
+        totalSampleBits += measureBlockBits8(block: &blockY, qt: qt)
+        
+        var blockCb = fetchBlockCb(reader: reader, x: sx, y: sy, w: w, h: h)
+        totalSampleBits += measureBlockBits8(block: &blockCb, qt: qt)
+        
+        var blockCr = fetchBlockCr(reader: reader, x: sx, y: sy, w: w, h: h)
+        totalSampleBits += measureBlockBits8(block: &blockCr, qt: qt)
+    }
+    
+    let samplePixels = points.count * (w * h) * 3
+    let totalPixels = img.width * img.height * 3
+    
+    let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
+        
+    let ratio = estimatedTotalBits / Double(targetBits)
+    let predictedStep = Double(probeStep) * ratio * 3.5
+    let q = min(10000, Int(max(1, predictedStep)))
+    
+    return QuantizationTable(baseStep: q)
+}
+
 public class Encoder {
     public let width: Int
     public let height: Int

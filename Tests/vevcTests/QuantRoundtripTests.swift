@@ -32,7 +32,7 @@ final class QuantRoundtripTests: XCTestCase {
         
         // 量子化（SignedMapping = ジグザグエンコード付き）
         block.withView { view in
-            quantizeSignedMapping(&view, q: qt.qLow)
+            quantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         
         // ジグザグエンコード後の値を保存
@@ -40,7 +40,7 @@ final class QuantRoundtripTests: XCTestCase {
         
         // 逆量子化（SignedMapping = ジグザグデコード付き）
         block.withView { view in
-            dequantizeSignedMapping(&view, q: qt.qLow)
+            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         
         // 元の値と比較
@@ -77,10 +77,10 @@ final class QuantRoundtripTests: XCTestCase {
         let original = block.data
         
         block.withView { view in
-            quantizeSignedMapping(&view, q: qt.qLow)
+            quantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         block.withView { view in
-            dequantizeSignedMapping(&view, q: qt.qLow)
+            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         
         var mismatches: [(Int, Int16, Int16)] = []
@@ -109,10 +109,10 @@ final class QuantRoundtripTests: XCTestCase {
         let original = block.data
         
         block.withView { view in
-            quantizeSignedMapping(&view, q: qt.qLow)
+            quantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         block.withView { view in
-            dequantizeSignedMapping(&view, q: qt.qLow)
+            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         
         var mismatches: [(Int, Int16, Int16)] = []
@@ -147,10 +147,10 @@ final class QuantRoundtripTests: XCTestCase {
         }
         
         block.withView { view in
-            quantizeSignedMapping(&view, q: qt.qLow)
+            quantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         block.withView { view in
-            dequantizeSignedMapping(&view, q: qt.qLow)
+            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
         }
         
         var signMismatches: [(Int, Int16, Int16)] = []
@@ -190,8 +190,8 @@ final class QuantRoundtripTests: XCTestCase {
         // Mid test
         var blockMid = Block2D(width: size, height: size)
         for i in 0..<(size * size) { blockMid.data[i] = testValues[i] }
-        blockMid.withView { view in quantizeSignedMapping(&view, q: qt.qMid) }
-        blockMid.withView { view in dequantizeSignedMapping(&view, q: qt.qMid) }
+        blockMid.withView { view in quantizeSIMDSignedMapping(&view, q: qt.qMid) }
+        blockMid.withView { view in dequantizeSIMDSignedMapping(&view, q: qt.qMid) }
         
         var midSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
@@ -210,8 +210,8 @@ final class QuantRoundtripTests: XCTestCase {
         // High test
         var blockHigh = Block2D(width: size, height: size)
         for i in 0..<(size * size) { blockHigh.data[i] = testValues[i] }
-        blockHigh.withView { view in quantizeSignedMapping(&view, q: qt.qHigh) }
-        blockHigh.withView { view in dequantizeSignedMapping(&view, q: qt.qHigh) }
+        blockHigh.withView { view in quantizeSIMDSignedMapping(&view, q: qt.qHigh) }
+        blockHigh.withView { view in dequantizeSIMDSignedMapping(&view, q: qt.qHigh) }
         
         var highSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {

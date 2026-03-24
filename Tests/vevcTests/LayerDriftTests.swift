@@ -98,14 +98,14 @@ final class LayerDriftTests: XCTestCase {
         let qtC0 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 0, isOne: false)
         let (layer0, baseRecon, _, _, _) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 3)
 
-        let testBaseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+        let _ = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
         let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
         // エンコーダ再構築: Base8 → Layer16
         let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
         let l1dx = sub2.width
         let l1dy = sub2.height
-        let reconL1Y = reconstructPlaneLayer(blocks: l1yBlocks, prevImg: baseImg, planeType: 0, width: l1dx, height: l1dy, blockSize: 16, qt: qtY1)
+        let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
         
         // デコーダ: Base8 → Layer16
         let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0)

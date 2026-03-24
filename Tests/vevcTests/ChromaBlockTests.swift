@@ -258,10 +258,10 @@ final class ChromaBlockTests: XCTestCase {
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
                 var lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
                 var hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
-                dequantize(&llView, q: qt.qLow)
-                dequantizeSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSignedMapping(&hhView, q: qt.qHigh)
+                dequantizeSIMD(&llView, q: qt.qLow)
+                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
                 invDwt2d_8(&view)
             }
 
