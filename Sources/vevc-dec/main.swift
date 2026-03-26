@@ -96,7 +96,7 @@ do {
     let imageStream = decoder.decode(stream: encodedStream)
     for try await image in imageStream {
         if y4mWriter == nil {
-            let fpsHeader = vevcReader.fpsHeader ?? "F30:1"
+            let fpsHeader = "F\(vevcReader.fps):1"
             y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
         }
         

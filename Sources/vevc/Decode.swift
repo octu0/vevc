@@ -12,8 +12,19 @@ public enum DecodeError: Error {
 }
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
+
+    // Compute per-layer dimensions matching encoder DWT subband sizes:
+    // Layer2 (32x32): original size
+    // Layer1 (16x16): DWT LL subband of Layer2 = (dx+1)/2 × (dy+1)/2
+    // Layer0 (Base8): DWT LL subband of Layer1 = ((dx+1)/2+1)/2 × ((dy+1)/2+1)/2
+    let l2dx = dx
+    let l2dy = dy
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
 
     // encodeSpatialLayers appends layer0, then layer1, then layer2.
     // So chunks are ordered [layer0, layer1, layer2].
@@ -24,7 +35,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
     offset += Int(len0)
     
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, layer: 0)
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, layer: 0, dx: l0dx, dy: l0dy)
     var current = baseImg
     var parentYBlocks: [Block2D]? = base8YBlocks
     var parentCbBlocks: [Block2D]? = base8CbBlocks
@@ -36,7 +47,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
         
-        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, layer: 1, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
         current = l16Img
         parentYBlocks = l16YBlocks
         parentCbBlocks = l16CbBlocks
@@ -49,7 +60,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, predictedPd: PlaneData420? =
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         
-        current = try await decodeLayer32(r: layer2Data, layer: 2, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+        current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
     }
     
     return current
@@ -411,22 +422,9 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, la
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> Image16 {
     var offset = 0
     
-    guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
-    let header = Array(r[offset..<(offset + 5)])
-    offset += 5
-    
-    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
-         throw DecodeError.invalidHeader
-    }
-    guard header[4] == layer else {
-        throw DecodeError.invalidLayerNumber
-    }
-    
-    let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: false)
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: false)
     
@@ -518,22 +516,9 @@ func decodeLayer32(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
 }
 
 @inline(__always)
-func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
+func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
     
-    guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
-    let header = Array(r[offset..<(offset + 5)])
-    offset += 5
-    
-    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
-         throw DecodeError.invalidHeader
-    }
-    guard header[4] == layer else {
-        throw DecodeError.invalidLayerNumber
-    }
-    
-    let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: false)
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: false)
     
@@ -625,22 +610,9 @@ func decodeLayer16(r: [UInt8], layer: UInt8, prev: Image16, parentYBlocks: [Bloc
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], layer: UInt8) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
+func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
     
-    guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
-    let header = Array(r[offset..<(offset + 5)])
-    offset += 5
-    
-    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
-         throw DecodeError.invalidHeader
-    }
-    guard header[4] == layer else {
-        throw DecodeError.invalidLayerNumber
-    }
-    
-    let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: false)
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: false)
     
@@ -732,21 +704,9 @@ func decodeBase8(r: [UInt8], layer: UInt8) async throws -> (Image16, [Block2D], 
 }
 
 @inline(__always)
-func decodeBase32(r: [UInt8], layer: UInt8) async throws -> Image16 {
+func decodeBase32(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> Image16 {
     var offset = 0
-    guard (offset + 5) <= r.count else { throw DecodeError.insufficientData }
-    let header = Array(r[offset..<(offset + 5)])
-    offset += 5
     
-    guard header[0] == 0x56 && header[1] == 0x45 && header[2] == 0x56 && header[3] == 0x43 else {
-         throw DecodeError.invalidHeader
-    }
-    guard header[4] == layer else {
-        throw DecodeError.invalidLayerNumber
-    }
-    
-    let dx = Int(try readUInt16BEFromBytes(r, offset: &offset))
-    let dy = Int(try readUInt16BEFromBytes(r, offset: &offset))
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: true)
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: true)
     
@@ -853,49 +813,69 @@ public struct DecodeOptions: Sendable {
 }
 
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
+/// Decode VEVC encoded data. Handles GOP chunks (both Temporal and Direct).
 @inline(__always)
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
     if data.isEmpty { return [] }
     
     var offset = 0
-    var chunks: [[UInt8]] = []
+    var result: [YCbCrImage] = []
     
-    while offset + 4 <= data.count {
-        let startOffset = offset
-        let magic = Array(data[offset..<(offset + 4)])
-        offset += 4
+    // Collect all GOP chunks
+    var chunks: [[UInt8]] = []
+    var parsedWidth = 0
+    var parsedHeight = 0
+    while offset < data.count {
+        let byte0 = data[offset]
         
-        switch magic {
-        case [0x56, 0x45, 0x56, 0x49], [0x56, 0x45, 0x4F, 0x49]: // VEVI, VEOI
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            offset += len
-            chunks.append(Array(data[startOffset..<offset]))
+        if byte0 == 0x56 {
+            // VEVC file header: magic(4B) + dataSize(4B) = 8B, then metadata
+            offset += 8 // skip magic + dataSize
+            let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
+            let metaStart = offset
+            // Parse Profile 1 metadata to extract width/height
+            if 0 < metadataSize {
+                let profile = data[offset]
+                if profile == 0x01, 9 <= metadataSize {
+                    var mOffset = metaStart + 1
+                    parsedWidth = Int(try readUInt16BEFromBytes(data, offset: &mOffset))
+                    parsedHeight = Int(try readUInt16BEFromBytes(data, offset: &mOffset))
+                }
+            }
+            offset = metaStart + metadataSize
+        } else if byte0 == 0x00 || byte0 == 0x01 {
+            // GOP chunk: Mode(1B) + GOPSize(4B) + nLow(2B) + frames
+            let chunkStart = offset
+            offset += 1 // mode
             
-        case [0x56, 0x45, 0x56, 0x48]: // VEVH
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            offset += len
-            // VEVH is just header (FPS), we skip adding it to chunks because Decoder handles individual frame chunks
+            let gopSize = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            let _ = try readUInt16BEFromBytes(data, offset: &offset) // nLow
             
-        case [0x56, 0x45, 0x56, 0x50], [0x56, 0x45, 0x4F, 0x50]: // VEVP, VEOP
-            let _ = Int(try readUInt32BEFromBytes(data, offset: &offset)) // mvsCount
-            let mvDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + mvDataLen) <= data.count else { throw DecodeError.insufficientData }
-            offset += mvDataLen
+            for _ in 0..<gopSize {
+                let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
+                guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
+                offset += len
+            }
             
-            let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-            offset += len
-            chunks.append(Array(data[startOffset..<offset]))
-            
-        default: 
-             throw DecodeError.invalidHeader
+            chunks.append(Array(data[chunkStart..<offset]))
+        } else {
+            throw DecodeError.invalidHeader
         }
     }
     
-    let decoder = Decoder(maxLayer: opts.maxLayer)
-    return try await decoder.decode(chunks: chunks)
+    // Decode all chunks in parallel using Decoder streaming pipeline
+    let decoder = Decoder(maxLayer: opts.maxLayer, width: parsedWidth, height: parsedHeight)
+    let stream = AsyncStream<[UInt8]> { continuation in
+        for chunk in chunks {
+            continuation.yield(chunk)
+        }
+        continuation.finish()
+    }
+    for try await img in decoder.decode(stream: stream) {
+        result.append(img)
+    }
+    
+    return result
 }
 
 @inline(__always)

@@ -390,163 +390,112 @@ class CoreEncoder {
     
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
     func encode(image: YCbCrImage) async throws -> [UInt8] {
-        var out: [UInt8] = []
         let curr = toPlaneData420(images: [image])[0]
         
-        var forceIFrame = false
-        var predictedPlane: PlaneData420? = nil
-        var motionTree = MotionTree(ctuNodes: [], width: 0, height: 0)
-        var meanSAD: Int = 0
-
-        if keyint <= framesSinceKeyframe || prevReconstructed == nil {
-            forceIFrame = true
-        } else {
-            guard let prev = prevReconstructed else { throw NSError(domain: "vevc.Encoder", code: 2, userInfo: nil) }
-            
-            let layer0Curr = downscale8x(pd: curr)
-            let layer0Prev = downscale8x(pd: prev)
-            let rawStats = calculateDownscaledSADStats(layer0Curr: layer0Curr.data, layer0Prev: layer0Prev.data, w: layer0Curr.w, h: layer0Curr.h)
-            
-            // Layer0 is heavily filtered, so its SAD correctly represents structural changes without noise
-            if rawStats.meanSAD > sceneChangeThreshold * 16 {
-                forceIFrame = true
-                meanSAD = 999999
-                debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to Layer0 Scene Change (\(rawStats.meanSAD))")
-            } else {
-                motionTree = estimateMotionQuadtree(curr: curr, prev: prev, layer0Curr: layer0Curr, layer0Prev: layer0Prev)
-                let predicted = await applyMotionQuadtree(prev: prev, tree: motionTree)
-                predictedPlane = predicted
-                // Compute actual residual to encode
-                let res = await subPlanes(curr: curr, predicted: predicted)
-                let resStats = calculateSADAndMaxBlockSAD(res: res, mbSize: mbSize)
-                
-                // Use structural Layer0 raw SAD as the primary global activity metric for stable Rate Control (AQ)
-                meanSAD = rawStats.meanSAD
-                
-                if sceneChangeThreshold < resStats.meanSAD {
-                    forceIFrame = true
-                    meanSAD = 999999
-                    debugLog("[Frame \(frameIndex)] Adaptive GOP: Forced I-Frame due to high residual meanSAD (\(resStats.meanSAD) > \(sceneChangeThreshold))")
-                }
-            }
-        }
-        
-        if forceIFrame {
+        // Rate control
+        if keyint <= framesSinceKeyframe || frameIndex == 0 {
             let targetBits = rateController.beginGOP()
             let baseQt = estimateQuantization(img: image, targetBits: targetBits)
             self.qt = baseQt
+            framesSinceKeyframe = 0
         }
         guard let qt = self.qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
         
-        if forceIFrame {
-            let bytes: [UInt8]
-            let reconstructed: PlaneData420
-            let appliedQtY: QuantizationTable
-            
-            if isOne {
-                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: true)
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: true)
-                (bytes, reconstructed) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-                appliedQtY = qtY
-            } else {
-                let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: false)
-                let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: false)
-                (bytes, reconstructed) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-                appliedQtY = qtY
-            }
-                if isOne {
-                    out.append(contentsOf: [0x56, 0x45, 0x4F, 0x49]) // VEOI
-                } else {
-                    out.append(contentsOf: [0x56, 0x45, 0x56, 0x49]) // VEVI
-                }
-                appendUInt32BE(&out, UInt32(bytes.count))
-                out.append(contentsOf: bytes)
-                debugLog("[Frame \(frameIndex)] I-Frame: \(bytes.count) bytes (\(String(format: "%.2f", Double(bytes.count) / 1024.0)) KB)")
-                
-                rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(appliedQtY.step))
-                
-                prevReconstructed = reconstructed
-                framesSinceKeyframe = 1
-            } else {
-                let currentSAD = Double(meanSAD)
-                let newStepInt = rateController.calculatePFrameQStep(currentSAD: currentSAD, baseStep: Int(qt.step))
-                let newStep = Int16(clamping: newStepInt)
-                
-                // Adaptive Quantization Factor based on frame motion activity (0 to 10)
-                let activity = min(10, meanSAD)
-                
-                let bytes: [UInt8]
-                let reconstructedResidual: PlaneData420
-                let appliedQtY: QuantizationTable
-                
-                if isOne {
-                    let stepY = max(1, (Int(newStep) * (10 + activity)) / 15)
-                    let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
-                    let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: true)
-                    let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: true)
-                    (bytes, reconstructedResidual) = try await encodePlaneBase32(pd: curr, predictedPd: predictedPlane, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-                    appliedQtY = qtY
-                } else {
-                    // Luma (Y): Scale baseStep from 0.5x (static) to 1.0x (active)
-                    let stepY = max(1, (Int(newStep) * (10 + activity)) / 20)
-                    let qtY = QuantizationTable(baseStep: stepY, isChroma: false, layerIndex: 0, isOne: false)
-                    
-                    // Chroma (Cb/Cr): Scale baseStep from 1.0x (static) to 2.0x (active)
-                    let stepC = max(1, (Int(newStep) * (10 + activity)) / 10)
-                    let qtC = QuantizationTable(baseStep: stepC, isChroma: true, layerIndex: 0, isOne: false)
-                    (bytes, reconstructedResidual) = try await encodeSpatialLayers(pd: curr, predictedPd: predictedPlane, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-                    appliedQtY = qtY
-                }
-                    if isOne {
-                    out.append(contentsOf: [0x56, 0x45, 0x4F, 0x50]) // VEOP
-                } else {
-                    out.append(contentsOf: [0x56, 0x45, 0x56, 0x50]) // VEVP
-                }
-
-                var mvBw = EntropyEncoder<StaticEntropyModel>()
-                var grid = MVGrid(width: curr.width, height: curr.height, minSize: 8)
-                let mbCols = (curr.width + mbSize - 1) / mbSize
-                let mbRows = (curr.height + mbSize - 1) / mbSize
-                
-                for mbY in 0..<mbRows {
-                    let startY = mbY * mbSize
-                    for mbX in 0..<mbCols {
-                        let startX = mbX * mbSize
-                        let nodeIdx = mbY * mbCols + mbX
-                        if nodeIdx < motionTree.ctuNodes.count {
-                            let node = motionTree.ctuNodes[nodeIdx]
-                            encodeMotionQuadtreeNode(node: node, w: curr.width, h: curr.height, startX: startX, startY: startY, size: mbSize, grid: &grid, bw: &mvBw)
-                        }
-                    }
-                }
-                mvBw.flush()
-                let mvOut = mvBw.getData()
-                appendUInt32BE(&out, UInt32(motionTree.ctuNodes.count))
-                appendUInt32BE(&out, UInt32(mvOut.count))
-                out.append(contentsOf: mvOut)
-
-                appendUInt32BE(&out, UInt32(bytes.count))
-                out.append(contentsOf: bytes)
-                let totalBytes = bytes.count + mvOut.count
-                
-                rateController.consumePFrame(bits: totalBytes * 8, qStep: Int(appliedQtY.step), sad: Double(meanSAD))
-                
-                if let predicted = predictedPlane {
-                    let reconstructed = await addPlanes(residual: reconstructedResidual, predicted: predicted)
-                    prevReconstructed = reconstructed
-                } else {
-                    prevReconstructed = reconstructedResidual
-                }
-                framesSinceKeyframe += 1
-            }
+        let bytes: [UInt8]
+        let appliedQtY: QuantizationTable
         
-
+        if isOne {
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: true)
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: true)
+            (bytes, _) = try await encodePlaneBase32(pd: curr, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            appliedQtY = qtY
+        } else {
+            let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: false)
+            let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: false)
+            (bytes, _) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+            appliedQtY = qtY
+        }
+        
+        // Build GOP output: Direct mode, GOP=1, nLow=0
+        var out: [UInt8] = []
+        out.append(0x01)                                   // Mode: Direct
+        appendUInt32BE(&out, 1)                            // GOP size: 1
+        appendUInt16BE(&out, 0)                            // nLow: 0
+        appendUInt32BE(&out, UInt32(bytes.count))           // Frame length
+        out.append(contentsOf: bytes)
+        
+        rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(appliedQtY.step))
+        framesSinceKeyframe += 1
         frameIndex += 1
+        
         return out
     }
     #else
     func encode(image: YCbCrImage) async throws -> [UInt8] {
         throw EncodeError.unsupportedArchitecture
+    }
+    #endif
+    
+    #if (arch(arm64) || arch(x86_64) || arch(wasm32))
+    /// Encode a temporal GOP of 4 I-frames using temporal DWT + spatial Layers.
+    func encodeTemporalGOP4(images: [YCbCrImage]) async throws -> [UInt8] {
+        guard images.count == 4 else {
+            throw TemporalDWTError.invalidFrameCount(expected: 4, actual: images.count)
+        }
+        
+        let planes = toPlaneData420(images: images)
+        
+        // Determine quantization from first frame
+        let targetBits = rateController.beginGOP()
+        let baseQt = estimateQuantization(img: images[0], targetBits: targetBits)
+        self.qt = baseQt
+        guard let qt = self.qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
+        
+        let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0, isOne: false)
+        let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0, isOne: false)
+        
+        // Temporal DWT: 4 frames → 2 low + 2 high
+        let subbands = try temporalForwardDWT4(frames: planes)
+        
+        // Encode all 4 temporal subband frames in parallel
+        let allSubbandFrames = subbands.low + subbands.high
+        let localMaxbitrate = maxbitrate
+        let localZeroThreshold = zeroThreshold
+        
+        var encodedFrames = [[UInt8]](repeating: [], count: 4)
+        try await withThrowingTaskGroup(of: (Int, [UInt8]).self) { group in
+            for (idx, frame) in allSubbandFrames.enumerated() {
+                group.addTask {
+                    let (bytes, _) = try await encodeSpatialLayers(
+                        pd: frame, predictedPd: nil, maxbitrate: localMaxbitrate,
+                        qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold,
+                    )
+                    return (idx, bytes)
+                }
+            }
+            for try await (idx, bytes) in group {
+                encodedFrames[idx] = bytes
+            }
+        }
+        
+        // Build GOP output: Temporal mode, GOP=4, nLow=2
+        var out: [UInt8] = []
+        out.append(0x00)                                   // Mode: Temporal
+        appendUInt32BE(&out, UInt32(images.count))          // GOP size: 4
+        appendUInt16BE(&out, UInt16(subbands.low.count))    // nLow: 2
+        
+        // Write all subband frames (low first, then high)
+        for encoded in encodedFrames {
+            appendUInt32BE(&out, UInt32(encoded.count))
+            out.append(contentsOf: encoded)
+        }
+        
+        // Update state
+        rateController.consumeIFrame(bits: out.count * 8, qStep: Int(qtY.step))
+        framesSinceKeyframe = 4
+        frameIndex += 4
+        
+        return out
     }
     #endif
 }
@@ -575,8 +524,59 @@ public struct Encoder: Sendable {
     }
 
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-    /// Encodes a stream of frames into a stream of bitstream chunks using GOP-level parallelization.
+    /// Encodes a stream of frames into a stream of bitstream chunks.
+    /// For multi-layer mode (isOne=false): uses temporal DWT GOP=4.
+    /// For single-layer mode (isOne=true): uses per-frame encoding with keyint-based GOP parallelization.
     public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
+        if self.isOne {
+            return encodeOneStream(stream: stream)
+        } else {
+            return encodeTemporalStream(stream: stream)
+        }
+    }
+    
+    /// Temporal DWT encoding stream: buffers 4 frames, encodes as temporal GOP.
+    private func encodeTemporalStream(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
+        return AsyncThrowingStream { continuation in
+            Task {
+                var iterator = stream.makeAsyncIterator()
+                
+                let coreEncoder = CoreEncoder(
+                    width: self.width,
+                    height: self.height,
+                    maxbitrate: self.maxbitrate,
+                    framerate: self.framerate,
+                    zeroThreshold: self.zeroThreshold,
+                    keyint: self.keyint,
+                    sceneChangeThreshold: self.sceneChangeThreshold,
+                    isOne: false
+                )
+                
+                do {
+                    var buffer: [YCbCrImage] = []
+                    while let img = await iterator.next() {
+                        buffer.append(img)
+                        if buffer.count == 4 {
+                            let gopBytes = try await coreEncoder.encodeTemporalGOP4(images: buffer)
+                            continuation.yield(gopBytes)
+                            buffer.removeAll(keepingCapacity: true)
+                        }
+                    }
+                    // Remaining frames: encode individually
+                    for img in buffer {
+                        let chunk = try await coreEncoder.encode(image: img)
+                        continuation.yield(chunk)
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+    
+    /// Single-layer (One mode) encoding stream: per-frame encoding with GOP-level parallelization.
+    private func encodeOneStream(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()

@@ -132,7 +132,7 @@ func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: 
     return (encTime, decTime, outBytes.count, metrics)
 }
 
-// MARK: - H264 Encode / Decode (VideoToolbox)
+
 func createPixelBuffer(from img: YCbCrImage) -> CVPixelBuffer? {
     let width = img.width
     let height = img.height

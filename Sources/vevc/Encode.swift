@@ -1605,11 +1605,13 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
 }
 
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
+/// Encode images using temporal DWT (GOP=4) + spatial Layers pipeline.
+/// Groups every 4 frames into temporal GOPs for improved compression.
 public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {    
     if images.isEmpty { return [] }
     guard let first = images.first else { return [] }
     
-    let encoder = Encoder(
+    let coreEncoder = CoreEncoder(
         width: first.width,
         height: first.height,
         maxbitrate: maxbitrate,
@@ -1620,8 +1622,48 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
         isOne: false
     )
     
-    let chunks = try await encoder.encode(images: images)
-    return chunks.flatMap { $0 }
+    // Write VEVC file header: magic(4B) + dataSize(4B) = 8B
+    var result: [UInt8] = [0x56, 0x45, 0x56, 0x43] // VEVC
+    result.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // DataSize placeholder (updated at end)
+    
+    // Write Metadata: metadataSize(2B) + Profile1(1B) + Width(2B) + Height(2B) + ColorGamut(1B) + FPS(2B) + Timescale(1B)
+    let metadataPayloadSize: UInt16 = 9
+    appendUInt16BE(&result, metadataPayloadSize)
+    result.append(0x01) // Profile 1
+    appendUInt16BE(&result, UInt16(first.width))
+    appendUInt16BE(&result, UInt16(first.height))
+    result.append(0x01) // BT.709
+    appendUInt16BE(&result, UInt16(framerate))
+    result.append(0x00) // timescale 1000ms
+    
+    let gopSize = 4
+    var i = 0
+    
+    while i < images.count {
+        let remaining = images.count - i
+        if remaining >= gopSize {
+            let gopImages = Array(images[i..<(i + gopSize)])
+            let gopBytes = try await coreEncoder.encodeTemporalGOP4(images: gopImages)
+            result.append(contentsOf: gopBytes)
+            i += gopSize
+        } else {
+            // Remaining frames: encode individually as spatial Layers I-frames
+            for j in i..<images.count {
+                let frameBytes = try await coreEncoder.encode(image: images[j])
+                result.append(contentsOf: frameBytes)
+            }
+            i = images.count
+        }
+    }
+    
+    // Update DataSize: everything after the 8-byte file header
+    let dataSize = UInt32(result.count - 8)
+    result[4] = UInt8((dataSize >> 24) & 0xFF)
+    result[5] = UInt8((dataSize >> 16) & 0xFF)
+    result[6] = UInt8((dataSize >> 8) & 0xFF)
+    result[7] = UInt8(dataSize & 0xFF)
+    
+    return result
 }
 
 @inline(__always)
@@ -1640,8 +1682,33 @@ public func encodeOne(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30
         isOne: true
     )
     
+    // Write VEVC file header: magic(4B) + dataSize(4B) = 8B
+    var result: [UInt8] = [0x56, 0x45, 0x56, 0x43] // VEVC
+    result.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // DataSize placeholder
+    
+    // Write Metadata
+    let metadataPayloadSize: UInt16 = 9
+    appendUInt16BE(&result, metadataPayloadSize)
+    result.append(0x01) // Profile 1
+    appendUInt16BE(&result, UInt16(first.width))
+    appendUInt16BE(&result, UInt16(first.height))
+    result.append(0x01) // BT.709
+    appendUInt16BE(&result, UInt16(framerate))
+    result.append(0x00) // timescale 1000ms
+    
     let chunks = try await encoder.encode(images: images)
-    return chunks.flatMap { $0 }
+    for chunk in chunks {
+        result.append(contentsOf: chunk)
+    }
+    
+    // Update DataSize
+    let dataSize = UInt32(result.count - 8)
+    result[4] = UInt8((dataSize >> 24) & 0xFF)
+    result[5] = UInt8((dataSize >> 16) & 0xFF)
+    result[6] = UInt8((dataSize >> 8) & 0xFF)
+    result[7] = UInt8(dataSize & 0xFF)
+    
+    return result
 }
             
 #else

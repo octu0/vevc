@@ -57,7 +57,7 @@ final class LayerDriftTests: XCTestCase {
         let (bytes, encRecon, _, _, _) = try await encodePlaneBase8(pd: pd, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
         // デコーダ: Base8のみ
-        let (decImg, _, _, _) = try await decodeBase8(r: bytes, layer: 0)
+        let (decImg, _, _, _) = try await decodeBase8(r: bytes, layer: 0, dx: width, dy: height)
         
         let d = diffStats(encRecon.y, decImg.y)
         XCTAssertEqual(d.maxDiff, 0, "Base8 Y不一致: maxDiff=\(d.maxDiff) diffPixels=\(d.diffCount)/\(d.count) enc=[\(stats(encRecon.y))] dec=[\(stats(decImg.y))]")
@@ -108,8 +108,8 @@ final class LayerDriftTests: XCTestCase {
         let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
         
         // デコーダ: Base8 → Layer16
-        let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0)
-        let (decL1, _, _, _) = try await decodeLayer16(r: layer1, layer: 1, prev: decBase, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+        let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0, dx: sub1.width, dy: sub1.height)
+        let (decL1, _, _, _) = try await decodeLayer16(r: layer1, layer: 1, dx: sub2.width, dy: sub2.height, prev: decBase, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
         let d = diffStats(reconL1Y, decL1.y)
         XCTAssertEqual(d.maxDiff, 0, "Base8+Layer16 Y不一致: maxDiff=\(d.maxDiff) diffPixels=\(d.diffCount)/\(d.count) enc=[\(stats(reconL1Y))] dec=[\(stats(decL1.y))]")
@@ -141,7 +141,7 @@ final class LayerDriftTests: XCTestCase {
         
         let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
-        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
+        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2, dx: width, dy: height)
         
         let dY = diffStats(encRecon.y, decImg16.y)
         let dCb = diffStats(encRecon.cb, decImg16.cb)
@@ -180,7 +180,7 @@ final class LayerDriftTests: XCTestCase {
         
         let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
-        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
+        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2, dx: width, dy: height)
         
         let dY = diffStats(encRecon.y, decImg16.y)
         XCTAssertEqual(dY.maxDiff, 0, "NoisePattern Full Y不一致: maxDiff=\(dY.maxDiff) diffPixels=\(dY.diffCount)/\(dY.count) enc=[\(stats(encRecon.y))] dec=[\(stats(decImg16.y))]")

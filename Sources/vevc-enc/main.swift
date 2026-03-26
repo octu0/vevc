@@ -106,18 +106,30 @@ do {
     var frameCount = 0
     let startTime = Date()
     
-    // Write VEVH header with fpsHeader
-    let fpsStr = y4mReader.fpsHeader
-    if let fpsData = fpsStr.data(using: .utf8) {
-        var vevh = Data([0x56, 0x45, 0x56, 0x48])
-        let len = UInt32(fpsData.count)
-        vevh.append(UInt8((len >> 24) & 0xFF))
-        vevh.append(UInt8((len >> 16) & 0xFF))
-        vevh.append(UInt8((len >> 8) & 0xFF))
-        vevh.append(UInt8(len & 0xFF))
-        vevh.append(fpsData)
-        outFileHandle.write(vevh)
-    }
+    // Write VEVC file header: magic(4B) + dataSize(4B) = 8 bytes
+    // dataSize is placeholder 0, updated after encoding completes
+    var vevcHeader = Data([0x56, 0x45, 0x56, 0x43]) // VEVC
+    vevcHeader.append(contentsOf: [0x00, 0x00, 0x00, 0x00]) // DataSize placeholder
+    outFileHandle.write(vevcHeader)
+    
+    // Write Metadata: metadataSize(2B) + profile(1B) + width(2B) + height(2B) + colorGamut(1B) + fps(2B) + timescale(1B)
+    var metadata = Data()
+    let metadataPayloadSize: UInt16 = 9 // Profile(1) + Width(2) + Height(2) + ColorGamut(1) + FPS(2) + Timescale(1)
+    metadata.append(UInt8((metadataPayloadSize >> 8) & 0xFF))
+    metadata.append(UInt8(metadataPayloadSize & 0xFF))
+    metadata.append(0x01) // Profile 1
+    let w = UInt16(y4mReader.width)
+    metadata.append(UInt8((w >> 8) & 0xFF))
+    metadata.append(UInt8(w & 0xFF))
+    let h = UInt16(y4mReader.height)
+    metadata.append(UInt8((h >> 8) & 0xFF))
+    metadata.append(UInt8(h & 0xFF))
+    metadata.append(0x01) // ColorGamut: BT.709
+    let fpsValue = UInt16(fps)
+    metadata.append(UInt8((fpsValue >> 8) & 0xFF))
+    metadata.append(UInt8(fpsValue & 0xFF))
+    metadata.append(0x00) // Timescale: 0=1000ms
+    outFileHandle.write(metadata)
 
     let frameStream = AsyncStream<YCbCrImage> { continuation in
         Task {
@@ -137,6 +149,19 @@ do {
     for try await chunk in chunkStream {
         outFileHandle.write(Data(chunk))
         frameCount += 1
+    }
+    
+    // Update DataSize in file header (seek back to offset 4)
+    if outPath != "-" {
+        let fileSize = outFileHandle.offsetInFile
+        let dataSize = UInt32(fileSize - 8) // everything after the 8-byte file header
+        outFileHandle.seek(toFileOffset: 4)
+        var dataSizeBytes = Data()
+        dataSizeBytes.append(UInt8((dataSize >> 24) & 0xFF))
+        dataSizeBytes.append(UInt8((dataSize >> 16) & 0xFF))
+        dataSizeBytes.append(UInt8((dataSize >> 8) & 0xFF))
+        dataSizeBytes.append(UInt8(dataSize & 0xFF))
+        outFileHandle.write(dataSizeBytes)
     }
 
     let elapsed = Date().timeIntervalSince(startTime)

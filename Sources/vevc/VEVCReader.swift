@@ -80,86 +80,102 @@ public enum VEVCReaderError: Error {
 
 public class VEVCReader {
     private let fileHandle: FileHandle
-    public var fpsHeader: String? = nil
+    public var dataSize: UInt32 = 0
+    public var width: Int = 0
+    public var height: Int = 0
+    public var colorGamut: UInt8 = 1  // 1=BT.709, 2=BT.2020
+    public var fps: UInt16 = 30
+    public var timescale: UInt8 = 0   // 0=1000ms, 1=90000hz
     
     public init(fileHandle: FileHandle) {
         self.fileHandle = fileHandle
     }
     
     public func readFrameChunk() throws -> [UInt8]? {
-        let magicData = readFully(count: 4)
-        if magicData.isEmpty { return nil } // Normal EOF
-        guard magicData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
+        // Peek first byte to determine chunk type
+        let firstByte = readFully(count: 1)
+        if firstByte.isEmpty { return nil } // Normal EOF
+        guard firstByte.count == 1 else { throw VEVCReaderError.unexpectedEOF }
+        
+        let byte0 = firstByte[firstByte.startIndex]
+        
+        // VEVC file header starts with 'V' (0x56)
+        if byte0 == 0x56 {
+            // Read remaining 3 bytes of magic + 4 bytes dataSize = 7 bytes
+            let restHeader = readFully(count: 7)
+            guard restHeader.count == 7 else { throw VEVCReaderError.unexpectedEOF }
+            
+            let magic = Data([byte0]) + restHeader.prefix(3)
+            guard magic == Data([0x56, 0x45, 0x56, 0x43]) else {
+                let magicString = magic.map { String(format: "%02x", $0) }.joined()
+                throw VEVCReaderError.unknownMagic(magicString)
+            }
+            
+            // DataSize (4B) at restHeader[3..<7]
+            var dsOffset = 3
+            self.dataSize = try readUInt32BEFromBytes([UInt8](restHeader), offset: &dsOffset)
+            
+            // Read metadata: metadataSize(2B) first
+            let metaSizeData = readFully(count: 2)
+            guard metaSizeData.count == 2 else { throw VEVCReaderError.unexpectedEOF }
+            var msOffset = 0
+            let metadataSize = Int(try readUInt16BEFromBytes([UInt8](metaSizeData), offset: &msOffset))
+            
+            // Read metadata payload
+            let metaData = readFully(count: metadataSize)
+            guard metaData.count == metadataSize else { throw VEVCReaderError.unexpectedEOF }
+            let metaBytes = [UInt8](metaData)
+            
+            // Parse Profile 1: Width(2B) + Height(2B) + ColorGamut(1B) + FPS(2B) + Timescale(1B)
+            let profile = metaBytes[0]
+            if profile == 0x01, metadataSize >= 9 {
+                var mOffset = 1
+                self.width = Int(try readUInt16BEFromBytes(metaBytes, offset: &mOffset))
+                self.height = Int(try readUInt16BEFromBytes(metaBytes, offset: &mOffset))
+                self.colorGamut = metaBytes[mOffset]
+                mOffset += 1
+                self.fps = try readUInt16BEFromBytes(metaBytes, offset: &mOffset)
+                self.timescale = metaBytes[mOffset]
+            }
+            
+            // Recursively read the next chunk (first GOP)
+            return try readFrameChunk()
+        }
+        
+        // GOP chunk: Mode(1B) + GOPSize(4B) + nLow(2B) + frames
+        guard byte0 == 0x00 || byte0 == 0x01 else {
+            throw VEVCReaderError.unknownMagic(String(format: "%02x", byte0))
+        }
         
         var chunk = [UInt8]()
         chunk.reserveCapacity(1024 * 16)
-        chunk.append(contentsOf: magicData)
+        chunk.append(byte0) // Mode
         
-        switch magicData {
-        case Data([0x56, 0x45, 0x56, 0x49]), Data([0x56, 0x45, 0x4F, 0x49]): // VEVI, VEOI
-            let lenData = readFully(count: 4)
-            guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: lenData)
+        // Read GOPSize(4B) + nLow(2B) = 6 bytes
+        let headerData = readFully(count: 6)
+        guard headerData.count == 6 else { throw VEVCReaderError.unexpectedEOF }
+        chunk.append(contentsOf: headerData)
+        
+        var headerOffset = 0
+        let gopSize = Int(try readUInt32BEFromBytes([UInt8](headerData), offset: &headerOffset))
+        // nLow is read but not needed for framing
+        
+        // Read all frame payloads
+        for _ in 0..<gopSize {
+            let frameLenData = readFully(count: 4)
+            guard frameLenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
+            chunk.append(contentsOf: frameLenData)
             
-            var lenOffset = 0
-            let len = Int(try readUInt32BEFromBytes([UInt8](lenData), offset: &lenOffset))
+            var frameLenOffset = 0
+            let frameLen = Int(try readUInt32BEFromBytes([UInt8](frameLenData), offset: &frameLenOffset))
+            guard frameLen >= 0 else { throw VEVCReaderError.invalidHeader }
             
-            guard len >= 0 else { throw VEVCReaderError.invalidHeader }
-            let payload = readFully(count: len)
-            guard payload.count == len else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: payload)
-            
-            return chunk
-            
-        case Data([0x56, 0x45, 0x56, 0x50]), Data([0x56, 0x45, 0x4F, 0x50]): // VEVP, VEOP
-            let headerData = readFully(count: 8) // mvsCount(4) + mvDataLen(4)
-            guard headerData.count == 8 else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: headerData)
-            
-            var mvLenOffset = 4
-            let mvDataLen = Int(try readUInt32BEFromBytes([UInt8](headerData), offset: &mvLenOffset))
-            
-            if mvDataLen > 0 {
-                let mvData = readFully(count: mvDataLen)
-                guard mvData.count == mvDataLen else { throw VEVCReaderError.unexpectedEOF }
-                chunk.append(contentsOf: mvData)
-            }
-            
-            let lenData = readFully(count: 4)
-            guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: lenData)
-            
-            var lenOffset = 0
-            let len = Int(try readUInt32BEFromBytes([UInt8](lenData), offset: &lenOffset))
-            
-            guard len >= 0 else { throw VEVCReaderError.invalidHeader }
-            let payload = readFully(count: len)
-            guard payload.count == len else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: payload)
-            
-            return chunk
-            
-        case Data([0x56, 0x45, 0x56, 0x48]): // VEVH
-            let lenData = readFully(count: 4)
-            guard lenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
-            
-            var lenOffset = 0
-            let len = Int(try readUInt32BEFromBytes([UInt8](lenData), offset: &lenOffset))
-            guard len >= 0 else { throw VEVCReaderError.invalidHeader }
-            
-            if len > 0 {
-                let payload = readFully(count: len)
-                guard payload.count == len else { throw VEVCReaderError.unexpectedEOF }
-                self.fpsHeader = String(data: payload, encoding: .utf8)
-            }
-            
-            // recursively read the next chunk (which should be the first frame)
-            return try readFrameChunk()
-            
-        default:
-            let magicString = magicData.map { String(format: "%02x", $0) }.joined()
-            throw VEVCReaderError.unknownMagic(magicString)
+            let framePayload = readFully(count: frameLen)
+            guard framePayload.count == frameLen else { throw VEVCReaderError.unexpectedEOF }
+            chunk.append(contentsOf: framePayload)
         }
+        
+        return chunk
     }
     
     private func readFully(count: Int) -> Data {

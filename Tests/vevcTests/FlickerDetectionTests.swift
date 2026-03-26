@@ -112,7 +112,7 @@ final class FlickerDetectionTests: XCTestCase {
             keyint: 30,  // 全フレームが1GOP内に入るようにする
             sceneChangeThreshold: 8
         )
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
 
         var originals: [YCbCrImage] = []
         var decoded: [YCbCrImage] = []
@@ -125,7 +125,7 @@ final class FlickerDetectionTests: XCTestCase {
             let chunk = try await encoder.encode(image: img)
             frameSizes.append(chunk.count)
 
-            let dec = try await decoder.decode(chunk: chunk)
+            let dec = try await decoder.decodeGOP(chunk: chunk)[0]
             decoded.append(dec)
         }
 

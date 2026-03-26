@@ -44,7 +44,7 @@ final class ParallelCodecTests: XCTestCase {
         let width = 320
         let height = 240
         let frameCount = 10
-        let keyint = 3 // Force multiple GOPs (10 frames / 3 = 4 GOPs: 3, 3, 3, 1)
+        // Note: with temporal DWT (GOP=4), 10 frames → 2 VTGI chunks (4+4) + 2 individual I-frames = 4 chunks
 
         let images = generateSequence(width: width, height: height, count: frameCount)
 
@@ -57,14 +57,15 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 1. Parallel Encoding Test
-        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: keyint, sceneChangeThreshold: 8, isOne: false, maxConcurrency: 2)
+        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 60, sceneChangeThreshold: 8, isOne: false, maxConcurrency: 2)
         
         var chunks: [[UInt8]] = []
         let chunkStream = encoder.encode(stream: frameStream)
         for try await chunk in chunkStream {
             chunks.append(chunk)
         }
-        XCTAssertEqual(chunks.count, frameCount, "Should produce exactly one encoded chunk per frame.")
+        // Temporal encoding: 10 frames → 2 VTGI (4+4=8 frames) + 2 individual (2 frames) = 4 chunks
+        XCTAssertEqual(chunks.count, 4, "10 frames with temporal GOP=4 should produce 4 chunks (2 VTGI + 2 individual).")
         
         // Emulate streaming bitstream chunks
         let encodedStream = AsyncStream<[UInt8]> { continuation in
@@ -75,7 +76,7 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 2. Parallel Decoding Test
-        let decoder = Decoder(maxLayer: 2, maxConcurrency: 2)
+        let decoder = Decoder(maxLayer: 2, maxConcurrency: 2, width: width, height: height)
         var decodedImages: [YCbCrImage] = []
         let imageStream = decoder.decode(stream: encodedStream)
         for try await img in imageStream {

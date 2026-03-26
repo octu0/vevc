@@ -25,6 +25,46 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 // MARK: - LeGall 5/3 Lifting
 
 @inline(__always)
+func lift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+    // even samples = low, odd samples = high
+    var low = SIMD2<Int16>(buffer[0 * stride], buffer[2 * stride])
+    var high = SIMD2<Int16>(buffer[1 * stride], buffer[3 * stride])
+
+    // Predict: H[n] -= (L[n] + L[n+1]) >> 1
+    // Boundary mirror: L[n+1] for last element uses L[n] itself
+    let lowShifted = SIMD2<Int16>(low[1], low[1])
+    high &-= (low &+ lowShifted) &>> 1
+
+    // Update: L[n] += (H[n-1] + H[n] + 2) >> 2
+    // Boundary mirror: H[n-1] for first element uses H[n] itself
+    let highShifted = SIMD2<Int16>(high[0], high[0])
+    low &+= (highShifted &+ high &+ 2) &>> 2
+
+    // Output: [L0, L1, H0, H1]
+    buffer[0 * stride] = low[0]; buffer[1 * stride] = low[1]
+    buffer[2 * stride] = high[0]; buffer[3 * stride] = high[1]
+}
+
+@inline(__always)
+func invLift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+    // Input layout: [L0, L1, H0, H1]
+    var low = SIMD2<Int16>(buffer[0 * stride], buffer[1 * stride])
+    var high = SIMD2<Int16>(buffer[2 * stride], buffer[3 * stride])
+
+    // Inverse Update: L[n] -= (H[n-1] + H[n] + 2) >> 2
+    let highShifted = SIMD2<Int16>(high[0], high[0])
+    low &-= (highShifted &+ high &+ 2) &>> 2
+
+    // Inverse Predict: H[n] += (L[n] + L[n+1]) >> 1
+    let lowShifted = SIMD2<Int16>(low[1], low[1])
+    high &+= (low &+ lowShifted) &>> 1
+
+    // Interleave back: [L0, H0, L1, H1]
+    buffer[0 * stride] = low[0]; buffer[1 * stride] = high[0]
+    buffer[2 * stride] = low[1]; buffer[3 * stride] = high[1]
+}
+
+@inline(__always)
 func lift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD4<Int16>(buffer[0 * stride], buffer[2 * stride], buffer[4 * stride], buffer[6 * stride])
     var high = SIMD4<Int16>(buffer[1 * stride], buffer[3 * stride], buffer[5 * stride], buffer[7 * stride])

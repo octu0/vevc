@@ -45,8 +45,8 @@ final class DPCMDistributionTests: XCTestCase {
         
         for (name, gen) in patterns {
             var yPlane = [Int16](repeating: 0, count: width * height)
-            var cbPlane = [Int16](repeating: 128, count: (width / 2) * (height / 2))
-            var crPlane = [Int16](repeating: 128, count: (width / 2) * (height / 2))
+            let cbPlane = [Int16](repeating: 128, count: (width / 2) * (height / 2))
+            let crPlane = [Int16](repeating: 128, count: (width / 2) * (height / 2))
             
             for y in 0..<height {
                 for x in 0..<width {

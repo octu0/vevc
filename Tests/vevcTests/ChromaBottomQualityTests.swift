@@ -145,10 +145,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         let chunk = try await encoder.encode(image: img)
-        let decoded = try await decoder.decode(chunk: chunk)
+        let decoded = try await decoder.decodeGOP(chunk: chunk)[0]
         
         assertChromaBottomQuality(
             originalCb: img.cbPlane, decodedCb: decoded.cbPlane,
@@ -178,7 +178,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let frameCount = 8
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         var bottomCbPsnrs: [Double] = []
         var bottomCrPsnrs: [Double] = []
@@ -186,7 +186,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         for i in 0..<frameCount {
             let img = generateNaturalImage(width: width, height: height, seed: i * 3)
             let chunk = try await encoder.encode(image: img)
-            let decoded = try await decoder.decode(chunk: chunk)
+            let decoded = try await decoder.decodeGOP(chunk: chunk)[0]
             
             let frameType = (i == 0) ? "I" : "P"
             
@@ -248,7 +248,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, maxLayer: 2)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, maxLayer: 2, dx: width, dy: height)
         let iDecodedPd = PlaneData420(img16: iDecoded)
         
         // I-Frameのクロマ差分
@@ -266,7 +266,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, predictedPd: predicted, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // P-Frame: decode
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height)
         let pDecodedPd = PlaneData420(img16: pDecoded)
         
         // P-Frameの残差のクロマ差分
@@ -334,10 +334,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         let chunk = try await encoder.encode(image: img)
-        let decoded = try await decoder.decode(chunk: chunk)
+        let decoded = try await decoder.decodeGOP(chunk: chunk)[0]
         
         // 最後のブロック行（8ピクセル行）のクロマPSNR
         let lastBlockStartY = max(0, cHeight - 8)

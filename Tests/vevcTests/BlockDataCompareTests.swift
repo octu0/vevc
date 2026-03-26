@@ -39,9 +39,6 @@ final class BlockDataCompareTests: XCTestCase {
         // decodePlaneSubbands32 は decodePlaneSubbands32(data:blockCount:) で直接呼べる
         // ただしLayer32ヘッダを解析してdataを取り出す必要がある
         var offset = 0
-        offset += 5 // header
-        let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset)) // dx
-        let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset)) // dy
         let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset)) // qtY step
         let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset)) // qtC step
         

@@ -5,16 +5,16 @@
 > Work In Progress
 
 
-**vevc** is a high-speed video compression format, extending the high-efficiency, multi-resolution image format [veif](https://github.com/octu0/veif) (velocity image format) with Pixel-Domain Macroblock-based Motion Estimation (MBME) and Residual 2D-DWT.
+**vevc** is a high-speed video compression format, extending the high-efficiency, multi-resolution image format [veif](https://github.com/octu0/veif) (velocity image format) with Temporal DWT, Spatial 2D-DWT, and SIMD-optimized entropy coding.
 
 ![figure0](docs/fig0.jpg)
 
 ## Features
 
-1. **Pixel-Domain Prediction & 2D-DWT**
-   - **Spatial**: LeGall 5/3 2D-DWT (Supports multiple resolutions via Layer 0, 1, 2) similar to `veif`.
-   - **Temporal**: Macroblock-based Motion Estimation (MBME) to predict pixel movement using robust 16x16 blocks, followed by Interleaved rANS entropy coding and 2D-DWT applied only to the residual (difference) frame, achieving ultra-fast decode speeds.
-   - **Quadtree Variable Macroblocks**: Dynamically splits blocks (e.g., from 32x32 down to 8x8) based on localized subband coefficient variance and SAD, selectively skipping flat regions to significantly optimize processing speed and file size.
+1. **Temporal + Spatial DWT Pipeline**
+   - **Temporal**: LeGall 5/3 1D-DWT across GOP=4 frames. Each pixel position is transformed along the time axis, producing 2 temporal-low (smooth) and 2 temporal-high (detail) subband frames. Subband frames are encoded/decoded in parallel using Swift concurrency for near-zero overhead.
+   - **Spatial**: LeGall 5/3 2D-DWT with multi-resolution Layers (Layer 0, 1, 2) inherited from `veif`. Each temporal subband frame is further decomposed into spatial frequency layers.
+   - **SIMD8-Optimized**: Temporal lifting uses `SIMD8<Int16>` for 8-pixel simultaneous processing with `UnsafeRawPointer.load/storeBytes` direct memory access.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -28,65 +28,101 @@
    | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p                     | Skip Layer 1, 2               |
 
 3. **Acceleration via Concurrency & SIMD**
-   - Critical operations such as Plane matching, shifting, and difference calculations are fully parallelized and vectorized.
+   - Temporal subband frames are encoded/decoded in parallel (4-way `TaskGroup`).
+   - Spatial DWT, plane matching, shifting, and difference calculations are fully vectorized.
+   - Temporal DWT lifting is SIMD8-optimized with scalar tail handling.
 
 ---
 
 ## Data Layout
 
-`vevc` performs encoding using an I-Frame (Intra-coded) and P-Frame (Predicted) structure.
+`vevc` encodes video using Temporal GOP (Group of Pictures) of 4 frames, processed through a temporal-spatial wavelet pipeline.
 
-**Infrastructure Efficiency:** By leveraging the hierarchical spatial layers, servers can generate streams for different visual quality levels simply by skipping (demuxing) unnecessary outer layers without any re-encoding overhead.
+**Bitstream Structure:**
 
 ```
                                      VEVC File Structure
-+--------------------------------------------------------------------------------+
-|                                  Container (VEVC)                              |
-+--------------------------------------------------------------------------------+
-|       I-Frame           |       P-Frame 1         |       P-Frame 2         | ...
-+-------------------------+-------------------------+-------------------------+
++-------------------------------------------------------------------------+
+|                                  Container (VEVC)                       |
++-------------------------------------------------------------------------+
+| VEVC Header     | Metadata        | GOP (0..3)      | ... | GOP (tail)  |
++-----------------+-----------------+-----------------+-----+-------------+
 
-                                     Frame Structure
-+---------------------------------------------------------------------------------------------+
-|     Magic (4B)     |   rANS Encoded MVs (P-Frame) |           Spatial Data            |
-|  'VEVI' or 'VEVP'  |  RLE + rANS Motion Vectors   |                                   |
-+--------------------+--------------------------------+-----------------------------------+
-                                                |
-                                                v
-    +-----------------------------------------------------------------------------------------------+
-    |                                        Spatial Layers                                         |
-    +-----------------------------------+-----------------------------------+-----------------------+
-    |              Layer 0              |              Layer 1              |        Layer 2        |
-    +-----------------+-----------------+-----------------+-----------------+-------------+---------+
-    | Header & Metdata|     Payload     | Header & Metdata|     Payload     | Header/Meta | Payload |
-    |   'VEVC' + 0    |   (Y, Cb, Cr)   |   'VEVC' + 1    |   (Y, Cb, Cr)   | 'VEVC' + 2  | (Y,C,C) |
-    +-----------------+-----------------+-----------------+-----------------+-------------+---------+
+         VEVC File Header (8 bytes)
++-------------------------------------------+
+| Magic 'VEVC' (4B) | Data Size (4B)        |
++--------------------+----------------------+
+
+         Metadata (Profile 1)
++---------------------------------------------+
+| Metadata Size (2B) | Profile Version(1B)    |
++------------+-------+-----+------------------+----------+----------------+
+| Width (2B) | Height (2B) | Color Gamut (1B) | FPS (2B) | Timescale (1B) |
++------------+-------------+------------------+----------+----------------+
+  Color Gamut: 0x01=BT.709, 0x02=BT.2020
+  Timescale:   0x00=1000ms, 0x01=90000hz
+
+# Temporal Mode (Mode=0x00, GOP=4, nLow=2)
++------------------------------------------------+
+| Mode 0x00 (1B) | GOP Size 4 (4B) | nLow 2 (2B) |
++----------------+-----------------+-------------+--------------------+
+| F0 len (4B) | F0 (Low0 spatial)  | F1 len (4B) | F1 (Low1 spatial)  |
++-------------+--------------------+-------------+--------------------+
+| F2 len (4B) | F2 (High0 spatial) | F3 len (4B) | F3 (High1 spatial) |
++-------------+--------------------+-------------+--------------------+
+
+    Spatial Frame (Temporal: 3 Layers)
+    +---------------------------------------------------------+
+    | L0 len (4B)  | Layer 0 Payload (8x8 base)               |
+    +--------------+------------------------------------------+
+    | L1 len (4B)  | Layer 1 Payload (16x16 refinement)       |
+    +--------------+------------------------------------------+
+    | L2 len (4B)  | Layer 2 Payload (32x32 refinement)       |
+    +--------------+------------------------------------------+
+
+
+# Direct Mode / One Mode (Mode=0x01, GOP=1, nLow=0)
++-------------------------------------------------+
+| Mode 0x01 (1B) | GOP Size 1 (4B) | nLow 0 (2B)  |
++----------------+-----------------+--------------+
+| F0 len (4B) | F0 spatial data    |
++--------------+-------------------+
+
+    Spatial Frame (One/Direct: 1 Layer)
+    +---------------------------------------------------------+
+    | L0 len (4B)  | Layer 0 Payload (32x32 base)             |
+    +--------------+------------------------------------------+
+
+
+# Layer Payload
++-------------+-----------+
+| qtY (2B)    | qtC (2B)  |
++-------------+-----------+
+| Y len (4B)  | Y data    |
++-------------+-----------+
+| Cb len (4B) | Cb data   |
++-------------+-----------+
+| Cr len (4B) | Cr data   |
++-------------+-----------+
 ```
 
-- **I-Frame (`VEVI`)**: The base keyframe encoded as a standalone 2D-DWT image.
-- **P-Frame (`VEVP`)**: The predicted frame, containing rANS encoded Motion Vectors relative to the previous frame, followed by the encoded spatial layers of the **residual** (the difference after prediction).
-
-Spatial information (image resolution) is organized hierarchically as Layer 0 to 2 (from `veif`) inside the frame data.
+- **Mode=0x00 (Temporal)**: 4 frames → temporal LeGall 5/3 DWT → 2 low + 2 high → each encoded as 3 spatial layers. GOP=4, nLow=2.
+- **Mode=0x01 (Direct)**: 1 frame → encoded as 1 base layer (32x32). GOP=1, nLow=0.
 
 ---
 
 ## Performance
 
-*(Tested with 640x480, 60 frames, target 500 kbps)*
+*(Tested with Tears of Steel 1080p, 1802 frames)*
 
-### Speed & Size
-
-![speed_size](docs/speed_size.png)
-
-SW: Software, HWA: Hardware Acceleration
-
-### PSNR
-
-![psnr](docs/psnr.png)
-
-### SSIM
-
-![ssim](docs/ssim.png)
+| Codec | Encode (ms/f) | Decode (ms/f) | Size (KB) | SSIM Avg | SSIM Min |
+|-------|---------------|---------------|-----------|----------|----------|
+| **VEVC (Layers)** | **1.53** | **0.96** | **24,256** | **0.9070** | **0.8298** |
+| VEVC (One) | 0.86 | 0.57 | 29,341 | 0.8625 | 0.8182 |
+| H.264 HWA | 2.54 | 0.30 | 1,856 | 0.9282 | 0.8375 |
+| HEVC HWA | 2.68 | 0.29 | 1,859 | 0.9508 | 0.8698 |
+| HEVC SW | 14.23 | 0.26 | 1,736 | 0.9649 | 0.9399 |
+| MJPEG | 0.68 | 1.30 | 159,189 | 0.9875 | 0.9787 |
 
 ---
 
@@ -146,7 +182,7 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 - `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
 - `-b <kilobit>`: Specifies the target bitrate (desired compression ratio/quality) in kilobit per second.
-- `-one`: Enables single-layer (Layer 0) mode, bypassing multi-resolution overhead for maximum encoding/decoding speed and optimal compression for fixed-resolution targets.
+- `-one`: Enables single-layer (Layer 0) mode, bypassing temporal DWT and multi-resolution overhead for maximum encoding/decoding speed.
 - `-keyint <keyint>`: Specifies the keyframe interval (GOP size).
 - `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size).
 - `-sceneThreshold <sad>`: Sets the SAD threshold for scene change detection (forces I-frame).
@@ -159,7 +195,7 @@ Takes a `vevc` format file as input and outputs the decoded `y4m` video stream. 
 $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 ```
 
-**Multi-Resolution / Multi-Framerate Options**:
+**Multi-Resolution Options**:
 
 - `-i <path|->`: Specifies the input `.vevc` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.y4m` file path or standard output (`-`).
@@ -168,7 +204,6 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
   - `0`: 1/4 size (for rough thumbnails)
   - `1`: 1/2 size (for previews)
   - `2`: Original size (default)
-- `-maxFrames <1|2|4>`: Decodes the specified sub-sampled framerate by skipping inter frames.
 
 ---
 
@@ -176,8 +211,9 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 
 The core components of the implementation consist of the following files:
 
-- `Motion`: Macroblock-based Motion Estimation (MBME) utilizing 16x16 block searches to estimate accurate localized motion vectors between frames, significantly reducing prediction residual.
-- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process I-Frames and P-Frames. P-Frames generate a residual plane which is then passed to the Spatial 2D-DWT and entropy encoded via Interleaved rANS with Zero-Run RLE.
+- `TemporalDWT`: SIMD8-optimized LeGall 5/3 temporal wavelet transform across GOP=4 frames. Produces temporal low/high subband frames for improved compression.
+- `DWT`: Spatial LeGall 5/3 2D-DWT with SIMD-optimized lifting steps. Supports both 4-element (temporal) and 8-element (spatial) transforms.
+- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process temporal subband frames and individual I-Frames through the spatial 2D-DWT and entropy coding pipeline.
 - `rANS` / `EntropyCodec`: Interleaved 4-way rANS entropy coding engine with adaptive token-based probability modeling, O(1) LUT decoding, and raw fallback for sparse data.
 
 ## License

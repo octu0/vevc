@@ -50,7 +50,7 @@ final class ReconstructionDriftTests: XCTestCase {
         
         let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
-        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2)
+        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2, dx: width, dy: height)
         let decRecon = PlaneData420(img16: decImg16)
         
         let encStats = stats(encRecon.y)
@@ -109,7 +109,7 @@ final class ReconstructionDriftTests: XCTestCase {
         let height = 480
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 500 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         var img0 = YCbCrImage(width: width, height: height)
         for y in 0..<height {
@@ -127,7 +127,7 @@ final class ReconstructionDriftTests: XCTestCase {
         }
         
         let chunk0 = try await encoder.encode(image: img0)
-        let dec0 = try await decoder.decode(chunk: chunk0)
+        let dec0 = try await decoder.decodeGOP(chunk: chunk0)[0]
         
         var img1 = img0
         for y in 0..<height {
@@ -138,7 +138,7 @@ final class ReconstructionDriftTests: XCTestCase {
         }
         
         let chunk1 = try await encoder.encode(image: img1)
-        let dec1 = try await decoder.decode(chunk: chunk1)
+        let dec1 = try await decoder.decodeGOP(chunk: chunk1)[0]
         
         let enc0psnr = calculatePSNR(original: img0, decoded: dec0)
         let enc1psnr = calculatePSNR(original: img1, decoded: dec1)

@@ -548,9 +548,6 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     debugLog("  [Layer \\(layer)] Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes")
     
     var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
-    appendUInt16BE(&out, UInt16(dx))
-    appendUInt16BE(&out, UInt16(dy))
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
@@ -578,9 +575,6 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     debugLog("  [Layer \\(layer)] Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes")
     
     var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
-    appendUInt16BE(&out, UInt16(dx))
-    appendUInt16BE(&out, UInt16(dy))
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
@@ -1152,9 +1146,6 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
-    appendUInt16BE(&out, UInt16(dx))
-    appendUInt16BE(&out, UInt16(dy))
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
@@ -1290,9 +1281,6 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
     var out: [UInt8] = []
-    out.append(contentsOf: [0x56, 0x45, 0x56, 0x43, layer])
-    appendUInt16BE(&out, UInt16(dx))
-    appendUInt16BE(&out, UInt16(dy))
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     

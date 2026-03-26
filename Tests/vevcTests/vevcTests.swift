@@ -97,7 +97,7 @@ final class VevcTests: XCTestCase {
         malformed += [0, 0, 0, 100] 
         
         do {
-            _ = try await vevc.decodeSpatialLayers(r: malformed, maxLayer: 2)
+            _ = try await vevc.decodeSpatialLayers(r: malformed, maxLayer: 2, dx: 64, dy: 64)
             XCTFail("Should have thrown DecodeError.insufficientData")
         } catch DecodeError.insufficientData {
             // Success
@@ -163,14 +163,14 @@ final class VevcTests: XCTestCase {
         let frameCount = 4
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
             let img = generateGradientImage(width: width, height: height, seed: i * 5)
             let chunk = try await encoder.encode(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
             
-            let decodedImg = try await decoder.decode(chunk: chunk)
+            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
             XCTAssertEqual(decodedImg.width, width)
             XCTAssertEqual(decodedImg.height, height)
             
@@ -190,7 +190,7 @@ final class VevcTests: XCTestCase {
         
         // maxbitrateを10倍に
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 10000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         var failedFrames: [(Int, Double)] = []
         
@@ -226,7 +226,7 @@ final class VevcTests: XCTestCase {
             }
             
             let chunk = try await encoder.encode(image: img)
-            let decodedImg = try await decoder.decode(chunk: chunk)
+            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
             
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
             if psnrY <= 15.0 {
@@ -248,7 +248,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 20 // GOPサイズ(15)を超えるフレーム数
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         var failedFrames: [(Int, Double)] = []
         
@@ -286,7 +286,7 @@ final class VevcTests: XCTestCase {
             let chunk = try await encoder.encode(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
             
-            let decodedImg = try await decoder.decode(chunk: chunk)
+            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
             
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
             if psnrY <= 5.0 {
@@ -323,11 +323,11 @@ final class VevcTests: XCTestCase {
         }
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
             let chunk = try await encoder.encode(image: baseImg)
-            let decodedImg = try await decoder.decode(chunk: chunk)
+            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
             
             let psnrY = calculatePSNR(original: baseImg.yPlane, decoded: decodedImg.yPlane)
             let frameType = (i == 0) ? "I" : "P"
@@ -342,7 +342,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 5
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 1000 * 1024, keyint: 15)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)
@@ -364,7 +364,7 @@ final class VevcTests: XCTestCase {
             }
             
             let chunk = try await encoder.encode(image: img)
-            let decodedImg = try await decoder.decode(chunk: chunk)
+            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
             
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
             let frameType = (i == 0) ? "I" : "P"
@@ -423,7 +423,7 @@ final class VevcTests: XCTestCase {
         let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, maxLayer: 2)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, maxLayer: 2, dx: width, dy: height)
         let iPd = PlaneData420(img16: iDecoded)
         
         // I-Frame品質確認
@@ -441,7 +441,7 @@ final class VevcTests: XCTestCase {
         XCTAssertGreaterThan(encoderReconPsnr, 25.0, "エンコーダ再構築PSNR(\(String(format: "%.1f", encoderReconPsnr))dB)が低い")
         
         // P-Frame: decode（predictedPdなしでデコード → residualのみ取得）
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height)
         let pResidualPd = PlaneData420(img16: pDecoded)
         
         // デコーダ側: residual + predicted
@@ -518,7 +518,7 @@ final class VevcTests: XCTestCase {
         let encoderPsnr = calculatePSNR(original: img3.yPlane, decoded: encoderReconImg.yPlane)
         
         // Step5: デコーダ側 (same mvs, reconstruct predicted from iRecon)
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height)
         let pResidual = PlaneData420(img16: pDecoded)
         let decoderPredicted = await applyMBME(prev: iRecon, mvs: mvs)
         let decoderRecon = await addPlanes(residual: pResidual, predicted: decoderPredicted)
@@ -549,7 +549,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 6
         
         let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15, sceneChangeThreshold: 8)
-        let decoder = CoreDecoder()
+        let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)
@@ -576,7 +576,7 @@ final class VevcTests: XCTestCase {
             let chunk = try await encoder.encode(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
             
-            let decodedImg = try await decoder.decode(chunk: chunk)
+            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
 
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
             XCTAssertGreaterThan(psnrY, 15.0, "フレーム\(i) Y-PSNR(\(String(format: "%.1f", psnrY))dB)が15dBを下回っている: シーンチェンジ後のノイズ")

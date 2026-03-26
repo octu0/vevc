@@ -2,136 +2,81 @@ import Foundation
 
 class CoreDecoder {
     let maxLayer: Int
-    private var prevReconstructed: PlaneData420? = nil
+    let width: Int
+    let height: Int
     
-    init(maxLayer: Int = 2) {
+    init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
         self.maxLayer = maxLayer
+        self.width = width
+        self.height = height
     }
     
 #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-    func decode(chunk: [UInt8]) async throws -> YCbCrImage {
-        guard chunk.count >= 4 else { throw DecodeError.insufficientData }
+    /// Decode a GOP chunk into one or more YCbCrImages.
+    /// Mode=0x00 (Temporal): applies inverse temporal DWT to reconstruct original frames.
+    /// Mode=0x01 (Direct): outputs frames directly.
+    func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
+        guard chunk.count >= 7 else { throw DecodeError.insufficientData }
         var offset = 0
-        let magic = Array(chunk[offset..<(offset + 4)])
-        offset += 4
         
-        switch magic {
-        case [0x56, 0x45, 0x56, 0x49]:
+        // Parse GOP header: Mode(1B) + GOPSize(4B) + nLow(2B)
+        let mode = chunk[offset]
+        offset += 1
+        
+        let gopSize = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
+        let nLow = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
+        
+        // Parse all frame payloads (sequential, offset-dependent)
+        var frameData: [[UInt8]] = []
+        for _ in 0..<gopSize {
             let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
             guard (offset + len) <= chunk.count else { throw DecodeError.insufficientData }
-            let data = Array(chunk[offset..<(offset + len)])
-            
-            let img16 = try await decodeSpatialLayers(r: data, maxLayer: maxLayer)
-            let pd = PlaneData420(img16: img16)
-            prevReconstructed = pd
-            return pd.toYCbCr()
-
-        case [0x56, 0x45, 0x56, 0x50]:
-            let mvsCount = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            let mvDataLen = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            guard (offset + mvDataLen) <= chunk.count else { throw DecodeError.insufficientData }
-
-            let mvData = Array(chunk[offset..<(offset + mvDataLen)])
-            offset += mvDataLen
-            var mvBr = try EntropyDecoder(data: mvData)
-
-            let mbSize = 64
-            guard let prevWidth = prevReconstructed?.width, let prevHeight = prevReconstructed?.height else { throw DecodeError.invalidHeader }
-            let mbCols = (prevWidth + mbSize - 1) / mbSize
-            let mbRows = (prevHeight + mbSize - 1) / mbSize
-
-            var grid = MVGrid(width: prevWidth, height: prevHeight, minSize: 8)
-            var ctuNodes = [MotionNode]()
-            for mbY in 0..<mbRows {
-                let startY = mbY * mbSize
-                for mbX in 0..<mbCols {
-                    let startX = mbX * mbSize
-                    if ctuNodes.count < mvsCount {
-                        let node = try decodeMotionQuadtreeNode(w: prevWidth, h: prevHeight, startX: startX, startY: startY, size: mbSize, grid: &grid, br: &mvBr)
-                        ctuNodes.append(node)
+            frameData.append(Array(chunk[offset..<(offset + len)]))
+            offset += len
+        }
+        
+        switch mode {
+        case 0x00: // Temporal: decode subbands in parallel, then inverse DWT
+            let localMaxLayer = maxLayer
+            let localWidth = width
+            let localHeight = height
+            var decodedPlanes = [PlaneData420?](repeating: nil, count: frameData.count)
+            try await withThrowingTaskGroup(of: (Int, PlaneData420).self) { group in
+                for (idx, data) in frameData.enumerated() {
+                    group.addTask {
+                        let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight)
+                        return (idx, PlaneData420(img16: img16))
                     }
                 }
-            }
-            let motionTree = MotionTree(ctuNodes: ctuNodes, width: prevWidth, height: prevHeight)
-            
-            let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            guard (offset + len) <= chunk.count else { throw DecodeError.insufficientData }
-            let data = Array(chunk[offset..<(offset + len)])
-            
-            let img16 = try await decodeSpatialLayers(r: data, maxLayer: maxLayer)
-            let residual = PlaneData420(img16: img16)
-            
-            if let prev = prevReconstructed {
-                let predicted = await applyMotionQuadtree(prev: prev, tree: motionTree)
-                let curr = await addPlanes(residual: residual, predicted: predicted)
-                prevReconstructed = curr
-                return curr.toYCbCr()
-            } else {
-                return residual.toYCbCr()
-            }
-            
-        case [0x56, 0x45, 0x4F, 0x49]: // VEOI
-            let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            guard (offset + len) <= chunk.count else { throw DecodeError.insufficientData }
-            let data = Array(chunk[offset..<(offset + len)])
-            
-            let img16 = try await decodeBase32(r: data, layer: 0)
-            let pd = PlaneData420(img16: img16)
-            prevReconstructed = pd
-            return pd.toYCbCr()
-
-        case [0x56, 0x45, 0x4F, 0x50]: // VEOP
-            let mvsCount = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            let mvDataLen = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-
-            guard (offset + mvDataLen) <= chunk.count else { throw DecodeError.insufficientData }
-
-            let mvData = Array(chunk[offset..<(offset + mvDataLen)])
-            offset += mvDataLen
-            var mvBr = try EntropyDecoder(data: mvData)
-
-            let mbSize = 64
-            guard let prevWidth = prevReconstructed?.width, let prevHeight = prevReconstructed?.height else { throw DecodeError.invalidHeader }
-            let mbCols = (prevWidth + mbSize - 1) / mbSize
-            let mbRows = (prevHeight + mbSize - 1) / mbSize
-
-            var grid = MVGrid(width: prevWidth, height: prevHeight, minSize: 8)
-            var ctuNodes = [MotionNode]()
-            for mbY in 0..<mbRows {
-                let startY = mbY * mbSize
-                for mbX in 0..<mbCols {
-                    let startX = mbX * mbSize
-                    if ctuNodes.count < mvsCount {
-                        let node = try decodeMotionQuadtreeNode(w: prevWidth, h: prevHeight, startX: startX, startY: startY, size: mbSize, grid: &grid, br: &mvBr)
-                        ctuNodes.append(node)
-                    }
+                for try await (idx, plane) in group {
+                    decodedPlanes[idx] = plane
                 }
             }
-            let motionTree = MotionTree(ctuNodes: ctuNodes, width: prevWidth, height: prevHeight)
             
-            let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-            guard (offset + len) <= chunk.count else { throw DecodeError.insufficientData }
-            let data = Array(chunk[offset..<(offset + len)])
+            let nHigh = gopSize - nLow
+            let lowPlanes = decodedPlanes[0..<nLow].map { $0! }
+            let highPlanes = decodedPlanes[nLow..<(nLow + nHigh)].map { $0! }
             
-            let img16 = try await decodeBase32(r: data, layer: 0)
-            let residual = PlaneData420(img16: img16)
+            let subbands = TemporalSubbands(low: Array(lowPlanes), high: Array(highPlanes))
+            let reconstructed = try temporalInverseDWT4(subbands: subbands)
+            return reconstructed.map { $0.toYCbCr() }
             
-            if let prev = prevReconstructed {
-                let predicted = await applyMotionQuadtree(prev: prev, tree: motionTree)
-                let curr = await addPlanes(residual: residual, predicted: predicted)
-                prevReconstructed = curr
-                return curr.toYCbCr()
-            } else {
-                return residual.toYCbCr()
+        case 0x01: // Direct: decode each frame independently
+            var result: [YCbCrImage] = []
+            for data in frameData {
+                let img16 = try await decodeSpatialLayers(r: data, maxLayer: maxLayer, dx: width, dy: height)
+                let pd = PlaneData420(img16: img16)
+                result.append(pd.toYCbCr())
             }
+            return result
             
-        default: 
-             throw DecodeError.invalidHeader
+        default:
+            throw DecodeError.invalidHeader
         }
     }
 
 #else
-    func decode(chunk: [UInt8]) async throws -> YCbCrImage {
+    func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
         throw DecodeError.unsupportedArchitecture
     }
 #endif
@@ -140,14 +85,24 @@ class CoreDecoder {
 public struct Decoder: Sendable {
     public let maxLayer: Int
     public let maxConcurrency: Int
+    public let width: Int
+    public let height: Int
 
-    public init(maxLayer: Int = 2, maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount) {
+    public init(
+        maxLayer: Int = 2,
+        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount,
+        width: Int = 0,
+        height: Int = 0,
+    ) {
         self.maxLayer = maxLayer
         self.maxConcurrency = maxConcurrency
+        self.width = width
+        self.height = height
     }
 
     #if (arch(arm64) || arch(x86_64) || arch(wasm32))
-    /// Decodes a stream of bitstream chunks into a stream of images using GOP-level parallelization.
+    /// Decodes a stream of VEGI chunks into a stream of images.
+    /// Each chunk is a self-contained VEGI GOP that decodes to one or more frames.
     public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -156,58 +111,32 @@ public struct Decoder: Sendable {
                 var nextGOPIndexToYield = 0
                 var completedGOPs: [Int: [YCbCrImage]] = [:]
                 
-                var bufferedChunk: [UInt8]? = nil
-                
-                func readNextGOP() async throws -> [[UInt8]]? {
-                    var gop: [[UInt8]] = []
-                    
-                    if let first = bufferedChunk {
-                        gop.append(first)
-                        bufferedChunk = nil
-                    } else if let chunk = await iterator.next() {
-                        gop.append(chunk)
-                    } else {
-                        return nil // EOF
-                    }
-                    
-                    while let chunk = await iterator.next() {
-                        guard chunk.count >= 4 else { throw DecodeError.insufficientData }
-                        let magic = Array(chunk[0..<4])
-                        if magic == [0x56, 0x45, 0x56, 0x49] || magic == [0x56, 0x45, 0x4F, 0x49] {
-                            bufferedChunk = chunk
-                            return gop
-                        }
-                        gop.append(chunk)
-                    }
-                    
-                    return gop
-                }
-                
                 do {
                     try await withThrowingTaskGroup(of: (Int, [YCbCrImage]).self) { group in
                         var activeTasks = 0
                         
+                        // Fill initial task pool
                         while activeTasks < self.maxConcurrency {
-                            guard let gop = try await readNextGOP() else { break }
+                            guard let chunk = await iterator.next() else { break }
                             let idx = currentGOPIndex
                             currentGOPIndex += 1
+                            let localMaxLayer = self.maxLayer
+                            let localWidth = self.width
+                            let localHeight = self.height
                             group.addTask {
-                                let decoder = CoreDecoder(maxLayer: self.maxLayer)
-                                var decodedFrames: [YCbCrImage] = []
-                                for chunk in gop {
-                                    let img = try await decoder.decode(chunk: chunk)
-                                    decodedFrames.append(img)
-                                }
-                                return (idx, decodedFrames)
+                                let decoder = CoreDecoder(maxLayer: localMaxLayer, width: localWidth, height: localHeight)
+                                return (idx, try await decoder.decodeGOP(chunk: chunk))
                             }
                             activeTasks += 1
                         }
                         
+                        // Process results and feed new tasks
                         while let result = try await group.next() {
                             activeTasks -= 1
                             let (idx, frames) = result
                             completedGOPs[idx] = frames
                             
+                            // Yield frames in order
                             while let consecutiveFrames = completedGOPs[nextGOPIndexToYield] {
                                 for frame in consecutiveFrames {
                                     continuation.yield(frame)
@@ -216,17 +145,16 @@ public struct Decoder: Sendable {
                                 nextGOPIndexToYield += 1
                             }
                             
-                            if let gop = try await readNextGOP() {
+                            // Schedule next chunk if available
+                            if let chunk = await iterator.next() {
                                 let newIdx = currentGOPIndex
                                 currentGOPIndex += 1
+                                let localMaxLayer = self.maxLayer
+                                let localWidth = self.width
+                                let localHeight = self.height
                                 group.addTask {
-                                    let decoder = CoreDecoder(maxLayer: self.maxLayer)
-                                    var newFrames: [YCbCrImage] = []
-                                    for chunk in gop {
-                                        let img = try await decoder.decode(chunk: chunk)
-                                        newFrames.append(img)
-                                    }
-                                    return (newIdx, newFrames)
+                                    let decoder = CoreDecoder(maxLayer: localMaxLayer, width: localWidth, height: localHeight)
+                                    return (newIdx, try await decoder.decodeGOP(chunk: chunk))
                                 }
                                 activeTasks += 1
                             }
