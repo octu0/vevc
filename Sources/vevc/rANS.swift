@@ -99,6 +99,36 @@ let staticValModel1 = buildStaticModel(rawFreqs: [
        1,    1,    1,    1,    1,   1,    1,   1,
 ])
 
+// MARK: - DPCM Static Tables
+// Measured from real 1080p video (ToS-4k-1080.y4m, 1802 frames, 44139379 pairs).
+// DPCM has no isParentZero concept, so only one run/val model pair is needed.
+// Both isParentZero=false and isParentZero=true use the same tables.
+
+// DPCM run tokens: run=0 dominant (~39%), smooth exponential decay
+let staticDPCMRunModel = buildStaticModel(rawFreqs: [
+    6358, 2738, 1575, 1049,  757,  582,  490,  392,
+     298,  254,  226,  200,  192,  199,  269,  209,
+      45,   31,   25,   21,   18,   17,   19,   18,
+      15,   13,   14,   14,   15,   19,   36,   35,
+      10,    7,   11,   19,   52,   47,   34,   25,
+      17,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+])
+
+// DPCM val tokens: token0(+1)=44.2%, token1(-1)=48.2% (ultra-concentrated)
+// DPCM residuals are almost exclusively ±1
+let staticDPCMValModel = buildStaticModel(rawFreqs: [
+    7247, 7891,  495,  516,   90,   91,   19,   20,
+       4,    4,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+       1,    1,    1,    1,    1,    1,    1,    1,
+])
+
 // MARK: - rANS Probability Model
 
 struct rANSModel {

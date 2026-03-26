@@ -1392,7 +1392,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     bwFlags.flush()
     debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(String(format: "%.1f", Double(zeroCount) / Double(max(1, blocks.count)) * 100))%")
     
-    var encoder = EntropyEncoder<DynamicEntropyModel>()
+    var encoder = EntropyEncoder<StaticDPCMEntropyModel>()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {

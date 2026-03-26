@@ -12,6 +12,7 @@ struct ContextModel {
 
 protocol EntropyModelProvider {
     static var isStaticMode: Bool { get }
+    static var isDPCMMode: Bool { get }
     static func generateModels(
         runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
         runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
@@ -26,6 +27,7 @@ protocol EntropyModelProvider {
 
 struct StaticEntropyModel: EntropyModelProvider {
     static var isStaticMode: Bool { true }
+    static var isDPCMMode: Bool { false }
     
     @inline(__always)
     static func generateModels(
@@ -45,6 +47,7 @@ struct StaticEntropyModel: EntropyModelProvider {
 
 struct DynamicEntropyModel: EntropyModelProvider {
     static var isStaticMode: Bool { false }
+    static var isDPCMMode: Bool { false }
     
     @inline(__always)
     static func generateModels(
@@ -73,6 +76,29 @@ struct DynamicEntropyModel: EntropyModelProvider {
         writeCompressedFreqTable(&out, freqs: runModel1.tokenFreqs)
         writeCompressedFreqTable(&out, freqs: valModel1.tokenFreqs)
     }
+}
+
+/// Static entropy model specialized for DPCM mode.
+/// DPCM does not distinguish isParentZero, so the same tables are used for both isParentZero=false and true.
+struct StaticDPCMEntropyModel: EntropyModelProvider {
+    static var isStaticMode: Bool { true }
+    static var isDPCMMode: Bool { true }
+    
+    @inline(__always)
+    static func generateModels(
+        runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
+        runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
+    ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
+        // DPCM uses the same model for both isParentZero=false and true
+        return (staticDPCMRunModel, staticDPCMValModel, staticDPCMRunModel, staticDPCMValModel)
+    }
+    
+    @inline(__always)
+    static func writeHeaders(
+        into out: inout [UInt8],
+        runModel0: rANSModel, valModel0: rANSModel,
+        runModel1: rANSModel, valModel1: rANSModel
+    ) {}
 }
 
 struct EntropyEncoder<Model: EntropyModelProvider> {
@@ -228,7 +254,11 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         let runModel1 = models.runModel1
         let valModel1 = models.valModel1
         
-        let headerFlag: UInt8 = Model.isStaticMode ? (hasTrailingZeros ? 0x41 : 0x40) : (hasTrailingZeros ? 1 : 0)
+        // Flags byte: bit6=isStatic, bit5=isDPCM, bit0=hasTrailingZeros
+        let staticBit: UInt8 = Model.isStaticMode ? 0x40 : 0
+        let dpcmBit: UInt8   = Model.isDPCMMode   ? 0x20 : 0
+        let trailBit: UInt8  = hasTrailingZeros    ? 0x01 : 0
+        let headerFlag: UInt8 = staticBit | dpcmBit | trailBit
         out.append(headerFlag)
         appendUInt32BE(&out, UInt32(totalPairEntries))
         
@@ -417,8 +447,16 @@ struct EntropyDecoder {
         }
         self.chunkStarts = starts
         
-        if isStaticTable {
-            // Static table mode: no frequency tables in bitstream
+        let isDPCMTable = (flags & 0x20) != 0
+        
+        if isStaticTable, isDPCMTable {
+            // Static DPCM mode: use DPCM-specific static tables
+            self.runModel0 = staticDPCMRunModel
+            self.valModel0 = staticDPCMValModel
+            self.runModel1 = staticDPCMRunModel
+            self.valModel1 = staticDPCMValModel
+        } else if isStaticTable {
+            // Static DWT mode: no frequency tables in bitstream
             self.runModel0 = staticRunModel0
             self.valModel0 = staticValModel0
             self.runModel1 = staticRunModel1
