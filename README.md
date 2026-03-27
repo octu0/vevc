@@ -11,10 +11,11 @@
 
 ## Features
 
-1. **Temporal + Spatial DWT Pipeline**
-   - **Temporal**: LeGall 5/3 1D-DWT across GOP=4 frames. Each pixel position is transformed along the time axis, producing 2 temporal-low (smooth) and 2 temporal-high (detail) subband frames. Subband frames are encoded/decoded in parallel using Swift concurrency for near-zero overhead.
-   - **Spatial**: LeGall 5/3 2D-DWT with multi-resolution Layers (Layer 0, 1, 2) inherited from `veif`. Each temporal subband frame is further decomposed into spatial frequency layers.
-   - **SIMD8-Optimized**: Temporal lifting uses `SIMD8<Int16>` for 8-pixel simultaneous processing with `UnsafeRawPointer.load/storeBytes` direct memory access.
+1. **Full Spatio-Temporal DWT Architecture**
+   - **No Block-based Prediction**: Unlike conventional codecs (H.264/HEVC) that rely heavily on complex block-matching (Motion Vectors) and intra-frame prediction, `vevc` employs a unified DWT approach across all three dimensions (time + 2D space). 
+   - **Temporal DWT**: LeGall 5/3 1D-DWT across frames (e.g., GOP=4). It transforms the time axis directly, smoothly decomposing temporal changes into low-frequency (smooth motion) and high-frequency (details) subband frames. This eliminates the need for expensive motion estimation.
+   - **Spatial DWT**: LeGall 5/3 2D-DWT with multi-resolution Layers (Layer 0, 1, 2) inherited from `veif`. Each temporal subband frame is cleanly decomposed into spatial frequency layers.
+   - **SIMD8-Optimized**: Both Temporal lifting and Spatial DWT use `SIMD8<Int16>` vectorization for massively parallel pixel processing with `UnsafeRawPointer.load/storeBytes` direct memory access.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -46,7 +47,7 @@
 | Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
 +-------------------+------------+-----------------+-----+-------------+
 
-# Metadata (Profile 1)
+    Metadata (Profile 1)
 +---------------------------------------------+
 | Metadata Size (2B) | Profile Version(1B)    |
 +------------+-------+-----+------------------+----------+----------------+
@@ -55,7 +56,7 @@
   Color Gamut: 0x01=BT.709, 0x02=BT.2020
   Timescale:   0x00=1000ms, 0x01=90000hz
 
-# Temporal GOP (GOP=4, nLow=2) or Spatial Direct GOP (GOP=1, nLow=0)
+    Temporal GOP (GOP=4, nLow=2) or I-Frame GOP (GOP=1, nLow=0)
 +----------------+-----------------+-------------+
 | Data Size(4B)  | GOP Size X (4B) | nLow X (2B) |
 +----------------+-------------+---+-------------+--+
@@ -73,16 +74,16 @@
     | L2 len (4B)  | Layer 2 Payload (32x32 refinement)       |
     +--------------+------------------------------------------+
 
-# Layer Payload
-+-------------+-----------+
-| qtY (2B)    | qtC (2B)  |
-+-------------+-----------+
-| Y len (4B)  | Y data    |
-+-------------+-----------+
-| Cb len (4B) | Cb data   |
-+-------------+-----------+
-| Cr len (4B) | Cr data   |
-+-------------+-----------+
+        Layer Payload
+        +-------------+-----------+
+        | qtY (2B)    | qtC (2B)  |
+        +-------------+-----------+
+        | Y len (4B)  | Y data    |
+        +-------------+-----------+
+        | Cb len (4B) | Cb data   |
+        +-------------+-----------+
+        | Cr len (4B) | Cr data   |
+        +-------------+-----------+
 ```
 
 ---
@@ -157,9 +158,9 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 - `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
 - `-b <kilobit>`: Specifies the target bitrate (desired compression ratio/quality) in kilobit per second.
-- `-keyint <keyint>`: Specifies the keyframe interval (GOP size).
-- `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size).
-- `-sceneThreshold <sad>`: Sets the SAD threshold for scene change detection (forces I-frame).
+- `-keyint <keyint>`: Specifies the keyframe interval (maximum GOP size, automatically falls back to I-Frame for scene changes or end of stream).
+- `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size by aggressively skipping noise).
+- `-sceneThreshold <sad>`: Sets the SAD threshold for scene change detection (forces an I-frame when temporal changes are too massive).
 
 ### Decode (`vevc-dec`)
 
