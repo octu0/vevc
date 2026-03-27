@@ -90,7 +90,21 @@
 
 ## Performance
 
-*(Tested with Tears of Steel 1080p, 1802 frames)*
+*(Tested with Tears of Steel 1080p, 1802 frames, target 500 kbps)*
+
+### Speed & Size
+
+![speed_size](docs/speed_size.png)
+
+SW: Software, HWA: Hardware Acceleration
+
+### PSNR
+
+![psnr](docs/psnr.png)
+
+### SSIM
+
+![ssim](docs/ssim.png)
 
 | Codec | Encode (ms/f) | Decode (ms/f) | Size (KB) | SSIM Avg | SSIM Min |
 |-------|---------------|---------------|-----------|----------|----------|

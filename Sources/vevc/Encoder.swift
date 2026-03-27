@@ -295,8 +295,7 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
         
     let ratio = estimatedTotalBits / Double(targetBits)
     let predictedStep = Double(probeStep) * ratio * 3.5
-    // SSIM Min 0.90を保証するため、量子化ステップの上限を128に厳しく設定
-    let q = min(128, Int(max(1, predictedStep)))
+    let q = min(64, Int(max(1, predictedStep)))
     
     return QuantizationTable(baseStep: q)
 }

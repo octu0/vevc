@@ -35,47 +35,43 @@ struct QuantizationTable: Sendable {
         
         // CSF-based perceptual quantization
         // DWT subbands map to spatial frequency bands:
-            //   Layer 0 (Base8)  = lowest freq  → high CSF sensitivity → fine quantization
-            //   Layer 1 (L16)    = mid freq      → moderate sensitivity
-            //   Layer 2 (L32)    = highest freq  → low sensitivity → coarse quantization
-            //   HH (diagonal) = √2× higher freq than HL/LH → even less perceptible
-            var qMidScale = 1.0    // HL/LH scale
-            var qHighScale = 2.0   // HH scale
-            var qLowDivisor = 6
-            var deadZoneMid = -0.1  // HL/LH dead zone
-            var deadZoneHigh = -0.3 // HH dead zone (wider = more zeros)
+        //   Layer 0 (Base8)  = lowest freq  → high CSF sensitivity → fine quantization
+        //   Layer 1 (L16)    = mid freq      → moderate sensitivity
+        //   Layer 2 (L32)    = highest freq  → low sensitivity → coarse quantization
+        //   HH (diagonal) = √2× higher freq than HL/LH → even less perceptible
+        var qMidScale = 1.0    // HL/LH scale
+        var qHighScale = 1.5   // HH scale
+        var qLowDivisor = 6
+        var deadZoneMid = 0.0  // HL/LH dead zone
+        var deadZoneHigh = 0.0 // HH dead zone
 
-            if layerIndex == 2 {
-                // Layer 32 (High Freq): low CSF sensitivity -> quantize coarsely
-                // Reallocate bit budget for precision of Layer 0/1
-                qMidScale = 2.2
-                qHighScale = 4.5
-                deadZoneMid = -0.20
-                deadZoneHigh = -0.40
-            } else if layerIndex == 1 {
-                // Layer 16 (Mid Freq): structure preservation is important
-                qMidScale = 0.65
-                qHighScale = 1.2
-                deadZoneMid = -0.10
-                deadZoneHigh = -0.25
-            } else if layerIndex == 0 {
-                // Layer 8 (Low Freq - Base): highest CSF sensitivity -> preserve precisely
-                qMidScale = 0.20
-                qHighScale = 0.35
-                qLowDivisor = 16
-                deadZoneMid = -0.05
-                deadZoneHigh = -0.15
-            }
+        if layerIndex == 2 {
+            qMidScale = 1.5
+            qHighScale = 2.5
+            deadZoneMid = -0.05
+            deadZoneHigh = -0.10
+        } else if layerIndex == 1 {
+            qMidScale = 0.5
+            qHighScale = 1.0
+            deadZoneMid = 0.0
+            deadZoneHigh = -0.05
+        } else if layerIndex == 0 {
+            qMidScale = 0.20
+            qHighScale = 0.30
+            qLowDivisor = 16
+            deadZoneMid = 0.0
+            deadZoneHigh = 0.0
+        }
 
-            if isChroma {
-                self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: 0.0)
-                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: 0.0)
-            } else {
-                self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
-                self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
-            }
+        if isChroma {
+            self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
+            self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: 0.0)
+            self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: 0.0)
+        } else {
+            self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
+            self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
+            self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
+        }
     }
 }
 
