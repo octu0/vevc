@@ -105,33 +105,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     return (encTime, decTime, outBytes.count, metrics)
 }
 
-func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
-    let vevcImages = images.map { $0.vevcImage }
-    
-    // Encode
-    let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold)
-    let encTime = Date().timeIntervalSince(encStart)
-    
-    // Decode
-    let decStart = Date()
-    let opts = vevc.DecodeOptions(maxLayer: 2, maxFrames: 4)
-    let outFrames = try await vevc.decode(data: outBytes, opts: opts)
-    let decTime = Date().timeIntervalSince(decStart)
-    
-    var metrics: [QualityMetrics]? = nil
-    if config.quality {
-        var mets = [QualityMetrics]()
-        for i in 0..<min(images.count, outFrames.count) {
-            let psnr = calculatePSNR(img1: images[i].vevcImage, img2: outFrames[i])
-            let ssim = calculateSSIM(img1: images[i].vevcImage, img2: outFrames[i])
-            mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
-        }
-        metrics = mets
-    }
-    
-    return (encTime, decTime, outBytes.count, metrics)
-}
+
 
 
 func createPixelBuffer(from img: YCbCrImage) -> CVPixelBuffer? {
@@ -837,7 +811,6 @@ struct CompareApp {
             let warmupImages = Array(localImages[0..<warmupCount])
             print("Warming up (\(warmupCount) frames)...")
             let _ = try await runVEVC(images: warmupImages, config: localConfig)
-            let _ = try await runVEVCOne(images: warmupImages, config: localConfig)
             let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
             let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
             let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
@@ -847,9 +820,6 @@ struct CompareApp {
 
             print("Running vevc (layers)...")
             let vevcResult = try await runVEVC(images: localImages, config: localConfig)
-            
-            print("Running vevc (One)...")
-            let vevcOneResult = try await runVEVCOne(images: localImages, config: localConfig)
             
             print("Running H.264 (VideoToolbox HWA)...")
             let h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
@@ -895,7 +865,6 @@ struct CompareApp {
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
             chartResults.append(printStats(name: "VEVC (Layers)", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "VEVC (One)", result: vevcOneResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
             chartResults.append(printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             chartResults.append(printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))

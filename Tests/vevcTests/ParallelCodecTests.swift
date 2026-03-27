@@ -57,7 +57,7 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 1. Parallel Encoding Test
-        let encoder = Encoder(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 60, sceneChangeThreshold: 8, , maxConcurrency: 2)
+        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 60, sceneChangeThreshold: 8, maxConcurrency: 2)
         
         var chunks: [[UInt8]] = []
         let chunkStream = encoder.encode(stream: frameStream)

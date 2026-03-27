@@ -144,10 +144,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
-        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         let decoder = CoreDecoder(width: width, height: height)
         
-        let chunk = try await encoder.encode(image: img)
+        let chunk = try await encoder.encodeSingleFrame(image: img)
         let decoded = try await decoder.decodeGOP(chunk: chunk)[0]
         
         assertChromaBottomQuality(
@@ -177,7 +177,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let cHeight = (height + 1) / 2
         let frameCount = 8
         
-        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         let decoder = CoreDecoder(width: width, height: height)
         
         var bottomCbPsnrs: [Double] = []
@@ -185,7 +185,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         for i in 0..<frameCount {
             let img = generateNaturalImage(width: width, height: height, seed: i * 3)
-            let chunk = try await encoder.encode(image: img)
+            let chunk = try await encoder.encodeSingleFrame(image: img)
             let decoded = try await decoder.decodeGOP(chunk: chunk)[0]
             
             let frameType = (i == 0) ? "I" : "P"
@@ -260,10 +260,8 @@ final class ChromaBottomQualityTests: XCTestCase {
         XCTAssertLessThan(iCrDiff, 1.0,
             "I-Frame エンコーダ再構築とデコーダ出力のCr差異(MAE=\(String(format: "%.2f", iCrDiff)))が大きい → enc/dec非対称性")
         
-        // P-Frame: encode with predicted
-        let mvs = estimateMBME(curr: pd1, prev: iRecon)
-        let predicted = await applyMBME(prev: iRecon, mvs: mvs)
-        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, predictedPd: predicted, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        // P-Frame: encode (without motion compensation since it's removed)
+        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // P-Frame: decode
         let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height)
@@ -333,10 +331,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
-        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 2000 * 1024, keyint: 15)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         let decoder = CoreDecoder(width: width, height: height)
         
-        let chunk = try await encoder.encode(image: img)
+        let chunk = try await encoder.encodeSingleFrame(image: img)
         let decoded = try await decoder.decodeGOP(chunk: chunk)[0]
         
         // 最後のブロック行（8ピクセル行）のクロマPSNR

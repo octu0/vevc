@@ -254,7 +254,7 @@ final class TemporalDWTTests: XCTestCase {
         let image = makeYCbCrImage(width: width, height: height, yValue: 128)
         let images = [image, image, image, image]
         
-        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 500, framerate: 30)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         let encoded = try await encoder.encodeTemporalGOP4(images: images)
         
         let decoder = CoreDecoder(maxLayer: 2, width: width, height: height)
@@ -288,7 +288,7 @@ final class TemporalDWTTests: XCTestCase {
             makeYCbCrImage(width: width, height: height, yValue: 129),
         ]
         
-        let encoder = CoreEncoder(width: width, height: height, maxbitrate: 500, framerate: 30)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         let encoded = try await encoder.encodeTemporalGOP4(images: images)
         
         let decoder = CoreDecoder(maxLayer: 2, width: width, height: height)
@@ -318,14 +318,14 @@ final class TemporalDWTTests: XCTestCase {
         let images = [image, image, image, image]
         
         // Encode with temporal GOP
-        let temporalEncoder = CoreEncoder(width: width, height: height, maxbitrate: 500, framerate: 30)
+        let temporalEncoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         let temporalEncoded = try await temporalEncoder.encodeTemporalGOP4(images: images)
         
         // Encode without temporal (4 individual I-frames)
-        let normalEncoder = CoreEncoder(width: width, height: height, maxbitrate: 500, framerate: 30)
+        let normalEncoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
         var normalSize = 0
         for img in images {
-            let bytes = try await normalEncoder.encode(image: img)
+            let bytes = try await normalEncoder.encodeSingleFrame(image: img)
             normalSize += bytes.count
         }
         

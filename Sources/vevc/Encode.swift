@@ -1503,7 +1503,7 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
     if images.isEmpty { return [] }
     guard let first = images.first else { return [] }
     
-    let encoder = LayersEncoder(
+    let encoder = VEVCEncoder(
         width: first.width,
         height: first.height,
         maxbitrate: maxbitrate,

@@ -1,9 +1,6 @@
 import Foundation
 
-public protocol VEVCEncoder {
-    func encode(images: [YCbCrImage]) async throws -> [[UInt8]]
-    func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error>
-}
+
 
 struct EncoderUtils {
     @inline(__always)
@@ -23,7 +20,7 @@ struct EncoderUtils {
 
 // MARK: - LayersEncoder & LayersCoreEncoder (Temporal DWT, Mode=0x00)
 
-public class LayersEncoder: VEVCEncoder {
+public class VEVCEncoder {
     public let width: Int
     public let height: Int
     public let maxbitrate: Int
@@ -70,7 +67,7 @@ public class LayersEncoder: VEVCEncoder {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
-                let coreEncoder = LayersCoreEncoder(
+                let coreEncoder = LayersEncodeActor(
                     width: width,
                     height: height,
                     maxbitrate: maxbitrate,
@@ -105,7 +102,7 @@ public class LayersEncoder: VEVCEncoder {
     }
 }
 
-actor LayersCoreEncoder {
+actor LayersEncodeActor {
     let width: Int
     let height: Int
     let maxbitrate: Int

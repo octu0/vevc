@@ -104,10 +104,11 @@ final class FlickerDetectionTests: XCTestCase {
         let height = 240
         let frameCount = 20  // I-frame + P-frames（gopSize=15以内）
 
-        let encoder = CoreEncoder(
+        let encoder = LayersEncodeActor(
             width: width,
             height: height,
             maxbitrate: 500 * 1000,
+            framerate: 30,
             zeroThreshold: 3,
             keyint: 30,  // 全フレームが1GOP内に入るようにする
             sceneChangeThreshold: 8
@@ -122,7 +123,7 @@ final class FlickerDetectionTests: XCTestCase {
             let img = generateGradientFrame(width: width, height: height, frameIndex: i)
             originals.append(img)
 
-            let chunk = try await encoder.encode(image: img)
+            let chunk = try await encoder.encodeSingleFrame(image: img)
             frameSizes.append(chunk.count)
 
             let dec = try await decoder.decodeGOP(chunk: chunk)[0]
@@ -179,10 +180,11 @@ final class FlickerDetectionTests: XCTestCase {
 
         // 同じフレームを連続で送った場合、動きが無いのでmeanSADは低くなるはず
         // → 粗い量子化ケースに入る
-        let encoder = CoreEncoder(
+        let encoder = LayersEncodeActor(
             width: width,
             height: height,
             maxbitrate: 500 * 1024,
+            framerate: 30,
             zeroThreshold: 20,
             keyint: 15,
             sceneChangeThreshold: 10
@@ -191,16 +193,16 @@ final class FlickerDetectionTests: XCTestCase {
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)
 
         // I-frame
-        let iFrameBytes = try await encoder.encode(image: img)
+        let iFrameBytes = try await encoder.encodeSingleFrame(image: img)
 
         // 動きがほぼないP-frame（同じ画像）
-        let pFrame1Bytes = try await encoder.encode(image: img)
+        let pFrame1Bytes = try await encoder.encodeSingleFrame(image: img)
 
         // 微小な動きのあるP-frame
-        let pFrame2Bytes = try await encoder.encode(image: imgSlightlyDifferent)
+        let pFrame2Bytes = try await encoder.encodeSingleFrame(image: imgSlightlyDifferent)
 
         // 再度動きなし
-        let pFrame3Bytes = try await encoder.encode(image: img)
+        let pFrame3Bytes = try await encoder.encodeSingleFrame(image: img)
 
         // サイズの変動を記録
         print("[Flicker] I-frame: \(iFrameBytes.count) bytes")

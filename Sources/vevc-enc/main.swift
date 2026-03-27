@@ -89,7 +89,7 @@ do {
         }
     }
     
-    let encoder = vevc.LayersEncoder(
+    let encoder = vevc.VEVCEncoder(
         width: y4mReader.width,
         height: y4mReader.height,
         maxbitrate: bitrate * 1000,
