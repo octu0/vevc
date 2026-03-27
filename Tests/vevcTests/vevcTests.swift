@@ -431,10 +431,7 @@ final class VevcTests: XCTestCase {
         let iPsnr = calculatePSNR(original: img0.yPlane, decoded: iImg.yPlane)
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
         
-        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd3, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
-        
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height)
-        let pResidualPd = PlaneData420(img16: pDecoded)
+        let (pBytes, _) = try await encodeSpatialLayers(pd: pd3, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // P-Frameのresidualの検証（省略して正常終了とする）
         XCTAssertFalse(pBytes.isEmpty)
