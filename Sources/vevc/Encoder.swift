@@ -146,9 +146,11 @@ actor LayersEncodeActor {
         frameIndex += 4
         
         let planes = toPlaneData420(images: images)
-        let qtY = QuantizationTable(baseStep: max(1, Int(baseQt.step)), isChroma: false, layerIndex: 0)
-        let qtC = QuantizationTable(baseStep: max(1, Int(baseQt.step) * 2), isChroma: true, layerIndex: 0)
+        let baseStep = Int(baseQt.step)
         
+        let qtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
+        let qtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
+    
         let subbands = try temporalForwardDWT4(frames: planes)
         let allSubbandFrames = subbands.low + subbands.high
         
@@ -293,7 +295,8 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
         
     let ratio = estimatedTotalBits / Double(targetBits)
     let predictedStep = Double(probeStep) * ratio * 3.5
-    let q = min(10000, Int(max(1, predictedStep)))
+    // SSIM Min 0.90を保証するため、量子化ステップの上限を128に厳しく設定
+    let q = min(128, Int(max(1, predictedStep)))
     
     return QuantizationTable(baseStep: q)
 }

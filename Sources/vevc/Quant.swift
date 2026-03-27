@@ -69,8 +69,8 @@ struct QuantizationTable: Sendable {
 
             if isChroma {
                 self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
-                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
+                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: 0.0)
+                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: 0.0)
             } else {
                 self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
                 self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
