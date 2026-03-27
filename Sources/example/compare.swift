@@ -110,12 +110,13 @@ func runVEVCOne(images: [ImageInput], config: Config) async throws -> (encTime: 
     
     // Encode
     let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encodeOne(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold)
+    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold)
     let encTime = Date().timeIntervalSince(encStart)
     
     // Decode
     let decStart = Date()
-    let outFrames = try await vevc.decodeOne(data: outBytes)
+    let opts = vevc.DecodeOptions(maxLayer: 2, maxFrames: 4)
+    let outFrames = try await vevc.decode(data: outBytes, opts: opts)
     let decTime = Date().timeIntervalSince(decStart)
     
     var metrics: [QualityMetrics]? = nil

@@ -1104,243 +1104,283 @@ func calculateSAD8x8(pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, c
 }
 
 @inline(__always)
-func evaluateMotionQuadtreeNode(
+func evaluateMotionQuadtreeNode64(
     pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
-    startX: Int, startY: Int, size: Int, searchRange: Int,
+    startX: Int, startY: Int, searchRange: Int,
     coarseDX: Int, coarseDY: Int,
     grid: inout MVGrid,
     fracRefBuf: UnsafeMutablePointer<Int16>,
     fracExtBuf: UnsafeMutablePointer<Int16>
 ) -> (node: MotionNode, sad: Int) {
-    if startX >= w || startY >= h {
-        return (.leaf(mv: .zero), 0)
-    }
-
-    let actW = min(size, w - startX)
-    let actH = min(size, h - startY)
-
-    let minX = -startX
-    let minY = -startY
-    let maxX = w - startX - actW
-    let maxY = h - startY - actH
-
-    let pmv = grid.getPMV(x: startX, y: startY, w: size)
-    
-    // Layer0 Coarse MV serves as the search center at the root (64x64) level
-    var centerDX = Int(pmv.x)
-    var centerDY = Int(pmv.y)
-    if size == 64 {
-        centerDX = coarseDX
-        centerDY = coarseDY
-    }
-    
-    // Extremely tight fine search around the center
-    // E.g., for ±3 range, we only check 49 points.
-    var bestDX = Int(pmv.x) >> 2
-    var bestDY = Int(pmv.y) >> 2
-    
-    bestDX = max(minX, min(maxX, bestDX))
-    bestDY = max(minY, min(maxY, bestDY))
-
+    if startX >= w || startY >= h { return (.leaf(mv: .zero), 0) }
+    let actW = min(64, w - startX)
+    let actH = min(64, h - startY)
+    let pmv = grid.getPMV(x: startX, y: startY, w: 64)
+    let centerDX = coarseDX
+    let centerDY = coarseDY
+    var bestDX = max(-startX, min(w - startX - actW, Int(pmv.x) >> 2))
+    var bestDY = max(-startY, min(h - startY - actH, Int(pmv.y) >> 2))
     var bestSAD: Int
-    if size == 64 && actW == 64 && actH == 64 {
-        bestSAD = calculateSAD64x64(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-            currStride: w, prevStride: w
-        )
-        let zeroSAD = calculateSAD64x64(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: startY * w + startX),
-            currStride: w, prevStride: w
-        )
-        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
-    } else if size == 32 && actW == 32 && actH == 32 {
-        bestSAD = calculateSAD32x32(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-            currStride: w, prevStride: w
-        )
-        let zeroSAD = calculateSAD32x32(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: startY * w + startX),
-            currStride: w, prevStride: w
-        )
-        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
-    } else if size == 16 && actW == 16 && actH == 16 {
-        bestSAD = calculateSAD16x16(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-            currStride: w, prevStride: w
-        )
-        let zeroSAD = calculateSAD16x16(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: startY * w + startX),
-            currStride: w, prevStride: w
-        )
-        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
-    } else if size == 8 && actW == 8 && actH == 8 {
-        bestSAD = calculateSAD8x8(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-            currStride: w, prevStride: w
-        )
-        let zeroSAD = calculateSAD8x8(
-            pCurr: pCurr.advanced(by: startY * w + startX),
-            pPrev: pPrev.advanced(by: startY * w + startX),
-            currStride: w, prevStride: w
-        )
+    if actW == 64 && actH == 64 {
+        bestSAD = calculateSAD64x64(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX), currStride: w, prevStride: w)
+        let zeroSAD = calculateSAD64x64(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: startY * w + startX), currStride: w, prevStride: w)
         if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
     } else {
         bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: centerDX, dy: centerDY)
         let zeroSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
-        
-        // Zero-bias (0,0 is generally preferred if close)
-        if zeroSAD <= bestSAD + (actW * actH / 16) {
-            bestDX = 0
-            bestDY = 0
-            bestSAD = zeroSAD
-        } else {
-            bestDX = centerDX
-            bestDY = centerDY
-        }
+        if zeroSAD <= bestSAD + (actW * actH / 16) { bestDX = 0; bestDY = 0; bestSAD = zeroSAD } else { bestDX = centerDX; bestDY = centerDY }
     }
-    // Fast Mode: If PMV or ZeroMV already yields an excellent match.
-    // Given that typical quantization noise adds SAD=3~5 per pixel, we set the threshold to SAD=8 per pixel.
-    // If the error is under this, it's mostly quantization noise and the MV is correct.
-    let earlyExitThreshold = size * size * 8
-    if earlyExitThreshold < bestSAD {
+    if 64 * 64 * 8 < bestSAD {
         var step = max(1, searchRange / 2)
         while 1 <= step {
             var currentBestDX = bestDX
             var currentBestDY = bestDY
             var currentBestSAD = bestSAD
-
-            if step == 1 && size == 64 && actW == 64 && actH == 64 {
-                currentBestSAD = calculateSAD64x64(
-                    pCurr: pCurr.advanced(by: startY * w + startX),
-                    pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX),
-                    currStride: w, prevStride: w
-                )
+            if step == 1 && actW == 64 && actH == 64 {
+                currentBestSAD = calculateSAD64x64(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX), currStride: w, prevStride: w)
             }
-
             for j in -1...1 {
                 for i in -1...1 {
                     if i == 0 && j == 0 { continue }
                     let dx = bestDX + i * step
                     let dy = bestDY + j * step
-                    
-                    let maxAbsoluteMV = 64
-                    if dx < -maxAbsoluteMV || maxAbsoluteMV < dx || dy < -maxAbsoluteMV || maxAbsoluteMV < dy { continue }
-                    if dx < minX || maxX < dx || dy < minY || maxY < dy { continue }
-                    
+                    if dx < -64 || 64 < dx || dy < -64 || 64 < dy { continue }
+                    if dx < -startX || w - startX - actW < dx || dy < -startY || h - startY - actH < dy { continue }
                     let penalty = abs(dx) + abs(dy)
                     if currentBestSAD <= penalty { continue }
-                    
                     let sad: Int
-                    if size == 64 && actW == 64 && actH == 64 {
-                        sad = step == 1 ? calculateSAD64x64(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
-                            currStride: w, prevStride: w
-                        ) : calculateSAD64x64_Subsample(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
-                            currStride: w, prevStride: w
-                        )
-                    } else if size == 32 && actW == 32 && actH == 32 {
-                        sad = calculateSAD32x32(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
-                            currStride: w, prevStride: w
-                        )
-                    } else if size == 16 && actW == 16 && actH == 16 {
-                        sad = calculateSAD16x16(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
-                            currStride: w, prevStride: w
-                        )
-                    } else if size == 8 && actW == 8 && actH == 8 {
-                        sad = calculateSAD8x8(
-                            pCurr: pCurr.advanced(by: startY * w + startX),
-                            pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx),
-                            currStride: w, prevStride: w
-                        )
+                    if actW == 64 && actH == 64 {
+                        sad = step == 1 ? calculateSAD64x64(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx), currStride: w, prevStride: w) : calculateSAD64x64_Subsample(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx), currStride: w, prevStride: w)
                     } else {
                         sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
                     }
-                    
-                    let totalSAD = sad &+ penalty
-                    if totalSAD < currentBestSAD {
-                        currentBestSAD = totalSAD
-                        currentBestDX = dx
-                        currentBestDY = dy
-                    }
+                    if sad &+ penalty < currentBestSAD { currentBestSAD = sad &+ penalty; currentBestDX = dx; currentBestDY = dy }
                 }
             }
-            bestDX = currentBestDX
-            bestDY = currentBestDY
-            bestSAD = currentBestSAD
-            step /= 2
+            bestDX = currentBestDX; bestDY = currentBestDY; bestSAD = currentBestSAD; step /= 2
         }
     }
-
-    // Fractional ME should ONLY run if we decide NOT to split (to save massive CPU time)
-    let penaltyValues = [64: 0, 32: 200, 16: 400, 8: 600] // RDO penalty based on size
-    let baseLeafSAD = bestSAD + (penaltyValues[size] ?? 0)
-
-    let minSize = 8
-    let splitEarlyExitThreshold = actW * actH * 8 // SAD=8 per pixel (tolerates quantization noise)
+    let baseLeafSAD = bestSAD + 0
     var performSplit = false
     var splitNode: MotionNode? = nil
     var splitSAD = Int.max
-
-    // Evaluate Split
-    if size > minSize && actW == size && actH == size && bestSAD > splitEarlyExitThreshold {
-        let half = size / 2
-        // Save grid state in case we don't pick split
+    if actW == 64 && actH == 64 && bestSAD > actW * actH * 8 {
         let savedGrid = grid
-        
-        // Provide integer PMV for children during their search to keep it accurate
-        let intPMV = SIMD2<Int16>(Int16(bestDX * 4), Int16(bestDY * 4))
-        grid.fill(x: startX, y: startY, w: size, h: size, mv: intPMV)
-        
-        // Hierarchical ME (HME): Reduce the search range exponentially for child nodes.
-        // Parent already found the bulk motion vector. Children only need to slightly refine it.
-        let childSearchRange = max(1, searchRange / 2) // Drastically shrink for children
-        let tl = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        let tr = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + half, startY: startY, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        let bl = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY + half, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        let br = evaluateMotionQuadtreeNode(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + half, startY: startY + half, size: half, searchRange: childSearchRange, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
-        // Penalty for sending 4 MVs instead of 1 MV.
-        // It must scale with area to prevent overfitting to quantization noise!
-        let splitPenalty = (actW * actH) * 1 // Requires at least an average of SAD=1 reduction per pixel to justify a split
-        splitSAD = tl.sad + tr.sad + bl.sad + br.sad + splitPenalty
-        
-        if splitSAD < baseLeafSAD {
-            // Split preferred
-            performSplit = true
-            splitNode = .split(tl: tl.node, tr: tr.node, bl: bl.node, br: br.node)
-        } else {
-            // No Split preferred: Revert grid
-            grid = savedGrid
-        }
+        grid.fill(x: startX, y: startY, w: 64, h: 64, mv: SIMD2<Int16>(Int16(bestDX * 4), Int16(bestDY * 4)))
+        let cr = max(1, searchRange / 2)
+        let tl = evaluateMotionQuadtreeNode32(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let tr = evaluateMotionQuadtreeNode32(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + 32, startY: startY, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let bl = evaluateMotionQuadtreeNode32(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY + 32, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let br = evaluateMotionQuadtreeNode32(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + 32, startY: startY + 32, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        splitSAD = tl.sad + tr.sad + bl.sad + br.sad + actW * actH * 1
+        if splitSAD < baseLeafSAD { performSplit = true; splitNode = .split(tl: tl.node, tr: tr.node, bl: bl.node, br: br.node) } else { grid = savedGrid }
     }
-
     if performSplit {
         return (splitNode!, splitSAD)
     } else {
-        // Run heavy subpixel refinement ONLY on the finalized leaf node!
-        let refinedQMV = refineFractionalMBME(
-            pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-            startX: startX, startY: startY, actW: actW, actH: actH,
-            bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD,
-            fracRefBuffer: fracRefBuf, fracExtBuffer: fracExtBuf
-        )
+        let refinedQMV = refineFractionalMBME(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD, fracRefBuffer: fracRefBuf, fracExtBuffer: fracExtBuf)
         grid.fill(x: startX, y: startY, w: actW, h: actH, mv: refinedQMV)
         return (.leaf(mv: refinedQMV), baseLeafSAD)
     }
 }
+
+@inline(__always)
+func evaluateMotionQuadtreeNode32(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, searchRange: Int,
+    coarseDX: Int, coarseDY: Int,
+    grid: inout MVGrid,
+    fracRefBuf: UnsafeMutablePointer<Int16>,
+    fracExtBuf: UnsafeMutablePointer<Int16>
+) -> (node: MotionNode, sad: Int) {
+    if startX >= w || startY >= h { return (.leaf(mv: .zero), 0) }
+    let actW = min(32, w - startX); let actH = min(32, h - startY)
+    let pmv = grid.getPMV(x: startX, y: startY, w: 32)
+    let centerDX = Int(pmv.x); let centerDY = Int(pmv.y)
+    var bestDX = max(-startX, min(w - startX - actW, Int(pmv.x) >> 2))
+    var bestDY = max(-startY, min(h - startY - actH, Int(pmv.y) >> 2))
+    var bestSAD: Int
+    if actW == 32 && actH == 32 {
+        bestSAD = calculateSAD32x32(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX), currStride: w, prevStride: w)
+        let zeroSAD = calculateSAD32x32(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: startY * w + startX), currStride: w, prevStride: w)
+        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
+    } else {
+        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: centerDX, dy: centerDY)
+        let zeroSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
+        if zeroSAD <= bestSAD + (actW * actH / 16) { bestDX = 0; bestDY = 0; bestSAD = zeroSAD } else { bestDX = centerDX; bestDY = centerDY }
+    }
+    if 32 * 32 * 8 < bestSAD {
+        var step = max(1, searchRange / 2)
+        while 1 <= step {
+            var currentBestDX = bestDX; var currentBestDY = bestDY; var currentBestSAD = bestSAD
+            for j in -1...1 {
+                for i in -1...1 {
+                    if i == 0 && j == 0 { continue }
+                    let dx = bestDX + i * step; let dy = bestDY + j * step
+                    if dx < -64 || 64 < dx || dy < -64 || 64 < dy { continue }
+                    if dx < -startX || w - startX - actW < dx || dy < -startY || h - startY - actH < dy { continue }
+                    let penalty = abs(dx) + abs(dy)
+                    if currentBestSAD <= penalty { continue }
+                    let sad: Int
+                    if actW == 32 && actH == 32 {
+                        sad = calculateSAD32x32(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx), currStride: w, prevStride: w)
+                    } else {
+                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
+                    }
+                    if sad &+ penalty < currentBestSAD { currentBestSAD = sad &+ penalty; currentBestDX = dx; currentBestDY = dy }
+                }
+            }
+            bestDX = currentBestDX; bestDY = currentBestDY; bestSAD = currentBestSAD; step /= 2
+        }
+    }
+    let baseLeafSAD = bestSAD + 200
+    var performSplit = false
+    var splitNode: MotionNode? = nil
+    var splitSAD = Int.max
+    if actW == 32 && actH == 32 && bestSAD > actW * actH * 8 {
+        let savedGrid = grid
+        grid.fill(x: startX, y: startY, w: 32, h: 32, mv: SIMD2<Int16>(Int16(bestDX * 4), Int16(bestDY * 4)))
+        let cr = max(1, searchRange / 2)
+        let tl = evaluateMotionQuadtreeNode16(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let tr = evaluateMotionQuadtreeNode16(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + 16, startY: startY, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let bl = evaluateMotionQuadtreeNode16(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY + 16, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let br = evaluateMotionQuadtreeNode16(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + 16, startY: startY + 16, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        splitSAD = tl.sad + tr.sad + bl.sad + br.sad + actW * actH * 1
+        if splitSAD < baseLeafSAD { performSplit = true; splitNode = .split(tl: tl.node, tr: tr.node, bl: bl.node, br: br.node) } else { grid = savedGrid }
+    }
+    if performSplit { return (splitNode!, splitSAD) } else {
+        let refinedQMV = refineFractionalMBME(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD, fracRefBuffer: fracRefBuf, fracExtBuffer: fracExtBuf)
+        grid.fill(x: startX, y: startY, w: actW, h: actH, mv: refinedQMV)
+        return (.leaf(mv: refinedQMV), baseLeafSAD)
+    }
+}
+
+@inline(__always)
+func evaluateMotionQuadtreeNode16(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, searchRange: Int,
+    coarseDX: Int, coarseDY: Int,
+    grid: inout MVGrid,
+    fracRefBuf: UnsafeMutablePointer<Int16>,
+    fracExtBuf: UnsafeMutablePointer<Int16>
+) -> (node: MotionNode, sad: Int) {
+    if startX >= w || startY >= h { return (.leaf(mv: .zero), 0) }
+    let actW = min(16, w - startX); let actH = min(16, h - startY)
+    let pmv = grid.getPMV(x: startX, y: startY, w: 16)
+    let centerDX = Int(pmv.x); let centerDY = Int(pmv.y)
+    var bestDX = max(-startX, min(w - startX - actW, Int(pmv.x) >> 2))
+    var bestDY = max(-startY, min(h - startY - actH, Int(pmv.y) >> 2))
+    var bestSAD: Int
+    if actW == 16 && actH == 16 {
+        bestSAD = calculateSAD16x16(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX), currStride: w, prevStride: w)
+        let zeroSAD = calculateSAD16x16(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: startY * w + startX), currStride: w, prevStride: w)
+        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
+    } else {
+        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: centerDX, dy: centerDY)
+        let zeroSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
+        if zeroSAD <= bestSAD + (actW * actH / 16) { bestDX = 0; bestDY = 0; bestSAD = zeroSAD } else { bestDX = centerDX; bestDY = centerDY }
+    }
+    if 16 * 16 * 8 < bestSAD {
+        var step = max(1, searchRange / 2)
+        while 1 <= step {
+            var currentBestDX = bestDX; var currentBestDY = bestDY; var currentBestSAD = bestSAD
+            for j in -1...1 {
+                for i in -1...1 {
+                    if i == 0 && j == 0 { continue }
+                    let dx = bestDX + i * step; let dy = bestDY + j * step
+                    if dx < -64 || 64 < dx || dy < -64 || 64 < dy { continue }
+                    if dx < -startX || w - startX - actW < dx || dy < -startY || h - startY - actH < dy { continue }
+                    let penalty = abs(dx) + abs(dy)
+                    if currentBestSAD <= penalty { continue }
+                    let sad: Int
+                    if actW == 16 && actH == 16 {
+                        sad = calculateSAD16x16(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx), currStride: w, prevStride: w)
+                    } else {
+                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
+                    }
+                    if sad &+ penalty < currentBestSAD { currentBestSAD = sad &+ penalty; currentBestDX = dx; currentBestDY = dy }
+                }
+            }
+            bestDX = currentBestDX; bestDY = currentBestDY; bestSAD = currentBestSAD; step /= 2
+        }
+    }
+    let baseLeafSAD = bestSAD + 400
+    var performSplit = false
+    var splitNode: MotionNode? = nil
+    var splitSAD = Int.max
+    if actW == 16 && actH == 16 && bestSAD > actW * actH * 8 {
+        let savedGrid = grid
+        grid.fill(x: startX, y: startY, w: 16, h: 16, mv: SIMD2<Int16>(Int16(bestDX * 4), Int16(bestDY * 4)))
+        let cr = max(1, searchRange / 2)
+        let tl = evaluateMotionQuadtreeNode8(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let tr = evaluateMotionQuadtreeNode8(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + 8, startY: startY, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let bl = evaluateMotionQuadtreeNode8(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY + 8, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        let br = evaluateMotionQuadtreeNode8(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX + 8, startY: startY + 8, searchRange: cr, coarseDX: 0, coarseDY: 0, grid: &grid, fracRefBuf: fracRefBuf, fracExtBuf: fracExtBuf)
+        splitSAD = tl.sad + tr.sad + bl.sad + br.sad + actW * actH * 1
+        if splitSAD < baseLeafSAD { performSplit = true; splitNode = .split(tl: tl.node, tr: tr.node, bl: bl.node, br: br.node) } else { grid = savedGrid }
+    }
+    if performSplit { return (splitNode!, splitSAD) } else {
+        let refinedQMV = refineFractionalMBME(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD, fracRefBuffer: fracRefBuf, fracExtBuffer: fracExtBuf)
+        grid.fill(x: startX, y: startY, w: actW, h: actH, mv: refinedQMV)
+        return (.leaf(mv: refinedQMV), baseLeafSAD)
+    }
+}
+
+@inline(__always)
+func evaluateMotionQuadtreeNode8(
+    pCurr: UnsafePointer<Int16>, pPrev: UnsafePointer<Int16>, w: Int, h: Int,
+    startX: Int, startY: Int, searchRange: Int,
+    coarseDX: Int, coarseDY: Int,
+    grid: inout MVGrid,
+    fracRefBuf: UnsafeMutablePointer<Int16>,
+    fracExtBuf: UnsafeMutablePointer<Int16>
+) -> (node: MotionNode, sad: Int) {
+    if startX >= w || startY >= h { return (.leaf(mv: .zero), 0) }
+    let actW = min(8, w - startX); let actH = min(8, h - startY)
+    let pmv = grid.getPMV(x: startX, y: startY, w: 8)
+    let centerDX = Int(pmv.x); let centerDY = Int(pmv.y)
+    var bestDX = max(-startX, min(w - startX - actW, Int(pmv.x) >> 2))
+    var bestDY = max(-startY, min(h - startY - actH, Int(pmv.y) >> 2))
+    var bestSAD: Int
+    if actW == 8 && actH == 8 {
+        bestSAD = calculateSAD8x8(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + bestDY) * w + startX + bestDX), currStride: w, prevStride: w)
+        let zeroSAD = calculateSAD8x8(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: startY * w + startX), currStride: w, prevStride: w)
+        if zeroSAD < bestSAD { bestSAD = zeroSAD; bestDX = 0; bestDY = 0 }
+    } else {
+        bestSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: centerDX, dy: centerDY)
+        let zeroSAD = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: 0, dy: 0)
+        if zeroSAD <= bestSAD + (actW * actH / 16) { bestDX = 0; bestDY = 0; bestSAD = zeroSAD } else { bestDX = centerDX; bestDY = centerDY }
+    }
+    if 8 * 8 * 8 < bestSAD {
+        var step = max(1, searchRange / 2)
+        while 1 <= step {
+            var currentBestDX = bestDX; var currentBestDY = bestDY; var currentBestSAD = bestSAD
+            for j in -1...1 {
+                for i in -1...1 {
+                    if i == 0 && j == 0 { continue }
+                    let dx = bestDX + i * step; let dy = bestDY + j * step
+                    if dx < -64 || 64 < dx || dy < -64 || 64 < dy { continue }
+                    if dx < -startX || w - startX - actW < dx || dy < -startY || h - startY - actH < dy { continue }
+                    let penalty = abs(dx) + abs(dy)
+                    if currentBestSAD <= penalty { continue }
+                    let sad: Int
+                    if actW == 8 && actH == 8 {
+                        sad = calculateSAD8x8(pCurr: pCurr.advanced(by: startY * w + startX), pPrev: pPrev.advanced(by: (startY + dy) * w + startX + dx), currStride: w, prevStride: w)
+                    } else {
+                        sad = calculateSADEdge(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, dx: dx, dy: dy)
+                    }
+                    if sad &+ penalty < currentBestSAD { currentBestSAD = sad &+ penalty; currentBestDX = dx; currentBestDY = dy }
+                }
+            }
+            bestDX = currentBestDX; bestDY = currentBestDY; bestSAD = currentBestSAD; step /= 2
+        }
+    }
+    let baseLeafSAD = bestSAD + 600
+    let refinedQMV = refineFractionalMBME(pCurr: pCurr, pPrev: pPrev, w: w, h: h, startX: startX, startY: startY, actW: actW, actH: actH, bestIntDX: bestDX, bestIntDY: bestDY, bestIntSAD: bestSAD, fracRefBuffer: fracRefBuf, fracExtBuffer: fracExtBuf)
+    grid.fill(x: startX, y: startY, w: actW, h: actH, mv: refinedQMV)
+    return (.leaf(mv: refinedQMV), baseLeafSAD)
+}
+
 
 @inline(__always)
 func evaluateLayer0Motion(
@@ -1412,12 +1452,12 @@ func estimateMotionQuadtree(curr: PlaneData420, prev: PlaneData420, layer0Curr: 
                                     
                                     // 2. Full-res Fine ME: Refine around the scaled Coarse MV
                                     // Fine search range of ±3 is extremely light (49 evaluations) instead of ±16 (1089 evaluations)
-                                    let nodeEval = evaluateMotionQuadtreeNode(
-                                        pCurr: pCurr, pPrev: pPrev, w: w, h: h,
-                                        startX: startX, startY: startY, size: mbSize, searchRange: 3,
-                                        coarseDX: cDXDY.dx * 8, coarseDY: cDXDY.dy * 8,
-                                        grid: &grid, fracRefBuf: pFracRef, fracExtBuf: pFracExt
-                                    )
+                                    let nodeEval = evaluateMotionQuadtreeNode64(
+                            pCurr: pCurr, pPrev: pPrev, w: w, h: h,
+                            startX: startX, startY: startY, searchRange: 3,
+                            coarseDX: cDXDY.dx * 8, coarseDY: cDXDY.dy * 8,
+                            grid: &grid, fracRefBuf: pFracRef, fracExtBuf: pFracExt
+                        )
                                     ctuNodes.append(nodeEval.node)
                                 }
                             }

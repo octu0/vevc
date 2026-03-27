@@ -79,42 +79,37 @@ public enum VEVCReaderError: Error {
 }
 
 public class VEVCReader {
+    public enum ColorGamut: UInt8 {
+        case bt709 = 1
+        case bt2020 = 2
+        case unspecified = 0
+    }
+    
+    public enum Timescale: UInt8 {
+        case ms1000 = 0
+        case hz90000 = 1
+    }
+
     private let fileHandle: FileHandle
-    public var dataSize: UInt32 = 0
     public var width: Int = 0
     public var height: Int = 0
-    public var colorGamut: UInt8 = 1  // 1=BT.709, 2=BT.2020
+    public var colorGamut: ColorGamut = .bt709
     public var fps: UInt16 = 30
-    public var timescale: UInt8 = 0   // 0=1000ms, 1=90000hz
+    public var timescale: Timescale = .ms1000
     
     public init(fileHandle: FileHandle) {
         self.fileHandle = fileHandle
     }
     
     public func readFrameChunk() throws -> [UInt8]? {
-        // Peek first byte to determine chunk type
-        let firstByte = readFully(count: 1)
-        if firstByte.isEmpty { return nil } // Normal EOF
-        guard firstByte.count == 1 else { throw VEVCReaderError.unexpectedEOF }
+        // Read 4 bytes to determine if it's 'VEVC' magic or a GOP DataSize prefix
+        let first4Bytes = readFully(count: 4)
+        if first4Bytes.isEmpty { return nil } // Normal EOF
+        guard first4Bytes.count == 4 else { throw VEVCReaderError.unexpectedEOF }
         
-        let byte0 = firstByte[firstByte.startIndex]
+        let magicVEVC = Data([0x56, 0x45, 0x56, 0x43]) // 'VEVC'
         
-        // VEVC file header starts with 'V' (0x56)
-        if byte0 == 0x56 {
-            // Read remaining 3 bytes of magic + 4 bytes dataSize = 7 bytes
-            let restHeader = readFully(count: 7)
-            guard restHeader.count == 7 else { throw VEVCReaderError.unexpectedEOF }
-            
-            let magic = Data([byte0]) + restHeader.prefix(3)
-            guard magic == Data([0x56, 0x45, 0x56, 0x43]) else {
-                let magicString = magic.map { String(format: "%02x", $0) }.joined()
-                throw VEVCReaderError.unknownMagic(magicString)
-            }
-            
-            // DataSize (4B) at restHeader[3..<7]
-            var dsOffset = 3
-            self.dataSize = try readUInt32BEFromBytes([UInt8](restHeader), offset: &dsOffset)
-            
+        if first4Bytes == magicVEVC {
             // Read metadata: metadataSize(2B) first
             let metaSizeData = readFully(count: 2)
             guard metaSizeData.count == 2 else { throw VEVCReaderError.unexpectedEOF }
@@ -132,48 +127,35 @@ public class VEVCReader {
                 var mOffset = 1
                 self.width = Int(try readUInt16BEFromBytes(metaBytes, offset: &mOffset))
                 self.height = Int(try readUInt16BEFromBytes(metaBytes, offset: &mOffset))
-                self.colorGamut = metaBytes[mOffset]
+                if let cg = ColorGamut(rawValue: metaBytes[mOffset]) {
+                    self.colorGamut = cg
+                }
                 mOffset += 1
                 self.fps = try readUInt16BEFromBytes(metaBytes, offset: &mOffset)
-                self.timescale = metaBytes[mOffset]
+                if let ts = Timescale(rawValue: metaBytes[mOffset]) {
+                    self.timescale = ts
+                }
             }
             
             // Recursively read the next chunk (first GOP)
             return try readFrameChunk()
         }
         
-        // GOP chunk: Mode(1B) + GOPSize(4B) + nLow(2B) + frames
-        guard byte0 == 0x00 || byte0 == 0x01 else {
-            throw VEVCReaderError.unknownMagic(String(format: "%02x", byte0))
-        }
+        // GOP chunk: first4Bytes is actually DataSize(4B)
+        // DataSize is the total size of the gopBody without the 4B prefix itself.
+        var dsOffset = 0
+        let dataSizeBytes = [UInt8](first4Bytes)
+        let gopDataSize = Int(try readUInt32BEFromBytes(dataSizeBytes, offset: &dsOffset))
         
+        // Read the entire GOP body at once using DataSize
+        let gopBody = readFully(count: gopDataSize)
+        guard gopBody.count == gopDataSize else { throw VEVCReaderError.unexpectedEOF }
+        
+        // Build complete chunk: DataSize(4B) + gopBody
         var chunk = [UInt8]()
-        chunk.reserveCapacity(1024 * 16)
-        chunk.append(byte0) // Mode
-        
-        // Read GOPSize(4B) + nLow(2B) = 6 bytes
-        let headerData = readFully(count: 6)
-        guard headerData.count == 6 else { throw VEVCReaderError.unexpectedEOF }
-        chunk.append(contentsOf: headerData)
-        
-        var headerOffset = 0
-        let gopSize = Int(try readUInt32BEFromBytes([UInt8](headerData), offset: &headerOffset))
-        // nLow is read but not needed for framing
-        
-        // Read all frame payloads
-        for _ in 0..<gopSize {
-            let frameLenData = readFully(count: 4)
-            guard frameLenData.count == 4 else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: frameLenData)
-            
-            var frameLenOffset = 0
-            let frameLen = Int(try readUInt32BEFromBytes([UInt8](frameLenData), offset: &frameLenOffset))
-            guard frameLen >= 0 else { throw VEVCReaderError.invalidHeader }
-            
-            let framePayload = readFully(count: frameLen)
-            guard framePayload.count == frameLen else { throw VEVCReaderError.unexpectedEOF }
-            chunk.append(contentsOf: framePayload)
-        }
+        chunk.reserveCapacity(4 + gopDataSize)
+        chunk.append(contentsOf: dataSizeBytes)
+        chunk.append(contentsOf: gopBody)
         
         return chunk
     }

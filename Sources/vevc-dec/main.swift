@@ -5,7 +5,6 @@ var inputPath = ""
 var outPath = ""
 var maxLayer = 2
 var maxFrames = 4
-var isOne = false
 
 let args = CommandLine.arguments
 var i = 1
@@ -32,8 +31,6 @@ while i < args.count {
             if let v = Int(args[i + 1]) { maxFrames = v }
             i += 1
         }
-    case "-one":
-        isOne = true
     default:
         ()
     }
@@ -41,7 +38,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-dec [-one] -i </path/to/input.vevc | -> -o </path/to/output.y4m | -> [-maxLayer 0-2] [-maxFrames 1|2|4]\n", stderr)
+    fputs("Usage: vevc-dec -i </path/to/input.vevc | -> -o </path/to/output.y4m | -> [-maxLayer 0-2] [-maxFrames 1|2|4]\n", stderr)
     exit(1)
 }
 
@@ -70,18 +67,23 @@ do {
     }
 
     let vevcReader = VEVCReader(fileHandle: inFileHandle)
+    let layerToUse = maxLayer
     
-    let layerToUse = isOne ? 0 : maxLayer
-    let decoder = vevc.Decoder(maxLayer: layerToUse)
+    // Read the first chunk to ensure the VEVC header is parsed and width/height are available
+    let firstChunk = try vevcReader.readFrameChunk()
+    
+    let decoder = vevc.Decoder(maxLayer: layerToUse, width: vevcReader.width, height: vevcReader.height)
     
     var y4mWriter: Y4MWriter? = nil
-
     var frameCount = 0
     let startTime = Date()
 
     let encodedStream = AsyncStream<[UInt8]> { continuation in
         Task {
             do {
+                if let chunk = firstChunk {
+                    continuation.yield(chunk)
+                }
                 while let chunk = try vevcReader.readFrameChunk() {
                     continuation.yield(chunk)
                 }

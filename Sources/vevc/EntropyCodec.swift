@@ -332,27 +332,27 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
 @inline(__always)
 internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     var bitmap: UInt64 = 0
-        for i in 0..<64 {
-            if freqs[i] > 1 {
-                bitmap |= UInt64(1) << i
-            }
-        }
-        out.append(UInt8((bitmap >> 56) & 0xFF))
-        out.append(UInt8((bitmap >> 48) & 0xFF))
-        out.append(UInt8((bitmap >> 40) & 0xFF))
-        out.append(UInt8((bitmap >> 32) & 0xFF))
-        out.append(UInt8((bitmap >> 24) & 0xFF))
-        out.append(UInt8((bitmap >> 16) & 0xFF))
-        out.append(UInt8((bitmap >> 8) & 0xFF))
-        out.append(UInt8(bitmap & 0xFF))
-        
-        for i in 0..<64 {
-            if (bitmap & (UInt64(1) << i)) != 0 {
-                out.append(UInt8(truncatingIfNeeded: freqs[i] >> 8))
-                out.append(UInt8(truncatingIfNeeded: freqs[i] & 0xFF))
-            }
+    for i in 0..<64 {
+        if freqs[i] > 1 {
+            bitmap |= UInt64(1) << i
         }
     }
+    out.append(UInt8((bitmap >> 56) & 0xFF))
+    out.append(UInt8((bitmap >> 48) & 0xFF))
+    out.append(UInt8((bitmap >> 40) & 0xFF))
+    out.append(UInt8((bitmap >> 32) & 0xFF))
+    out.append(UInt8((bitmap >> 24) & 0xFF))
+    out.append(UInt8((bitmap >> 16) & 0xFF))
+    out.append(UInt8((bitmap >> 8) & 0xFF))
+    out.append(UInt8(bitmap & 0xFF))
+    
+    for i in 0..<64 {
+        if (bitmap & (UInt64(1) << i)) != 0 {
+            out.append(UInt8(truncatingIfNeeded: freqs[i] >> 8))
+            out.append(UInt8(truncatingIfNeeded: freqs[i] & 0xFF))
+        }
+    }
+}
 
 // MARK: - VevcDecoder
 

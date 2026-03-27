@@ -7,7 +7,6 @@ var inputPath = ""
 var outDir = ".out/"
 var maxLayer = 2
 var maxFrames = 4
-var isOne = false
 
 var i = 1
 while i < args.count {
@@ -33,8 +32,6 @@ while i < args.count {
             if let v = Int(args[i + 1]) { maxFrames = v }
             i += 1
         }
-    case "-one":
-        isOne = true
     default:
         ()
     }
@@ -54,12 +51,8 @@ guard let inputData = try? Data(contentsOf: URL(fileURLWithPath: inputPath)) els
 do {
     let startTime = Date()
     let images: [YCbCrImage]
-    if isOne {
-        images = try await vevc.decodeOne(data: Array(inputData))
-    } else {
-        let opts = vevc.DecodeOptions(maxLayer: maxLayer, maxFrames: maxFrames)
-        images = try await vevc.decode(data: Array(inputData), opts: opts)
-    }
+    let opts = vevc.DecodeOptions(maxLayer: maxLayer, maxFrames: maxFrames)
+    images = try await vevc.decode(data: Array(inputData), opts: opts)
     let elapsed = Date().timeIntervalSince(startTime)
     print(String(
         format: "Decoded %d frames in %.4fms (%.4fms/frame)",

@@ -118,14 +118,7 @@ func blockDecode32(decoder: inout EntropyDecoder, block: inout BlockView, parent
     let lscpIdx = lscpY * 32 + lscpX
 
     while currentIdx <= lscpIdx {
-        let isParentZero: Bool
-        if let pb = parentBlock {
-            let y = currentIdx / 32
-            let x = currentIdx % 32
-            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
-        } else {
-            isParentZero = false
-        }
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
         currentIdx += run
@@ -157,14 +150,7 @@ func blockDecode16(decoder: inout EntropyDecoder, block: inout BlockView, parent
     let lscpIdx = lscpY * 16 + lscpX
 
     while currentIdx <= lscpIdx {
-        let isParentZero: Bool
-        if let pb = parentBlock {
-            let y = currentIdx / 16
-            let x = currentIdx % 16
-            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
-        } else {
-            isParentZero = false
-        }
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
         currentIdx += run
@@ -195,14 +181,7 @@ func blockDecode8(decoder: inout EntropyDecoder, block: inout BlockView, parentB
     let lscpIdx = lscpY * 8 + lscpX
 
     while currentIdx <= lscpIdx {
-        let isParentZero: Bool
-        if let pb = parentBlock {
-            let y = currentIdx / 8
-            let x = currentIdx % 8
-            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
-        } else {
-            isParentZero = false
-        }
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
         currentIdx += run
@@ -234,14 +213,7 @@ func blockDecode4(decoder: inout EntropyDecoder, block: inout BlockView, parentB
     let lscpIdx = lscpY * 4 + lscpX
 
     while currentIdx <= lscpIdx {
-        let isParentZero: Bool
-        if let pb = parentBlock {
-            let y = currentIdx / 4
-            let x = currentIdx % 4
-            isParentZero = (pb.rowPointer(y: y / 2)[x / 2] == 0)
-        } else {
-            isParentZero = false
-        }
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
         currentIdx += run
@@ -262,7 +234,7 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: inout BlockView, las
     if hasNonZero == 1 {
         let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
         let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-        guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
+        guard lscpX < 4 && lscpY < 4 else { print("invalidBlockData at line 243"); throw DecodeError.invalidBlockData }
         lscpIdx = lscpY * 4 + lscpX
     }
 
@@ -318,7 +290,7 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, las
     if hasNonZero == 1 {
         let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
         let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-        guard lscpX < 8 && lscpY < 8 else { throw DecodeError.invalidBlockData }
+        guard lscpX < 8 && lscpY < 8 else { print("invalidBlockData at line 299"); throw DecodeError.invalidBlockData }
         lscpIdx = lscpY * 8 + lscpX
     }
 
@@ -424,9 +396,8 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, la
 @inline(__always)
 func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> Image16 {
     var offset = 0
-    
-    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: false)
-    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: false)
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
@@ -434,12 +405,12 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     offset += bufYLen
     
     let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufCbLen) <= r.count else { print("invalidBlockData at line 421"); throw DecodeError.invalidBlockData }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
     let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufCrLen) <= r.count else { print("invalidBlockData at line 426"); throw DecodeError.invalidBlockData }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
@@ -518,22 +489,21 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 @inline(__always)
 func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
-    
-    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: false)
-    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: false)
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufYLen) <= r.count else { print("invalidBlockData at line 510"); throw DecodeError.invalidBlockData }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
     let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufCbLen) <= r.count else { print("invalidBlockData at line 515"); throw DecodeError.invalidBlockData }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
     let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufCrLen) <= r.count else { print("invalidBlockData at line 520"); throw DecodeError.invalidBlockData }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
@@ -612,22 +582,21 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 @inline(__always)
 func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
-    
-    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: false)
-    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: false)
+    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
+    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufYLen) <= r.count else { print("invalidBlockData at line 604"); throw DecodeError.invalidBlockData }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
     let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufCbLen) <= r.count else { print("invalidBlockData at line 609"); throw DecodeError.invalidBlockData }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
     let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
+    guard (offset + bufCrLen) <= r.count else { print("invalidBlockData at line 614"); throw DecodeError.invalidBlockData }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
@@ -703,112 +672,14 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> (Im
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
-@inline(__always)
-func decodeBase32(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> Image16 {
-    var offset = 0
-    
-    let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), isOne: true)
-    let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), isOne: true)
-    
-    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
-    let bufY = Array(r[offset..<(offset + bufYLen)])
-    offset += bufYLen
-    
-    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockData }
-    let bufCb = Array(r[offset..<(offset + bufCbLen)])
-    offset += bufCbLen
-    
-    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockData }
-    let bufCr = Array(r[offset..<(offset + bufCrLen)])
-    offset += bufCrLen
-    
-    var sub = Image16(width: dx, height: dy)
-    
-    let rowCountY = (dy + 32 - 1) / 32
-    let colCountY = (dx + 32 - 1) / 32
-    let yBlocks = try decodePlaneBaseSubbands32(data: bufY, blockCount: rowCountY * colCountY)
-    
-    let cbDx = (dx + 1) / 2
-    let cbDy = (dy + 1) / 2
-    let rowCountCb = (cbDy + 32 - 1) / 32
-    let colCountCb = (cbDx + 32 - 1) / 32
-    let cbBlocks = try decodePlaneBaseSubbands32(data: bufCb, blockCount: rowCountCb * colCountCb)
-    
-    let rowCountCr = (cbDy + 32 - 1) / 32
-    let colCountCr = (cbDx + 32 - 1) / 32
-    let crBlocks = try decodePlaneBaseSubbands32(data: bufCr, blockCount: rowCountCr * colCountCr)
-    
-    let chunkSize = 4
-    
-    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-
-    
-    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-
-
-    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-
-
-    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeBase32ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateY(data: &blk, startX: w, startY: h, size: 32)
-            }
-        }
-    }
-
-    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeBase32ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCb(data: &blk, startX: w, startY: h, size: 32)
-            }
-        }
-    }
-    
-    try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeBase32ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCr(data: &blk, startX: w, startY: h, size: 32)
-            }
-        }
-    }
-    
-    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    return sub
-}
 
 public struct DecodeOptions: Sendable {
     public var maxLayer: Int
     public var maxFrames: Int
-    public var isOne: Bool
     
-    public init(maxLayer: Int = 2, maxFrames: Int = 4, isOne: Bool = false) {
+    public init(maxLayer: Int = 2, maxFrames: Int = 4) {
         self.maxLayer = maxLayer
         self.maxFrames = maxFrames
-        self.isOne = isOne
     }
 }
 
@@ -826,11 +697,15 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
     var parsedWidth = 0
     var parsedHeight = 0
     while offset < data.count {
-        let byte0 = data[offset]
+        guard offset + 4 <= data.count else {
+            // EOF or incomplete payload
+            break
+        }
         
-        if byte0 == 0x56 {
-            // VEVC file header: magic(4B) + dataSize(4B) = 8B, then metadata
-            offset += 8 // skip magic + dataSize
+        let first4Bytes = [data[offset], data[offset+1], data[offset+2], data[offset+3]]
+        if first4Bytes == [0x56, 0x45, 0x56, 0x43] {
+            // VEVC file header: magic(4B) + metadataSize(2B) + payload
+            offset += 4
             let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
             let metaStart = offset
             // Parse Profile 1 metadata to extract width/height
@@ -843,23 +718,19 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
                 }
             }
             offset = metaStart + metadataSize
-        } else if byte0 == 0x00 || byte0 == 0x01 {
-            // GOP chunk: Mode(1B) + GOPSize(4B) + nLow(2B) + frames
+        } else {
+            // GOP chunk: first4Bytes is actually DataSize(4B)
             let chunkStart = offset
-            offset += 1 // mode
-            
-            let gopSize = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            let _ = try readUInt16BEFromBytes(data, offset: &offset) // nLow
-            
-            for _ in 0..<gopSize {
-                let len = Int(try readUInt32BEFromBytes(data, offset: &offset))
-                guard (offset + len) <= data.count else { throw DecodeError.insufficientData }
-                offset += len
+            let gopDataSize = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            if (offset + gopDataSize) > data.count {
+                throw DecodeError.insufficientData
             }
             
-            chunks.append(Array(data[chunkStart..<offset]))
-        } else {
-            throw DecodeError.invalidHeader
+            let chunkEnd = offset + gopDataSize
+            // Also prefix DataSize again if CoreDecoder expects it
+            let chunkData = data[chunkStart..<chunkEnd]
+            chunks.append(Array(chunkData))
+            offset = chunkEnd
         }
     }
     
@@ -878,16 +749,8 @@ public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async t
     return result
 }
 
-@inline(__always)
-public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
-    return try await decode(data: data, opts: DecodeOptions(maxLayer: 0, maxFrames: 4, isOne: true))
-}
-
 #else
 public func decode(data: [UInt8], opts: DecodeOptions = DecodeOptions()) async throws -> [YCbCrImage] {
-    throw DecodeError.unsupportedArchitecture
-}
-public func decodeOne(data: [UInt8]) async throws -> [YCbCrImage] {
     throw DecodeError.unsupportedArchitecture
 }
 #endif
@@ -1220,94 +1083,3 @@ func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
 }
 
 
-@Sendable @inline(__always)
-func decodeBase32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCount)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                var block: Block2D = blocks[blockIndex]
-                let half: Int = 32 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSIMD(&llView, q: qt.qLow)
-                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-}
-
-
-@Sendable @inline(__always)
-func decodeBase32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCount)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                var block: Block2D = blocks[blockIndex]
-                let half: Int = 32 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSIMD(&llView, q: qt.qLow)
-                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-}
-
-
-@Sendable @inline(__always)
-func decodeBase32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
-        let startRow: Int = taskIdx * chunkSize
-        let endRow: Int = min(startRow + chunkSize, rowCount)
-        guard startRow < endRow else { return [] }
-        var rowResults: [(Block2D, Int, Int)] = []
-        for i in startRow..<endRow {
-            let h: Int = i * 32
-            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                var block: Block2D = blocks[blockIndex]
-                let half: Int = 32 / 2
-                block.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                    var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSIMD(&llView, q: qt.qLow)
-                    dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                    invDwt2d_32(&view)
-                }
-                rowResults.append((block, w, h))
-            }
-        }
-        return rowResults
-}

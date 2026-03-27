@@ -28,26 +28,13 @@ struct QuantizationTable: Sendable {
     public let qMid: Quantizer
     public let qHigh: Quantizer
     
-    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0, isOne: Bool = false) {
+    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
         self.isChroma = isChroma
         
-        if isOne {
-            // isOne=true (VEVC One): Try to smash size down to a few MB while keeping SSIM ~0.95
-            if isChroma {
-                self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 2))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * 2.0)))), deadZoneRatio: -0.1)
-                self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * 4.0)))), deadZoneRatio: -0.2)
-            } else {
-                // LL band (Residuals) can be heavily quantized because Spatial DC preserves the mean
-                self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep))), roundToNearest: true)
-                self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * 2.0)))), deadZoneRatio: -0.1)
-                self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * 4.0)))), deadZoneRatio: -0.3)
-            }
-        } else {
-            // isOne=false (VEVC Layers): CSF-based perceptual quantization
-            // DWT subbands map to spatial frequency bands:
+        // CSF-based perceptual quantization
+        // DWT subbands map to spatial frequency bands:
             //   Layer 0 (Base8)  = lowest freq  → high CSF sensitivity → fine quantization
             //   Layer 1 (L16)    = mid freq      → moderate sensitivity
             //   Layer 2 (L32)    = highest freq  → low sensitivity → coarse quantization
@@ -89,7 +76,6 @@ struct QuantizationTable: Sendable {
                 self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
                 self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
             }
-        }
     }
 }
 

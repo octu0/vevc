@@ -55,7 +55,7 @@ final class DPCMDistributionTests: XCTestCase {
             }
             
             let pd = PlaneData420(width: width, height: height, y: yPlane, cb: cbPlane, cr: crPlane)
-            let qtY = QuantizationTable(baseStep: 24, isChroma: false, layerIndex: 0, isOne: true)
+            let qtY = QuantizationTable(baseStep: 24, isChroma: false, layerIndex: 0)
             
             // extract blocks and quantize
             var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)

@@ -4,13 +4,13 @@
 
 使い方:
   1. エンコード: swift run -c release vevc-enc -o a.vevc docs/sample_frames/frame_0*.png
-  2. デコード:   swift run -c release vevc-dec -i a.vevc -o /tmp/decoded/
-  3. 比較:       python3 script/compare_frames.py docs/sample_frames/ /tmp/decoded/ [diff_dir] [gop_size]
+  2. デコード:   swift run -c release vevc-dec -i a.vevc -o .tmp/decoded/
+  3. 比較:       python3 script/compare_frames.py docs/sample_frames/ .tmp/decoded/ [diff_dir] [gop_size]
 
 引数:
   orig_dir   - 元画像ディレクトリ (e.g. docs/sample_frames/)
-  dec_dir    - デコード画像ディレクトリ (e.g. /tmp/decoded/)
-  diff_dir   - 差分画像出力先 (デフォルト: /tmp/diff/)
+  dec_dir    - デコード画像ディレクトリ (e.g. .tmp/decoded/)
+  diff_dir   - 差分画像出力先 (デフォルト: .tmp/diff/)
   gop_size   - GOP サイズ (デフォルト: 15)
 
 --- ログの見方 ---
@@ -50,9 +50,8 @@
    - 0.85 以下まで落ちるなら残差累積（error drift）が深刻
 3. Ghost Score が 30% 以上のフレームを確認 → 残像発生箇所
 4. MaxErr=255 が連続する区間を確認 → 破綻ピクセルの存在
-5. >10 が急に 90% 以上に跳ね上がるフレームを特定
-   → そのフレームで大きな変化（動き推定の失敗）が発生
-6. diff 画像 (/tmp/diff/diff_NNNN.png) を確認
+5. エンコードが落ちたなら、該当の G_n を中心にブロック処理を調査する
+6. diff 画像 (.tmp/diff/diff_NNNN.png) を確認
    → 誤差の空間分布でエッジ/ブロック境界/動き方向を特定
 7. Summary の P-Frame MAE trend を確認
    → first→last で増加傾向 = 累積劣化あり
@@ -71,8 +70,8 @@ except ImportError:
     print("  Install: pip install scikit-image")
 
 orig_dir = sys.argv[1]    # docs/sample_frames/
-dec_dir = sys.argv[2]     # /tmp/decoded/
-diff_dir = sys.argv[3] if len(sys.argv) > 3 else "/tmp/diff/"
+dec_dir = sys.argv[2]     # .tmp/decoded/
+diff_dir = sys.argv[3] if len(sys.argv) > 3 else ".tmp/diff/"
 gop_size = int(sys.argv[4]) if len(sys.argv) > 4 else 15
 os.makedirs(diff_dir, exist_ok=True)
 

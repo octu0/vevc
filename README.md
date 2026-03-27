@@ -41,19 +41,12 @@
 **Bitstream Structure:**
 
 ```
-                                     VEVC File Structure
-+-------------------------------------------------------------------------+
-|                                  Container (VEVC)                       |
-+-------------------------------------------------------------------------+
-| VEVC Header     | Metadata        | GOP (0..3)      | ... | GOP (tail)  |
-+-----------------+-----------------+-----------------+-----+-------------+
+                           VEVC File Structure
++-------------------+------------+-----------------+-----+-------------+
+| Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
++-------------------+------------+-----------------+-----+-------------+
 
-         VEVC File Header (8 bytes)
-+-------------------------------------------+
-| Magic 'VEVC' (4B) | Data Size (4B)        |
-+--------------------+----------------------+
-
-         Metadata (Profile 1)
+# Metadata (Profile 1)
 +---------------------------------------------+
 | Metadata Size (2B) | Profile Version(1B)    |
 +------------+-------+-----+------------------+----------+----------------+
@@ -62,16 +55,16 @@
   Color Gamut: 0x01=BT.709, 0x02=BT.2020
   Timescale:   0x00=1000ms, 0x01=90000hz
 
-# Temporal Mode (Mode=0x00, GOP=4, nLow=2)
-+------------------------------------------------+
-| Mode 0x00 (1B) | GOP Size 4 (4B) | nLow 2 (2B) |
-+----------------+-----------------+-------------+--------------------+
+# Temporal GOP (GOP=4, nLow=2) or Spatial Direct GOP (GOP=1, nLow=0)
++----------------+-----------------+-------------+
+| Data Size(4B)  | GOP Size X (4B) | nLow X (2B) |
++----------------+-------------+---+-------------+--+
 | F0 len (4B) | F0 (Low0 spatial)  | F1 len (4B) | F1 (Low1 spatial)  |
 +-------------+--------------------+-------------+--------------------+
 | F2 len (4B) | F2 (High0 spatial) | F3 len (4B) | F3 (High1 spatial) |
 +-------------+--------------------+-------------+--------------------+
 
-    Spatial Frame (Temporal: 3 Layers)
+    Spatial Frame (3 Layers structure)
     +---------------------------------------------------------+
     | L0 len (4B)  | Layer 0 Payload (8x8 base)               |
     +--------------+------------------------------------------+
@@ -79,20 +72,6 @@
     +--------------+------------------------------------------+
     | L2 len (4B)  | Layer 2 Payload (32x32 refinement)       |
     +--------------+------------------------------------------+
-
-
-# Direct Mode / One Mode (Mode=0x01, GOP=1, nLow=0)
-+-------------------------------------------------+
-| Mode 0x01 (1B) | GOP Size 1 (4B) | nLow 0 (2B)  |
-+----------------+-----------------+--------------+
-| F0 len (4B) | F0 spatial data    |
-+--------------+-------------------+
-
-    Spatial Frame (One/Direct: 1 Layer)
-    +---------------------------------------------------------+
-    | L0 len (4B)  | Layer 0 Payload (32x32 base)             |
-    +--------------+------------------------------------------+
-
 
 # Layer Payload
 +-------------+-----------+
@@ -106,9 +85,6 @@
 +-------------+-----------+
 ```
 
-- **Mode=0x00 (Temporal)**: 4 frames → temporal LeGall 5/3 DWT → 2 low + 2 high → each encoded as 3 spatial layers. GOP=4, nLow=2.
-- **Mode=0x01 (Direct)**: 1 frame → encoded as 1 base layer (32x32). GOP=1, nLow=0.
-
 ---
 
 ## Performance
@@ -118,7 +94,6 @@
 | Codec | Encode (ms/f) | Decode (ms/f) | Size (KB) | SSIM Avg | SSIM Min |
 |-------|---------------|---------------|-----------|----------|----------|
 | **VEVC (Layers)** | **1.53** | **0.96** | **24,256** | **0.9070** | **0.8298** |
-| VEVC (One) | 0.86 | 0.57 | 29,341 | 0.8625 | 0.8182 |
 | H.264 HWA | 2.54 | 0.30 | 1,856 | 0.9282 | 0.8375 |
 | HEVC HWA | 2.68 | 0.29 | 1,859 | 0.9508 | 0.8698 |
 | HEVC SW | 14.23 | 0.26 | 1,736 | 0.9649 | 0.9399 |
@@ -182,7 +157,6 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 - `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
 - `-b <kilobit>`: Specifies the target bitrate (desired compression ratio/quality) in kilobit per second.
-- `-one`: Enables single-layer (Layer 0) mode, bypassing temporal DWT and multi-resolution overhead for maximum encoding/decoding speed.
 - `-keyint <keyint>`: Specifies the keyframe interval (GOP size).
 - `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size).
 - `-sceneThreshold <sad>`: Sets the SAD threshold for scene change detection (forces I-frame).
@@ -199,7 +173,6 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 
 - `-i <path|->`: Specifies the input `.vevc` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.y4m` file path or standard output (`-`).
-- `-one`: Decodes the stream assuming it was encoded with the single-layer (Layer 0) mode.
 - `-maxLayer <0-2>`: Specifies the maximum level of spatial layers to decode.
   - `0`: 1/4 size (for rough thumbnails)
   - `1`: 1/2 size (for previews)

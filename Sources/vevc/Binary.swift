@@ -1,7 +1,14 @@
 
-enum BinaryError: Error {
+enum BinaryError: Error, CustomStringConvertible {
     case eof
-    case insufficientData
+    case insufficientData(message: String)
+    
+    var description: String {
+        switch self {
+        case .eof: return "EOF"
+        case .insufficientData(let msg): return "insufficientData: \(msg)"
+        }
+    }
 }
 
 // MARK: - Byte Serialization Helpers
@@ -28,23 +35,30 @@ func appendUInt64BE(_ out: inout [UInt8], _ val: UInt64) {
 
 @inline(__always)
 func readUInt8FromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt8 {
-    guard (offset + 1) <= r.count else { throw BinaryError.insufficientData }
+    guard (offset + 1) <= r.count else {
+        throw BinaryError.insufficientData(message: "readUInt8FromBytes offset(\(offset)) + 1 > r.count(\(r.count))")
+    }
     let val = r[offset]
     offset += 1
     return val
 }
 
 @inline(__always)
-func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt16 {
-    guard (offset + 2) <= r.count else { throw BinaryError.insufficientData }
-    let val = (UInt16(r[offset]) << 8) | UInt16(r[offset + 1])
+public func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt16 {
+    guard (offset + 2) <= r.count else {
+        throw BinaryError.insufficientData(message: "readUInt16BEFromBytes offset(\(offset)) + 2 > r.count(\(r.count))")
+    }
+    let b0 = UInt16(r[offset])
+    let b1 = UInt16(r[offset + 1])
     offset += 2
-    return val
+    return (b0 << 8) | b1
 }
 
 @inline(__always)
-func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
-    guard (offset + 4) <= r.count else { throw BinaryError.insufficientData }
+public func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
+    guard (offset + 4) <= r.count else {
+        throw BinaryError.insufficientData(message: "readUInt32BEFromBytes offset(\(offset)) + 4 > r.count(\(r.count))")
+    }
     let val = (UInt32(r[offset]) << 24) | (UInt32(r[offset + 1]) << 16) | (UInt32(r[offset + 2]) << 8) | UInt32(r[offset + 3])
     offset += 4
     return val

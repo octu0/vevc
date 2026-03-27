@@ -590,7 +590,6 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     return out
 }
 
-
 @inline(__always)
 func reconstructPlaneBase8(blocks: [Block2D], width: Int, height: Int, qt: QuantizationTable) -> [Int16] {
     let colCount = (width + 7) / 8
@@ -1082,6 +1081,7 @@ func reconstructPlaneLayer16Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
     }
     return plane
 }
+
 @inline(__always)
 func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
@@ -1303,12 +1303,12 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2, isOne: false)
-    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2, isOne: false)
-    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1, isOne: false)
-    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1, isOne: false)
-    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0, isOne: false)
-    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0, isOne: false)
+    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
+    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2)
+    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1)
+    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1)
+    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
+    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
     let (sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
     let (sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)

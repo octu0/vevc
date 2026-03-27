@@ -87,7 +87,7 @@ final class QualityDropTests: XCTestCase {
 
     func xtestQualityDropOnFrame() async throws {
         // Load the problematic frame
-        guard let fh = try? FileHandle(forReadingFrom: URL(fileURLWithPath: "/tmp/ToS-1080-f1740.y4m")) else {
+        guard let fh = try? FileHandle(forReadingFrom: URL(fileURLWithPath: ".tmp/ToS-1080-f1740.y4m")) else {
             print("ToS-1080-f1740.y4m not found, skipping specific test")
             return
         }
@@ -170,7 +170,7 @@ final class QualityDropTests: XCTestCase {
         let reconL1Y_2 = reconstructPlaneLayer16Y(blocks: l1yBlocks_2, prevImg: baseImg2, width: sub32.width, height: sub32.height, qt: qtY)
         let reconL1Cb_2 = reconstructPlaneLayer16Cb(blocks: l1cbBlocks_2, prevImg: baseImg2, width: (sub32.width+1)/2, height: (sub32.height+1)/2, qt: qtC)
         let reconL1Cr_2 = reconstructPlaneLayer16Cr(blocks: l1crBlocks_2, prevImg: baseImg2, width: (sub32.width+1)/2, height: (sub32.height+1)/2, qt: qtC)
-        let l1Img2 = Image16(width: sub32.width, height: sub32.height, y: reconL1Y_2, cb: reconL1Cb_2, cr: reconL1Cr_2)
+        _ = Image16(width: sub32.width, height: sub32.height, y: reconL1Y_2, cb: reconL1Cb_2, cr: reconL1Cr_2)
 
         let bytesL32 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &l32yBlocks, cbBlocks: &l32cbBlocks, crBlocks: &l32crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
