@@ -520,9 +520,13 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     return (subPlane, yBlocks, cbBlocks, crBlocks)
 }
 
-func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
-    let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
-    let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
+func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
+    // P-frame residuals: guarantee minimum safeThreshold of 2 to zero out
+    // blocks where all HL/LH/HH coefficients are within [-2, +2] after quantization.
+    // These small coefficients are below the quantization noise floor and imperceptible.
+    let pFrameMinThreshold = isPFrame ? 2 : 0
+    let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
+    let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
     
     let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks)
     let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks)
@@ -547,9 +551,10 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 }
 
 @inline(__always)
-func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
-    let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
-    let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
+func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
+    let pFrameMinThreshold = isPFrame ? 2 : 0
+    let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
+    let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
     
     let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks)
     let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks)
@@ -1383,6 +1388,10 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     }
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
 
+    // P-frame flag: passed downstream so entropy encode layers can apply
+    // more aggressive zero-block thresholds on P-frame residuals.
+    let isPFrame = predictedPd != nil
+    
     let (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
     let (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
     let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
@@ -1406,12 +1415,12 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     var l1yBlocksMut = l1yBlocks
     var l1cbBlocksMut = l1cbBlocks
     var l1crBlocksMut = l1crBlocks
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
     var l2yBlocksMut = l2yBlocks
     var l2cbBlocksMut = l2cbBlocks
     var l2crBlocksMut = l2crBlocks
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocksMut, cbBlocks: &l2cbBlocksMut, crBlocks: &l2crBlocksMut, parentYBlocks: l1yBlocksMut, parentCbBlocks: l1cbBlocksMut, parentCrBlocks: l1crBlocksMut)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocksMut, cbBlocks: &l2cbBlocksMut, crBlocks: &l2crBlocksMut, parentYBlocks: l1yBlocksMut, parentCbBlocks: l1cbBlocksMut, parentCrBlocks: l1crBlocksMut)
     
     // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
     let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2)
