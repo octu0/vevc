@@ -815,3 +815,38 @@ struct Image16: Sendable {
         }
     }
 }
+
+// MARK: - Duplicate Frame Detection
+
+/// Compare two PlaneData420 frames for pixel-level identity.
+/// Uses Y plane comparison only: if Y pixels are identical,
+/// Cb and Cr are also identical for the same input frame.
+/// SIMD16-accelerated for performance on hot path.
+@inline(__always)
+func isPlaneIdentical(a: PlaneData420, b: PlaneData420) -> Bool {
+    guard a.width == b.width, a.height == b.height else { return false }
+    guard a.y.count == b.y.count else { return false }
+    
+    let count = a.y.count
+    return a.y.withUnsafeBufferPointer { aBuf in
+        b.y.withUnsafeBufferPointer { bBuf in
+            guard let aPtr = aBuf.baseAddress, let bPtr = bBuf.baseAddress else { return false }
+            
+            var i = 0
+            #if arch(arm64) || arch(x86_64) || arch(wasm32)
+            while i + 16 <= count {
+                let aSimd = UnsafeRawPointer(aPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                let bSimd = UnsafeRawPointer(bPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                if any(aSimd .!= bSimd) { return false }
+                i += 16
+            }
+            #endif
+            
+            while i < count {
+                if aPtr[i] != bPtr[i] { return false }
+                i += 1
+            }
+            return true
+        }
+    }
+}

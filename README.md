@@ -65,6 +65,13 @@
 | F2 len (4B)   | F2 (P-Frame)    | F3 len (4B) | F3 (P-Frame)       | 
 +---------------+-----------------+-------------+--------------------+
 
+    Copy Frame (Duplicate Frame Skip):
+    When Fn len == 0, the frame is a "copy frame" — pixel-identical to its
+    predecessor. The encoder detects duplicate input frames (common in
+    telecine/pulldown content, e.g. 24fps→60fps where ~60% are duplicates)
+    and emits FrameLen=0 instead of encoding redundant data.
+    The decoder reuses the previous reconstructed frame verbatim.
+
     Spatial Frame (Motion Vectors + 3 Layers structure)
     +-------------------------------------------------------------+
     | MVs Count (4B) | MV Data Len (4B)  | rANS Encoded MVs       |
@@ -141,6 +148,17 @@ DWT Coefficients
 | `ValueTokenizer.swift` | Token/bypass decomposition for signed/unsigned values |
 | `rANSCompressor.swift` | Standalone rANS compression for generic byte data |
 
+### Hybrid Static/Dynamic Frequency Tables
+
+`vevc` uses a hybrid approach for rANS frequency tables, selected per-stream based on data volume:
+
+| Condition | Mode | Rationale |
+|-----------|------|----------|
+| Pair count ≥ 500 | **Dynamic** | Data-specific frequency tables provide 15–47% better compression |
+| Pair count < 500 | **Static** | Pre-defined tables avoid ~400B header overhead that would exceed compression gains |
+
+The encoder writes a `staticBit` flag in the stream header so the decoder knows whether to read embedded frequency tables or use the built-in static tables.
+
 ### Optimizations
 
 - **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
@@ -148,6 +166,7 @@ DWT Coefficients
 - **Zero-Run RLE**: DWT zero coefficients compressed as run-length tokens
 - **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely
 - **Compressed Frequency Tables**: Bitmap-based encoding reduces table size from 32B to ~10B
+- **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 4-byte markers
 
 ---
 

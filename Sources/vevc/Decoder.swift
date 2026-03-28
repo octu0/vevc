@@ -28,9 +28,19 @@ class CoreDecoder {
         let gopSize = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
         
         // Parse all frame payloads (sequential, offset-dependent)
+        // Convention: FrameLen == 0 signals a "copy frame" — a frame that is
+        // pixel-identical to its predecessor. The encoder detects duplicate
+        // input frames (common in 24fps→60fps telecine/pulldown conversions)
+        // and emits FrameLen=0 instead of encoding redundant data.
+        // The decoder handles this by reusing the previous reconstructed frame.
         var frameData: [[UInt8]] = []
         for _ in 0..<gopSize {
             let len = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
+            if len == 0 {
+                // Copy frame: empty payload signals reuse of previous frame
+                frameData.append([])
+                continue
+            }
             guard (offset + len) <= chunk.count else {
                 print("decodeGOP insufficientData: offset(\(offset)) + len(\(len)) > chunk.count(\(chunk.count))")
                 throw DecodeError.insufficientData
@@ -46,6 +56,14 @@ class CoreDecoder {
         
         var previousReconstructed: PlaneData420? = nil
         for (idx, data) in frameData.enumerated() {
+            // Copy frame: reuse previous reconstructed frame verbatim.
+            // This is valid because the encoder only emits FrameLen=0 when
+            // the input frame was pixel-identical to the previous one.
+            if data.isEmpty {
+                decodedPlanes[idx] = previousReconstructed
+                // Do NOT update previousReconstructed — it stays the same
+                continue
+            }
             let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed)
             let pd = PlaneData420(img16: img16)
             decodedPlanes[idx] = pd

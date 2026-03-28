@@ -156,8 +156,24 @@ actor LayersEncodeActor {
         
         var encodedFrames = [[UInt8]]()
         var previousReconstructed: PlaneData420? = nil
+        var previousInputPlane: PlaneData420? = nil
         
         for plane in planes {
+            // Duplicate frame detection: if current frame pixels are identical
+            // to the previous frame, emit a copy frame (empty data, FrameLen=0)
+            // instead of encoding the full frame. This saves significant data
+            // for videos with duplicate frames (e.g. 24fps→60fps upconversion).
+            if let prevInput = previousInputPlane {
+                let isDuplicate = isPlaneIdentical(a: plane, b: prevInput)
+                if isDuplicate {
+                    encodedFrames.append([]) // empty = copy frame (FrameLen=0)
+                    // previousReconstructed stays the same (reuse previous reconstruction)
+                    // previousInputPlane stays the same
+                    continue
+                }
+            }
+            previousInputPlane = plane
+            
             let (bytes, reconstructed) = try await encodeSpatialLayers(
                 pd: plane, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
                 qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold
@@ -169,6 +185,13 @@ actor LayersEncodeActor {
         var gopBody: [UInt8] = []
         appendUInt32BE(&gopBody, UInt32(images.count)) // GOP size
         
+        // GOP bitstream layout: [GOPBodySize(4B)] [GOPSize(4B)] [FrameLen(4B) FrameData]...
+        // Convention: FrameLen == 0 indicates a "copy frame" — the frame is
+        // pixel-identical to its predecessor and carries no encoded payload.
+        // This avoids encoding redundant data for duplicate input frames,
+        // which is common in telecine/pulldown converted content (e.g. 24fps→60fps,
+        // where approximately 60% of frames are exact duplicates).
+        // The decoder recognizes FrameLen == 0 and reuses the previous decoded frame.
         for encoded in encodedFrames {
             appendUInt32BE(&gopBody, UInt32(encoded.count))
             gopBody.append(contentsOf: encoded)
