@@ -292,10 +292,10 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     let totalPixels = img.width * img.height * 3
     
     let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
-        
     let ratio = estimatedTotalBits / Double(targetBits)
     let predictedStep = Double(probeStep) * ratio * 3.5
-    let q = min(64, Int(max(1, predictedStep)))
+    // 高難度シーンの破綻を防ぐため量子化ステップ上限を256に緩和(デッドゾーン撤廃による情報爆発バグ回避のため)
+    let q = min(256, Int(max(1, predictedStep)))
     
     return QuantizationTable(baseStep: q)
 }

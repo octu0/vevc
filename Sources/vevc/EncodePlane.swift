@@ -64,38 +64,45 @@ func evaluateQuantizeBase32(block: inout Block2D, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
+func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) async -> (blocks: [Block2D], subband: [Int16]) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 32 - 1) / 32)
-    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 8
-    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
-    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
-        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-            let startRow = (taskIdx * chunkSize)
-            let endRow = min((startRow + chunkSize), rowCount)
-
-            for i in startRow..<endRow {
-                let h = (i * 32)
-                var rowResults: [(Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: width, by: 32) {
-                    var block = Block2D(width: 32, height: 32)
-                    block.withView { view in
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                        dwt2d_32(&view)
+    // Concurrent ではなく TaskGroup を用いて安全に結果をマージする
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
+    await withTaskGroup(of: [(Int, [(Block2D, Int, Int)])].self) { group in
+        var startRow = 0
+        while startRow < rowCount {
+            let endRow = min(startRow + chunkSize, rowCount)
+            let sRow = startRow
+            group.addTask {
+                var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                for i in sRow..<endRow {
+                    let h = (i * 32)
+                    var rowResults: [(Block2D, Int, Int)] = []
+                    for w in stride(from: 0, to: width, by: 32) {
+                        var block = Block2D(width: 32, height: 32)
+                        block.withView { view in
+                            r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                            dwt2d_32(&view)
+                        }
+                        rowResults.append((block, w, h))
                     }
-                    rowResults.append((block, w, h))
+                    chunkResults.append((i, rowResults))
                 }
-                ptr[i] = (h, rowResults)
+                return chunkResults
+            }
+            startRow += chunkSize
+        }
+        for await chunk in group {
+            for (i, rowResults) in chunk {
+                resultsArray[i] = (i * 32, rowResults)
             }
         }
-    }
-
-    
+    }    
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
     subband.withUnsafeMutableBufferPointer { dstBuf in
@@ -153,38 +160,44 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) -> 
 }
 
 @inline(__always)
-func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> (blocks: [Block2D], subband: [Int16]) {
+func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) async -> (blocks: [Block2D], subband: [Int16]) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband: [Int16] = [Int16](repeating: 0, count: subWidth * subHeight)
     let rowCount = ((height + 16 - 1) / 16)
-    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 8
-    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
-    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
-        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-            let startRow = (taskIdx * chunkSize)
-            let endRow = min((startRow + chunkSize), rowCount)
-
-            for i in startRow..<endRow {
-                let h = (i * 16)
-                var rowResults: [(Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: width, by: 16) {
-                    var block = Block2D(width: 16, height: 16)
-                    block.withView { view in
-                        r.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
-                        dwt2d_16(&view)
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
+    await withTaskGroup(of: [(Int, [(Block2D, Int, Int)])].self) { group in
+        var startRow = 0
+        while startRow < rowCount {
+            let endRow = min(startRow + chunkSize, rowCount)
+            let sRow = startRow
+            group.addTask {
+                var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                for i in sRow..<endRow {
+                    let h = (i * 16)
+                    var rowResults: [(Block2D, Int, Int)] = []
+                    for w in stride(from: 0, to: width, by: 16) {
+                        var block = Block2D(width: 16, height: 16)
+                        block.withView { view in
+                            r.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
+                            dwt2d_16(&view)
+                        }
+                        rowResults.append((block, w, h))
                     }
-                    rowResults.append((block, w, h))
+                    chunkResults.append((i, rowResults))
                 }
-                ptr[i] = (h, rowResults)
+                return chunkResults
+            }
+            startRow += chunkSize
+        }
+        for await chunk in group {
+            for (i, rowResults) in chunk {
+                resultsArray[i] = (i * 16, rowResults)
             }
         }
-    }
-
-    
+    }    
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 16 - 1)  / 2)))
     subband.withUnsafeMutableBufferPointer { dstBuf in
@@ -234,35 +247,41 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) -> 
 }
 
 @inline(__always)
-func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) -> [Block2D] {
+func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) async -> [Block2D] {
     let rowCount = ((height + 8 - 1) / 8)
-    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 4
-    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
-    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
-        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-            let startRow = (taskIdx * chunkSize)
-            let endRow = min((startRow + chunkSize), rowCount)
-
-            for i in startRow..<endRow {
-                let h = (i * 8)
-                var rowResults: [(Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: width, by: 8) {
-                    var block = Block2D(width: 8, height: 8)
-                    block.withView { view in
-                        r.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
-                        dwt2d_8(&view)
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
+    await withTaskGroup(of: [(Int, [(Block2D, Int, Int)])].self) { group in
+        var startRow = 0
+        while startRow < rowCount {
+            let endRow = min(startRow + chunkSize, rowCount)
+            let sRow = startRow
+            group.addTask {
+                var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                for i in sRow..<endRow {
+                    let h = (i * 8)
+                    var rowResults: [(Block2D, Int, Int)] = []
+                    for w in stride(from: 0, to: width, by: 8) {
+                        var block = Block2D(width: 8, height: 8)
+                        block.withView { view in
+                            r.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
+                            dwt2d_8(&view)
+                        }
+                        rowResults.append((block, w, h))
                     }
-                    rowResults.append((block, w, h))
+                    chunkResults.append((i, rowResults))
                 }
-                ptr[i] = (h, rowResults)
+                return chunkResults
+            }
+            startRow += chunkSize
+        }
+        for await chunk in group {
+            for (i, rowResults) in chunk {
+                resultsArray[i] = (i * 8, rowResults)
             }
         }
-    }
-
-    
+    }    
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 8 - 1) / 8)))
     for i in 0..<rowCount {
@@ -277,35 +296,41 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
 }
 
 @inline(__always)
-func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int) -> [Block2D] {
+func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int) async -> [Block2D] {
     let rowCount = ((height + 32 - 1) / 32)
-    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
     let chunkSize = 4
-    let taskCount = ((rowCount + chunkSize - 1) / chunkSize)
     
-    resultsArray.withUnsafeMutableBufferPointer { resultsPtr in
-        nonisolated(unsafe) let ptr = resultsPtr.baseAddress!
-        DispatchQueue.concurrentPerform(iterations: taskCount) { taskIdx in
-            let startRow = (taskIdx * chunkSize)
-            let endRow = min((startRow + chunkSize), rowCount)
-
-            for i in startRow..<endRow {
-                let h = (i * 32)
-                var rowResults: [(Block2D, Int, Int)] = []
-                for w in stride(from: 0, to: width, by: 32) {
-                    var block = Block2D(width: 32, height: 32)
-                    block.withView { view in
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                        dwt2d_32(&view)
+    var resultsArray = [(Int, [(Block2D, Int, Int)])?](repeating: nil, count: rowCount)
+    await withTaskGroup(of: [(Int, [(Block2D, Int, Int)])].self) { group in
+        var startRow = 0
+        while startRow < rowCount {
+            let endRow = min(startRow + chunkSize, rowCount)
+            let sRow = startRow
+            group.addTask {
+                var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                for i in sRow..<endRow {
+                    let h = (i * 32)
+                    var rowResults: [(Block2D, Int, Int)] = []
+                    for w in stride(from: 0, to: width, by: 32) {
+                        var block = Block2D(width: 32, height: 32)
+                        block.withView { view in
+                            r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
+                            dwt2d_32(&view)
+                        }
+                        rowResults.append((block, w, h))
                     }
-                    rowResults.append((block, w, h))
+                    chunkResults.append((i, rowResults))
                 }
-                ptr[i] = (h, rowResults)
+                return chunkResults
+            }
+            startRow += chunkSize
+        }
+        for await chunk in group {
+            for (i, rowResults) in chunk {
+                resultsArray[i] = (i * 32, rowResults)
             }
         }
-    }
-
-    
+    }    
     var blocks: [Block2D] = []
     blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
     for i in 0..<rowCount {
@@ -418,11 +443,11 @@ func preparePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UI
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = {
-        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy)
+    async let taskBufY = { () -> ([Int16], [Int16]?, [Block2D]) in
+        var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy)
         var predSubband: [Int16]? = nil
         if let pPd = predictedPd {
-            var (pBlocks, pSubband) = extractSingleTransformBlocks32(r: pPd.rY, width: dx, height: dy)
+            var (pBlocks, pSubband) = await extractSingleTransformBlocks32(r: pPd.rY, width: dx, height: dy)
             subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
             predSubband = pSubband
         }
@@ -432,11 +457,11 @@ func preparePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UI
         return (subband, predSubband, blocks)
     }()
     
-    async let taskBufCb = {
-        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
+    async let taskBufCb = { () -> ([Int16], [Int16]?, [Block2D]) in
+        var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
         var predSubband: [Int16]? = nil
         if let pPd = predictedPd {
-            var (pBlocks, pSubband) = extractSingleTransformBlocks32(r: pPd.rCb, width: cbDx, height: cbDy)
+            var (pBlocks, pSubband) = await extractSingleTransformBlocks32(r: pPd.rCb, width: cbDx, height: cbDy)
             subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
             predSubband = pSubband
         }
@@ -446,11 +471,11 @@ func preparePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UI
         return (subband, predSubband, blocks)
     }()
     
-    async let taskBufCr = {
-        var (blocks, subband) = extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
+    async let taskBufCr = { () -> ([Int16], [Int16]?, [Block2D]) in
+        var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
         var predSubband: [Int16]? = nil
         if let pPd = predictedPd {
-            var (pBlocks, pSubband) = extractSingleTransformBlocks32(r: pPd.rCr, width: cbDx, height: cbDy)
+            var (pBlocks, pSubband) = await extractSingleTransformBlocks32(r: pPd.rCr, width: cbDx, height: cbDy)
             subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
             predSubband = pSubband
         }
@@ -480,11 +505,11 @@ func preparePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UI
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = {
-        var (blocks, subband) = extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy)
+    async let taskBufY = { () -> ([Int16], [Int16]?, [Block2D]) in
+        var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy)
         var predSubband: [Int16]? = nil
         if let pPd = predictedPd {
-            var (pBlocks, pSubband) = extractSingleTransformBlocks16(r: pPd.rY, width: dx, height: dy)
+            var (pBlocks, pSubband) = await extractSingleTransformBlocks16(r: pPd.rY, width: dx, height: dy)
             subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
             predSubband = pSubband
         }
@@ -494,11 +519,11 @@ func preparePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UI
         return (subband, predSubband, blocks)
     }()
     
-    async let taskBufCb = {
-        var (blocks, subband) = extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
+    async let taskBufCb = { () -> ([Int16], [Int16]?, [Block2D]) in
+        var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
         var predSubband: [Int16]? = nil
         if let pPd = predictedPd {
-            var (pBlocks, pSubband) = extractSingleTransformBlocks16(r: pPd.rCb, width: cbDx, height: cbDy)
+            var (pBlocks, pSubband) = await extractSingleTransformBlocks16(r: pPd.rCb, width: cbDx, height: cbDy)
             subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
             predSubband = pSubband
         }
@@ -508,11 +533,11 @@ func preparePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UI
         return (subband, predSubband, blocks)
     }()
     
-    async let taskBufCr = {
-        var (blocks, subband) = extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
+    async let taskBufCr = { () -> ([Int16], [Int16]?, [Block2D]) in
+        var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
         var predSubband: [Int16]? = nil
         if let pPd = predictedPd {
-            var (pBlocks, pSubband) = extractSingleTransformBlocks16(r: pPd.rCr, width: cbDx, height: cbDy)
+            var (pBlocks, pSubband) = await extractSingleTransformBlocks16(r: pPd.rCr, width: cbDx, height: cbDy)
             subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
             predSubband = pSubband
         }
@@ -1089,10 +1114,10 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = {
-        var blocks = extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
+    async let taskBufY = { () -> ([UInt8], [Int16], [Block2D]) in
+        var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
         if let pPd = predictedPd {
-            var pBlocks = extractSingleTransformBlocksBase8(r: pPd.rY, width: dx, height: dy)
+            var pBlocks = await extractSingleTransformBlocksBase8(r: pPd.rY, width: dx, height: dy)
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
@@ -1105,10 +1130,10 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
         return (buf, reconPlane, quantizedBlocks)
     }()
     
-    async let taskBufCb = {
-        var blocks = extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
+    async let taskBufCb = { () -> ([UInt8], [Int16], [Block2D]) in
+        var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
         if let pPd = predictedPd {
-            var pBlocks = extractSingleTransformBlocksBase8(r: pPd.rCb, width: cbDx, height: cbDy)
+            var pBlocks = await extractSingleTransformBlocksBase8(r: pPd.rCb, width: cbDx, height: cbDy)
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
@@ -1121,10 +1146,10 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
         return (buf, reconPlane, quantizedBlocks)
     }()
     
-    async let taskBufCr = {
-        var blocks = extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
+    async let taskBufCr = { () -> ([UInt8], [Int16], [Block2D]) in
+        var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
         if let pPd = predictedPd {
-            var pBlocks = extractSingleTransformBlocksBase8(r: pPd.rCr, width: cbDx, height: cbDy)
+            var pBlocks = await extractSingleTransformBlocksBase8(r: pPd.rCr, width: cbDx, height: cbDy)
             subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
@@ -1218,10 +1243,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = {
-        var blocks = extractSingleTransformBlocksBase32(r: pd.rY, width: dx, height: dy)
+    async let taskBufY = { () -> ([UInt8], [Int16]) in
+        var blocks = await extractSingleTransformBlocksBase32(r: pd.rY, width: dx, height: dy)
         if let pPd = predictedPd {
-            var pBlocks = extractSingleTransformBlocksBase32(r: pPd.rY, width: dx, height: dy)
+            var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rY, width: dx, height: dy)
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
@@ -1233,10 +1258,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
         return (buf, reconPlane)
     }()
     
-    async let taskBufCb = {
-        var blocks = extractSingleTransformBlocksBase32(r: pd.rCb, width: cbDx, height: cbDy)
+    async let taskBufCb = { () -> ([UInt8], [Int16]) in
+        var blocks = await extractSingleTransformBlocksBase32(r: pd.rCb, width: cbDx, height: cbDy)
         if let pPd = predictedPd {
-            var pBlocks = extractSingleTransformBlocksBase32(r: pPd.rCb, width: cbDx, height: cbDy)
+            var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rCb, width: cbDx, height: cbDy)
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
@@ -1248,10 +1273,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
         return (buf, reconPlane)
     }()
     
-    async let taskBufCr = {
-        var blocks = extractSingleTransformBlocksBase32(r: pd.rCr, width: cbDx, height: cbDy)
+    async let taskBufCr = { () -> ([UInt8], [Int16]) in
+        var blocks = await extractSingleTransformBlocksBase32(r: pd.rCr, width: cbDx, height: cbDy)
         if let pPd = predictedPd {
-            var pBlocks = extractSingleTransformBlocksBase32(r: pPd.rCr, width: cbDx, height: cbDy)
+            var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rCr, width: cbDx, height: cbDy)
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {

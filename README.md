@@ -106,14 +106,6 @@ SW: Software, HWA: Hardware Acceleration
 
 ![ssim](docs/ssim.png)
 
-| Codec | Encode (ms/f) | Decode (ms/f) | Size (KB) | SSIM Avg | SSIM Min |
-|-------|---------------|---------------|-----------|----------|----------|
-| **VEVC (Layers)** | **1.53** | **0.96** | **24,256** | **0.9070** | **0.8298** |
-| H.264 HWA | 2.54 | 0.30 | 1,856 | 0.9282 | 0.8375 |
-| HEVC HWA | 2.68 | 0.29 | 1,859 | 0.9508 | 0.8698 |
-| HEVC SW | 14.23 | 0.26 | 1,736 | 0.9649 | 0.9399 |
-| MJPEG | 0.68 | 1.30 | 159,189 | 0.9875 | 0.9787 |
-
 ---
 
 ## Entropy Coding: Interleaved rANS
