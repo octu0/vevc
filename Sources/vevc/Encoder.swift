@@ -202,7 +202,6 @@ actor LayersEncodeActor {
         
         var gopBody: [UInt8] = []
         appendUInt32BE(&gopBody, 1) // GOP size
-        appendUInt16BE(&gopBody, 0)
         
         appendUInt32BE(&gopBody, UInt32(bytes.count))
         gopBody.append(contentsOf: bytes)

@@ -69,16 +69,10 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         
-        current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+        current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, mvs: mvs)
     }
     
-    if let tPrev = predictedPd, let mvs = mvs {
-        let cbDx = (dx + 1) / 2
-        let cbDy = (dy + 1) / 2
-        applyMotionCompensationPixels(plane: &current.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
-        applyMotionCompensationPixels(plane: &current.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
-        applyMotionCompensationPixels(plane: &current.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
-    }
+
     
     return current
 }
@@ -411,7 +405,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, la
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?, predictedPd: PlaneData420? = nil, mvs: [MotionVector]? = nil) async throws -> Image16 {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -497,6 +491,12 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
         }
     }
     
+    if let tPrev = predictedPd, let mvs = mvs {
+        applyMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+        applyMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        applyMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    }
+
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
     applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))

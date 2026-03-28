@@ -798,12 +798,12 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
     let sign = value < 0
     let absValue = UInt16(value.magnitude)
     
-    if absValue <= 16 {
-        let token = UInt8((absValue - 1) * 2 + (sign ? 1 : 0))
+    if absValue <= 15 {
+        let token = UInt8((absValue - 1) * 2 + 1 + (sign ? 1 : 0))
         return (token, 0, 0)
     }
     
-    let v = UInt32(absValue - 17)
+    let v = UInt32(absValue - 16)
     if v == 0 {
         return (32, sign ? 1 : 0, 1)
     }
@@ -822,9 +822,11 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
 
 @inline(__always)
 func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
+    if token == 0 { return 0 }
     if token < 32 {
-        let absValue = (UInt16(token) / 2) + 1
-        let isNegative = (token % 2) == 1
+        let t = token - 1
+        let absValue = (UInt16(t) / 2) + 1
+        let isNegative = (t % 2) == 1
         return isNegative ? Int16(bitPattern: 0 &- absValue) : Int16(bitPattern: absValue)
     }
     
@@ -840,7 +842,7 @@ func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
         v = base | UInt32(bypass)
     }
     
-    let absValue = v + 17
+    let absValue = v + 16
     if sign {
         let neg = 0 &- absValue
         return Int16(truncatingIfNeeded: neg)

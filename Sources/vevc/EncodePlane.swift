@@ -445,7 +445,7 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufY = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 800 { blocks[i].clearAll() } }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -454,7 +454,7 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
@@ -463,7 +463,7 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 75 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
@@ -487,7 +487,7 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufY = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 800 { blocks[i].clearAll() } }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 75 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtY)
         }
@@ -496,7 +496,7 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
@@ -505,7 +505,7 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
@@ -1075,7 +1075,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     async let taskBufY = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count, sList[i] < 800 { blocks[i].clearAll() }
+            if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
@@ -1085,10 +1085,22 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
         return (buf, reconPlane, quantizedBlocks)
     }()
     
+    let lumaColCount = (dx + 7) / 8
+    let chromaColCount = (cbDx + 7) / 8
+    
     async let taskBufCb = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() }
+            var sadVal: Int = Int.max
+            if let sList = sads {
+                let r: Int = i / chromaColCount
+                let c: Int = i % chromaColCount
+                let r2: Int = r * 2
+                let c2: Int = c * 2
+                let lumaIdx: Int = r2 * lumaColCount + c2
+                if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
+            }
+            if sadVal < 75 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
@@ -1101,7 +1113,16 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     async let taskBufCr = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() }
+            var sadVal: Int = Int.max
+            if let sList = sads {
+                let r: Int = i / chromaColCount
+                let c: Int = i % chromaColCount
+                let r2: Int = r * 2
+                let c2: Int = c * 2
+                let lumaIdx: Int = r2 * lumaColCount + c2
+                if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
+            }
+            if sadVal < 75 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
@@ -1393,7 +1414,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420) async -> ([Mot
     
     let (_, currSub2) = await extractSingleTransformBlocks32(r: curr.rY, width: dx, height: dy)
     let (_, currSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
-    var currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy)
+    let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy)
 
     let (_, prevSub2) = await extractSingleTransformBlocks32(r: prev.rY, width: dx, height: dy)
     let (_, prevSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
@@ -1411,7 +1432,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420) async -> ([Mot
         let row = idx / colCount
         let bx = col * 8
         let by = row * 8
-        let (mv, _, sad) = MotionEstimation.search(currBlock: &currBlocks8[idx], prevPlane: prevSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+        let (mv, sad) = MotionEstimation.searchPixels(currPlane: currSub1, prevPlane: prevSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
         mvs.append(mv)
         sads.append(sad)
     }
