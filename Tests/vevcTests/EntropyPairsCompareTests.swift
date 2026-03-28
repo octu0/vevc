@@ -4,7 +4,7 @@ import XCTest
 /// EntropyEncoder/Decoder のpairsを128x128 PD420データで直接比較
 final class EntropyPairsCompareTests: XCTestCase {
     
-    func testEntropyPairsRoundtrip_128x128() throws {
+    func testEntropyPairsRoundtrip_128x128() async throws {
         let width = 128
         let height = 128
         
@@ -28,7 +28,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
         
-        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }

@@ -31,7 +31,7 @@ final class BlockDataCompareTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 6)
         
         // エンコーダ: Layer32 のバイト + blocks を取得
-        var (_, _, encYBlocks, encCbBlocks, encCrBlocks) = try await preparePlaneLayer32(pd: pd, predictedPd: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (_, encYBlocks, encCbBlocks, encCrBlocks) = try await preparePlaneLayer32(pd: pd, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         let layer2Bytes = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
 
         

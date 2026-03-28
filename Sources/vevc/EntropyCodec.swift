@@ -493,7 +493,7 @@ struct EntropyDecoder {
     }
     
     @inline(__always)
-    private static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
+    internal static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
         let bitmap = try readUInt64BEFromBytes(data, offset: &offset)
         
         var freqs = [UInt32](repeating: 1, count: 64)
@@ -562,4 +562,98 @@ struct EntropyDecoder {
     }
 }
 
+// MARK: - Motion Vector rANS Codec
 
+func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
+    var tokensDx = [UInt8]()
+    var tokensDy = [UInt8]()
+    tokensDx.reserveCapacity(mvs.count)
+    tokensDy.reserveCapacity(mvs.count)
+    
+    var bypass = BypassWriter()
+    var freqsDx = [UInt32](repeating: 0, count: 64)
+    var freqsDy = [UInt32](repeating: 0, count: 64)
+    
+    for mv in mvs {
+        let tx = valueTokenize(mv.dx)
+        tokensDx.append(tx.token)
+        freqsDx[Int(tx.token)] += 1
+        bypass.writeBits(tx.bypassBits, count: tx.bypassLen)
+
+        let ty = valueTokenize(mv.dy)
+        tokensDy.append(ty.token)
+        freqsDy[Int(ty.token)] += 1
+        bypass.writeBits(ty.bypassBits, count: ty.bypassLen)
+    }
+    bypass.flush()
+    
+    var modelDx = rANSModel()
+    modelDx.normalize(sigCounts: [0, 0], tokenCounts: freqsDx.map(Int.init))
+    
+    var modelDy = rANSModel()
+    modelDy.normalize(sigCounts: [0, 0], tokenCounts: freqsDy.map(Int.init))
+    
+    var enc = rANSEncoder()
+    for i in stride(from: mvs.count - 1, through: 0, by: -1) {
+        let ty = tokensDy[i]
+        enc.encodeSymbol(cumFreq: modelDy.tokenCumFreqs[Int(ty)], freq: modelDy.tokenFreqs[Int(ty)])
+        let tx = tokensDx[i]
+        enc.encodeSymbol(cumFreq: modelDx.tokenCumFreqs[Int(tx)], freq: modelDx.tokenFreqs[Int(tx)])
+    }
+    enc.flush()
+    
+    var out = [UInt8]()
+    writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
+    writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
+    
+    let bpData = bypass.bytes
+    out.append(UInt8((bpData.count >> 24) & 0xFF))
+    out.append(UInt8((bpData.count >> 16) & 0xFF))
+    out.append(UInt8((bpData.count >> 8) & 0xFF))
+    out.append(UInt8(bpData.count & 0xFF))
+    out.append(contentsOf: bpData)
+    
+    out.append(contentsOf: enc.getBitstream())
+    return out
+}
+
+func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
+    var offset = 0
+    let freqsDx = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+    let modelDx = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDx)
+    
+    let freqsDy = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+    let modelDy = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDy)
+    
+    let bpLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
+    guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
+    var bypassReader = BypassReader(data: Array(data[offset..<(offset + bpLen)]))
+    offset += bpLen
+    
+    guard offset < data.count else { throw DecodeError.insufficientData }
+    var dec = rANSDecoder(bitstream: Array(data[offset...]))
+    
+    var mvs = [MotionVector]()
+    mvs.reserveCapacity(count)
+    
+    for _ in 0..<count {
+        let cfDx = dec.getCumulativeFreq()
+        let txInfo = modelDx.findToken(cf: cfDx)
+        dec.advanceSymbol(cumFreq: txInfo.cumFreq, freq: txInfo.freq)
+        
+        let cfDy = dec.getCumulativeFreq()
+        let tyInfo = modelDy.findToken(cf: cfDy)
+        dec.advanceSymbol(cumFreq: tyInfo.cumFreq, freq: tyInfo.freq)
+        
+        let dxBypassLen = valueBypassLength(for: txInfo.token)
+        let dxBypassBits = bypassReader.readBits(count: dxBypassLen)
+        let dx = valueDetokenize(token: txInfo.token, bypassBits: dxBypassBits)
+        
+        let dyBypassLen = valueBypassLength(for: tyInfo.token)
+        let dyBypassBits = bypassReader.readBits(count: dyBypassLen)
+        let dy = valueDetokenize(token: tyInfo.token, bypassBits: dyBypassBits)
+        
+        mvs.append(MotionVector(dx: dx, dy: dy))
+    }
+    return mvs
+}

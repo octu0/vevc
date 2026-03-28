@@ -27,7 +27,16 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
     let l0dy = (l1dy + 1) / 2
 
     // encodeSpatialLayers appends layer0, then layer1, then layer2.
-    // So chunks are ordered [layer0, layer1, layer2].
+    var mvs: [MotionVector]? = nil
+    let mvCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let mvDataLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    
+    if mvCount > 0 && mvDataLen > 0 {
+        guard (offset + mvDataLen) <= r.count else { throw DecodeError.insufficientData }
+        
+        mvs = try decodeMVs(data: Array(r[offset..<(offset + mvDataLen)]), count: mvCount)
+        offset += mvDataLen
+    }
     
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
     guard (offset + Int(len0)) <= r.count else { throw DecodeError.insufficientData }
@@ -61,6 +70,14 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         offset += Int(len2)
         
         current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+    }
+    
+    if let tPrev = predictedPd, let mvs = mvs {
+        let cbDx = (dx + 1) / 2
+        let cbDy = (dy + 1) / 2
+        applyMotionCompensationPixels(plane: &current.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+        applyMotionCompensationPixels(plane: &current.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        applyMotionCompensationPixels(plane: &current.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
     }
     
     return current

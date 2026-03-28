@@ -11,11 +11,11 @@
 
 ## Features
 
-1. **Full Spatio-Temporal DWT Architecture**
-   - **No Block-based Prediction**: Unlike conventional codecs (H.264/HEVC) that rely heavily on complex block-matching (Motion Vectors) and intra-frame prediction, `vevc` employs a unified DWT approach across all three dimensions (time + 2D space). 
-   - **Temporal DWT**: LeGall 5/3 1D-DWT across frames (e.g., GOP=4). It transforms the time axis directly, smoothly decomposing temporal changes into low-frequency (smooth motion) and high-frequency (details) subband frames. This eliminates the need for expensive motion estimation.
-   - **Spatial DWT**: LeGall 5/3 2D-DWT with multi-resolution Layers (Layer 0, 1, 2) inherited from `veif`. Each temporal subband frame is cleanly decomposed into spatial frequency layers.
-   - **SIMD8-Optimized**: Both Temporal lifting and Spatial DWT use `SIMD8<Int16>` vectorization for massively parallel pixel processing with `UnsafeRawPointer.load/storeBytes` direct memory access.
+1. **Wavelet Domain Motion Compensation (WDMC) Architecture**
+   - **Subband Motion Estimation**: `vevc` employs a hierarchical Wavelet Domain Motion Compensation (WDMC) pattern. Instead of predicting full-resolution pixel blocks, motion estimation works directly on reduced-resolution spatial frequency layers (Layer 0 HL, LH, HH domains), avoiding DWT-shift dependency while enabling lighting-fast sub-millisecond coarse-to-fine searches.
+   - **Zero-Data Skip Blocks**: P-frame residuals are intelligently threshold-tested. Unchanged macroblocks have their transform coefficients completely nulled out at the encoder, yielding extreme entropy compression on structural backgrounds.
+   - **Spatial DWT**: LeGall 5/3 2D-DWT with multi-resolution Layers (Layer 0, 1, 2) inherited from `veif`. I-frames and P-frame residuals are cleanly decomposed into spatial frequency layers.
+   - **SIMD-Optimized Path**: Motion searches and DWT lifting are strictly unrolled without branches and optimized with `SIMD8<Int16>` vectorization for massively parallel pixel processing.
 
 2. **Multi-Resolution Design**
    - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
@@ -56,17 +56,19 @@
   Color Gamut: 0x01=BT.709, 0x02=BT.2020
   Timescale:   0x00=1000ms, 0x01=90000hz
 
-    Temporal GOP (GOP=4, nLow=2) or I-Frame GOP (GOP=1, nLow=0)
-+----------------+-----------------+-------------+
-| Data Size(4B)  | GOP Size X (4B) | nLow X (2B) |
-+----------------+-------------+---+-------------+--+
-| F0 len (4B) | F0 (Low0 spatial)  | F1 len (4B) | F1 (Low1 spatial)  |
-+-------------+--------------------+-------------+--------------------+
-| F2 len (4B) | F2 (High0 spatial) | F3 len (4B) | F3 (High1 spatial) |
-+-------------+--------------------+-------------+--------------------+
+    Variable GOP (I-Frame followed by P-Frames up to keyint / scene change)
++---------------+-----------------+
+| Data Size(4B) | GOP Size X (4B) |
++---------------+-----------------+-------------+--------------------+
+| F0 len (4B)   | F0 (I-Frame)    | F1 len (4B) | F1 (P-Frame)       |
++---------------+-----------------+-------------+--------------------+
+| F2 len (4B)   | F2 (P-Frame)    | F3 len (4B) | F3 (P-Frame)       | 
++---------------+-----------------+-------------+--------------------+
 
-    Spatial Frame (3 Layers structure)
-    +---------------------------------------------------------+
+    Spatial Frame (Motion Vectors + 3 Layers structure)
+    +-------------------------------------------------------------+
+    | MVs Count (4B) | MV Data Len (4B)  | rANS Encoded MVs       |
+    +----------------+-------------------+------------------------+
     | L0 len (4B)  | Layer 0 Payload (8x8 base)               |
     +--------------+------------------------------------------+
     | L1 len (4B)  | Layer 1 Payload (16x16 refinement)       |
@@ -191,9 +193,10 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 
 The core components of the implementation consist of the following files:
 
-- `TemporalDWT`: SIMD8-optimized LeGall 5/3 temporal wavelet transform across GOP=4 frames. Produces temporal low/high subband frames for improved compression.
-- `DWT`: Spatial LeGall 5/3 2D-DWT with SIMD-optimized lifting steps. Supports both 4-element (temporal) and 8-element (spatial) transforms.
-- `Encode` / `Plane`: The encoding flow that uses plane data (`PlaneData`) to process temporal subband frames and individual I-Frames through the spatial 2D-DWT and entropy coding pipeline.
+- `MotionEstimation`: SIMD-optimized hierarchical motion search directly operating on 2D DWT subbands for rapid P-frame prediction and Skip Block zeroing.
+- `DWT`: Spatial LeGall 5/3 2D-DWT with SIMD-optimized lifting steps.
+- `EncodePlane` / `DecodePlane`: The encode/decode pipeline applying spatial 2D-DWT, Wavelet Motion Compensation (MC), residual differencing, and entropy encoding.
+- `Encoder` / `Decoder`: Video-level abstractions mapping dynamic GOP boundaries, scene change cut-offs, and bit rate approximations to planes.
 - `rANS` / `EntropyCodec`: Interleaved 4-way rANS entropy coding engine with adaptive token-based probability modeling, O(1) LUT decoding, and raw fallback for sparse data.
 
 ## License

@@ -437,129 +437,87 @@ func subtractCoeffsBase32(currBlocks: inout [Block2D], predBlocks: inout [Block2
 }
 
 @inline(__always)
-func preparePlaneLayer32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
+func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = { () -> ([Int16], [Int16]?, [Block2D]) in
+    async let taskBufY = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy)
-        var predSubband: [Int16]? = nil
-        if let pPd = predictedPd {
-            var (pBlocks, pSubband) = await extractSingleTransformBlocks32(r: pPd.rY, width: dx, height: dy)
-            subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
-            predSubband = pSubband
-        }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 800 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
-        return (subband, predSubband, blocks)
+        return (subband, blocks)
     }()
     
-    async let taskBufCb = { () -> ([Int16], [Int16]?, [Block2D]) in
+    async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
-        var predSubband: [Int16]? = nil
-        if let pPd = predictedPd {
-            var (pBlocks, pSubband) = await extractSingleTransformBlocks32(r: pPd.rCb, width: cbDx, height: cbDy)
-            subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
-            predSubband = pSubband
-        }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
-        return (subband, predSubband, blocks)
+        return (subband, blocks)
     }()
     
-    async let taskBufCr = { () -> ([Int16], [Int16]?, [Block2D]) in
+    async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
-        var predSubband: [Int16]? = nil
-        if let pPd = predictedPd {
-            var (pBlocks, pSubband) = await extractSingleTransformBlocks32(r: pPd.rCr, width: cbDx, height: cbDy)
-            subtractCoeffs32(currBlocks: &blocks, predBlocks: &pBlocks)
-            predSubband = pSubband
-        }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
-        return (subband, predSubband, blocks)
+        return (subband, blocks)
     }()
 
-    let (subY, pSubY, yBlocks) = await taskBufY
-    let (subCb, pSubCb, cbBlocks) = await taskBufCb
-    let (subCr, pSubCr, crBlocks) = await taskBufCr
+    let (subY, yBlocks) = await taskBufY
+    let (subCb, cbBlocks) = await taskBufCb
+    let (subCr, crBlocks) = await taskBufCr
 
     let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
-    var subPredPlane: PlaneData420? = nil
-    if let pY = pSubY, let pCb = pSubCb, let pCr = pSubCr {
-        subPredPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: pY, cb: pCb, cr: pCr)
-    }
-
-    return (subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
+    return (subPlane, yBlocks, cbBlocks, crBlocks)
 }
 
 @inline(__always)
-func preparePlaneLayer16(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, PlaneData420?, [Block2D], [Block2D], [Block2D]) {
+func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = { () -> ([Int16], [Int16]?, [Block2D]) in
+    async let taskBufY = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy)
-        var predSubband: [Int16]? = nil
-        if let pPd = predictedPd {
-            var (pBlocks, pSubband) = await extractSingleTransformBlocks16(r: pPd.rY, width: dx, height: dy)
-            subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
-            predSubband = pSubband
-        }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 800 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtY)
         }
-        return (subband, predSubband, blocks)
+        return (subband, blocks)
     }()
     
-    async let taskBufCb = { () -> ([Int16], [Int16]?, [Block2D]) in
+    async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
-        var predSubband: [Int16]? = nil
-        if let pPd = predictedPd {
-            var (pBlocks, pSubband) = await extractSingleTransformBlocks16(r: pPd.rCb, width: cbDx, height: cbDy)
-            subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
-            predSubband = pSubband
-        }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
-        return (subband, predSubband, blocks)
+        return (subband, blocks)
     }()
     
-    async let taskBufCr = { () -> ([Int16], [Int16]?, [Block2D]) in
+    async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
-        var predSubband: [Int16]? = nil
-        if let pPd = predictedPd {
-            var (pBlocks, pSubband) = await extractSingleTransformBlocks16(r: pPd.rCr, width: cbDx, height: cbDy)
-            subtractCoeffs16(currBlocks: &blocks, predBlocks: &pBlocks)
-            predSubband = pSubband
-        }
+        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() } }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
-        return (subband, predSubband, blocks)
+        return (subband, blocks)
     }()
 
-    let (subY, pSubY, yBlocks) = await taskBufY
-    let (subCb, pSubCb, cbBlocks) = await taskBufCb
-    let (subCr, pSubCr, crBlocks) = await taskBufCr
+    let (subY, yBlocks) = await taskBufY
+    let (subCb, cbBlocks) = await taskBufCb
+    let (subCr, crBlocks) = await taskBufCr
 
-    let (subPlane, subPredPlane) = {
-        var subPredPlane: PlaneData420? = nil
-        if let pY = pSubY, let pCb = pSubCb, let pCr = pSubCr {
-            subPredPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: pY, cb: pCb, cr: pCr)
-        }
-        return (PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr), subPredPlane)
-    }()
-    
-    return (subPlane, subPredPlane, yBlocks, cbBlocks, crBlocks)
+    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
+    return (subPlane, yBlocks, cbBlocks, crBlocks)
 }
 
 func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
@@ -1108,7 +1066,7 @@ func reconstructPlaneLayer16Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
 }
 
 @inline(__always)
-func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [Block2D], [Block2D], [Block2D]) {
+func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [Block2D], [Block2D], [Block2D]) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1116,11 +1074,8 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     
     async let taskBufY = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
-        if let pPd = predictedPd {
-            var pBlocks = await extractSingleTransformBlocksBase8(r: pPd.rY, width: dx, height: dy)
-            subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
-        }
         for i in blocks.indices {
+            if let sList = sads, i < sList.count, sList[i] < 800 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
@@ -1132,11 +1087,8 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     
     async let taskBufCb = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
-        if let pPd = predictedPd {
-            var pBlocks = await extractSingleTransformBlocksBase8(r: pPd.rCb, width: cbDx, height: cbDy)
-            subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
-        }
         for i in blocks.indices {
+            if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
@@ -1148,11 +1100,8 @@ func encodePlaneBase8(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt8
     
     async let taskBufCr = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
-        if let pPd = predictedPd {
-            var pBlocks = await extractSingleTransformBlocksBase8(r: pPd.rCr, width: cbDx, height: cbDy)
-            subtractCoeffsBase8(currBlocks: &blocks, predBlocks: &pBlocks)
-        }
         for i in blocks.indices {
+            if let sList = sads, i < sList.count, sList[i] < 400 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
@@ -1335,9 +1284,21 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
-    let (sub2, subPred2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: pd, predictedPd: predictedPd, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
-    let (sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
+    let (mvs, sads) = predictedPd != nil ? await computeMotionVectors(curr: pd, prev: predictedPd!) : (nil, nil)
+    
+    var mutPdY = pd.y
+    var mutPdCb = pd.cb
+    var mutPdCr = pd.cr
+    if let pPd = predictedPd, let mvs = mvs {
+        subtractMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+        subtractMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        subtractMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    }
+    let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
+
+    let (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    let (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
     
     // Layer chain reconstruction: Base8 → Layer16 → Layer32
     // Build Image16 from base reconstruction for boundaryRepeat support
@@ -1374,6 +1335,12 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     var mutReconL2Cb = reconL2Cb
     var mutReconL2Cr = reconL2Cr
     
+    if let tPrev = predictedPd, let mvs = mvs {
+        applyMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+        applyMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        applyMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    }
+    
     // Apply deblocking filter (blockSize corresponds to Layer32 output)
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
@@ -1385,6 +1352,17 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     
     var out: [UInt8] = []
     
+    let mvCount = mvs?.count ?? 0
+    appendUInt32BE(&out, UInt32(mvCount))
+    
+    if mvCount > 0, let mvs = mvs {
+        let mvData = encodeMVs(mvs: mvs)
+        appendUInt32BE(&out, UInt32(mvData.count))
+        out.append(contentsOf: mvData)
+    } else {
+        appendUInt32BE(&out, 0) // mvDataLen = 0
+    }
+
     appendUInt32BE(&out, UInt32(layer0.count))
     out.append(contentsOf: layer0)
     
@@ -1396,3 +1374,119 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     
     return (out, reconstructed)
 }
+
+
+extension Block2D {
+    mutating func clearAll() {
+        self.data = [Int16](repeating: 0, count: self.data.count)
+    }
+}
+
+@inline(__always)
+func computeMotionVectors(curr: PlaneData420, prev: PlaneData420) async -> ([MotionVector], [Int]) {
+    let dx = curr.width
+    let dy = curr.height
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+    
+    let (_, currSub2) = await extractSingleTransformBlocks32(r: curr.rY, width: dx, height: dy)
+    let (_, currSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
+    var currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy)
+
+    let (_, prevSub2) = await extractSingleTransformBlocks32(r: prev.rY, width: dx, height: dy)
+    let (_, prevSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
+    
+    let targetWidth = l0dx
+    let targetHeight = l0dy
+    let colCount = (targetWidth + 7) / 8
+    
+    var mvs = [MotionVector]()
+    var sads = [Int]()
+    mvs.reserveCapacity(currBlocks8.count)
+    sads.reserveCapacity(currBlocks8.count)
+    for idx in currBlocks8.indices {
+        let col = idx % colCount
+        let row = idx / colCount
+        let bx = col * 8
+        let by = row * 8
+        let (mv, _, sad) = MotionEstimation.search(currBlock: &currBlocks8[idx], prevPlane: prevSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+        mvs.append(mv)
+        sads.append(sad)
+    }
+    return (mvs, sads)
+}
+
+@inline(__always)
+func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+    let colCount = (width + blockSize - 1) / blockSize
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        prevPlane.withUnsafeBufferPointer { srcBuf in
+            guard let srcBase = srcBuf.baseAddress else { return }
+            for row in 0..<((height + blockSize - 1) / blockSize) {
+                for col in 0..<colCount {
+                    let mvIndex = min(row * colCount + col, mvs.count - 1)
+                    let mv = mvs[mvIndex]
+                    let blockX = col * blockSize
+                    let blockY = row * blockSize
+                    let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                    let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                    let targetX = blockX + shiftX
+                    let targetY = blockY + shiftY
+                    for y in 0..<min(blockSize, height - blockY) {
+                        let dstY = blockY + y
+                        let srcY = targetY + y
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let safeSrcY = max(0, min(srcY, height - 1))
+                        let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                        for x in 0..<min(blockSize, width - blockX) {
+                            let srcX = targetX + x
+                            let safeSrcX = max(0, min(srcX, width - 1))
+                            let predPixel = srcRowPtr[safeSrcX]
+                            dstPtr[x] = dstPtr[x] &- predPixel
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+    let colCount = (width + blockSize - 1) / blockSize
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        prevPlane.withUnsafeBufferPointer { srcBuf in
+            guard let srcBase = srcBuf.baseAddress else { return }
+            for row in 0..<((height + blockSize - 1) / blockSize) {
+                for col in 0..<colCount {
+                    let mvIndex = min(row * colCount + col, mvs.count - 1)
+                    let mv = mvs[mvIndex]
+                    let blockX = col * blockSize
+                    let blockY = row * blockSize
+                    let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                    let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                    let targetX = blockX + shiftX
+                    let targetY = blockY + shiftY
+                    for y in 0..<min(blockSize, height - blockY) {
+                        let dstY = blockY + y
+                        let srcY = targetY + y
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let safeSrcY = max(0, min(srcY, height - 1))
+                        let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                        for x in 0..<min(blockSize, width - blockX) {
+                            let srcX = targetX + x
+                            let safeSrcX = max(0, min(srcX, width - 1))
+                            let predPixel = srcRowPtr[safeSrcX]
+                            dstPtr[x] = dstPtr[x] &+ predPixel
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+

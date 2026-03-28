@@ -54,7 +54,7 @@ final class LayerDriftTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 6)
         
         // エンコーダ: Base8のみ
-        let (bytes, encRecon, _, _, _) = try await encodePlaneBase8(pd: pd, predictedPd: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (bytes, encRecon, _, _, _) = try await encodePlaneBase8(pd: pd, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
         // デコーダ: Base8のみ
         let (decImg, _, _, _) = try await decodeBase8(r: bytes, layer: 0, dx: width, dy: height)
@@ -88,15 +88,15 @@ final class LayerDriftTests: XCTestCase {
         // encodeSpatialLayersのLayer2→Layer1→Base8 チェーンの部分実行と同等
         let qtY2 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 2)
         let qtC2 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 2)
-        let (sub2, subPred2, _, _, _) = try await preparePlaneLayer32(pd: pd, predictedPd: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: 3)
+        let (sub2, _, _, _) = try await preparePlaneLayer32(pd: pd, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: 3)
         
         let qtY1 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 1)
         let qtC1 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 1)
-        var (sub1, subPred1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, predictedPd: subPred2, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3)
+        var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, sads: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3)
         
         let qtY0 = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
         let qtC0 = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 0)
-        let (layer0, baseRecon, _, _, _) = try await encodePlaneBase8(pd: sub1, predictedPd: subPred1, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 3)
+        let (layer0, baseRecon, _, _, _) = try await encodePlaneBase8(pd: sub1, sads: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 3)
 
         let _ = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
         let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: 3, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)

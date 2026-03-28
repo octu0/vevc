@@ -11,7 +11,6 @@ class CoreDecoder {
         self.height = height
     }
     
-#if (arch(arm64) || arch(x86_64) || arch(wasm32))
     /// Decode a GOP chunk into one or more YCbCrImages.
     /// Mode=0x00 (Temporal): applies inverse temporal DWT to reconstruct original frames.
     /// Mode=0x01 (Direct): outputs frames directly.
@@ -27,7 +26,6 @@ class CoreDecoder {
         
         // No Mode byte anymore!
         let gopSize = Int(try readUInt32BEFromBytes(chunk, offset: &offset))
-        let nLow = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
         
         // Parse all frame payloads (sequential, offset-dependent)
         var frameData: [[UInt8]] = []
@@ -46,40 +44,18 @@ class CoreDecoder {
         let localHeight = height
         var decodedPlanes = [PlaneData420?](repeating: nil, count: frameData.count)
         
-        try await withThrowingTaskGroup(of: (Int, PlaneData420).self) { group in
-            for (idx, data) in frameData.enumerated() {
-                group.addTask {
-                    let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight)
-                    return (idx, PlaneData420(img16: img16))
-                }
-            }
-            for try await (idx, plane) in group {
-                decodedPlanes[idx] = plane
-            }
+        var previousReconstructed: PlaneData420? = nil
+        for (idx, data) in frameData.enumerated() {
+            let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed)
+            let pd = PlaneData420(img16: img16)
+            decodedPlanes[idx] = pd
+            previousReconstructed = pd
         }
         
         let validPlanes = decodedPlanes.map { $0! }
         
-        if nLow > 0 {
-            // Temporal DWT reconstructed
-            let nHigh = gopSize - nLow
-            let lowPlanes = Array(validPlanes[0..<nLow])
-            let highPlanes = Array(validPlanes[nLow..<(nLow + nHigh)])
-            
-            let subbands = TemporalSubbands(low: lowPlanes, high: highPlanes)
-            let reconstructed = try temporalInverseDWT4(subbands: subbands)
-            return reconstructed.map { $0.toYCbCr() }
-        } else {
-            // No Temporal DWT (e.g. single frame spatial direct)
-            return validPlanes.map { $0.toYCbCr() }
-        }
+        return validPlanes.map { $0.toYCbCr() }
     }
-
-#else
-    func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
-        throw DecodeError.unsupportedArchitecture
-    }
-#endif
 }
 
 public struct Decoder: Sendable {
@@ -100,7 +76,6 @@ public struct Decoder: Sendable {
         self.height = height
     }
 
-    #if (arch(arm64) || arch(x86_64) || arch(wasm32))
     /// Parse VEVC header chunk to extract width/height from metadata.
     /// Returns (width, height) if the chunk is a valid VEVC header, nil otherwise.
     private static func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int)? {
@@ -221,5 +196,4 @@ public struct Decoder: Sendable {
         }
         return images
     }
-    #endif
 }

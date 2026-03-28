@@ -4,7 +4,7 @@ import XCTest
 /// 4-way rANS エンコーダ/デコーダの各laneのstream消費量を直接比較
 final class RansStreamTraceTests: XCTestCase {
     
-    func testStreamConsumptionPerLane() throws {
+    func testStreamConsumptionPerLane() async throws {
         // 実DWTデータのpairsを生成
         let width = 128
         let height = 128
@@ -26,7 +26,7 @@ final class RansStreamTraceTests: XCTestCase {
         }
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
-        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtY) }
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         var encoder = EntropyEncoder<DynamicEntropyModel>()

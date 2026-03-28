@@ -4,7 +4,7 @@ import XCTest
 /// 128x128 block13 の不一致を詳細分析するテスト
 final class Block13DebugTests: XCTestCase {
     
-    func testBlock13Detail() throws {
+    func testBlock13Detail() async throws {
         let width = 128
         let height = 128
         
@@ -28,7 +28,7 @@ final class Block13DebugTests: XCTestCase {
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
         
-        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -56,7 +56,7 @@ final class Block13DebugTests: XCTestCase {
         }
         
         // isEffectivelyZeroチェックがblockのデータを変更するため、元のブロックを再作成
-        var (blocks2, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks2, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks2.indices {
             evaluateQuantizeLayer32(block: &blocks2[i], qt: qtY)
         }

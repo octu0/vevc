@@ -5,7 +5,7 @@ import XCTest
 final class SubbandsRoundtripTests: XCTestCase {
     
     /// 少数ブロックでencodePlaneSubbands32→decodePlaneSubbands32
-    func testSubbands32Roundtrip_3blocks() throws {
+    func testSubbands32Roundtrip_3blocks() async throws {
         // 3ブロック（1行3列）のテスト
         var blocks = (0..<3).map { _ in Block2D(width: 32, height: 32) }
         
@@ -116,7 +116,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     }
     
     /// splitが発生するデータでencodePlaneSubbands32→decodePlaneSubbands32
-    func testSubbands32Roundtrip_withSplit() throws {
+    func testSubbands32Roundtrip_withSplit() async throws {
         var blocks = (0..<3).map { _ in Block2D(width: 32, height: 32) }
         
         // Block0: 全象限にデータ → splitしない
@@ -216,7 +216,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
-        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -269,7 +269,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         XCTAssertEqual(totalDiff, 0, "Real DWT blocks不一致: \(totalDiff) pixels, maxDiff=\(maxDiff), firstBlock=\(firstDiffBlock), totalBlocks=\(blocks.count)")
     }
     
-    private func subbands32RoundtripForSize(width: Int, height: Int) throws -> (totalDiff: Int, firstBlock: Int, totalBlocks: Int) {
+    private func subbands32RoundtripForSize(width: Int, height: Int) async throws -> (totalDiff: Int, firstBlock: Int, totalBlocks: Int) {
         var rY = [Int16](repeating: 0, count: width * height)
         for y in 0..<height {
             for x in 0..<width {
@@ -281,7 +281,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         let qtY = QuantizationTable(baseStep: 2)
         let reader = Int16Reader(data: rY, width: width, height: height)
-        var (blocks, _) = extractSingleTransformBlocks32(r: reader, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -310,10 +310,10 @@ final class SubbandsRoundtripTests: XCTestCase {
         return (totalDiff, firstDiffBlock, blocks.count)
     }
     
-    func testSubbands32Roundtrip_sizeSearch() throws {
+    func testSubbands32Roundtrip_sizeSearch() async throws {
         let sizes: [(Int, Int)] = [(64, 64), (128, 128), (192, 128), (192, 192), (256, 192), (320, 240)]
         for (w, h) in sizes {
-            let (totalDiff, firstBlock, totalBlocks) = try subbands32RoundtripForSize(width: w, height: h)
+            let (totalDiff, firstBlock, totalBlocks) = try await subbands32RoundtripForSize(width: w, height: h)
             if 0 < totalDiff {
                 XCTFail("\(w)x\(h) (\(totalBlocks)blocks): totalDiff=\(totalDiff) firstBlock=\(firstBlock)")
             }
@@ -344,7 +344,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             let pd = toPlaneData420(images: [img])[0]
             let qtY = QuantizationTable(baseStep: 2)
             
-            var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: w, height: h)
+            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h)
             for i in blocks.indices {
                 evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
             }

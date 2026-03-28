@@ -32,7 +32,7 @@ final class CompressionFeatureTests: XCTestCase {
         XCTAssertEqual(decoded[1].height, 64)
     }
 
-    func testLSCPRoundTrip() throws {
+    func testLSCPRoundTrip() async throws {
         // We will encode and decode a block with many trailing zeros to test LSCP logic
         var encoder = EntropyEncoder<DynamicEntropyModel>()
 

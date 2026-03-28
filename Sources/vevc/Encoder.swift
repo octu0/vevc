@@ -128,54 +128,46 @@ actor LayersEncodeActor {
     }
     
     func encodeTemporalGOP4(images: [YCbCrImage]) async throws -> [UInt8] {
-        guard images.count == 4 else {
-            throw NSError(domain: "vevc.Encoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "TemporalGOP4 requires exactly 4 frames"])
+        guard !images.isEmpty else {
+            throw NSError(domain: "vevc.Encoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "TemporalGOP4 requires at least 1 frame"])
         }
         
         // Rate control
         var baseQt: QuantizationTable
         if keyint <= framesSinceKeyframe || frameIndex == 0 {
             let targetBitsPerGOP = rateController.beginGOP()
-            baseQt = estimateQuantization(img: images[0], targetBits: targetBitsPerGOP / 4)
+            baseQt = estimateQuantization(img: images[0], targetBits: targetBitsPerGOP / images.count)
             self.qt = baseQt
             framesSinceKeyframe = 0
         } else {
             baseQt = self.qt!
         }
-        framesSinceKeyframe += 4
-        frameIndex += 4
+        framesSinceKeyframe += images.count
+        frameIndex += images.count
         
         let planes = toPlaneData420(images: images)
         let baseStep = Int(baseQt.step)
         
         let qtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
-    
-        let subbands = try temporalForwardDWT4(frames: planes)
-        let allSubbandFrames = subbands.low + subbands.high
         
         let localMaxbitrate = maxbitrate
         let localZeroThreshold = zeroThreshold
         
-        var encodedFrames = [[UInt8]](repeating: [], count: 4)
-        try await withThrowingTaskGroup(of: (Int, [UInt8]).self) { group in
-            for (idx, frame) in allSubbandFrames.enumerated() {
-                group.addTask {
-                    let (bytes, _) = try await encodeSpatialLayers(
-                        pd: frame, predictedPd: nil, maxbitrate: localMaxbitrate,
-                        qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold
-                    )
-                    return (idx, bytes)
-                }
-            }
-            for try await (idx, bytes) in group {
-                encodedFrames[idx] = bytes
-            }
+        var encodedFrames = [[UInt8]]()
+        var previousReconstructed: PlaneData420? = nil
+        
+        for plane in planes {
+            let (bytes, reconstructed) = try await encodeSpatialLayers(
+                pd: plane, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
+                qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold
+            )
+            encodedFrames.append(bytes)
+            previousReconstructed = reconstructed
         }
         
         var gopBody: [UInt8] = []
-        appendUInt32BE(&gopBody, UInt32(images.count))
-        appendUInt16BE(&gopBody, UInt16(subbands.low.count))
+        appendUInt32BE(&gopBody, UInt32(images.count)) // GOP size
         
         for encoded in encodedFrames {
             appendUInt32BE(&gopBody, UInt32(encoded.count))
@@ -293,8 +285,9 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     
     let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
     let ratio = estimatedTotalBits / Double(targetBits)
-    let predictedStep = Double(probeStep) * ratio * 3.5
-    // 高難度シーンの破綻を防ぐため量子化ステップ上限を256に緩和(デッドゾーン撤廃による情報爆発バグ回避のため)
+    // WDMC provides dramatic size reductions on P-frames, so I-frames can be allocated far more bits.
+    let predictedStep = Double(probeStep) * ratio * 0.8
+
     let q = min(256, Int(max(1, predictedStep)))
     
     return QuantizationTable(baseStep: q)

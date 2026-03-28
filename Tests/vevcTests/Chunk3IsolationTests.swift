@@ -4,7 +4,7 @@ import XCTest
 /// chunk[3]のpairsだけを独立にエンコード/デコードして問題を分離
 final class Chunk3IsolationTests: XCTestCase {
     
-    private func generateRealPairs() -> [(run: UInt32, val: Int16, isParentZero: Bool)] {
+    private func generateRealPairs() async -> [(run: UInt32, val: Int16, isParentZero: Bool)] {
         let width = 128
         let height = 128
         
@@ -28,7 +28,7 @@ final class Chunk3IsolationTests: XCTestCase {
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
         
-        var (blocks, _) = extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -52,8 +52,8 @@ final class Chunk3IsolationTests: XCTestCase {
     }
     
     /// chunk[3]のpairsだけをrANSラウンドトリップ
-    func testChunk3Only() throws {
-        let allPairs = generateRealPairs()
+    func testChunk3Only() async throws {
+        let allPairs = await generateRealPairs()
         let pairCount = allPairs.count
         let chunkBase = pairCount / 4
         let chunkRemainder = pairCount % 4
@@ -98,8 +98,8 @@ final class Chunk3IsolationTests: XCTestCase {
     }
     
     /// 各chunkを独立にテスト
-    func testEachChunkIndependently() throws {
-        let allPairs = generateRealPairs()
+    func testEachChunkIndependently() async throws {
+        let allPairs = await generateRealPairs()
         let pairCount = allPairs.count
         let chunkBase = pairCount / 4
         let chunkRemainder = pairCount % 4
