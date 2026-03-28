@@ -1008,7 +1008,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder<StaticEntropyModel>()
+    var encoder = EntropyEncoder<DynamicEntropyModel>()
     
     if let pb = parentBlocks {
         for (i, task) in tasks {
@@ -1104,7 +1104,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder<StaticEntropyModel>()
+    var encoder = EntropyEncoder<DynamicEntropyModel>()
     
     if let pb = parentBlocks {
         for (i, task) in tasks {
@@ -1163,7 +1163,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder<StaticEntropyModel>()
+    var encoder = EntropyEncoder<DynamicEntropyModel>()
     
     for i in nonZeroIndices {
         blocks[i].withView { view in
@@ -1205,7 +1205,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [U
     let rateStr = String(format: "%.1f", zeroRate)
     debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
-    var encoder = EntropyEncoder<StaticEntropyModel>()
+    var encoder = EntropyEncoder<DynamicEntropyModel>()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -1525,9 +1525,9 @@ public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, z
 // MARK: - Dedicated Subband Process Functions
 
 @inline(__always)
-func encodeSubbands32WithParent(
+func encodeSubbands32WithParent<M: EntropyModelProvider>(
     task: EncodeTask32,
-    encoder: inout EntropyEncoder<StaticEntropyModel>,
+    encoder: inout EntropyEncoder<M>,
     subs: Subbands,
     parentHL: BlockView,
     parentLH: BlockView,
@@ -1587,9 +1587,9 @@ func encodeSubbands32WithParent(
 }
 
 @inline(__always)
-func encodeSubbands32WithoutParent(
+func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
     task: EncodeTask32,
-    encoder: inout EntropyEncoder<StaticEntropyModel>,
+    encoder: inout EntropyEncoder<M>,
     subs: Subbands
 ) {
     switch task {
@@ -1634,9 +1634,9 @@ func encodeSubbands32WithoutParent(
 }
 
 @inline(__always)
-func encodeSubbands16WithParent(
+func encodeSubbands16WithParent<M: EntropyModelProvider>(
     task: EncodeTask16,
-    encoder: inout EntropyEncoder<StaticEntropyModel>,
+    encoder: inout EntropyEncoder<M>,
     subs: Subbands,
     parentHL: BlockView,
     parentLH: BlockView,
@@ -1696,9 +1696,9 @@ func encodeSubbands16WithParent(
 }
 
 @inline(__always)
-func encodeSubbands16WithoutParent(
+func encodeSubbands16WithoutParent<M: EntropyModelProvider>(
     task: EncodeTask16,
-    encoder: inout EntropyEncoder<StaticEntropyModel>,
+    encoder: inout EntropyEncoder<M>,
     subs: Subbands
 ) {
     switch task {

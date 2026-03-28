@@ -46,14 +46,32 @@ struct StaticEntropyModel: EntropyModelProvider {
 }
 
 struct DynamicEntropyModel: EntropyModelProvider {
+    // isStaticMode is dynamic: determined at encode time based on pair count.
+    // When pair count < threshold, static tables are used (no header overhead).
+    // The actual flag is written in getData() based on the generated models.
     static var isStaticMode: Bool { false }
     static var isDPCMMode: Bool { false }
+    
+    /// Minimum pair count for dynamic tables to be cost-effective.
+    /// Below this threshold, the frequency table header overhead (~400B)
+    /// exceeds the compression improvement from data-specific tables.
+    /// Determined by breakeven analysis in StaticVsDynamicModelTests.
+    private static let dynamicThreshold: Int = 500
     
     @inline(__always)
     static func generateModels(
         runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
         runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
     ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
+        // Estimate pair count from run token counts (each pair produces one run token)
+        let totalPairs: Int = runTokenCounts0.reduce(0, +) + runTokenCounts1.reduce(0, +)
+        
+        // Fallback to static tables when pair count is below threshold
+        // to avoid frequency table header overhead exceeding compression benefit
+        if totalPairs < dynamicThreshold {
+            return (staticRunModel0, staticValModel0, staticRunModel1, staticValModel1)
+        }
+        
         var rm0 = rANSModel()
         var vm0 = rANSModel()
         var rm1 = rANSModel()
@@ -71,6 +89,12 @@ struct DynamicEntropyModel: EntropyModelProvider {
         runModel0: rANSModel, valModel0: rANSModel,
         runModel1: rANSModel, valModel1: rANSModel
     ) {
+        // Check if we fell back to static tables by comparing tokenFreqs pointers
+        // If the model's tokenFreqs match the static tables, skip writing headers
+        if runModel0.tokenFreqs == staticRunModel0.tokenFreqs
+            && valModel0.tokenFreqs == staticValModel0.tokenFreqs {
+            return
+        }
         writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
         writeCompressedFreqTable(&out, freqs: valModel0.tokenFreqs)
         writeCompressedFreqTable(&out, freqs: runModel1.tokenFreqs)
@@ -255,11 +279,14 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         let valModel1 = models.valModel1
         
         // Flags byte: bit6=isStatic, bit5=isDPCM, bit0=hasTrailingZeros
-        let staticBit: UInt8 = Model.isStaticMode ? 0x40 : 0
-        let dpcmBit: UInt8   = Model.isDPCMMode   ? 0x20 : 0
+        // Determine isStatic dynamically: if writeHeaders writes nothing,
+        // the model fell back to static tables (hybrid mode).
         let trailBit: UInt8  = hasTrailingZeros    ? 0x01 : 0
-        let headerFlag: UInt8 = staticBit | dpcmBit | trailBit
-        out.append(headerFlag)
+        let dpcmBit: UInt8   = Model.isDPCMMode   ? 0x20 : 0
+        
+        // Write a placeholder for flags byte, then headers, then fix the flag
+        let flagsOffset = out.count
+        out.append(0) // placeholder
         appendUInt32BE(&out, UInt32(totalPairEntries))
         
         // chunk size (4B × 4)
@@ -269,7 +296,13 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             appendUInt32BE(&out, UInt32(chunkPairCount + extraTrailing))
         }
         
+        let preHeaderSize = out.count
         Model.writeHeaders(into: &out, runModel0: runModel0, valModel0: valModel0, runModel1: runModel1, valModel1: valModel1)
+        let headerWasWritten = out.count > preHeaderSize
+        
+        // Set the isStatic flag based on whether headers were actually written
+        let staticBit: UInt8 = (Model.isStaticMode || !headerWasWritten) ? 0x40 : 0
+        out[flagsOffset] = staticBit | dpcmBit | trailBit
         
         // 4-way bypass data
         for lane in 0..<4 {
