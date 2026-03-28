@@ -1074,12 +1074,34 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     
     async let taskBufY = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
+        let isIFrame = (sads == nil)
         for i in blocks.indices {
             if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
         }
+        
+        if isIFrame {
+            var predDC: Int16 = 0
+            for i in blocks.indices {
+                let qDC = blocks[i].data[0]
+                blocks[i].data[0] = qDC - predDC
+                predDC = qDC
+            }
+        }
+        
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        
+        if isIFrame {
+            var predDC: Int16 = 0
+            for i in blocks.indices {
+                let diff = blocks[i].data[0]
+                let qDC = diff + predDC
+                blocks[i].data[0] = qDC
+                predDC = qDC
+            }
+        }
+        
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY)
         return (buf, reconPlane, quantizedBlocks)
@@ -1090,6 +1112,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     
     async let taskBufCb = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
+        let isIFrame = (sads == nil)
         for i in blocks.indices {
             var sadVal: Int = Int.max
             if let sList = sads {
@@ -1103,8 +1126,29 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             if sadVal < 75 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
+        
+        if isIFrame {
+            var predDC: Int16 = 0
+            for i in blocks.indices {
+                let qDC = blocks[i].data[0]
+                blocks[i].data[0] = qDC - predDC
+                predDC = qDC
+            }
+        }
+        
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        
+        if isIFrame {
+            var predDC: Int16 = 0
+            for i in blocks.indices {
+                let diff = blocks[i].data[0]
+                let qDC = diff + predDC
+                blocks[i].data[0] = qDC
+                predDC = qDC
+            }
+        }
+        
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane, quantizedBlocks)
@@ -1112,6 +1156,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     
     async let taskBufCr = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
+        let isIFrame = (sads == nil)
         for i in blocks.indices {
             var sadVal: Int = Int.max
             if let sList = sads {
@@ -1125,8 +1170,29 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             if sadVal < 75 { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
+        
+        if isIFrame {
+            var predDC: Int16 = 0
+            for i in blocks.indices {
+                let qDC = blocks[i].data[0]
+                blocks[i].data[0] = qDC - predDC
+                predDC = qDC
+            }
+        }
+        
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        
+        if isIFrame {
+            var predDC: Int16 = 0
+            for i in blocks.indices {
+                let diff = blocks[i].data[0]
+                let qDC = diff + predDC
+                blocks[i].data[0] = qDC
+                predDC = qDC
+            }
+        }
+        
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane, quantizedBlocks)

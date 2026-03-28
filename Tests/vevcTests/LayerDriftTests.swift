@@ -57,7 +57,7 @@ final class LayerDriftTests: XCTestCase {
         let (bytes, encRecon, _, _, _) = try await encodePlaneBase8(pd: pd, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
         // デコーダ: Base8のみ
-        let (decImg, _, _, _) = try await decodeBase8(r: bytes, layer: 0, dx: width, dy: height)
+        let (decImg, _, _, _) = try await decodeBase8(r: bytes, layer: 0, dx: width, dy: height, isIFrame: true)
         
         let d = diffStats(encRecon.y, decImg.y)
         XCTAssertEqual(d.maxDiff, 0, "Base8 Y不一致: maxDiff=\(d.maxDiff) diffPixels=\(d.diffCount)/\(d.count) enc=[\(stats(encRecon.y))] dec=[\(stats(decImg.y))]")
@@ -108,7 +108,7 @@ final class LayerDriftTests: XCTestCase {
         let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
         
         // デコーダ: Base8 → Layer16
-        let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0, dx: sub1.width, dy: sub1.height)
+        let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0, dx: sub1.width, dy: sub1.height, isIFrame: true)
         let (decL1, _, _, _) = try await decodeLayer16(r: layer1, layer: 1, dx: sub2.width, dy: sub2.height, prev: decBase, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
         let d = diffStats(reconL1Y, decL1.y)

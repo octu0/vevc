@@ -264,7 +264,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // P-Frame: decode
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon)
         let pDecodedPd = PlaneData420(img16: pDecoded)
         
         // P-Frameの残差のクロマ差分

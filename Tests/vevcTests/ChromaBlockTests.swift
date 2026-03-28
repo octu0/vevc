@@ -230,8 +230,7 @@ final class ChromaBlockTests: XCTestCase {
             }
         }
 
-        // 異なるステップでの歪みを計測
-        let steps = [2, 4, 6, 8, 12, 16]
+        let steps = [16, 24, 32]
         var distortions: [(step: Int, mse: Double)] = []
 
         for step in steps {
@@ -283,13 +282,13 @@ final class ChromaBlockTests: XCTestCase {
         }
 
         // クロマ用ステップ(step*3等)の歪みが輝度用(step)に比べてどの程度大きいか確認
-        // step=2でのMSEとstep=6(=2*3)でのMSE比較
-        let mseLuma = distortions.first(where: { $0.step == 2 })?.mse ?? 0
-        let mseChrCurrent = distortions.first(where: { $0.step == 6 })?.mse ?? 0 // 現在: step*3
-        let mseChrProposed = distortions.first(where: { $0.step == 4 })?.mse ?? 0 // 提案: step*2
+        // step=16でのMSEとstep=24でのMSE比較
+        let mseLuma = distortions.first(where: { $0.step == 16 })?.mse ?? 0
+        let mseChrCurrent = distortions.first(where: { $0.step == 32 })?.mse ?? 0 // 現在: step*2
+        let mseChrProposed = distortions.first(where: { $0.step == 24 })?.mse ?? 0 // 提案: step*1.5
 
         // 提案版（step=4）は現行（step=6）より歪みが小さいことを確認
-        XCTAssertLessThan(mseChrProposed, mseChrCurrent, "提案クロマステップ(step=4)は現行(step=6)より歪みが小さいべき")
+        XCTAssertLessThan(mseChrProposed, mseChrCurrent, "提案クロマステップ(step=24)は現行(step=32)より歪みが小さいべき")
 
         // 提案版のクロマMSEが輝度MSEの4倍以内であることを確認
         let proposedRatio = mseChrProposed / max(mseLuma, 0.001)

@@ -44,7 +44,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
     offset += Int(len0)
     
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, layer: 0, dx: l0dx, dy: l0dy)
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, layer: 0, dx: l0dx, dy: l0dy, isIFrame: (mvCount == 0))
     var current = baseImg
     var parentYBlocks: [Block2D]? = base8YBlocks
     var parentCbBlocks: [Block2D]? = base8CbBlocks
@@ -597,7 +597,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
+func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [Block2D], [Block2D], [Block2D]) {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -621,17 +621,45 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int) async throws -> (Im
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
+    var _yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
+    var _cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
+    var _crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
+    
+    if isIFrame {
+        var predDCY: Int16 = 0
+        for i in _yBlocks.indices {
+            let diff = _yBlocks[i].data[0]
+            let qDC = diff + predDCY
+            _yBlocks[i].data[0] = qDC
+            predDCY = qDC
+        }
+        var predDCCb: Int16 = 0
+        for i in _cbBlocks.indices {
+            let diff = _cbBlocks[i].data[0]
+            let qDC = diff + predDCCb
+            _cbBlocks[i].data[0] = qDC
+            predDCCb = qDC
+        }
+        var predDCCr: Int16 = 0
+        for i in _crBlocks.indices {
+            let diff = _crBlocks[i].data[0]
+            let qDC = diff + predDCCr
+            _crBlocks[i].data[0] = qDC
+            predDCCr = qDC
+        }
+    }
+    
+    let yBlocks = _yBlocks
+    let cbBlocks = _cbBlocks
+    let crBlocks = _crBlocks
     
     let chunkSize = 4
     

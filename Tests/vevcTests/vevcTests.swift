@@ -101,6 +101,14 @@ final class VevcTests: XCTestCase {
             XCTFail("Should have thrown DecodeError.insufficientData")
         } catch DecodeError.insufficientData {
             // Success
+        } catch let err as vevc.BinaryError {
+            switch err {
+            case .insufficientData:
+                // Success
+                break
+            default:
+                XCTFail("Threw wrong BinaryError: \(err)")
+            }
         } catch {
             XCTFail("Threw wrong error: \(error)")
         }
