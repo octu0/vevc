@@ -131,9 +131,14 @@ SW: Software, HWA: Hardware Acceleration
 |:---:|:---:|:---:|:---:|
 | <img src="docs/versus_h264_min_frame1395_orig.png" width="200" /> | <img src="docs/versus_h264_min_frame1395_vevc.png" width="200" /> | <img src="docs/versus_h264_min_frame1395_h264.png" width="200" /> | <img src="docs/versus_h264_min_frame1395_hevc.png" width="200" /> |
 
+#### 3. Frame 1395 (H.265 Min SSIM)
+| Original | VEVC | H.264(SW) | H.265(SW) |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/versus_hevc_min_frame1395_orig.png" width="200" /> | <img src="docs/versus_hevc_min_frame1395_vevc.png" width="200" /> | <img src="docs/versus_hevc_min_frame1395_h264.png" width="200" /> | <img src="docs/versus_hevc_min_frame1395_hevc.png" width="200" /> |
+
 (CC) Blender Foundation | [mango.blender.org](https://mango.blender.org)
 
-#### 3. Frame 840 (14 seconds at 60fps)
+#### 4. Frame 840 (14 seconds at 60fps)
 | Original | VEVC | H.264(SW) | H.265(SW) |
 |:---:|:---:|:---:|:---:|
 | <img src="docs/versus_14s_frame840_orig.png" width="200" /> | <img src="docs/versus_14s_frame840_vevc.png" width="200" /> | <img src="docs/versus_14s_frame840_h264.png" width="200" /> | <img src="docs/versus_14s_frame840_hevc.png" width="200" /> |

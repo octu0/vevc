@@ -889,10 +889,11 @@ struct CompareApp {
                 
                 let vevcMinIdx = vevcResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let h264MinIdx = h264SwResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let hevcMinIdx = hevcSwResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let sec14Idx = min(14 * localConfig.framerate, localImages.count - 1)
                 
-                let targetIndices: Set<Int> = [vevcMinIdx, h264MinIdx, sec14Idx]
-                print("Target Indices: VEVC Min SSIM (\(vevcMinIdx)), H264 Min SSIM (\(h264MinIdx)), 14s (\(sec14Idx))")
+                let targetIndices: Set<Int> = [vevcMinIdx, h264MinIdx, hevcMinIdx, sec14Idx]
+                print("Target Indices: VEVC Min SSIM (\(vevcMinIdx)), H264 Min SSIM (\(h264MinIdx)), HEVC Min SSIM (\(hevcMinIdx)), 14s (\(sec14Idx))")
                 
                 print("Extracting VEVC frames...")
                 let vevcExtracted = try await extractVEVCFrames(bitstream: vevcResult.bitstream, config: localConfig, indices: targetIndices)
@@ -906,6 +907,7 @@ struct CompareApp {
                 let pairs: [(name: String, idx: Int)] = [
                     ("vevc_min", vevcMinIdx),
                     ("h264_min", h264MinIdx),
+                    ("hevc_min", hevcMinIdx),
                     ("14s", sec14Idx)
                 ]
                 
