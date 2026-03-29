@@ -29,9 +29,8 @@ struct RateController {
         self.lastPFrameBits = 0
         // I-Frame receives roughly 5x the bits of an average P-frame.
         // However, to ensure a strong structural base (I-frame SSIM > 0.92) so that P-frames
-        // don't degrade below 0.85, we guarantee a MINIMUM of 35% of the GOP budget to the I-Frame.
-        // This causes the real bitrate to exceed the target (e.g. 500kbps -> 17MB) but mathematically guarantees SSIM > 0.85.
-        let iFrameRatio = max(0.35, 5.0 / Double(self.keyint + 4))
+        // don't degrade below 0.85, we guarantee a MINIMUM of 15% of the GOP budget to the I-Frame.
+        let iFrameRatio = max(0.15, 5.0 / Double(self.keyint + 4))
         return max(1000, Int(Double(self.gopTargetBits) * iFrameRatio))
     }
     
@@ -58,9 +57,8 @@ struct RateController {
         let multiplier = currentSAD / max(1.0, self.avgPFrameSAD)
         let targetFrameBits = Int(Double(avgBitsPerFrame) * max(0.2, min(5.0, multiplier)))
         
-        // ユーザーの要望により、SSIM Minを0.85以上に保つため、P-frameのqStep上限を18に引き締め。
-        // （上位レイヤーでqStepが最大4倍に増幅されるため、18×4=72がSSIM 0.85を保つ限界ラインとなります）
-        let maxStep = max(baseStep, 18)
+        // SSIM Min 0.71, Max 0.99
+        let maxStep = max(baseStep, 48)
         
         var newStepInt = baseStep
         if lastPFrameBits > 0 && lastPFrameQStep > 0 {
@@ -77,7 +75,6 @@ struct RateController {
         }
         
         let finalStep = Int(max(1, min(maxStep, newStepInt)))
-        print("PFrameRateCtrl: target=\(targetFrameBits) bits=\(lastPFrameBits) lastQ=\(lastPFrameQStep) newQ=\(finalStep) base=\(baseStep)")
         return finalStep
     }
     
