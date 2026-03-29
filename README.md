@@ -131,6 +131,8 @@ SW: Software, HWA: Hardware Acceleration
 |:---:|:---:|:---:|:---:|
 | <img src="docs/versus_h264_min_frame1395_orig.png" width="200" /> | <img src="docs/versus_h264_min_frame1395_vevc.png" width="200" /> | <img src="docs/versus_h264_min_frame1395_h264.png" width="200" /> | <img src="docs/versus_h264_min_frame1395_hevc.png" width="200" /> |
 
+(CC) Blender Foundation | [mango.blender.org](https://mango.blender.org)
+
 #### 3. Frame 1395 (H.265 Min SSIM)
 | Original | VEVC | H.264(SW) | H.265(SW) |
 |:---:|:---:|:---:|:---:|
