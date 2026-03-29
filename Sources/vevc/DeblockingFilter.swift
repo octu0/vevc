@@ -6,8 +6,10 @@ func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockS
     // Post-processing: out-of-loop like filtering for the whole generated plane.
     // It smooths boundaries between `blockSize` regions.
     
-    let tc = Int16(max(4, qStep / 2)) // Increased clipping limit for stronger smoothing
-    let beta = Int32(max(16, qStep * 2)) // Condition threshold to distinguish edge from block artifact
+    // tc controls maximum clipping: smaller tc -> less smoothing, prevents blurring of real edges.
+    // beta controls edge detection: smaller beta -> preserves more detailed textures.
+    let tc = Int16(min(12, max(2, qStep / 3)))
+    let beta = Int32(min(45, max(12, qStep)))
     
     // Vertical Edges (x = blockSize, 2*blockSize, ...)
     plane.withUnsafeMutableBufferPointer { buffer in
@@ -245,7 +247,10 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     let newP0 = p0 &+ d16
     let newQ0 = q0 &- d16
     
-    let dHalfMasked = dMasked &>> 1
+    // Simulate division by 2 (truncating toward zero) using SIMD arithmetic
+    // scalar equivalent is `val / 2`, so `val < 0 ? (val + 1) >> 1 : val >> 1`
+    let dMaskedSign = SIMD16<Int32>(repeating: 0).replacing(with: 1, where: dMasked .< 0)
+    let dHalfMasked = (dMasked &+ dMaskedSign) &>> 1
     let dHalf16 = SIMD16<Int16>(truncatingIfNeeded: dHalfMasked)
     
     let newP1 = p1 &+ dHalf16
