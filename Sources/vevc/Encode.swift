@@ -7,13 +7,6 @@ public enum EncodeError: Error {
 }
 
 @inline(__always)
-func debugLog(_ message: String) {
-    if ProcessInfo.processInfo.environment["VEVC_DEBUG"] != nil {
-        fputs(message + "\n", stderr)
-    }
-}
-
-@inline(__always)
 func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout EntropyEncoder<M>) {
     var q = val
     var bits = 0
@@ -465,26 +458,22 @@ func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         guard let baseErr = ptrErr.baseAddress else { return }
         
         var last: Int16 = lastVal
-        for y in 0..<8 {
+        
+        let ptrY0 = block.rowPointer(y: 0)
+        baseErr[0] = ptrY0[0] &- last
+        for x in 1..<8 {
+            baseErr[x] = ptrY0[x] &- ptrY0[x - 1]
+        }
+        last = ptrY0[7]
+        
+        for y in 1..<8 {
             let ptrY = block.rowPointer(y: y)
+            let ptrPrevY = block.rowPointer(y: y - 1)
             let rowOffset = y * 8
-            if y == 0 {
-                for x in 0..<8 {
-                    if x == 0 {
-                        baseErr[rowOffset + 0] = ptrY[0] &- last
-                    } else {
-                        baseErr[rowOffset + x] = ptrY[x] &- ptrY[x - 1]
-                    }
-                }
-            } else {
-                let ptrPrevY = block.rowPointer(y: y - 1)
-                for x in 0..<8 {
-                    if x == 0 {
-                        baseErr[rowOffset + 0] = ptrY[0] &- ptrPrevY[0]
-                    } else {
-                        baseErr[rowOffset + x] = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                    }
-                }
+            
+            baseErr[rowOffset] = ptrY[0] &- ptrPrevY[0]
+            for x in 1..<8 {
+                baseErr[rowOffset + x] = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
             }
             last = ptrY[7]
         }
@@ -545,32 +534,31 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     var lscpIdx = -1
     var last: Int16 = originalLastVal
 
-    for y in 0..<16 {
+    let ptrY0 = block.rowPointer(y: 0)
+    let diffFirst = ptrY0[0] &- last
+    if diffFirst != 0 {
+        lscpIdx = 0
+    }
+    for x in 1..<16 {
+        let diff = ptrY0[x] &- ptrY0[x - 1]
+        if diff != 0 {
+            lscpIdx = x
+        }
+    }
+    last = ptrY0[15]
+
+    for y in 1..<16 {
         let ptrY = block.rowPointer(y: y)
-        if y == 0 {
-            for x in 0..<16 {
-                let diff: Int16
-                if x == 0 {
-                    diff = ptrY[0] &- last
-                } else {
-                    diff = ptrY[x] &- ptrY[x - 1]
-                }
-                if diff != 0 {
-                    lscpIdx = y * 16 + x
-                }
-            }
-        } else {
-            let ptrPrevY = block.rowPointer(y: y - 1)
-            for x in 0..<16 {
-                let diff: Int16
-                if x == 0 {
-                    diff = ptrY[0] &- ptrPrevY[0]
-                } else {
-                    diff = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                }
-                if diff != 0 {
-                    lscpIdx = y * 16 + x
-                }
+        let ptrPrevY = block.rowPointer(y: y - 1)
+        
+        let diffY0 = ptrY[0] &- ptrPrevY[0]
+        if diffY0 != 0 {
+            lscpIdx = y * 16
+        }
+        for x in 1..<16 {
+            let diff = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+            if diff != 0 {
+                lscpIdx = y * 16 + x
             }
         }
         last = ptrY[15]
@@ -595,46 +583,59 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     var currentIdx = 0
     last = originalLastVal
 
-    for y in 0..<16 {
-        let ptrY = block.rowPointer(y: y)
-        if y == 0 {
-            for x in 0..<16 {
-                let diff: Int16
-                if x == 0 {
-                    diff = ptrY[0] &- last
-                } else {
-                    diff = ptrY[x] &- ptrY[x - 1]
-                }
-                if diff == 0 {
-                    run += 1
-                } else {
-                    encodeCoeffRun(val: diff, encoder: &encoder, run: run)
-                    run = 0
-                }
-                currentIdx += 1
-                if currentIdx > lscpIdx { break }
+    let ptrY0_run = block.rowPointer(y: 0)
+    let diffRunFirst = ptrY0_run[0] &- last
+    if diffRunFirst == 0 {
+        run += 1
+    } else {
+        encodeCoeffRun(val: diffRunFirst, encoder: &encoder, run: run)
+        run = 0
+    }
+    currentIdx += 1
+
+    if currentIdx <= lscpIdx {
+        for x in 1..<16 {
+            let diff = ptrY0_run[x] &- ptrY0_run[x - 1]
+            if diff == 0 {
+                run += 1
+            } else {
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                run = 0
             }
-        } else {
-            let ptrPrevY = block.rowPointer(y: y - 1)
-            for x in 0..<16 {
-                let diff: Int16
-                if x == 0 {
-                    diff = ptrY[0] &- ptrPrevY[0]
-                } else {
-                    diff = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                }
-                if diff == 0 {
-                    run += 1
-                } else {
-                    encodeCoeffRun(val: diff, encoder: &encoder, run: run)
-                    run = 0
-                }
-                currentIdx += 1
-                if currentIdx > lscpIdx { break }
-            }
+            currentIdx += 1
+            if currentIdx > lscpIdx { break }
         }
-        if currentIdx > lscpIdx { break }
-        last = ptrY[15]
+    }
+    last = ptrY0_run[15]
+
+    if currentIdx <= lscpIdx {
+        outerLoop: for y in 1..<16 {
+            let ptrY = block.rowPointer(y: y)
+            let ptrPrevY = block.rowPointer(y: y - 1)
+            
+            let diffY0 = ptrY[0] &- ptrPrevY[0]
+            if diffY0 == 0 {
+                run += 1
+            } else {
+                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run)
+                run = 0
+            }
+            currentIdx += 1
+            if currentIdx > lscpIdx { break outerLoop }
+            
+            for x in 1..<16 {
+                let diff = errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
+                if diff == 0 {
+                    run += 1
+                } else {
+                    encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                    run = 0
+                }
+                currentIdx += 1
+                if currentIdx > lscpIdx { break outerLoop }
+            }
+            last = ptrY[15]
+        }
     }
 }
 
