@@ -115,7 +115,27 @@ SW: Software, HWA: Hardware Acceleration
 
 ![ssim](docs/ssim.png)
 
+### Visual Quality Comparison
+
+*(Crop 400x400 from Tears of Steel 1080p width)*
+
+#### 1. Frame 1572 (VEVC Min SSIM)
+| Original | VEVC | H.264 | HEVC |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/versus_vevc_min_frame1572_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1572_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1572_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1572_hevc.png" width="200" /> |
+
+#### 2. Frame 1477 (H.264 Min SSIM)
+| Original | VEVC | H.264 | HEVC |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/versus_h264_min_frame1477_orig.png" width="200" /> | <img src="docs/versus_h264_min_frame1477_vevc.png" width="200" /> | <img src="docs/versus_h264_min_frame1477_h264.png" width="200" /> | <img src="docs/versus_h264_min_frame1477_hevc.png" width="200" /> |
+
+#### 3. Frame 840 (14 seconds at 60fps)
+| Original | VEVC | H.264 | HEVC |
+|:---:|:---:|:---:|:---:|
+| <img src="docs/versus_14s_frame840_orig.png" width="200" /> | <img src="docs/versus_14s_frame840_vevc.png" width="200" /> | <img src="docs/versus_14s_frame840_h264.png" width="200" /> | <img src="docs/versus_14s_frame840_hevc.png" width="200" /> |
+
 ---
+
 
 ## Entropy Coding: Interleaved rANS
 

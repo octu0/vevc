@@ -202,7 +202,7 @@ public func calculateSSIM(img1: YCbCrImage, bgraBuffer buffer: CVPixelBuffer) ->
 }
 
 @inline(__always)
-private func createYCbCrImage(from buffer: CVPixelBuffer, width: Int, height: Int) -> YCbCrImage {
+public func createYCbCrImage(from buffer: CVPixelBuffer, width: Int, height: Int) -> YCbCrImage {
     var ycbcr = YCbCrImage(width: width, height: height, ratio: .ratio420)
     
     CVPixelBufferLockBaseAddress(buffer, .readOnly)

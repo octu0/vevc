@@ -13,6 +13,7 @@ struct Config {
     var maxLayer: Int = 2
     var quality: Bool = false
     var outputGraph: Bool = false
+    var outputVersus: Bool = false
 }
 
 struct ImageInput {
@@ -73,7 +74,7 @@ func readY4M(path: String) -> [ImageInput]? {
 }
 
 // MARK: - VEVC Encode / Decode
-func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
+func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [UInt8]) {
     let vevcImages = images.map { $0.vevcImage }
     
     // Encode
@@ -102,7 +103,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
         metrics = mets
     }
     
-    return (encTime, decTime, outBytes.count, metrics)
+    return (encTime, decTime, outBytes.count, metrics, outBytes)
 }
 
 
@@ -165,7 +166,7 @@ func createPixelBuffer(from img: YCbCrImage) -> CVPixelBuffer? {
     return buffer
 }
 
-func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
+func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [CMSampleBuffer]) {
     var encTime: Double = 0
     var compSize: Int = 0
     
@@ -255,7 +256,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     
     // 2. Setup Decompression Session
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil) }
+    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil, frameBox.frames) }
     
     // Need format desc for decompression
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
@@ -347,11 +348,11 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         metrics = mets
     }
 
-    return (encTime, decTime, compSize, metrics)
+    return (encTime, decTime, compSize, metrics, frameBox.frames)
 }
 
 // MARK: - HEVC Encode / Decode (VideoToolbox)
-func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
+func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [CMSampleBuffer]) {
     var encTime: Double = 0
     var compSize: Int = 0
     
@@ -439,7 +440,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     
     // 2. Setup Decompression Session
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil) }
+    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil, frameBox.frames) }
     
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
         throw NSError(domain: "CMSampleBufferGetFormatDescription (HEVC)", code: -1, userInfo: nil)
@@ -530,7 +531,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         metrics = mets
     }
 
-    return (encTime, decTime, compSize, metrics)
+    return (encTime, decTime, compSize, metrics, frameBox.frames)
 }
 
 // MARK: - MJPEG Encode / Decode (VideoToolbox)
@@ -750,6 +751,8 @@ struct CompareApp {
             config.quality = true
         case "-output-graph":
             config.outputGraph = true
+        case "-output-versus":
+            config.outputVersus = true
         case "-y4m":
             if (i + 1) < args.count {
                 y4mPath = args[i + 1]
@@ -836,12 +839,12 @@ struct CompareApp {
             print("Running MJPEG (VideoToolbox)...")
             let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
             
-            func printStats(name: String, result: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?), count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
-                let encMs = result.encTime * 1000
-                let decMs = result.decTime * 1000
-                let encFps = Double(count) / result.encTime
-                let decFps = Double(count) / result.decTime
-                let sizeKB = Double(result.compSize) / 1024.0
+            func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
+                let encMs = encTime * 1000
+                let decMs = decTime * 1000
+                let encFps = Double(count) / encTime
+                let decFps = Double(count) / decTime
+                let sizeKB = Double(compSize) / 1024.0
                 
                 print("[\(name)]")
                 print(String(format: "  Encode : %7.2f ms (%.2f fps) - %.2f ms / frame", encMs, encFps, encMs / Double(count)))
@@ -850,7 +853,7 @@ struct CompareApp {
                 
                 var avgPsnr: Double? = nil
                 var avgSsim: Double? = nil
-                if let stats = calculateQualityStats(metrics: result.metrics ?? []) {
+                if let stats = calculateQualityStats(metrics: metrics ?? []) {
                     avgPsnr = stats.avgPSNR
                     avgSsim = stats.avgSSIM
                     print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f | 50%%: %5.2f | 90%%: %5.2f | SD: %5.2f", 
@@ -864,15 +867,15 @@ struct CompareApp {
             
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
-            chartResults.append(printStats(name: "VEVC (Layers)", result: vevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (Layers)", encTime: vevcResult.encTime, decTime: vevcResult.decTime, compSize: vevcResult.compSize, metrics: vevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
-            chartResults.append(printStats(name: "H.264 (SW)", result: h264SwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "HEVC (SW)", result: hevcSwResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "H.264 (SW)", encTime: h264SwResult.encTime, decTime: h264SwResult.decTime, compSize: h264SwResult.compSize, metrics: h264SwResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "HEVC (SW)", encTime: hevcSwResult.encTime, decTime: hevcSwResult.decTime, compSize: hevcSwResult.compSize, metrics: hevcSwResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
-            chartResults.append(printStats(name: "H.264 (HWA)", result: h264Result, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "HEVC (HWA)", result: hevcResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "H.264 (HWA)", encTime: h264Result.encTime, decTime: h264Result.decTime, compSize: h264Result.compSize, metrics: h264Result.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "HEVC (HWA)", encTime: hevcResult.encTime, decTime: hevcResult.decTime, compSize: hevcResult.compSize, metrics: hevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
-            chartResults.append(printStats(name: "MJPEG", result: mjpegResult, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "MJPEG", encTime: mjpegResult.encTime, decTime: mjpegResult.decTime, compSize: mjpegResult.compSize, metrics: mjpegResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             print("---------------")
             
             if localConfig.outputGraph {
@@ -881,10 +884,191 @@ struct CompareApp {
                 }
             }
             
+            if localConfig.outputVersus {
+                print("\n--- Output Versus Images ---")
+                
+                let vevcMinIdx = vevcResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let h264MinIdx = h264Result.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let sec14Idx = min(14 * localConfig.framerate, localImages.count - 1)
+                
+                let targetIndices: Set<Int> = [vevcMinIdx, h264MinIdx, sec14Idx]
+                print("Target Indices: VEVC Min SSIM (\(vevcMinIdx)), H264 Min SSIM (\(h264MinIdx)), 14s (\(sec14Idx))")
+                
+                print("Extracting VEVC frames...")
+                let vevcExtracted = try await extractVEVCFrames(bitstream: vevcResult.bitstream, config: localConfig, indices: targetIndices)
+                
+                print("Extracting H.264 frames...")
+                let h264Extracted = try extractVTFrames(bitstream: h264Result.bitstream, disableHWA: false, indices: targetIndices)
+                
+                print("Extracting HEVC frames...")
+                let hevcExtracted = try extractVTFrames(bitstream: hevcResult.bitstream, disableHWA: false, indices: targetIndices)
+                
+                let pairs: [(name: String, idx: Int)] = [
+                    ("vevc_min", vevcMinIdx),
+                    ("h264_min", h264MinIdx),
+                    ("14s", sec14Idx)
+                ]
+                
+                for p in pairs {
+                    let origFrame = localImages[p.idx]
+                    saveVersusImage(idx: p.idx, orig: origFrame, vevcF: vevcExtracted[p.idx], h264F: h264Extracted[p.idx], hevcF: hevcExtracted[p.idx], prefix: p.name)
+                }
+                print("Versus images written successfully.")
+            }
+            
         } catch {
             print("Error: \(error)")
             exit(1)
         }
         exit(0)
+    }
+}
+
+// MARK: - Frame Extraction Helpers
+
+func extractVTFrames(bitstream: [CMSampleBuffer], disableHWA: Bool, indices: Set<Int>) throws -> [Int: YCbCrImage] {
+    guard !bitstream.isEmpty else { return [:] }
+    guard let formatDesc = CMSampleBufferGetFormatDescription(bitstream[0]) else {
+        throw NSError(domain: "CMSampleBufferGetFormatDescription (Extract)", code: -1, userInfo: nil)
+    }
+    
+    class ExtractBox: @unchecked Sendable {
+        var extracted: [Int: YCbCrImage] = [:]
+        let targetIndices: Set<Int>
+        let lock = NSLock()
+        init(indices: Set<Int>) { self.targetIndices = indices }
+    }
+    let extractBox = ExtractBox(indices: indices)
+    
+    let destPixelBufferAttributes: [String: Any] = [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange,
+        kCVPixelBufferMetalCompatibilityKey as String: true
+    ]
+    
+    let decoderSpec: CFDictionary? = disableHWA ? ([
+        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
+        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
+    ] as CFDictionary) : nil
+    
+    var decompressionSessionOut: VTDecompressionSession?
+    let decStatus = VTDecompressionSessionCreate(
+        allocator: kCFAllocatorDefault,
+        formatDescription: formatDesc,
+        decoderSpecification: decoderSpec,
+        imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
+        outputCallback: nil,
+        decompressionSessionOut: &decompressionSessionOut
+    )
+    
+    guard decStatus == noErr, let session = decompressionSessionOut else {
+        throw NSError(domain: "VTDecompressionSessionCreate (Extract)", code: Int(decStatus), userInfo: nil)
+    }
+    
+    for sample in bitstream {
+        var flags: VTDecodeInfoFlags = []
+        VTDecompressionSessionDecodeFrame(
+            session,
+            sampleBuffer: sample,
+            flags: [],
+            infoFlagsOut: &flags,
+            outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, _) in
+                if let buf = imageBuffer {
+                    let idx = Int(presentationTimeStamp.value)
+                    if extractBox.targetIndices.contains(idx) {
+                        let w = CVPixelBufferGetWidth(buf)
+                        let h = CVPixelBufferGetHeight(buf)
+                        let ycbcr = createYCbCrImage(from: buf, width: w, height: h)
+                        extractBox.lock.lock()
+                        extractBox.extracted[idx] = ycbcr
+                        extractBox.lock.unlock()
+                    }
+                }
+            }
+        )
+    }
+    VTDecompressionSessionWaitForAsynchronousFrames(session)
+    return extractBox.extracted
+}
+
+func extractVEVCFrames(bitstream: [UInt8], config: Config, indices: Set<Int>) async throws -> [Int: YCbCrImage] {
+    let opts = vevc.DecodeOptions(maxLayer: config.maxLayer, maxFrames: 4)
+    let outFrames = try await vevc.decode(data: bitstream, opts: opts)
+    var extracted: [Int: YCbCrImage] = [:]
+    for i in 0..<outFrames.count {
+        if indices.contains(i) {
+            extracted[i] = outFrames[i]
+        }
+    }
+    return extracted
+}
+
+func saveVersusImage(idx: Int, orig: ImageInput, vevcF: YCbCrImage?, h264F: YCbCrImage?, hevcF: YCbCrImage?, prefix: String) {
+    let w = orig.width
+    let h = orig.height
+    
+    // We will crop 400x400 from the center
+    let cropW = 400
+    let cropH = 400
+    let cx = max(0, w / 2 - cropW / 2)
+    let cy = max(0, h / 2 - cropH / 2)
+    
+    func doCrop(rgba: [PNG.RGBA<UInt8>], width: Int, height: Int) -> [PNG.RGBA<UInt8>] {
+        var out = [PNG.RGBA<UInt8>](repeating: .init(0,0,0,255), count: cropW * cropH)
+        for y in 0..<cropH {
+            let sy = cy + y
+            if sy < 0 || sy >= height { continue }
+            for x in 0..<cropW {
+                let sx = cx + x
+                if sx < 0 || sx >= width { continue }
+                out[y * cropW + x] = rgba[sy * width + sx]
+                out[y * cropW + x].a = 255 // Force opaque
+            }
+        }
+        return out
+    }
+    
+    // Convert to RGBA and crop
+    let origRGBA = orig.rgbaFrames
+    
+    // Helper to convert UInt8 array to PNG.RGBA
+    func toPNGRGBA(_ data: [UInt8]) -> [PNG.RGBA<UInt8>] {
+        let count = data.count / 4
+        var arr = [PNG.RGBA<UInt8>](repeating: .init(0,0,0,255), count: count)
+        data.withUnsafeBufferPointer { src in
+            arr.withUnsafeMutableBufferPointer { dst in
+                guard let s = src.baseAddress, let d = dst.baseAddress else { return }
+                for i in 0..<count {
+                    let off = i * 4
+                    d[i] = PNG.RGBA<UInt8>(s[off], s[off+1], s[off+2], 255)
+                }
+            }
+        }
+        return arr
+    }
+    
+    let vevcRGBA = vevcF != nil ? toPNGRGBA(vevc.ycbcrToRGBA(img: vevcF!)) : nil
+    let h264RGBA = h264F != nil ? toPNGRGBA(vevc.ycbcrToRGBA(img: h264F!)) : nil
+    let hevcRGBA = hevcF != nil ? toPNGRGBA(vevc.ycbcrToRGBA(img: hevcF!)) : nil
+    
+    let crops: [(name: String, data: [PNG.RGBA<UInt8>]?)] = [
+        ("orig", doCrop(rgba: origRGBA, width: w, height: h)),
+        ("vevc", vevcRGBA != nil ? doCrop(rgba: vevcRGBA!, width: w, height: h) : nil),
+        ("h264", h264RGBA != nil ? doCrop(rgba: h264RGBA!, width: w, height: h) : nil),
+        ("hevc", hevcRGBA != nil ? doCrop(rgba: hevcRGBA!, width: w, height: h) : nil),
+    ]
+    
+    for c in crops {
+        guard let data = c.data else { continue }
+        let filename = "docs/versus_\(prefix)_frame\(idx)_\(c.name).png"
+        let image = PNG.Image(
+            packing: data,
+            size: (x: cropW, y: cropH),
+            layout: .init(format: .rgba8(palette: [], fill: nil))
+        )
+        if let _ = try? image.compress(path: filename, level: 6) {
+            print("  -> Saved \(filename)")
+        } else {
+            print("  -> Failed to save \(filename)")
+        }
     }
 }
