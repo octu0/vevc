@@ -9,10 +9,10 @@ struct RateController {
     private(set) var gopRemainingBits: Int = 0
     private(set) var gopRemainingFrames: Int = 0
     
-    private(set) var avgPFrameSAD: Double = 0.0
+    private(set) var avgPFrameSAD: Int = 0
     private(set) var lastPFrameBits: Int = 0
     private(set) var lastPFrameQStep: Int = 0
-    private(set) var lastPFrameSAD: Double = 0.0
+    private(set) var lastPFrameSAD: Int = 0
     
     init(maxbitrate: Int, framerate: Int, keyint: Int) {
         self.maxbitrate = maxbitrate
@@ -22,7 +22,7 @@ struct RateController {
     
     @inline(__always)
     mutating func beginGOP() -> Int {
-        self.gopTargetBits = Int((Double(maxbitrate) / Double(framerate)) * Double(keyint))
+        self.gopTargetBits = (maxbitrate * keyint) / framerate
         self.gopRemainingBits = self.gopTargetBits
         self.gopRemainingFrames = self.keyint
         
@@ -30,8 +30,11 @@ struct RateController {
         // I-Frame receives roughly 5x the bits of an average P-frame.
         // However, to ensure a strong structural base (I-frame SSIM > 0.92) so that P-frames
         // don't degrade below 0.85, we guarantee a MINIMUM of 15% of the GOP budget to the I-Frame.
-        let iFrameRatio = max(0.15, 5.0 / Double(self.keyint + 4))
-        return max(1000, Int(Double(self.gopTargetBits) * iFrameRatio))
+        // iFrameRatio = max(0.15, 5.0 / (keyint + 4))
+        // Expressed as integer: max(gopTargetBits * 3 / 20, gopTargetBits * 5 / (keyint + 4))
+        let iFrameBitsFloor = (self.gopTargetBits * 3) / 20        // 15% = 3/20
+        let iFrameBitsProp = (self.gopTargetBits * 5) / (self.keyint + 4)
+        return max(1000, max(iFrameBitsFloor, iFrameBitsProp))
     }
     
     @inline(__always)
@@ -41,45 +44,51 @@ struct RateController {
         
         self.lastPFrameBits = 0 // Reset
         self.lastPFrameQStep = qStep
-        self.lastPFrameSAD = 0.0
+        self.lastPFrameSAD = 0
     }
     
     @inline(__always)
-    mutating func calculatePFrameQStep(currentSAD: Double, baseStep: Int) -> Int {
-        if self.avgPFrameSAD == 0.0 { self.avgPFrameSAD = currentSAD }
-        self.avgPFrameSAD = (self.avgPFrameSAD * 0.8) + (currentSAD * 0.2)
+    mutating func calculatePFrameQStep(currentSAD: Int, baseStep: Int) -> Int {
+        if self.avgPFrameSAD == 0 { self.avgPFrameSAD = currentSAD }
+        // EMA: avg = avg * 0.8 + current * 0.2 → (avg * 4 + current) / 5
+        self.avgPFrameSAD = ((self.avgPFrameSAD * 4) + currentSAD) / 5
         
         // Ensure P-Frames always get at least 2% of GOP bits to avoid total quality collapse
-        let fallbackBits = Int(Double(gopTargetBits) * 0.02)
-        let avgBitsPerFrame = max(fallbackBits, Int(gopRemainingBits / max(1, gopRemainingFrames)))
+        // 2% = 1/50
+        let fallbackBits = gopTargetBits / 50
+        let avgBitsPerFrame = max(fallbackBits, gopRemainingBits / max(1, gopRemainingFrames))
         
-        // Weight by activity variation
-        let multiplier = currentSAD / max(1.0, self.avgPFrameSAD)
-        let targetFrameBits = Int(Double(avgBitsPerFrame) * max(0.2, min(5.0, multiplier)))
+        // Weight by activity variation: multiplier = currentSAD / avgPFrameSAD
+        // Use Q16 fixed-point for multiplier: multiplier16 = (currentSAD << 16) / avgPFrameSAD
+        let safeAvg = max(1, self.avgPFrameSAD)
+        let multiplier16 = (Int64(currentSAD) << 16) / Int64(safeAvg)
+        
+        // Clamp multiplier to [0.2, 5.0] in Q16: [13107, 327680]
+        let clampedMul16 = max(13107, min(327680, multiplier16))
+        let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
         
         // SSIM Min 0.71, Max 0.99
         let maxStep = max(baseStep, 48)
         
         var newStepInt = baseStep
-        if lastPFrameBits > 0 && lastPFrameQStep > 0 {
+        if 0 < lastPFrameBits && 0 < lastPFrameQStep {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
-            let predictedCurrentBits = Double(lastPFrameBits) * multiplier
-            let ratio = predictedCurrentBits / Double(max(1, targetFrameBits))
-            let val = Double(lastPFrameQStep) * ratio
+            // predictedCurrentBits = lastPFrameBits * multiplier
+            let predictedBits64 = (Int64(lastPFrameBits) * multiplier16) >> 16
+            // ratio = predictedCurrentBits / targetFrameBits
+            let safeTarget = max(1, targetFrameBits)
+            // val = lastPFrameQStep * ratio
+            let val = (Int64(lastPFrameQStep) * predictedBits64) / Int64(safeTarget)
             
-            if val.isNaN || val.isInfinite {
-                newStepInt = maxStep
-            } else {
-                newStepInt = Int(min(Double(maxStep), max(1.0, val)))
-            }
+            newStepInt = Int(max(1, min(Int64(maxStep), val)))
         }
         
-        let finalStep = Int(max(1, min(maxStep, newStepInt)))
+        let finalStep = max(1, min(maxStep, newStepInt))
         return finalStep
     }
     
     @inline(__always)
-    mutating func consumePFrame(bits: Int, qStep: Int, sad: Double) {
+    mutating func consumePFrame(bits: Int, qStep: Int, sad: Int) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         

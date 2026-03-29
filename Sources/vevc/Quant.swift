@@ -6,20 +6,30 @@ struct Quantizer: Sendable {
     let bias: Int32
     let shift: Int16 = 16
     
-    init(step: Int, roundToNearest: Bool = false, deadZoneRatio: Double = 0.0) {
+    /// - Parameters:
+    ///   - step: Quantization step size.
+    ///   - roundToNearest: If true, sets bias to 1<<15 for round-to-nearest behavior.
+    ///   - deadZoneBias: Pre-computed dead zone bias in Q16 fixed-point.
+    ///     Positive values narrow the dead zone (towards round-to-nearest).
+    ///     Negative values widen the dead zone (more values become 0).
+    ///     Common values: -6554 (-0.10), -3277 (-0.05), 0 (none).
+    init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0) {
         self.step = Int16(step)
         self.mul = Int32((1 << 16) / step)
         var b: Int32 = 0
         if roundToNearest {
             b = Int32(1 << 15)
-        } else if deadZoneRatio != 0.0 {
-            // positive deadZoneRatio narrows the dead zone (towards round-to-nearest)
-            // negative deadZoneRatio widens the dead zone (more values become 0)
-            b = Int32(Double(1 << 16) * deadZoneRatio)
+        } else if deadZoneBias != 0 {
+            b = deadZoneBias
         }
         self.bias = b
     }
 }
+
+// Pre-computed dead zone bias constants in Q16 fixed-point
+// deadZoneRatio * 65536 = bias value
+private let kDeadZoneBiasNeg005: Int32 = -3277  // -0.05 * 65536
+private let kDeadZoneBiasNeg010: Int32 = -6554  // -0.10 * 65536
 
 struct QuantizationTable: Sendable {
     let step: Int16
@@ -39,38 +49,44 @@ struct QuantizationTable: Sendable {
         //   Layer 1 (L16)    = mid freq      → moderate sensitivity
         //   Layer 2 (L32)    = highest freq  → low sensitivity → coarse quantization
         //   HH (diagonal) = √2× higher freq than HL/LH → even less perceptible
-        var qMidScale = 1.0    // HL/LH scale
-        var qHighScale = 1.5   // HH scale
+        //
+        // Scale factors are expressed as integer ratios (numerator, denominator)
+        // to avoid floating-point computation entirely.
+        var qMidNum = 4       // HL/LH scale numerator   (4/4 = 1.0)
+        var qMidDen = 4       // HL/LH scale denominator
+        var qHighNum = 6      // HH scale numerator      (6/4 = 1.5)
+        var qHighDen = 4      // HH scale denominator
         var qLowDivisor = 6
-        var deadZoneMid = 0.0  // HL/LH dead zone
-        var deadZoneHigh = 0.0 // HH dead zone
+        var deadZoneBiasMid: Int32 = 0   // HL/LH dead zone bias (Q16)
+        var deadZoneBiasHigh: Int32 = 0  // HH dead zone bias (Q16)
 
-        if layerIndex == 2 {
-            qMidScale = 1.2
-            qHighScale = 1.5
-            deadZoneMid = -0.05
-            deadZoneHigh = -0.10
-        } else if layerIndex == 1 {
-            qMidScale = 0.5
-            qHighScale = 1.0
-            deadZoneMid = 0.0
-            deadZoneHigh = -0.05
-        } else if layerIndex == 0 {
-            qMidScale = 0.25
-            qHighScale = 0.5
+        switch layerIndex {
+        case 2:
+            qMidNum = 6; qMidDen = 5          // 1.2
+            qHighNum = 6; qHighDen = 4        // 1.5
+            deadZoneBiasMid = kDeadZoneBiasNeg005
+            deadZoneBiasHigh = kDeadZoneBiasNeg010
+        case 1:
+            qMidNum = 2; qMidDen = 4          // 0.5
+            qHighNum = 4; qHighDen = 4        // 1.0
+            deadZoneBiasMid = 0
+            deadZoneBiasHigh = kDeadZoneBiasNeg005
+        default: // layerIndex == 0
+            qMidNum = 1; qMidDen = 4          // 0.25
+            qHighNum = 2; qHighDen = 4        // 0.5
             qLowDivisor = 12
-            deadZoneMid = 0.0
-            deadZoneHigh = 0.0
+            deadZoneBiasMid = 0
+            deadZoneBiasHigh = 0
         }
 
         if isChroma {
             self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(min(4096, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: 0.0)
-            self.qHigh = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: 0.0)
+            self.qMid = Quantizer(step: Int(min(4096, max(1, (baseStep * qMidNum) / qMidDen))))
+            self.qHigh = Quantizer(step: Int(min(8192, max(1, (baseStep * qHighNum) / qHighDen))))
         } else {
             self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(min(8192, max(1, Int(Double(baseStep) * qMidScale)))), deadZoneRatio: deadZoneMid)
-            self.qHigh = Quantizer(step: Int(min(16384, max(1, Int(Double(baseStep) * qHighScale)))), deadZoneRatio: deadZoneHigh)
+            self.qMid = Quantizer(step: Int(min(8192, max(1, (baseStep * qMidNum) / qMidDen))), deadZoneBias: deadZoneBiasMid)
+            self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), deadZoneBias: deadZoneBiasHigh)
         }
     }
 }

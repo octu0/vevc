@@ -78,8 +78,8 @@ public class VEVCEncoder {
                 )
                 
                 // 簡易かつ高速なシーンチェンジ判定用ヘルパー (Yプレーンのみ、4ピクセルおきにSAD算出)
-                func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Double {
-                    guard a.yPlane.count == b.yPlane.count, a.yPlane.count > 0 else { return 0 }
+                func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
+                    guard a.yPlane.count == b.yPlane.count, 0 < a.yPlane.count else { return 0 }
                     let count = a.yPlane.count
                     var sum: UInt64 = 0
                     a.yPlane.withUnsafeBufferPointer { aPtr in
@@ -89,7 +89,7 @@ public class VEVCEncoder {
                             }
                         }
                     }
-                    return Double(sum * 4) / Double(count)
+                    return Int((sum * 4) / UInt64(count))
                 }
                 
                 do {
@@ -100,7 +100,7 @@ public class VEVCEncoder {
                         // シーンチェンジ判定: 既存バッファがある場合、最後のフレームと比較
                         if let lastImg = buffer.last {
                             let sad = estimateFastSAD(a: img, b: lastImg)
-                            if sad > Double(sceneChangeThreshold) {
+                            if sceneChangeThreshold < sad {
                                 // シーンチェンジ検知：現在のGOPバッファを強制終了してエンコード
                                 let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
                                 continuation.yield(gopBytes)
@@ -229,7 +229,7 @@ actor LayersEncodeActor {
                 rateController.consumeIFrame(bits: encodedBits, qStep: Int(frameQtY.step))
                 isFirstEncoded = false
             } else {
-                let frameSAD = isPFrame ? estimateFrameSAD(current: plane, previous: previousReconstructed!) : 0.0
+                let frameSAD = isPFrame ? estimateFrameSAD(current: plane, previous: previousReconstructed!) : 0
                 rateController.consumePFrame(bits: encodedBits, qStep: Int(frameQtY.step), sad: frameSAD)
             }
             previousReconstructed = reconstructed
@@ -293,12 +293,12 @@ actor LayersEncodeActor {
 
 /// Estimate frame-level SAD (Sum of Absolute Differences) between current
 /// and previous PlaneData420 Y planes by sampling representative blocks.
-/// Returns average per-pixel SAD as a Double for RateController input.
+/// Returns average per-pixel SAD as an Int for RateController input.
 @inline(__always)
-func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Double {
+func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Int {
     let width = current.width
     let height = current.height
-    guard width > 0 && height > 0 else { return 0.0 }
+    guard 0 < width && 0 < height else { return 0 }
     
     let blockSize = 32
     let bw = min(blockSize, width)
@@ -330,7 +330,7 @@ func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Double {
         totalPixels += bw * bh
     }
     
-    return totalPixels > 0 ? Double(totalSAD) / Double(totalPixels) : 0.0
+    return 0 < totalPixels ? totalSAD / totalPixels : 0
 }
 
 func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
@@ -400,13 +400,14 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     let samplePixels = points.count * (w * h) * 3
     let totalPixels = img.width * img.height * 3
     
-    let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
-    let ratio = estimatedTotalBits / Double(targetBits)
-    // I-frame quality bias balances compression vs quality.
-    // 0.85 is tuned for SSIM Min ~0.85 with 22% I-frame allocation.
-    let predictedStep = Double(probeStep) * ratio * 0.85
+    // Use Int64 to prevent overflow in multiplication:
+    // estimatedTotalBits = totalSampleBits * (totalPixels / samplePixels)
+    // predictedStep = probeStep * estimatedTotalBits * 85 / (targetBits * 100)
+    let estimatedTotalBits64 = (Int64(totalSampleBits) * Int64(totalPixels)) / Int64(samplePixels)
+    // I-frame quality bias: 0.85 = 85/100
+    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 85) / (Int64(targetBits) * 100)
 
-    let q = min(256, Int(max(1, predictedStep)))
+    let q = min(256, Int(max(1, predictedStep64)))
     
     return QuantizationTable(baseStep: q)
 }

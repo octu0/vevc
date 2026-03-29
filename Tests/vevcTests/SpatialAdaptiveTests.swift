@@ -6,11 +6,11 @@ struct SpatialAdaptiveTests {
     
     // MARK: - spatialWeight tests
     
-    @Test("spatialWeight: center block returns minimum weight (≈1.0)")
+    @Test("spatialWeight: center block returns minimum weight (≈1024)")
     func centerBlockWeight() {
         // Center of an 11x11 grid (odd size = exact center)
         let w = spatialWeight(blockCol: 5, blockRow: 5, colCount: 11, rowCount: 11)
-        #expect(abs(w - 1.0) < 0.01, "Center block should have weight ≈ 1.0, got \(w)")
+        #expect(abs(w - 1024) < 10, "Center block should have weight ≈ 1024, got \(w)")
     }
     
     @Test("spatialWeight: corner blocks return maximum weight")
@@ -20,7 +20,8 @@ struct SpatialAdaptiveTests {
         let center = spatialWeight(blockCol: 5, blockRow: 5, colCount: colCount, rowCount: rowCount)
         let corner = spatialWeight(blockCol: 0, blockRow: 0, colCount: colCount, rowCount: rowCount)
         #expect(corner > center, "Corner weight \(corner) should be > center weight \(center)")
-        #expect(corner > 1.3, "Corner weight \(corner) should be > 1.3")
+        // 1.3 * 1024 = 1331
+        #expect(1331 < corner, "Corner weight \(corner) should be > 1331 (1.3 in 1024-scale)")
     }
     
     @Test("spatialWeight: monotonically increases from center to edge")
@@ -45,13 +46,13 @@ struct SpatialAdaptiveTests {
         let rowCount = 10
         let w1 = spatialWeight(blockCol: 2, blockRow: 3, colCount: colCount, rowCount: rowCount)
         let w2 = spatialWeight(blockCol: colCount - 1 - 2, blockRow: rowCount - 1 - 3, colCount: colCount, rowCount: rowCount)
-        #expect(abs(w1 - w2) < 0.001, "Symmetric blocks should have equal weight: \(w1) vs \(w2)")
+        #expect(abs(w1 - w2) < 2, "Symmetric blocks should have equal weight: \(w1) vs \(w2)")
     }
     
-    @Test("spatialWeight: 1x1 grid returns 1.0")
+    @Test("spatialWeight: 1x1 grid returns 1024")
     func singleBlock() {
         let w = spatialWeight(blockCol: 0, blockRow: 0, colCount: 1, rowCount: 1)
-        #expect(abs(w - 1.0) < 0.01, "Single block should have weight 1.0, got \(w)")
+        #expect(abs(w - 1024) < 10, "Single block should have weight 1024, got \(w)")
     }
     
     // MARK: - Spatial adaptive SAD threshold tests
@@ -77,3 +78,4 @@ struct SpatialAdaptiveTests {
         #expect(edge > center, "Edge threshold \(edge) should be > center \(center)")
     }
 }
+

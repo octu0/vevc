@@ -27,7 +27,7 @@ final class RateControllerTests: XCTestCase {
         XCTAssertEqual(controller.lastPFrameBits, 0)
         
         // P-Frame 1
-        let p1SAD = 1000.0
+        let p1SAD = 1000
         let qStep1 = controller.calculatePFrameQStep(currentSAD: p1SAD, baseStep: 32)
         XCTAssertTrue(qStep1 >= 1 && qStep1 <= 128)
         
@@ -38,7 +38,7 @@ final class RateControllerTests: XCTestCase {
         XCTAssertEqual(controller.lastPFrameQStep, qStep1)
         
         // P-Frame 2 (high motion)
-        let p2SAD = 2000.0
+        let p2SAD = 2000
         let qStep2 = controller.calculatePFrameQStep(currentSAD: p2SAD, baseStep: 32)
         controller.consumePFrame(bits: 50_000, qStep: qStep2, sad: p2SAD)
         XCTAssertEqual(controller.gopRemainingBits, 330_000)
