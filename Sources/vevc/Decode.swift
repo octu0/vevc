@@ -340,26 +340,20 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, las
         currentIdx += 1
     }
 
-    var last: Int16 = lastVal
-    for y in 0..<8 {
+    let ptrY0 = block.rowPointer(y: 0)
+    ptrY0[0] = ptrY0[0] &+ lastVal
+    for x in 1..<8 {
+        ptrY0[x] = ptrY0[x] &+ ptrY0[x - 1]
+    }
+    
+    var last = ptrY0[7]
+    for y in 1..<8 {
         let ptrY = block.rowPointer(y: y)
-        if y == 0 {
-            for x in 0..<8 {
-                if x == 0 {
-                    ptrY[0] = ptrY[0] &+ last
-                } else {
-                    ptrY[x] = ptrY[x] &+ ptrY[x - 1]
-                }
-            }
-        } else {
-            let ptrPrevY = block.rowPointer(y: y - 1)
-            for x in 0..<8 {
-                if x == 0 {
-                    ptrY[0] = ptrY[0] &+ ptrPrevY[0]
-                } else {
-                    ptrY[x] = ptrY[x] &+ predictMED(ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                }
-            }
+        let ptrPrevY = block.rowPointer(y: y - 1)
+        
+        ptrY[0] = ptrY[0] &+ ptrPrevY[0]
+        for x in 1..<8 {
+            ptrY[x] = ptrY[x] &+ predictMED(ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
         }
         last = ptrY[7]
     }
@@ -394,26 +388,20 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, la
         currentIdx += 1
     }
 
-    var last: Int16 = lastVal
-    for y in 0..<16 {
+    let ptrY0 = block.rowPointer(y: 0)
+    ptrY0[0] = ptrY0[0] &+ lastVal
+    for x in 1..<16 {
+        ptrY0[x] = ptrY0[x] &+ ptrY0[x - 1]
+    }
+    
+    var last = ptrY0[15]
+    for y in 1..<16 {
         let ptrY = block.rowPointer(y: y)
-        if y == 0 {
-            for x in 0..<16 {
-                if x == 0 {
-                    ptrY[0] = ptrY[0] &+ last
-                } else {
-                    ptrY[x] = ptrY[x] &+ ptrY[x - 1]
-                }
-            }
-        } else {
-            let ptrPrevY = block.rowPointer(y: y - 1)
-            for x in 0..<16 {
-                if x == 0 {
-                    ptrY[0] = ptrY[0] &+ ptrPrevY[0]
-                } else {
-                    ptrY[x] = ptrY[x] &+ predictMED(ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                }
-            }
+        let ptrPrevY = block.rowPointer(y: y - 1)
+        
+        ptrY[0] = ptrY[0] &+ ptrPrevY[0]
+        for x in 1..<16 {
+            ptrY[x] = ptrY[x] &+ predictMED(ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
         }
         last = ptrY[15]
     }

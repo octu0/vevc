@@ -488,26 +488,20 @@ private func estimateRiceBitsDPCM16(block: BlockView, lastVal: inout Int16) -> I
     }
 
     var sumDiffAbs = 0
-    var last = lastVal
-    for y in 0..<16 {
+    let ptrY0 = block.rowPointer(y: 0)
+    sumDiffAbs += abs(Int(ptrY0[0]) - Int(lastVal))
+    for x in 1..<16 {
+        sumDiffAbs += abs(Int(ptrY0[x]) - Int(ptrY0[x - 1]))
+    }
+    
+    var last = ptrY0[15]
+    for y in 1..<16 {
         let ptrY = block.rowPointer(y: y)
-        if y == 0 {
-            for x in 0..<16 {
-                if x == 0 {
-                    sumDiffAbs += abs(Int(ptrY[0]) - Int(last))
-                } else {
-                    sumDiffAbs += abs(Int(ptrY[x]) - Int(ptrY[x - 1]))
-                }
-            }
-        } else {
-            let ptrPrevY = block.rowPointer(y: y - 1)
-            for x in 0..<16 {
-                if x == 0 {
-                    sumDiffAbs += abs(Int(ptrY[0]) - Int(ptrPrevY[0]))
-                } else {
-                    sumDiffAbs += errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-                }
-            }
+        let ptrPrevY = block.rowPointer(y: y - 1)
+        
+        sumDiffAbs += abs(Int(ptrY[0]) - Int(ptrPrevY[0]))
+        for x in 1..<16 {
+            sumDiffAbs += errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
         }
         last = ptrY[15]
     }
