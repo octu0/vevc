@@ -46,8 +46,8 @@ struct QuantizationTable: Sendable {
         var deadZoneHigh = 0.0 // HH dead zone
 
         if layerIndex == 2 {
-            qMidScale = 1.5
-            qHighScale = 2.5
+            qMidScale = 1.2
+            qHighScale = 1.5
             deadZoneMid = -0.05
             deadZoneHigh = -0.10
         } else if layerIndex == 1 {
@@ -56,9 +56,9 @@ struct QuantizationTable: Sendable {
             deadZoneMid = 0.0
             deadZoneHigh = -0.05
         } else if layerIndex == 0 {
-            qMidScale = 0.20
-            qHighScale = 0.30
-            qLowDivisor = 16
+            qMidScale = 0.25
+            qHighScale = 0.5
+            qLowDivisor = 12
             deadZoneMid = 0.0
             deadZoneHigh = 0.0
         }

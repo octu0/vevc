@@ -866,20 +866,26 @@ func shouldSplit16(data: UnsafeMutableBufferPointer<Int16>, skipLL: Bool) -> Boo
 }
 
 @inline(__always)
-func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int, isPFrame: Bool = false) -> Bool {
     guard let base = data.baseAddress else { return false }
+    
+    let th = Int16(threshold)
+    let thPos = SIMD2<Int16>(repeating: th)
+    let thNeg = SIMD2<Int16>(repeating: -th)
+    
     // Check LL
     for y in 0..<2 {
         let ptr = base + y * 4
         let vec = SIMD2<Int16>(UnsafeBufferPointer(start: ptr, count: 2))
-        if vec[0] != 0 || vec[1] != 0 { return false }
+        if isPFrame {
+            let mask = (vec .> thPos) .| (vec .< thNeg)
+            if any(mask) { return false }
+        } else {
+            if vec[0] != 0 || vec[1] != 0 { return false }
+        }
     }
     
     // Check Subbands
-    let th = Int16(threshold)
-    let thPos = SIMD2<Int16>(repeating: th)
-    let thNeg = SIMD2<Int16>(repeating: -th)
-
     let lowerHalfBase = base + 2 * 4
     for i in stride(from: 0, to: 8, by: 2) {
         let vec = SIMD2<Int16>(UnsafeBufferPointer(start: lowerHalfBase + i, count: 2))
@@ -1206,13 +1212,13 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFrame: Bool = false) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
         let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-            return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold)
+            return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold, isPFrame: isPFrame)
         }
         if isZero {
             bwFlags.writeBit(true)

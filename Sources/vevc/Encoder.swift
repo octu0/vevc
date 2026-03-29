@@ -30,7 +30,7 @@ public class VEVCEncoder {
     public let sceneChangeThreshold: Int
     public let maxConcurrency: Int
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 32, maxConcurrency: Int = 4) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 15, maxConcurrency: Int = 4) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -77,21 +77,47 @@ public class VEVCEncoder {
                     sceneChangeThreshold: sceneChangeThreshold
                 )
                 
+                // 簡易かつ高速なシーンチェンジ判定用ヘルパー (Yプレーンのみ、4ピクセルおきにSAD算出)
+                func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Double {
+                    guard a.yPlane.count == b.yPlane.count, a.yPlane.count > 0 else { return 0 }
+                    let count = a.yPlane.count
+                    var sum: UInt64 = 0
+                    a.yPlane.withUnsafeBufferPointer { aPtr in
+                        b.yPlane.withUnsafeBufferPointer { bPtr in
+                            for i in stride(from: 0, to: count, by: 4) {
+                                sum += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
+                            }
+                        }
+                    }
+                    return Double(sum * 4) / Double(count)
+                }
+                
                 do {
                     continuation.yield(EncoderUtils.buildVEVCHeader(width: width, height: height, framerate: framerate))
                     
                     var buffer: [YCbCrImage] = []
                     while let img = await iterator.next() {
+                        // シーンチェンジ判定: 既存バッファがある場合、最後のフレームと比較
+                        if let lastImg = buffer.last {
+                            let sad = estimateFastSAD(a: img, b: lastImg)
+                            if sad > Double(sceneChangeThreshold) {
+                                // シーンチェンジ検知：現在のGOPバッファを強制終了してエンコード
+                                let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
+                                continuation.yield(gopBytes)
+                                buffer.removeAll(keepingCapacity: true)
+                            }
+                        }
+                        
                         buffer.append(img)
-                        if buffer.count == 4 {
-                            let gopBytes = try await coreEncoder.encodeTemporalGOP4(images: buffer)
+                        if buffer.count == keyint {
+                            let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
                             continuation.yield(gopBytes)
                             buffer.removeAll(keepingCapacity: true)
                         }
                     }
-                    for img in buffer {
-                        let chunk = try await coreEncoder.encodeSingleFrame(image: img)
-                        continuation.yield(chunk)
+                    if !buffer.isEmpty {
+                        let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
+                        continuation.yield(gopBytes)
                     }
                     continuation.finish()
                 } catch {
@@ -127,7 +153,7 @@ actor LayersEncodeActor {
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
-    func encodeTemporalGOP4(images: [YCbCrImage]) async throws -> [UInt8] {
+    func encodeTemporalGOPChunk(images: [YCbCrImage]) async throws -> [UInt8] {
         guard !images.isEmpty else {
             throw NSError(domain: "vevc.Encoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "TemporalGOP4 requires at least 1 frame"])
         }
@@ -135,8 +161,8 @@ actor LayersEncodeActor {
         // Rate control
         var baseQt: QuantizationTable
         if keyint <= framesSinceKeyframe || frameIndex == 0 {
-            let targetBitsPerGOP = rateController.beginGOP()
-            baseQt = estimateQuantization(img: images[0], targetBits: targetBitsPerGOP / images.count)
+            let targetBits = rateController.beginGOP()
+            baseQt = estimateQuantization(img: images[0], targetBits: targetBits)
             self.qt = baseQt
             framesSinceKeyframe = 0
         } else {

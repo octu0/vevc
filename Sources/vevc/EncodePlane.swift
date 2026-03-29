@@ -621,9 +621,8 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=4) than Layer1 (threshold=2) without
     // perceptible quality loss.
-    let pFrameMinThreshold = isPFrame ? 4 : 0
-    let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
-    let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
+    let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
+    let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
     
     let colCountY = (dx + 31) / 32
     let rowCountY = (dy + 31) / 32
@@ -656,9 +655,8 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 
 @inline(__always)
 func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
-    let pFrameMinThreshold = isPFrame ? 2 : 0
-    let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
-    let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
+    let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
+    let safeThresholdC = max(0, zeroThreshold - (Int(qtC.step) / 2))
     
     let colCountY = (dx + 15) / 16
     let rowCountY = (dy + 15) / 16
@@ -1215,11 +1213,9 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             }
         }
         
-        // P-frame Base8: apply minimum safeThreshold of 1 to zero out
-        // imperceptible low-frequency residuals
-        let pFrameMinBase8 = isPFrame ? 1 : 0
-        let safeThreshold = max(pFrameMinBase8, max(0, zeroThreshold - (Int(qtY.step) / 2)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
+        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
         if isIFrame {
             var predDC: Int16 = 0
@@ -1242,6 +1238,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     async let taskBufCb = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy)
         let isIFrame = (sads == nil)
+        let isPFrame = !isIFrame
         for i in blocks.indices {
             var sadVal: Int = Int.max
             if let sList = sads {
@@ -1266,7 +1263,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
         }
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
         if isIFrame {
             var predDC: Int16 = 0
@@ -1286,6 +1283,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     async let taskBufCr = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy)
         let isIFrame = (sads == nil)
+        let isPFrame = !isIFrame
         for i in blocks.indices {
             var sadVal: Int = Int.max
             if let sList = sads {
@@ -1310,7 +1308,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
         }
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
         if isIFrame {
             var predDC: Int16 = 0
