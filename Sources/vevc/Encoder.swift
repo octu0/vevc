@@ -376,8 +376,9 @@ func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable
     
     let estimatedTotalBits = Double(totalSampleBits) * (Double(totalPixels) / Double(samplePixels))
     let ratio = estimatedTotalBits / Double(targetBits)
-    // WDMC provides dramatic size reductions on P-frames, so I-frames can be allocated far more bits.
-    let predictedStep = Double(probeStep) * ratio * 0.8
+    // I-frame quality bias balances compression vs quality.
+    // 0.85 is tuned for SSIM Min ~0.85 with 22% I-frame allocation.
+    let predictedStep = Double(probeStep) * ratio * 0.85
 
     let q = min(256, Int(max(1, predictedStep)))
     

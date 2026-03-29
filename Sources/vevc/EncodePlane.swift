@@ -617,10 +617,11 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
 }
 
 func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [Block2D], cbBlocks: inout [Block2D], crBlocks: inout [Block2D], parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?) -> [UInt8] {
-    // P-frame residuals: guarantee minimum safeThreshold of 2 to zero out
-    // blocks where all HL/LH/HH coefficients are within [-2, +2] after quantization.
-    // These small coefficients are below the quantization noise floor and imperceptible.
-    let pFrameMinThreshold = isPFrame ? 2 : 0
+    // Layer2 (32x32) contains the highest-frequency DWT subbands with the
+    // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
+    // more aggressively (threshold=4) than Layer1 (threshold=2) without
+    // perceptible quality loss.
+    let pFrameMinThreshold = isPFrame ? 4 : 0
     let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
     let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
     
@@ -1187,11 +1188,21 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
+    let yColCount8 = (dx + 7) / 8
+    let yRowCount8 = (dy + 7) / 8
+    
     async let taskBufY = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
         let isIFrame = (sads == nil)
+        let isPFrame = !isIFrame
         for i in blocks.indices {
-            if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() }
+            if let sList = sads, i < sList.count {
+                let col = i % yColCount8
+                let row = i / yColCount8
+                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
+                                                    colCount: yColCount8, rowCount: yRowCount8)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
         }
         
@@ -1204,7 +1215,10 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             }
         }
         
-        let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
+        // P-frame Base8: apply minimum safeThreshold of 1 to zero out
+        // imperceptible low-frequency residuals
+        let pFrameMinBase8 = isPFrame ? 1 : 0
+        let safeThreshold = max(pFrameMinBase8, max(0, zeroThreshold - (Int(qtY.step) / 2)))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         
         if isIFrame {

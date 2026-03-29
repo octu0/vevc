@@ -20,6 +20,7 @@ struct RateController {
         self.keyint = keyint
     }
     
+    @inline(__always)
     mutating func beginGOP() -> Int {
         self.gopTargetBits = Int((Double(maxbitrate) / Double(framerate)) * Double(keyint))
         self.gopRemainingBits = self.gopTargetBits
@@ -29,10 +30,11 @@ struct RateController {
         self.lastPFrameQStep = 0
         self.lastPFrameSAD = 0.0
         
-        // I-Frame receives a substantial portion of the GOP bits (e.g. ~25%)
+        // I-Frame receives ~25% of GOP bits
         return max(1000, self.gopTargetBits / 4)
     }
     
+    @inline(__always)
     mutating func consumeIFrame(bits: Int, qStep: Int) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
@@ -42,6 +44,7 @@ struct RateController {
         self.lastPFrameSAD = 0.0
     }
     
+    @inline(__always)
     mutating func calculatePFrameQStep(currentSAD: Double, baseStep: Int) -> Int {
         if self.avgPFrameSAD == 0.0 { self.avgPFrameSAD = currentSAD }
         self.avgPFrameSAD = (self.avgPFrameSAD * 0.8) + (currentSAD * 0.2)
@@ -77,6 +80,7 @@ struct RateController {
         return Int(max(1, min(maxStep, newStepInt)))
     }
     
+    @inline(__always)
     mutating func consumePFrame(bits: Int, qStep: Int, sad: Double) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
