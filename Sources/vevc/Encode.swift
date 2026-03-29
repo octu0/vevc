@@ -952,15 +952,29 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBlocks: [Block2D]?) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBlocks: [Block2D]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
     
+    // Spatial adaptive threshold: when colCount/rowCount are provided,
+    // apply higher zero-thresholds to peripheral blocks where human
+    // visual attention is lower, increasing zero-block rate at edges.
+    let useSpatialWeight = colCount > 1 && rowCount > 1
+    
     var zeroCount = 0
     for i in blocks.indices {
+        let blockThreshold: Int
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            blockThreshold = Int(Double(max(1, zeroThreshold)) * weight)
+        } else {
+            blockThreshold = zeroThreshold
+        }
         let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-            return isEffectivelyZero32(data: ptr, threshold: zeroThreshold)
+            return isEffectivelyZero32(data: ptr, threshold: blockThreshold)
         }
         if isZero {
             bwFlags.writeBit(true)
@@ -1049,15 +1063,26 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBlocks: [Block2D]?) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBlocks: [Block2D]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
     
+    let useSpatialWeight = colCount > 1 && rowCount > 1
+    
     var zeroCount = 0
     for i in blocks.indices {
+        let blockThreshold: Int
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            blockThreshold = Int(Double(max(1, zeroThreshold)) * weight)
+        } else {
+            blockThreshold = zeroThreshold
+        }
         let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-            return isEffectivelyZero16(data: ptr, threshold: zeroThreshold)
+            return isEffectivelyZero16(data: ptr, threshold: blockThreshold)
         }
         if isZero {
             bwFlags.writeBit(true)

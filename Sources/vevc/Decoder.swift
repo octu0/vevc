@@ -16,8 +16,7 @@ class CoreDecoder {
     /// Mode=0x01 (Direct): outputs frames directly.
     func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
         guard chunk.count >= 11 else {
-            print("decodeGOP insufficientData: chunk.count=\(chunk.count) < 11")
-            throw DecodeError.insufficientData
+            throw DecodeError.insufficientDataContext("decodeGOP: chunk.count=\(chunk.count) < 11")
         }
         var offset = 0
         
@@ -42,8 +41,7 @@ class CoreDecoder {
                 continue
             }
             guard (offset + len) <= chunk.count else {
-                print("decodeGOP insufficientData: offset(\(offset)) + len(\(len)) > chunk.count(\(chunk.count))")
-                throw DecodeError.insufficientData
+                throw DecodeError.insufficientDataContext("decodeGOP: offset(\(offset)) + len(\(len)) > chunk.count(\(chunk.count))")
             }
             frameData.append(Array(chunk[offset..<(offset + len)]))
             offset += len

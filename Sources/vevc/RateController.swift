@@ -54,6 +54,12 @@ struct RateController {
         let multiplier = currentSAD / max(1.0, self.avgPFrameSAD)
         let targetFrameBits = Int(Double(avgBitsPerFrame) * max(0.2, min(5.0, multiplier)))
         
+        // Clamp P-frame qStep to [baseStep, baseStep * 1.2] to prevent
+        // excessive quality degradation on low-activity frames.
+        // Without this cap, the rate controller can push qStep to 128,
+        // causing SSIM Min to drop below acceptable thresholds.
+        let maxStep = max(baseStep, Int(Double(baseStep) * 1.2))
+        
         var newStepInt = baseStep
         if lastPFrameBits > 0 && lastPFrameQStep > 0 {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
@@ -62,13 +68,13 @@ struct RateController {
             let val = Double(lastPFrameQStep) * ratio
             
             if val.isNaN || val.isInfinite {
-                newStepInt = 128
+                newStepInt = maxStep
             } else {
-                newStepInt = Int(min(128.0, max(1.0, val)))
+                newStepInt = Int(min(Double(maxStep), max(1.0, val)))
             }
         }
         
-        return Int(max(1, min(128, newStepInt)))
+        return Int(max(1, min(maxStep, newStepInt)))
     }
     
     mutating func consumePFrame(bits: Int, qStep: Int, sad: Double) {

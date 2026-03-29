@@ -2,6 +2,44 @@
 
 import Foundation
 
+// MARK: - Spatial Adaptive Weight
+
+/// Compute a spatial weight for a block at (blockCol, blockRow) in a grid of (colCount x rowCount).
+/// Returns 1.0 at the center of the image and increases toward edges/corners.
+/// Used to apply more aggressive compression on peripheral blocks where
+/// human visual attention is naturally lower.
+///
+/// - Parameters:
+///   - blockCol, blockRow: Block position (0-indexed).
+///   - colCount, rowCount: Total grid dimensions.
+///   - edgeScale: Maximum weight at corners (default 1.5 = 50% more aggressive).
+/// - Returns: Weight in [1.0, edgeScale].
+@inline(__always)
+func spatialWeight(blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int,
+                   edgeScale: Double = 1.5) -> Double {
+    guard colCount > 1 && rowCount > 1 else { return 1.0 }
+    
+    // Normalize block position to [-1, 1] centered coordinates
+    let cx = (Double(blockCol) / Double(colCount - 1)) * 2.0 - 1.0
+    let cy = (Double(blockRow) / Double(rowCount - 1)) * 2.0 - 1.0
+    
+    // Euclidean distance from center, normalized to [0, 1] (corner = 1.0)
+    let dist = min(1.0, sqrt(cx * cx + cy * cy) / sqrt(2.0))
+    
+    // Linear interpolation: center → 1.0, corner → edgeScale
+    return 1.0 + (edgeScale - 1.0) * dist
+}
+
+/// Compute spatially-adaptive SAD threshold for zero-block skip decisions.
+/// Edge blocks get higher thresholds → more likely to be fully skipped.
+@inline(__always)
+func spatialSADThreshold(baseSAD: Int, blockCol: Int, blockRow: Int,
+                          colCount: Int, rowCount: Int) -> Int {
+    let weight = spatialWeight(blockCol: blockCol, blockRow: blockRow,
+                               colCount: colCount, rowCount: rowCount)
+    return Int(Double(baseSAD) * weight)
+}
+
 final class ConcurrentBox<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }
@@ -443,9 +481,22 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
+    let yColCount32 = (dx + 31) / 32
+    let cbColCount32 = (cbDx + 31) / 32
+    let yRowCount32 = (dy + 31) / 32
+    let cbRowCount32 = (cbDy + 31) / 32
+    
     async let taskBufY = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
+        for i in blocks.indices {
+            if let sList = sads, i < sList.count {
+                let col = i % yColCount32
+                let row = i / yColCount32
+                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
+                                                    colCount: yColCount32, rowCount: yRowCount32)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
+        }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -454,7 +505,15 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
+        for i in blocks.indices {
+            if let sList = sads, i < sList.count {
+                let col = i % cbColCount32
+                let row = i / cbColCount32
+                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
+                                                    colCount: cbColCount32, rowCount: cbRowCount32)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
+        }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
@@ -463,7 +522,15 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 75 { blocks[i].clearAll() } }
+        for i in blocks.indices {
+            if let sList = sads, i < sList.count {
+                let col = i % cbColCount32
+                let row = i / cbColCount32
+                let threshold = spatialSADThreshold(baseSAD: 75, blockCol: col, blockRow: row,
+                                                    colCount: cbColCount32, rowCount: cbRowCount32)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
+        }
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtC)
         }
@@ -485,9 +552,22 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
+    let yColCount16 = (dx + 15) / 16
+    let cbColCount16 = (cbDx + 15) / 16
+    let yRowCount16 = (dy + 15) / 16
+    let cbRowCount16 = (cbDy + 15) / 16
+    
     async let taskBufY = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 75 { blocks[i].clearAll() } }
+        for i in blocks.indices {
+            if let sList = sads, i < sList.count {
+                let col = i % yColCount16
+                let row = i / yColCount16
+                let threshold = spatialSADThreshold(baseSAD: 75, blockCol: col, blockRow: row,
+                                                    colCount: yColCount16, rowCount: yRowCount16)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
+        }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtY)
         }
@@ -496,7 +576,15 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
+        for i in blocks.indices {
+            if let sList = sads, i < sList.count {
+                let col = i % cbColCount16
+                let row = i / cbColCount16
+                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
+                                                    colCount: cbColCount16, rowCount: cbRowCount16)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
+        }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
@@ -505,7 +593,15 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     
     async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
-        for i in blocks.indices { if let sList = sads, i < sList.count, sList[i] < 150 { blocks[i].clearAll() } }
+        for i in blocks.indices {
+            if let sList = sads, i < sList.count {
+                let col = i % cbColCount16
+                let row = i / cbColCount16
+                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
+                                                    colCount: cbColCount16, rowCount: cbRowCount16)
+                if sList[i] < threshold { blocks[i].clearAll() }
+            }
+        }
         for i in blocks.indices {
             evaluateQuantizeLayer16(block: &blocks[i], qt: qtC)
         }
@@ -528,9 +624,16 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
     let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
     
-    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks)
-    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks)
-    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks)
+    let colCountY = (dx + 31) / 32
+    let rowCountY = (dy + 31) / 32
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let colCountC = (cbDx + 31) / 32
+    let rowCountC = (cbDy + 31) / 32
+    
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY)
+    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
+    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
     
     debugLog("  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes")
     
@@ -556,9 +659,16 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     let safeThresholdY = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtY.step) / 2)))
     let safeThresholdC = max(pFrameMinThreshold, max(0, zeroThreshold - (Int(qtC.step) / 2)))
     
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks)
-    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks)
-    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks)
+    let colCountY = (dx + 15) / 16
+    let rowCountY = (dy + 15) / 16
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let colCountC = (cbDx + 15) / 16
+    let rowCountC = (cbDy + 15) / 16
+    
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY)
+    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
+    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
     
     debugLog("  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes")
     

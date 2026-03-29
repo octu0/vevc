@@ -1,15 +1,33 @@
 // MARK: - Decode Error
 
-public enum DecodeError: Error {
+public enum DecodeError: Error, CustomStringConvertible {
     case eof
     case insufficientData
+    case insufficientDataContext(String)
     case invalidBlockData
+    case invalidBlockDataContext(String)
     case invalidHeader
     case invalidLayerNumber
     case noDataProvided
     case unsupportedArchitecture
     case outOfBits
+    
+    public var description: String {
+        switch self {
+        case .eof: return "DecodeError.eof"
+        case .insufficientData: return "DecodeError.insufficientData"
+        case .insufficientDataContext(let ctx): return "DecodeError.insufficientData: \(ctx)"
+        case .invalidBlockData: return "DecodeError.invalidBlockData"
+        case .invalidBlockDataContext(let ctx): return "DecodeError.invalidBlockData: \(ctx)"
+        case .invalidHeader: return "DecodeError.invalidHeader"
+        case .invalidLayerNumber: return "DecodeError.invalidLayerNumber"
+        case .noDataProvided: return "DecodeError.noDataProvided"
+        case .unsupportedArchitecture: return "DecodeError.unsupportedArchitecture"
+        case .outOfBits: return "DecodeError.outOfBits"
+        }
+    }
 }
+
 
 @inline(__always)
 func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
@@ -245,7 +263,7 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: inout BlockView, las
     if hasNonZero == 1 {
         let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
         let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-        guard lscpX < 4 && lscpY < 4 else { print("invalidBlockData at line 243"); throw DecodeError.invalidBlockData }
+        guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("DPCM4 lscp out of range: (\(lscpX), \(lscpY))") }
         lscpIdx = lscpY * 4 + lscpX
     }
 
@@ -301,7 +319,7 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, las
     if hasNonZero == 1 {
         let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
         let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-        guard lscpX < 8 && lscpY < 8 else { print("invalidBlockData at line 299"); throw DecodeError.invalidBlockData }
+        guard lscpX < 8 && lscpY < 8 else { throw DecodeError.invalidBlockDataContext("DPCM8 lscp out of range: (\(lscpX), \(lscpY))") }
         lscpIdx = lscpY * 8 + lscpX
     }
 
@@ -416,12 +434,12 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     offset += bufYLen
     
     let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { print("invalidBlockData at line 421"); throw DecodeError.invalidBlockData }
+    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer32 Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)") }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
     let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { print("invalidBlockData at line 426"); throw DecodeError.invalidBlockData }
+    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer32 Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)") }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
@@ -510,17 +528,17 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufYLen) <= r.count else { print("invalidBlockData at line 510"); throw DecodeError.invalidBlockData }
+    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer16 Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)") }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
     let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { print("invalidBlockData at line 515"); throw DecodeError.invalidBlockData }
+    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer16 Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)") }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
     let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { print("invalidBlockData at line 520"); throw DecodeError.invalidBlockData }
+    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer16 Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)") }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
@@ -603,17 +621,17 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
     let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufYLen) <= r.count else { print("invalidBlockData at line 604"); throw DecodeError.invalidBlockData }
+    guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Base8 Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)") }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
     let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCbLen) <= r.count else { print("invalidBlockData at line 609"); throw DecodeError.invalidBlockData }
+    guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Base8 Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)") }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
     let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
-    guard (offset + bufCrLen) <= r.count else { print("invalidBlockData at line 614"); throw DecodeError.invalidBlockData }
+    guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Base8 Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)") }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     

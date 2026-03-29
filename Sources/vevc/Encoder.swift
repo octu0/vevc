@@ -148,15 +148,13 @@ actor LayersEncodeActor {
         let planes = toPlaneData420(images: images)
         let baseStep = Int(baseQt.step)
         
-        let qtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
-        let qtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
-        
         let localMaxbitrate = maxbitrate
         let localZeroThreshold = zeroThreshold
         
         var encodedFrames = [[UInt8]]()
         var previousReconstructed: PlaneData420? = nil
         var previousInputPlane: PlaneData420? = nil
+        var isFirstEncoded = true
         
         for plane in planes {
             // Duplicate frame detection: if current frame pixels are identical
@@ -174,11 +172,40 @@ actor LayersEncodeActor {
             }
             previousInputPlane = plane
             
+            // Per-frame rate control:
+            // - I-frame (first non-copy encoded frame): uses baseQt from GOP-level rate control
+            // - P-frames: dynamically adjust qStep based on frame-level SAD activity
+            //   using the existing RateController.calculatePFrameQStep() method.
+            let frameQtY: QuantizationTable
+            let frameQtC: QuantizationTable
+            let isPFrame = previousReconstructed != nil
+            
+            if isPFrame {
+                // Compute frame-level SAD by sampling Y plane differences
+                let frameSAD = estimateFrameSAD(current: plane, previous: previousReconstructed!)
+                let adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
+                frameQtY = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: false, layerIndex: 0)
+                frameQtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
+            } else {
+                frameQtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
+                frameQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
+            }
+            
             let (bytes, reconstructed) = try await encodeSpatialLayers(
                 pd: plane, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
-                qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold
+                qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
             )
             encodedFrames.append(bytes)
+            
+            // Feed back to rate controller for next frame's qStep prediction
+            let encodedBits = bytes.count * 8
+            if isFirstEncoded {
+                rateController.consumeIFrame(bits: encodedBits, qStep: Int(frameQtY.step))
+                isFirstEncoded = false
+            } else {
+                let frameSAD = isPFrame ? estimateFrameSAD(current: plane, previous: previousReconstructed!) : 0.0
+                rateController.consumePFrame(bits: encodedBits, qStep: Int(frameQtY.step), sad: frameSAD)
+            }
             previousReconstructed = reconstructed
         }
         
@@ -237,6 +264,48 @@ actor LayersEncodeActor {
     }
 }
 
+
+/// Estimate frame-level SAD (Sum of Absolute Differences) between current
+/// and previous PlaneData420 Y planes by sampling representative blocks.
+/// Returns average per-pixel SAD as a Double for RateController input.
+@inline(__always)
+func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Double {
+    let width = current.width
+    let height = current.height
+    guard width > 0 && height > 0 else { return 0.0 }
+    
+    let blockSize = 32
+    let bw = min(blockSize, width)
+    let bh = min(blockSize, height)
+    
+    // Sample 8 blocks at strategic positions (same as estimateQuantization)
+    let points: [(Int, Int)] = [
+        (0, 0),
+        (max(0, width - bw), 0),
+        (0, max(0, height - bh)),
+        (max(0, width - bw), max(0, height - bh)),
+        (max(0, (width - bw) / 2), 0),
+        (max(0, width - bw), max(0, (height - bh) / 2)),
+        (max(0, (width - bw) / 2), max(0, height - bh)),
+        (0, max(0, (height - bh) / 2)),
+    ]
+    
+    var totalSAD: Int = 0
+    var totalPixels: Int = 0
+    
+    for (sx, sy) in points {
+        for y in sy..<min(sy + bh, height) {
+            let rowOffset = y * width
+            for x in sx..<min(sx + bw, width) {
+                let idx = rowOffset + x
+                totalSAD += abs(Int(current.y[idx]) - Int(previous.y[idx]))
+            }
+        }
+        totalPixels += bw * bh
+    }
+    
+    return totalPixels > 0 ? Double(totalSAD) / Double(totalPixels) : 0.0
+}
 
 func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
     let probeStep = 64
