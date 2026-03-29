@@ -28,18 +28,19 @@ struct SpeedSizeChart: View {
             
             Chart(results, id: \.name) { res in
                 // Using BarMarks for Encoding and Decoding Times
+                let isVEVC = res.name.contains("VEVC")
                 BarMark(
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", res.encTimeMs)
                 )
-                .foregroundStyle(by: .value("Type", "Encode Time"))
+                .foregroundStyle(by: .value("Category", isVEVC ? "VEVC Encode" : "Encode Time"))
                 .position(by: .value("Type", "Encode Time"))
                 
                 BarMark(
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", res.decTimeMs)
                 )
-                .foregroundStyle(by: .value("Type", "Decode Time"))
+                .foregroundStyle(by: .value("Category", isVEVC ? "VEVC Decode" : "Decode Time"))
                 .position(by: .value("Type", "Decode Time"))
                 
                 // Normalized Size
@@ -48,7 +49,7 @@ struct SpeedSizeChart: View {
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", normalizedSize)
                 )
-                .foregroundStyle(by: .value("Type", "Size (KB)"))
+                .foregroundStyle(by: .value("Category", isVEVC ? "VEVC Size" : "Size (KB)"))
                 .symbol(.circle)
                 .symbolSize(100)
                 .annotation(position: .top) {
@@ -80,9 +81,12 @@ struct SpeedSizeChart: View {
                 }
             }
             .chartForegroundStyleScale([
-                "Encode Time": Color.blue,
-                "Decode Time": Color.green,
-                "Size (KB)": Color.purple
+                "VEVC Encode": Color.orange,
+                "VEVC Decode": Color.yellow,
+                "VEVC Size": Color.red,
+                "Encode Time": Color.blue.opacity(0.4),
+                "Decode Time": Color.green.opacity(0.4),
+                "Size (KB)": Color.purple.opacity(0.4)
             ])
             .frame(width: 800, height: 500)
             .padding()
@@ -104,11 +108,12 @@ struct PsnrChart: View {
                 .padding()
             
             Chart(validResults, id: \.name) { res in
+                let isVEVC = res.name.contains("VEVC")
                 BarMark(
                     x: .value("Codec", res.name),
                     y: .value("PSNR (dB)", res.avgPSNR!)
                 )
-                .foregroundStyle(.blue)
+                .foregroundStyle(isVEVC ? Color.orange : Color.blue.opacity(0.4))
                 .annotation(position: .top) {
                     Text(String(format: "%.2f", res.avgPSNR!))
                         .font(.caption)
@@ -135,11 +140,12 @@ struct SsimChart: View {
                 .padding()
             
             Chart(validResults, id: \.name) { res in
+                let isVEVC = res.name.contains("VEVC")
                 BarMark(
                     x: .value("Codec", res.name),
                     y: .value("SSIM", res.avgSSIM!)
                 )
-                .foregroundStyle(.green)
+                .foregroundStyle(isVEVC ? Color.orange : Color.green.opacity(0.4))
                 .annotation(position: .top) {
                     Text(String(format: "%.4f", res.avgSSIM!))
                         .font(.caption)
