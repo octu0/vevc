@@ -641,38 +641,53 @@ func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: B
     block.data.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
         
-        for y in 0..<32 {
+        // Cache parameters to avoid struct access overhead
+        let qLL3mul = qLL3.mul; let qLL3bias = qLL3.bias; let qLL3shift = qLL3.shift
+        let qHL3mul = qHL3.mul; let qHL3bias = qHL3.bias; let qHL3shift = qHL3.shift
+        let qHL2mul = qHL2.mul; let qHL2bias = qHL2.bias; let qHL2shift = qHL2.shift
+        let qHL1mul = qHL1.mul; let qHL1bias = qHL1.bias; let qHL1shift = qHL1.shift
+
+        @inline(__always)
+        func applyQLL3(_ v: Int16) -> Int16 {
+            let absVal = abs(Int32(v))
+            let qVal = max(0, (((absVal &* qLL3mul) &+ qLL3bias) &>> Int32(qLL3shift)))
+            let res = v <= -1 ? (-1 * qVal) : qVal
+            return Int16(res)
+        }
+        
+        @inline(__always)
+        func applyQSM(_ v: Int16, mul: Int32, bias: Int32, shift: Int16) -> Int16 {
+            let absVal = abs(Int32(v))
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> Int32(shift)))
+            let res = v <= -1 ? (-1 * qVal) : qVal
+            let mask = ((res &<< 1) ^ (res &>> 15))
+            return Int16(mask)
+        }
+        
+        for y in 0..<4 {
             let rowOffset = y * 32
-            for x in 0..<32 {
-                let v = base[rowOffset + x]
-                var denom = qHL1
-                
-                if y < 16 && x < 16 {
-                    if y < 8 && x < 8 {
-                        if y < 4 && x < 4 {
-                            denom = qLL3
-                        } else {
-                            denom = qHL3
-                        }
-                    } else {
-                        denom = qHL2
-                    }
-                }
-                
-                let q = denom
-                let absVal = abs(Int32(v))
-                let qVal = max(0, (((absVal &* q.mul) &+ q.bias) &>> q.shift))
-                var res: Int32 = qVal
-                if v <= -1 {
-                    res = -1 * qVal
-                }
-                if y < 4 && x < 4 {
-                    base[rowOffset + x] = Int16(res)
-                } else {
-                    let mask = ((res &<< 1) ^ (res &>> 15))
-                    base[rowOffset + x] = Int16(mask)
-                }
-            }
+            for x in 0..<4   { base[rowOffset + x] = applyQLL3(base[rowOffset + x]) }
+            for x in 4..<8   { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL3mul, bias: qHL3bias, shift: qHL3shift) }
+            for x in 8..<16  { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL2mul, bias: qHL2bias, shift: qHL2shift) }
+            for x in 16..<32 { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL1mul, bias: qHL1bias, shift: qHL1shift) }
+        }
+        
+        for y in 4..<8 {
+            let rowOffset = y * 32
+            for x in 0..<8   { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL3mul, bias: qHL3bias, shift: qHL3shift) }
+            for x in 8..<16  { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL2mul, bias: qHL2bias, shift: qHL2shift) }
+            for x in 16..<32 { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL1mul, bias: qHL1bias, shift: qHL1shift) }
+        }
+        
+        for y in 8..<16 {
+            let rowOffset = y * 32
+            for x in 0..<16  { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL2mul, bias: qHL2bias, shift: qHL2shift) }
+            for x in 16..<32 { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL1mul, bias: qHL1bias, shift: qHL1shift) }
+        }
+        
+        for y in 16..<32 {
+            let rowOffset = y * 32
+            for x in 0..<32  { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL1mul, bias: qHL1bias, shift: qHL1shift) }
         }
     }
 }
@@ -687,36 +702,48 @@ func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma:
 
     block.data.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
+
+        let sLL3 = Int32(qLL3.step)
+        let sHL3 = Int32(qHL3.step)
+        let sHL2 = Int32(qHL2.step)
+        let sHL1 = Int32(qHL1.step)
+
+        @inline(__always)
+        func applyDQLL3(_ v: Int16) -> Int16 {
+            return Int16(clamping: Int32(v) &* sLL3)
+        }
         
-        for y in 0..<32 {
+        @inline(__always)
+        func applyDQSM(_ v: Int16, s: Int32) -> Int16 {
+            let uVal = UInt16(bitPattern: v)
+            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+            return Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* s)
+        }
+
+        for y in 0..<4 {
             let rowOffset = y * 32
-            for x in 0..<32 {
-                let v = base[rowOffset + x]
-                var denom = qHL1
-                
-                if y < 16 && x < 16 {
-                    if y < 8 && x < 8 {
-                        if y < 4 && x < 4 {
-                            denom = qLL3
-                        } else {
-                            denom = qHL3
-                        }
-                    } else {
-                        denom = qHL2
-                    }
-                }
-                
-                let q = denom
-                let step = Int32(q.step)
-                if y < 4 && x < 4 {
-                    base[rowOffset + x] = Int16(clamping: Int32(v) &* step)
-                } else {
-                    let uVal = UInt16(bitPattern: v)
-                    let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-                    let decoded = Int16(bitPattern: decodedUInt)
-                    base[rowOffset + x] = Int16(clamping: Int32(decoded) &* step)
-                }
-            }
+            for x in 0..<4   { base[rowOffset + x] = applyDQLL3(base[rowOffset + x]) }
+            for x in 4..<8   { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL3) }
+            for x in 8..<16  { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL2) }
+            for x in 16..<32 { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL1) }
+        }
+        
+        for y in 4..<8 {
+            let rowOffset = y * 32
+            for x in 0..<8   { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL3) }
+            for x in 8..<16  { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL2) }
+            for x in 16..<32 { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL1) }
+        }
+        
+        for y in 8..<16 {
+            let rowOffset = y * 32
+            for x in 0..<16  { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL2) }
+            for x in 16..<32 { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL1) }
+        }
+        
+        for y in 16..<32 {
+            let rowOffset = y * 32
+            for x in 0..<32  { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL1) }
         }
     }
 }

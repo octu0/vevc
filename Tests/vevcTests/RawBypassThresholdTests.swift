@@ -78,10 +78,10 @@ struct RawBypassThresholdTests {
         encoder.flush()
         let data = encoder.getData()
 
-        // getData() structure: [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
-        // mode byte should be 0x80 for raw bypass mode
-        let bypassLen = Int(UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3]))
-        let modeByteOffset = 4 + bypassLen + 4 // skip bypassLen + bypassData + coeffCount
+        // getData() structure: [lsciCount(4B)] ... [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
+        var offset = 4 // skip lsciCount (which is 0 in this test)
+        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
+        let modeByteOffset = offset + 4 + bypassLen + 4 // skip bypassLen(4) + bypassData + coeffCount(4)
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         #expect(data[modeByteOffset] == 0x80, "Should be raw bypass mode (0x80) for \(pairs.count) pairs")
     }
@@ -96,8 +96,9 @@ struct RawBypassThresholdTests {
         encoder.flush()
         let data = encoder.getData()
 
-        let bypassLen = Int(UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3]))
-        let modeByteOffset = 4 + bypassLen + 4
+        var offset = 4 // skip lsciCount
+        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
+        let modeByteOffset = offset + 4 + bypassLen + 4
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         let modeByte = data[modeByteOffset]
         #expect(modeByte != 0x80, "Should NOT be raw bypass mode for \(pairs.count) pairs")
