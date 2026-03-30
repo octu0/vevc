@@ -51,8 +51,8 @@ guard let inputData = try? Data(contentsOf: URL(fileURLWithPath: inputPath)) els
 do {
     let startTime = Date()
     let images: [YCbCrImage]
-    let opts = vevc.DecodeOptions(maxLayer: maxLayer, maxFrames: maxFrames)
-    images = try await vevc.decode(data: Array(inputData), opts: opts)
+    let decoder = Decoder(maxLayer: maxLayer)
+    images = try await decoder.decode(data: Array(inputData))
     let elapsed = Date().timeIntervalSince(startTime)
     print(String(
         format: "Decoded %d frames in %.4fms (%.4fms/frame)",

@@ -66,39 +66,17 @@ do {
         outFileHandle = f
     }
 
-    let vevcReader = VEVCReader(fileHandle: inFileHandle)
-    let layerToUse = maxLayer
-    
-    // Read the first chunk to ensure the VEVC header is parsed and width/height are available
-    let firstChunk = try vevcReader.readFrameChunk()
-    
-    let decoder = vevc.Decoder(maxLayer: layerToUse, width: vevcReader.width, height: vevcReader.height)
-    
+    let decoder = vevc.Decoder(maxLayer: maxLayer)
+
     var y4mWriter: Y4MWriter? = nil
     var frameCount = 0
     let startTime = Date()
 
-    let encodedStream = AsyncStream<[UInt8]> { continuation in
-        Task {
-            do {
-                if let chunk = firstChunk {
-                    continuation.yield(chunk)
-                }
-                while let chunk = try vevcReader.readFrameChunk() {
-                    continuation.yield(chunk)
-                }
-                continuation.finish()
-            } catch {
-                fputs("Failed to read chunk: \(error)\n", stderr)
-                continuation.finish()
-            }
-        }
-    }
-
-    let imageStream = decoder.decode(stream: encodedStream)
+    let imageStream = decoder.decode(fileHandle: inFileHandle)
     for try await image in imageStream {
         if y4mWriter == nil {
-            let fpsHeader = "F\(vevcReader.fps):1"
+            // FPS is not available from Decoder directly; use default 30fps
+            let fpsHeader = "F30:1"
             y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
         }
         
@@ -117,9 +95,6 @@ do {
     outFileHandle.closeFile()
 } catch let error as vevc.DecodeError {
     fputs("Failed to decode: DecodeError \(error)\n", stderr)
-    exit(1)
-} catch let error as vevc.VEVCReaderError {
-    fputs("Failed to decode: VEVCReaderError \(error)\n", stderr)
     exit(1)
 } catch {
     fputs("Failed to decode: \(error.localizedDescription) (\(error))\n", stderr)

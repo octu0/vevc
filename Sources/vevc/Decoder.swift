@@ -77,19 +77,13 @@ class CoreDecoder {
 public struct Decoder: Sendable {
     public let maxLayer: Int
     public let maxConcurrency: Int
-    public let width: Int
-    public let height: Int
 
     public init(
         maxLayer: Int = 2,
         maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount,
-        width: Int = 0,
-        height: Int = 0,
     ) {
         self.maxLayer = maxLayer
         self.maxConcurrency = maxConcurrency
-        self.width = width
-        self.height = height
     }
 
     /// Parse VEVC header chunk to extract width/height from metadata.
@@ -116,6 +110,7 @@ public struct Decoder: Sendable {
     /// Decodes a stream of VEVC chunks into a stream of images.
     /// First chunk may be a VEVC header (Magic + Metadata), followed by GOP chunks.
     /// Each GOP chunk is a self-contained unit that decodes to one or more frames.
+    /// Width/height are extracted from the VEVC header in the stream.
     public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -124,9 +119,9 @@ public struct Decoder: Sendable {
                 var nextGOPIndexToYield = 0
                 var completedGOPs: [Int: [YCbCrImage]] = [:]
                 
-                // Use initializer values, may be overridden by VEVC header
-                var effectiveWidth = self.width
-                var effectiveHeight = self.height
+                // Width/height are extracted from VEVC header
+                var effectiveWidth = 0
+                var effectiveHeight = 0
                 
                 // Consume leading VEVC header chunk(s) before entering decode loop
                 var pendingGOPChunk: [UInt8]? = nil
@@ -198,6 +193,55 @@ public struct Decoder: Sendable {
         }
     }
     
+    /// Decode VEVC encoded byte array into images.
+    /// Parses the VEVC header and GOP chunks from the data, then decodes via streaming pipeline.
+    public func decode(data: [UInt8]) async throws -> [YCbCrImage] {
+        if data.isEmpty { return [] }
+        
+        var offset = 0
+        var chunks: [[UInt8]] = []
+        var headerChunk: [UInt8]? = nil
+        
+        while offset < data.count {
+            guard offset + 4 <= data.count else { break }
+            
+            let first4Bytes = [data[offset], data[offset+1], data[offset+2], data[offset+3]]
+            if first4Bytes == [0x56, 0x45, 0x56, 0x43] {
+                // VEVC file header: magic(4B) + metadataSize(2B) + payload
+                let headerStart = offset
+                offset += 4
+                let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
+                offset += metadataSize
+                headerChunk = Array(data[headerStart..<offset])
+            } else {
+                // GOP chunk: first4Bytes is DataSize(4B)
+                let chunkStart = offset
+                let gopDataSize = Int(try readUInt32BEFromBytes(data, offset: &offset))
+                if (offset + gopDataSize) > data.count {
+                    throw DecodeError.insufficientData
+                }
+                let chunkEnd = offset + gopDataSize
+                chunks.append(Array(data[chunkStart..<chunkEnd]))
+                offset = chunkEnd
+            }
+        }
+        
+        let stream = AsyncStream<[UInt8]> { continuation in
+            if let header = headerChunk {
+                continuation.yield(header)
+            }
+            for chunk in chunks {
+                continuation.yield(chunk)
+            }
+            continuation.finish()
+        }
+        var images: [YCbCrImage] = []
+        for try await img in self.decode(stream: stream) {
+            images.append(img)
+        }
+        return images
+    }
+
     /// Decodes an array of chunks. Convenience for tests and compare tool.
     public func decode(chunks: [[UInt8]]) async throws -> [YCbCrImage] {
         let stream = AsyncStream<[UInt8]> { continuation in
@@ -212,4 +256,79 @@ public struct Decoder: Sendable {
         }
         return images
     }
+    
+    /// Decode VEVC data from a FileHandle (file or stdin).
+    /// Reads the VEVC header and GOP chunks, then decodes via streaming pipeline.
+    /// VEVCReader の機能を統合: ヘッダ解析とチャンク読み込みを Decoder 内で完結させる。
+    public func decode(fileHandle: FileHandle) -> AsyncThrowingStream<YCbCrImage, Error> {
+        let stream = AsyncStream<[UInt8]> { continuation in
+            Task {
+                do {
+                    while true {
+                        let first4Data = readFully(fileHandle: fileHandle, count: 4)
+                        if first4Data.isEmpty { break } // Normal EOF
+                        guard first4Data.count == 4 else {
+                            continuation.finish()
+                            return
+                        }
+                        
+                        let first4Bytes = [UInt8](first4Data)
+                        if first4Bytes == [0x56, 0x45, 0x56, 0x43] {
+                            // VEVC file header
+                            let metaSizeData = readFully(fileHandle: fileHandle, count: 2)
+                            guard metaSizeData.count == 2 else {
+                                continuation.finish()
+                                return
+                            }
+                            var msOffset = 0
+                            let metadataSize = Int(try readUInt16BEFromBytes([UInt8](metaSizeData), offset: &msOffset))
+                            let metaData = readFully(fileHandle: fileHandle, count: metadataSize)
+                            guard metaData.count == metadataSize else {
+                                continuation.finish()
+                                return
+                            }
+                            
+                            // Build complete header chunk for parseVEVCHeaderChunk
+                            var headerChunk: [UInt8] = first4Bytes
+                            headerChunk.append(contentsOf: metaSizeData)
+                            headerChunk.append(contentsOf: metaData)
+                            continuation.yield(headerChunk)
+                        } else {
+                            // GOP chunk: first4Bytes is DataSize(4B)
+                            var dsOffset = 0
+                            let gopDataSize = Int(try readUInt32BEFromBytes(first4Bytes, offset: &dsOffset))
+                            let gopBody = readFully(fileHandle: fileHandle, count: gopDataSize)
+                            guard gopBody.count == gopDataSize else {
+                                continuation.finish()
+                                return
+                            }
+                            
+                            var chunk: [UInt8] = []
+                            chunk.reserveCapacity(4 + gopDataSize)
+                            chunk.append(contentsOf: first4Bytes)
+                            chunk.append(contentsOf: gopBody)
+                            continuation.yield(chunk)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish()
+                }
+            }
+        }
+        return self.decode(stream: stream)
+    }
+}
+
+/// FileHandle からの確実な読み込み (途中で分割される可能性に対応)
+private func readFully(fileHandle: FileHandle, count: Int) -> Data {
+    var result = Data()
+    var remaining = count
+    while remaining > 0 {
+        let data = fileHandle.readData(ofLength: remaining)
+        if data.isEmpty { break }
+        result.append(data)
+        remaining -= data.count
+    }
+    return result
 }

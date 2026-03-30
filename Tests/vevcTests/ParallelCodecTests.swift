@@ -76,7 +76,7 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 2. Parallel Decoding Test
-        let decoder = Decoder(maxLayer: 2, maxConcurrency: 2, width: width, height: height)
+        let decoder = Decoder(maxLayer: 2, maxConcurrency: 2)
         var decodedImages: [YCbCrImage] = []
         let imageStream = decoder.decode(stream: encodedStream)
         for try await img in imageStream {

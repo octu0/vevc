@@ -27,21 +27,6 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
     out.append(UInt8(val & 0xFF))
 }
 
-@inline(__always)
-func appendUInt64BE(_ out: inout [UInt8], _ val: UInt64) {
-    appendUInt32BE(&out, UInt32((val >> 32) & 0xFFFFFFFF))
-    appendUInt32BE(&out, UInt32(val & 0xFFFFFFFF))
-}
-
-@inline(__always)
-func readUInt8FromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt8 {
-    guard (offset + 1) <= r.count else {
-        throw BinaryError.insufficientData(message: "readUInt8FromBytes offset(\(offset)) + 1 > r.count(\(r.count))")
-    }
-    let val = r[offset]
-    offset += 1
-    return val
-}
 
 @inline(__always)
 public func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt16 {

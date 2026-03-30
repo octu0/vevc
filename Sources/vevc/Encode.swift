@@ -648,41 +648,6 @@ func isEffectivelyZero8(data: UnsafeMutableBufferPointer<Int16>, threshold: Int)
     return true
 }
 
-@inline(__always)
-func isEffectivelyZero4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
-    guard let base = data.baseAddress else { return false }
-    let th = Int16(threshold)
-    let thPos = SIMD2<Int16>(repeating: th)
-    let thNeg = SIMD2<Int16>(repeating: -th)
-
-    let lowerHalfBase = base + 2 * 4
-    for i in stride(from: 0, to: 8, by: 2) {
-        let vec: SIMD2<Int16> = UnsafeRawPointer(lowerHalfBase + i).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
-    }
-    for y in 0..<2 {
-        let ptr = base + y * 4 + 2
-        let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
-    }
-
-    let zeroVec = SIMD2<Int16>(repeating: 0)
-    for i in stride(from: 0, to: 8, by: 2) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
-    }
-    for y in 0..<2 {
-        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
-    }
-    return true
-}
 
 @inline(__always)
 func checkQuadrants16x16(base: UnsafeMutablePointer<Int16>, stride: Int, q0: inout Bool, q1: inout Bool, q2: inout Bool, q3: inout Bool) {
@@ -1455,31 +1420,6 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     return out
 }
 
-#if (arch(arm64) || arch(x86_64) || arch(wasm32))
-/// Encode images using temporal DWT (GOP=4) + spatial Layers pipeline.
-/// Groups every 4 frames into temporal GOPs for improved compression.
-public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {    
-    if images.isEmpty { return [] }
-    guard let first = images.first else { return [] }
-    
-    let encoder = VEVCEncoder(
-        width: first.width,
-        height: first.height,
-        maxbitrate: maxbitrate,
-        framerate: framerate,
-        zeroThreshold: zeroThreshold,
-        keyint: keyint,
-        sceneChangeThreshold: sceneChangeThreshold
-    )
-    
-    let chunks = try await encoder.encode(images: images)
-    var result: [UInt8] = []
-    for chunk in chunks {
-        result.append(contentsOf: chunk)
-    }
-    
-    return result
-}
 
 // MARK: - Dedicated Subband Process Functions
 
@@ -1700,8 +1640,3 @@ func encodeSubbands16WithoutParent<M: EntropyModelProvider>(
         }
     }
 }
-#else
-public func encode(images: [YCbCrImage], maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, gopSize: Int = 15, sceneChangeThreshold: Int = 32) async throws -> [UInt8] {
-    throw EncodeError.unsupportedArchitecture
-}
-#endif

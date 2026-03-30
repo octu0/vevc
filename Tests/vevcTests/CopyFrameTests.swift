@@ -39,15 +39,15 @@ struct CopyFrameTests {
         let img = makeSolidImage(width: width, height: height, y: 128, cb: 128, cr: 128)
         let identicalImages = [img, img, img, img, img]
 
-        let identicalBytes = try await vevc.encode(
-            images: identicalImages,
+        let identicalEncoder = VEVCEncoder(
+            width: width, height: height,
             maxbitrate: 5_000_000,
             framerate: 60,
             zeroThreshold: 0,
             keyint: 60,
             sceneChangeThreshold: 32
         )
-        let identicalSize = identicalBytes.count
+        let identicalBytes = try await identicalEncoder.encodeToData(images: identicalImages)
 
         // Scenario 2: 5 different frames
         let img1 = makeSolidImage(width: width, height: height, y: 100, cb: 128, cr: 128)
@@ -57,16 +57,18 @@ struct CopyFrameTests {
         let img5 = makeSolidImage(width: width, height: height, y: 180, cb: 128, cr: 128)
         let differentImages = [img1, img2, img3, img4, img5]
 
-        let differentBytes = try await vevc.encode(
-            images: differentImages,
+        let differentEncoder = VEVCEncoder(
+            width: width, height: height,
             maxbitrate: 5_000_000,
             framerate: 60,
             zeroThreshold: 0,
             keyint: 60,
             sceneChangeThreshold: 32
         )
-        let differentSize = differentBytes.count
+        let differentBytes = try await differentEncoder.encodeToData(images: differentImages)
 
+        let identicalSize = identicalBytes.count
+        let differentSize = differentBytes.count
         print("  Identical 5 frames: \(identicalSize) bytes")
         print("  Different 5 frames: \(differentSize) bytes")
         print("  Ratio: \(String(format: "%.1f", Double(identicalSize) / Double(differentSize) * 100))%")
@@ -91,16 +93,17 @@ struct CopyFrameTests {
         let img2 = makeSolidImage(width: width, height: height, y: 200, cb: 128, cr: 128)
         let images = [img1, img1, img2, img2, img2]
 
-        let encoded = try await vevc.encode(
-            images: images,
+        let copyEncoder = VEVCEncoder(
+            width: width, height: height,
             maxbitrate: 5_000_000,
             framerate: 60,
             zeroThreshold: 0,
             keyint: 60,
             sceneChangeThreshold: 32
         )
+        let encoded = try await copyEncoder.encodeToData(images: images)
 
-        let decoded = try await vevc.decode(data: encoded)
+        let decoded = try await Decoder().decode(data: encoded)
         #expect(decoded.count == 5, "Should decode 5 frames, got \(decoded.count)")
 
         // Frames 0 and 1 should be similar (both derived from img1)
@@ -132,16 +135,17 @@ struct CopyFrameTests {
         for count in [2, 3, 5, 10] {
             let images = [YCbCrImage](repeating: img, count: count)
 
-            let encoded = try await vevc.encode(
-                images: images,
+            let countEncoder = VEVCEncoder(
+                width: width, height: height,
                 maxbitrate: 5_000_000,
                 framerate: 60,
                 zeroThreshold: 0,
                 keyint: 60,
                 sceneChangeThreshold: 32
             )
+            let encoded = try await countEncoder.encodeToData(images: images)
 
-            let decoded = try await vevc.decode(data: encoded)
+            let decoded = try await Decoder().decode(data: encoded)
             #expect(decoded.count == count,
                    "GOP with \(count) identical frames should decode to \(count) frames, got \(decoded.count)")
         }

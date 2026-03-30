@@ -76,8 +76,19 @@ for p in positionalArgs {
 
 do {
     let startTime = Date()
-    let out: [UInt8]
-    out = try await vevc.encode(images: images, maxbitrate: bitrate * 1000, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneThreshold)
+    guard let first = images.first else {
+        print("No images to encode")
+        exit(1)
+    }
+    let encoder = VEVCEncoder(
+        width: first.width,
+        height: first.height,
+        maxbitrate: bitrate * 1000,
+        zeroThreshold: zeroThreshold,
+        keyint: keyint,
+        sceneChangeThreshold: sceneThreshold
+    )
+    let out = try await encoder.encodeToData(images: images)
     let elapsed = Date().timeIntervalSince(startTime)
     
     let dataSize: Int

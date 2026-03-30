@@ -2,20 +2,18 @@ import Foundation
 
 
 
-struct EncoderUtils {
-    @inline(__always)
-    static func buildVEVCHeader(width: Int, height: Int, framerate: Int) -> [UInt8] {
-        var header: [UInt8] = [0x56, 0x45, 0x56, 0x43] // Magic 'VEVC'
-        let metadataPayloadSize: UInt16 = 9
-        appendUInt16BE(&header, metadataPayloadSize)
-        header.append(0x01) // Profile 1
-        appendUInt16BE(&header, UInt16(width))
-        appendUInt16BE(&header, UInt16(height))
-        header.append(0x01) // ColorGamut: BT.709
-        appendUInt16BE(&header, UInt16(framerate))
-        header.append(0x00) // Timescale: 0=1000ms
-        return header
-    }
+@inline(__always)
+private func buildVEVCHeader(width: Int, height: Int, framerate: Int) -> [UInt8] {
+    var header: [UInt8] = [0x56, 0x45, 0x56, 0x43] // Magic 'VEVC'
+    let metadataPayloadSize: UInt16 = 9
+    appendUInt16BE(&header, metadataPayloadSize)
+    header.append(0x01) // Profile 1
+    appendUInt16BE(&header, UInt16(width))
+    appendUInt16BE(&header, UInt16(height))
+    header.append(0x01) // ColorGamut: BT.709
+    appendUInt16BE(&header, UInt16(framerate))
+    header.append(0x00) // Timescale: 0=1000ms
+    return header
 }
 
 // MARK: - LayersEncoder & LayersCoreEncoder (Temporal DWT, Mode=0x00)
@@ -55,6 +53,18 @@ public class VEVCEncoder {
         return chunks
     }
     
+    /// Encode images and return concatenated byte array.
+    /// Convenience for roundtrip tests and simple usage.
+    public func encodeToData(images: [YCbCrImage]) async throws -> [UInt8] {
+        let chunks = try await encode(images: images)
+        var result: [UInt8] = []
+        for chunk in chunks {
+            result.append(contentsOf: chunk)
+        }
+        return result
+    }
+
+    
     public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
         let width = self.width
         let height = self.height
@@ -77,23 +87,8 @@ public class VEVCEncoder {
                     sceneChangeThreshold: sceneChangeThreshold
                 )
                 
-                // 簡易かつ高速なシーンチェンジ判定用ヘルパー (Yプレーンのみ、4ピクセルおきにSAD算出)
-                func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
-                    guard a.yPlane.count == b.yPlane.count, 0 < a.yPlane.count else { return 0 }
-                    let count = a.yPlane.count
-                    var sum: UInt64 = 0
-                    a.yPlane.withUnsafeBufferPointer { aPtr in
-                        b.yPlane.withUnsafeBufferPointer { bPtr in
-                            for i in stride(from: 0, to: count, by: 4) {
-                                sum += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
-                            }
-                        }
-                    }
-                    return Int((sum * 4) / UInt64(count))
-                }
-                
                 do {
-                    continuation.yield(EncoderUtils.buildVEVCHeader(width: width, height: height, framerate: framerate))
+                    continuation.yield(buildVEVCHeader(width: width, height: height, framerate: framerate))
                     
                     var buffer: [YCbCrImage] = []
                     while let img = await iterator.next() {
@@ -291,6 +286,22 @@ actor LayersEncodeActor {
 }
 
 
+/// 簡易かつ高速なシーンチェンジ判定用ヘルパー (Yプレーンのみ、4ピクセルおきにSAD算出)
+@inline(__always)
+private func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
+    guard a.yPlane.count == b.yPlane.count, 0 < a.yPlane.count else { return 0 }
+    let count = a.yPlane.count
+    var sum: UInt64 = 0
+    a.yPlane.withUnsafeBufferPointer { aPtr in
+        b.yPlane.withUnsafeBufferPointer { bPtr in
+            for i in stride(from: 0, to: count, by: 4) {
+                sum += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
+            }
+        }
+    }
+    return Int((sum * 4) / UInt64(count))
+}
+
 /// Estimate frame-level SAD (Sum of Absolute Differences) between current
 /// and previous PlaneData420 Y planes by sampling representative blocks.
 /// Returns average per-pixel SAD as an Int for RateController input.
@@ -470,58 +481,6 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
     return bodyBits + headerBits
 }
 
-private func estimateRiceBitsDPCM16(block: BlockView, lastVal: inout Int16) -> Int {
-    let count = 16 * 16
-    
-    @inline(__always)
-    func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
-        let ia = Int(a), ib = Int(b), ic = Int(c)
-        let predicted: Int
-        if ia <= ic && ib <= ic {
-            predicted = min(ia, ib)
-        } else if ic <= ia && ic <= ib {
-            predicted = max(ia, ib)
-        } else {
-            predicted = ia + ib - ic
-        }
-        return abs(Int(x) - predicted)
-    }
-
-    var sumDiffAbs = 0
-    let ptrY0 = block.rowPointer(y: 0)
-    sumDiffAbs += abs(Int(ptrY0[0]) - Int(lastVal))
-    for x in 1..<16 {
-        sumDiffAbs += abs(Int(ptrY0[x]) - Int(ptrY0[x - 1]))
-    }
-    
-    var last = ptrY0[15]
-    for y in 1..<16 {
-        let ptrY = block.rowPointer(y: y)
-        let ptrPrevY = block.rowPointer(y: y - 1)
-        
-        sumDiffAbs += abs(Int(ptrY[0]) - Int(ptrPrevY[0]))
-        for x in 1..<16 {
-            sumDiffAbs += errorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
-        }
-        last = ptrY[15]
-    }
-    lastVal = last
-    
-    let meanInt = sumDiffAbs / count
-    let k: Int
-    if meanInt < 1 {
-        k = 0
-    } else {
-        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
-    }
-    
-    let divisorShift = max(0, k - 1)
-    let bodyBits = sumDiffAbs >> divisorShift
-    let headerBits = count * (1 + k)
-    
-    return bodyBits + headerBits
-}
-
 private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
     var sub = block.withView { view in
         return dwt2d_8_sb(&view)
@@ -549,81 +508,6 @@ private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> I
     return bits
 }
 
-private func estimateRiceBits32(block: BlockView) -> Int {
-    var sumAbs = 0
-    let count = (32 * 32)
-    
-    for y in 0..<32 {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<32 {
-            sumAbs += abs(Int(ptr[x]))
-        }
-    }
-    let meanInt = sumAbs / count
-    let k: Int
-    if meanInt < 1 {
-        k = 0
-    } else {
-        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
-    }
-    
-    let divisorShift = max(0, k - 1)
-    let bodyBits = sumAbs >> divisorShift
-    let headerBits = count * (1 + k)
-    
-    return bodyBits + headerBits
-}
-
-private func estimateRiceBits16(block: BlockView) -> Int {
-    var sumAbs = 0
-    let count = (16 * 16)
-    
-    for y in 0..<16 {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<16 {
-            sumAbs += abs(Int(ptr[x]))
-        }
-    }
-    let meanInt = sumAbs / count
-    let k: Int
-    if meanInt < 1 {
-        k = 0
-    } else {
-        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
-    }
-    
-    let divisorShift = max(0, k - 1)
-    let bodyBits = sumAbs >> divisorShift
-    let headerBits = count * (1 + k)
-    
-    return bodyBits + headerBits
-}
-
-private func estimateRiceBits8(block: BlockView) -> Int {
-    var sumAbs = 0
-    let count = (8 * 8)
-    
-    for y in 0..<8 {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<8 {
-            sumAbs += abs(Int(ptr[x]))
-        }
-    }
-    let meanInt = sumAbs / count
-    let k: Int
-    if meanInt < 1 {
-        k = 0
-    } else {
-        k = (Int.bitWidth - 1) - meanInt.leadingZeroBitCount
-    }
-    
-    let divisorShift = max(0, k - 1)
-    let bodyBits = sumAbs >> divisorShift
-    let headerBits = count * (1 + k)
-    
-    return bodyBits + headerBits
-}
-
 private func estimateRiceBits4(block: BlockView) -> Int {
     var sumAbs = 0
     let count = (4 * 4)
@@ -647,32 +531,5 @@ private func estimateRiceBits4(block: BlockView) -> Int {
     let headerBits = count * (1 + k)
     
     return bodyBits + headerBits
-}
-
-private func measureBlockBits32(block: inout Block2D, qt: QuantizationTable) -> Int {
-    var sub = block.withView { view in
-        return dwt2d_32_sb(&view)
-    }
-    
-    quantizeSIMD(&sub.ll, q: qt.qLow)
-    quantizeSIMD(&sub.hl, q: qt.qMid)
-    quantizeSIMD(&sub.lh, q: qt.qMid)
-    quantizeSIMD(&sub.hh, q: qt.qHigh)
-    
-    let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
-        return isEffectivelyZeroBase32(data: ptr, threshold: 0)
-    }
-    if isZero {
-        return 1
-    }
-    
-    var bits = 1
-    var lastVal: Int16 = 0
-    bits += estimateRiceBitsDPCM16(block: sub.ll, lastVal: &lastVal)
-    bits += estimateRiceBits16(block: sub.hl)
-    bits += estimateRiceBits16(block: sub.lh)
-    bits += estimateRiceBits16(block: sub.hh)
-    
-    return bits
 }
 

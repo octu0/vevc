@@ -80,15 +80,25 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     // Encode
     print("  -> runVEVC Encoding...")
     let encStart = Date()
-    let outBytes: [UInt8] = try await vevc.encode(images: vevcImages, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold)
+    guard let first = vevcImages.first else { return (0, 0, 0, nil, []) }
+    let vevcEncoder = VEVCEncoder(
+        width: first.width,
+        height: first.height,
+        maxbitrate: config.bitrate * 1000,
+        framerate: config.framerate,
+        zeroThreshold: config.zeroThreshold,
+        keyint: config.keyint,
+        sceneChangeThreshold: config.sceneThreshold
+    )
+    let outBytes = try await vevcEncoder.encodeToData(images: vevcImages)
     let encTime = Date().timeIntervalSince(encStart)
     print("  -> runVEVC Encoded \(outBytes.count) bytes")
     
     // Decode
     print("  -> runVEVC Decoding...")
-    let opts = vevc.DecodeOptions(maxLayer: config.maxLayer, maxFrames: 4)
+    let vevcDecoder = Decoder(maxLayer: config.maxLayer)
     let decStart = Date()
-    let outFrames = try await vevc.decode(data: outBytes, opts: opts)
+    let outFrames = try await vevcDecoder.decode(data: outBytes)
     let decTime = Date().timeIntervalSince(decStart)
     print("  -> runVEVC Decoded \(outFrames.count) frames")
     
@@ -996,8 +1006,8 @@ func extractVTFrames(bitstream: [CMSampleBuffer], disableHWA: Bool, indices: Set
 }
 
 func extractVEVCFrames(bitstream: [UInt8], config: Config, indices: Set<Int>) async throws -> [Int: YCbCrImage] {
-    let opts = vevc.DecodeOptions(maxLayer: config.maxLayer, maxFrames: 4)
-    let outFrames = try await vevc.decode(data: bitstream, opts: opts)
+    let vevcDecoder = Decoder(maxLayer: config.maxLayer)
+    let outFrames = try await vevcDecoder.decode(data: bitstream)
     var extracted: [Int: YCbCrImage] = [:]
     for i in 0..<outFrames.count {
         if indices.contains(i) {

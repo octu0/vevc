@@ -65,10 +65,11 @@ final class VevcTests: XCTestCase {
         
         let images = [img1, img2]
         
-        let encoded = try await vevc.encode(images: images, maxbitrate: 1000 * 1024)
+        let encoder = VEVCEncoder(width: 64, height: 64, maxbitrate: 1000 * 1024)
+        let encoded = try await encoder.encodeToData(images: images)
         XCTAssertFalse(encoded.isEmpty)
         
-        let decoded = try await vevc.decode(data: encoded)
+        let decoded = try await Decoder().decode(data: encoded)
         XCTAssertEqual(decoded.count, 2)
         XCTAssertEqual(decoded[0].width, 64)
         XCTAssertEqual(decoded[0].height, 64)
@@ -122,10 +123,11 @@ final class VevcTests: XCTestCase {
         let height = 480
         let img = generateGradientImage(width: width, height: height, seed: 42)
         
-        let encoded = try await vevc.encode(images: [img], maxbitrate: 1000 * 1024)
+        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024)
+        let encoded = try await encoder.encodeToData(images: [img])
         XCTAssertFalse(encoded.isEmpty, "エンコード結果が空")
         
-        let decoded = try await vevc.decode(data: encoded)
+        let decoded = try await Decoder().decode(data: encoded)
         XCTAssertEqual(decoded.count, 1, "デコード結果のフレーム数が1でない")
         XCTAssertEqual(decoded[0].width, width)
         XCTAssertEqual(decoded[0].height, height)
@@ -151,10 +153,11 @@ final class VevcTests: XCTestCase {
             images.append(generateGradientImage(width: width, height: height, seed: i * 3))
         }
         
-        let encoded = try await vevc.encode(images: images, maxbitrate: 1000 * 1024)
+        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024)
+        let encoded = try await encoder.encodeToData(images: images)
         XCTAssertFalse(encoded.isEmpty, "エンコード結果が空")
         
-        let decoded = try await vevc.decode(data: encoded)
+        let decoded = try await Decoder().decode(data: encoded)
         XCTAssertEqual(decoded.count, frameCount, "デコード結果のフレーム数が\(frameCount)でない: \(decoded.count)")
         
         for i in 0..<frameCount {
