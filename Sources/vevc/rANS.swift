@@ -158,6 +158,7 @@ struct rANSModel {
         buildLUT()
     }
     
+    @inline(__always)
     private mutating func buildLUT() {
         tokenLUT.withUnsafeMutableBufferPointer { ptr in
             for sym in 0..<64 {
@@ -171,6 +172,7 @@ struct rANSModel {
         }
     }
     
+    @inline(__always)
     mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
         let totalSig = sigCounts[0] + sigCounts[1]
         if totalSig == 0 {
@@ -272,11 +274,13 @@ struct rANSEncoder {
         state = (q << RANS_SCALE_BITS) + (state - q * freq) + cumFreq
     }
     
+    @inline(__always)
     mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: state))
         stream.append(UInt16(truncatingIfNeeded: state >> 16))
     }
     
+    @inline(__always)
     func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
@@ -391,6 +395,7 @@ struct Interleaved4rANSEncoder {
         }
     }
     
+    @inline(__always)
     mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: states.3))
         stream.append(UInt16(truncatingIfNeeded: states.3 >> 16))
@@ -402,6 +407,7 @@ struct Interleaved4rANSEncoder {
         stream.append(UInt16(truncatingIfNeeded: states.0 >> 16))
     }
     
+    @inline(__always)
     func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
@@ -525,6 +531,7 @@ struct InterleavedrANSEncoder {
         states[lane] = state
     }
     
+    @inline(__always)
     mutating func flush() {
         for lane in 0..<4 {
             streams[lane].append(UInt16(truncatingIfNeeded: states[lane]))
@@ -534,6 +541,7 @@ struct InterleavedrANSEncoder {
     
     /// merge 4 streams into a single bitstream
     /// format: [len0(4bytes)][len1(4bytes)][len2(4bytes)][len3(4bytes)][stream0][stream1][stream2][stream3]
+    @inline(__always)
     func getBitstream() -> [UInt8] {
         var bytes = [UInt8]()
         
@@ -673,7 +681,6 @@ struct InterleavedrANSDecoder {
     }
 }
 
-
 struct BypassWriter {
     private(set) var bytes: [UInt8]
     private var buffer: UInt64
@@ -716,6 +723,7 @@ struct BypassWriter {
         }
     }
     
+    @inline(__always)
     mutating func flush() {
         guard 0 < bitsInBuffer else { return }
         while bitsInBuffer >= 8 {
@@ -790,8 +798,6 @@ struct BypassReader {
         return (totalBitsRead + 7) / 8
     }
 }
-
-import Foundation
 
 @inline(__always)
 func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
@@ -928,6 +934,7 @@ struct ZOrder {
         return z
     }
     
+    @inline(__always)
     private static func buildZOrder(size: Int) -> [(x: Int, y: Int)] {
         var arr = [(x: Int, y: Int)](repeating: (0, 0), count: size * size)
         for y in 0..<size {

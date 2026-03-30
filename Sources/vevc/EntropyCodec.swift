@@ -597,6 +597,7 @@ struct EntropyDecoder {
 
 // MARK: - Motion Vector rANS Codec
 
+@inline(__always)
 func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
     var tokensDx = [UInt8]()
     var tokensDy = [UInt8]()
@@ -650,6 +651,7 @@ func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
     return out
 }
 
+@inline(__always)
 func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
     var offset = 0
     let freqsDx = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
