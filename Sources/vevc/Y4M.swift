@@ -47,6 +47,7 @@ public class Y4MReader {
         self.fpsHeader = fps
     }
     
+    @inline(__always)
     public func readFrame() throws -> YCbCrImage? {
         let header = fileHandle.readData(ofLength: 6)
         if header.isEmpty { return nil } // EOF
@@ -86,6 +87,7 @@ public class Y4MWriter {
         }
     }
     
+    @inline(__always)
     public func writeFrame(_ img: YCbCrImage) throws {
         fileHandle.write(frameHeader)
         

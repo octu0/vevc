@@ -1,7 +1,6 @@
 import Foundation
 
-@inlinable
-@inline(__always)
+@inlinable @inline(__always)
 func debugLog(_ message: @autoclosure () -> String) {
 #if DEBUG
     if ProcessInfo.processInfo.environment["VEVC_DEBUG"] != nil {
@@ -20,7 +19,6 @@ public enum Timescale: UInt8 {
     case ms1000 = 0
     case hz90000 = 1
 }
-
 
 // MARK: - BlockView
 
@@ -93,6 +91,7 @@ struct Block2D: Sendable {
         }
     }
     
+    @inline(__always)
     mutating func clearAll() {
         self.data = [Int16](repeating: 0, count: self.data.count)
     }

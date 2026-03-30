@@ -129,6 +129,7 @@ struct MotionEstimation {
         return (bestFineDx, bestFineDy, bestFineSad)
     }
 
+    @inline(__always)
     static func searchPixels(currPlane: [Int16], prevPlane: [Int16], width: Int, height: Int, bx: Int, by: Int, range: Int = 4) -> (MotionVector, Int) {
         return currPlane.withUnsafeBufferPointer { cBuf in
             prevPlane.withUnsafeBufferPointer { pBuf in

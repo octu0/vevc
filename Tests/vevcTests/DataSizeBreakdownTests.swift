@@ -147,9 +147,7 @@ struct DataSizeBreakdownTests {
         let data = encoder.getData()
 
         // Parse the structure to find the bypass/rANS split
-        var offset = 0
         let bypassLen = Int(UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3]))
-        offset = 4 + bypassLen + 4 // skip bypassLen + bypassData + coeffCount
 
         let metaBypassSize = 4 + bypassLen // bypassLen field + bypass data
         let coeffCountSize = 4

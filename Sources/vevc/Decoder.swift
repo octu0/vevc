@@ -97,6 +97,22 @@ class CoreDecoder {
     }
 }
 
+@inline(__always)
+private func submitGOPChunk(
+    _ chunk: [UInt8],
+    index: Int,
+    maxLayer: Int,
+    width: Int,
+    height: Int,
+    group: inout ThrowingTaskGroup<(Int, [YCbCrImage]), Error>
+) {
+    let idx = index
+    group.addTask {
+        let decoder = CoreDecoder(maxLayer: maxLayer, width: width, height: height)
+        return (idx, try await decoder.decodeGOP(chunk: chunk))
+    }
+}
+
 public struct Decoder: Sendable {
     public let maxLayer: Int
     public let maxConcurrency: Int
@@ -110,7 +126,7 @@ public struct Decoder: Sendable {
     }
 
     /// Decodes a stream of VEVC chunks into a stream of images.
-    /// First chunk may be a VEVC header (Magic + Metadata), followed by GOP chunks.
+    /// First chunk must be a VEVC header (Magic + Metadata), followed by GOP chunks.
     /// Each GOP chunk is a self-contained unit that decodes to one or more frames.
     /// Width/height are extracted from the VEVC header in the stream.
     public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
@@ -121,52 +137,23 @@ public struct Decoder: Sendable {
                 var nextGOPIndexToYield = 0
                 var completedGOPs: [Int: [YCbCrImage]] = [:]
                 
-                // Width/height are extracted from VEVC header
-                var effectiveWidth = 0
-                var effectiveHeight = 0
-                
-                // VEVCヘッダは最初の1チャンクのみ (READMEフォーマット仕様)
-                var pendingGOPChunk: [UInt8]? = nil
-                if let firstChunk = await iterator.next() {
-                    if let (w, h) = parseVEVCHeaderChunk(firstChunk) {
-                        effectiveWidth = w
-                        effectiveHeight = h
-                        // ヘッダの次のチャンクがGOPチャンク
-                        pendingGOPChunk = await iterator.next()
-                    } else {
-                        // ヘッダなし: 最初のチャンクがGOPチャンク
-                        pendingGOPChunk = firstChunk
-                    }
+                guard let firstChunk = await iterator.next(), let (effectiveWidth, effectiveHeight) = parseVEVCHeaderChunk(firstChunk) else {
+                    continuation.finish(throwing: DecodeError.insufficientDataContext("missing VEVC header chunk"))
+                    return
                 }
                 
                 let decoderMaxLayer = self.maxLayer
-                let decoderWidth = effectiveWidth
-                let decoderHeight = effectiveHeight
                 
                 do {
                     try await withThrowingTaskGroup(of: (Int, [YCbCrImage]).self) { group in
                         var activeTasks = 0
                         
-                        // Helper to submit a GOP chunk for decoding
-                        func submitChunk(_ chunk: [UInt8]) {
-                            let idx = currentGOPIndex
-                            currentGOPIndex += 1
-                            group.addTask {
-                                let decoder = CoreDecoder(maxLayer: decoderMaxLayer, width: decoderWidth, height: decoderHeight)
-                                return (idx, try await decoder.decodeGOP(chunk: chunk))
-                            }
-                            activeTasks += 1
-                        }
-                        
-                        // Submit the first pending chunk if present
-                        if let first = pendingGOPChunk {
-                            submitChunk(first)
-                        }
-                        
                         // Fill initial task pool
                         while activeTasks < self.maxConcurrency {
                             guard let chunk = await iterator.next() else { break }
-                            submitChunk(chunk)
+                            submitGOPChunk(chunk, index: currentGOPIndex, maxLayer: decoderMaxLayer, width: effectiveWidth, height: effectiveHeight, group: &group)
+                            currentGOPIndex += 1
+                            activeTasks += 1
                         }
                         
                         // Process results and feed new tasks
@@ -186,7 +173,9 @@ public struct Decoder: Sendable {
                             
                             // Schedule next chunk if available
                             if let chunk = await iterator.next() {
-                                submitChunk(chunk)
+                                submitGOPChunk(chunk, index: currentGOPIndex, maxLayer: decoderMaxLayer, width: effectiveWidth, height: effectiveHeight, group: &group)
+                                currentGOPIndex += 1
+                                activeTasks += 1
                             }
                         }
                     }
