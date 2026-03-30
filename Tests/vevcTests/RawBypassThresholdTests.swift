@@ -29,7 +29,7 @@ struct RawBypassThresholdTests {
         encoder.encodeBypass(binVal: 1) // exp-golomb for lscpY=0
 
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val)
+            encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
         }
         if trailingZeros > 0 {
             encoder.addTrailingZeros(trailingZeros)
@@ -73,7 +73,7 @@ struct RawBypassThresholdTests {
         let pairs = generateRealisticPairs(count: 10)
         var encoder = EntropyEncoder<StaticEntropyModel>()
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val)
+            encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
         }
         encoder.flush()
         let data = encoder.getData()
@@ -91,7 +91,7 @@ struct RawBypassThresholdTests {
         let pairs = generateRealisticPairs(count: 64)
         var encoder = EntropyEncoder<StaticEntropyModel>()
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val)
+            encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
         }
         encoder.flush()
         let data = encoder.getData()
@@ -171,7 +171,7 @@ struct RawBypassThresholdTests {
             encoder.encodeBypass(binVal: 1) // lscpX exp-golomb terminator
             encoder.encodeBypass(binVal: 1) // lscpY exp-golomb terminator
             for pair in originalPairs {
-                encoder.addPair(run: pair.run, val: pair.val)
+                encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
             }
             encoder.flush()
             let data = encoder.getData()
@@ -184,7 +184,7 @@ struct RawBypassThresholdTests {
             let _ = try decoder.decodeBypass() // lscpY
 
             for (idx, original) in originalPairs.enumerated() {
-                let decoded = decoder.readPair()
+                let decoded = decoder.readPair(contextIdx: 0)
                 #expect(decoded.run == Int(original.run),
                        "Roundtrip mismatch at pair \(idx)/\(count): run expected=\(original.run) got=\(decoded.run)")
                 #expect(decoded.val == original.val,

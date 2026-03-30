@@ -31,7 +31,7 @@ struct DataSizeBreakdownTests {
             encoder.encodeBypass(binVal: 1) // hasNonZero = true
             encoder.encodeBypass(binVal: 1) // lscpX = 0 (exp-golomb: 1-bit terminator)
             encoder.encodeBypass(binVal: 1) // lscpY = 0
-            encoder.addPair(run: 0, val: 1)
+            encoder.addPair(run: 0, val: 1, contextIdx: 0)
             encoder.addTrailingZeros(15)
             encoder.flush()
             let data = encoder.getData()
@@ -45,7 +45,7 @@ struct DataSizeBreakdownTests {
             // lscpX = 3: exp-golomb(3) = 0b0_1_00 = 4 bits (0, 1-bit, then 2 data bits)
             // But in our encoding, we use encodeExpGolomb differently
             // Let's just measure the full block
-            encoder.addPair(run: 15, val: 1) // run=15 to reach (3,3) in 4x4
+            encoder.addPair(run: 15, val: 1, contextIdx: 0) // run=15 to reach (3,3) in 4x4
             encoder.flush()
             let data = encoder.getData()
             print("  4x4 single-coeff-at-3,3: \(data.count)B")
@@ -58,7 +58,7 @@ struct DataSizeBreakdownTests {
             encoder.encodeBypass(binVal: 1) // lscpX = 3
             encoder.encodeBypass(binVal: 1) // lscpY = 3
             for _ in 0..<16 {
-                encoder.addPair(run: 0, val: 1)
+                encoder.addPair(run: 0, val: 1, contextIdx: 0)
             }
             encoder.flush()
             let data = encoder.getData()
@@ -77,7 +77,7 @@ struct DataSizeBreakdownTests {
                 if v == 0 {
                     run += 1
                 } else {
-                    encoder.addPair(run: run, val: v)
+                    encoder.addPair(run: run, val: v, contextIdx: 0)
                     run = 0
                 }
             }
@@ -114,9 +114,9 @@ struct DataSizeBreakdownTests {
                 encoder.encodeBypass(binVal: 1) // lscpX = 0
                 encoder.encodeBypass(binVal: 1) // lscpY = 0
                 // Typical: 3-5 non-zero coefficients per 4x4 block
-                encoder.addPair(run: 0, val: 2) // val=+2
-                encoder.addPair(run: 1, val: 1) // skip 1, val=+1
-                encoder.addPair(run: 0, val: -1) // val=-1
+                encoder.addPair(run: 0, val: 2, contextIdx: 0) // val=+2
+                encoder.addPair(run: 1, val: 1, contextIdx: 0) // skip 1, val=+1
+                encoder.addPair(run: 0, val: -1, contextIdx: 0) // val=-1
                 encoder.addTrailingZeros(12)     // rest are zero
             }
             encoder.flush()
@@ -138,9 +138,9 @@ struct DataSizeBreakdownTests {
             encoder.encodeBypass(binVal: 1) // hasNonZero
             encoder.encodeBypass(binVal: 1) // lscpX
             encoder.encodeBypass(binVal: 1) // lscpY
-            encoder.addPair(run: 0, val: 3)
-            encoder.addPair(run: 1, val: 1)
-            encoder.addPair(run: 0, val: -2)
+            encoder.addPair(run: 0, val: 3, contextIdx: 0)
+            encoder.addPair(run: 1, val: 1, contextIdx: 0)
+            encoder.addPair(run: 0, val: -2, contextIdx: 0)
             encoder.addTrailingZeros(12)
         }
         encoder.flush()
@@ -186,7 +186,7 @@ struct DataSizeBreakdownTests {
             encoder.encodeBypass(binVal: 1) // lscpY
             // DPCM residuals are typically ±1
             for _ in 0..<16 {
-                encoder.addPair(run: 0, val: 1)
+                encoder.addPair(run: 0, val: 1, contextIdx: 0)
             }
         }
         encoder.flush()
@@ -199,9 +199,9 @@ struct DataSizeBreakdownTests {
             encoder2.encodeBypass(binVal: 1) // hasNonZero
             encoder2.encodeBypass(binVal: 1) // lscpX
             encoder2.encodeBypass(binVal: 1) // lscpY
-            encoder2.addPair(run: 0, val: 2)
-            encoder2.addPair(run: 2, val: 1)
-            encoder2.addPair(run: 0, val: -1)
+            encoder2.addPair(run: 0, val: 2, contextIdx: 0)
+            encoder2.addPair(run: 2, val: 1, contextIdx: 0)
+            encoder2.addPair(run: 0, val: -1, contextIdx: 0)
             encoder2.addTrailingZeros(12)
         }
         encoder2.flush()

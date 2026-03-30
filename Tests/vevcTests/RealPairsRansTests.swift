@@ -4,7 +4,7 @@ import XCTest
 /// 実DWTデータのpairs配列を直接EntropyEncoderに渡してrANSラウンドトリップテスト
 final class RealPairsRansTests: XCTestCase {
     
-    private func generateRealPairs() async -> (pairs: [(run: UInt32, val: Int16, isParentZero: Bool)], bypass: [UInt8]) {
+    private func generateRealPairs() async -> (pairs: [(run: UInt32, val: Int16, contextIdx: Int)], bypass: [UInt8]) {
         let width = 128
         let height = 128
         
@@ -63,14 +63,14 @@ final class RealPairsRansTests: XCTestCase {
         // 新しいエンコーダに同じpairsを追加
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for pair in realPairs {
-            encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
+            encoder.addPair(run: pair.run, val: pair.val, contextIdx: pair.contextIdx)
         }
         
         let data = encoder.getData()
         var decoder = try EntropyDecoder(data: data)
         var decPairs: [(run: Int, val: Int16)] = []
         for i in 0..<encoder.pairs.count {
-            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+            let pair = decoder.readPair(contextIdx: encoder.pairs[i].contextIdx)
             decPairs.append(pair)
         }
         

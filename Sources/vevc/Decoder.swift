@@ -1,5 +1,27 @@
 import Foundation
 
+/// Parse VEVC header chunk to extract width/height from metadata.
+/// Returns (width, height) if the chunk is a valid VEVC header, nil otherwise.
+@inline(__always)
+private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int)? {
+    guard chunk.count >= 4, chunk[0] == 0x56, chunk[1] == 0x45, chunk[2] == 0x56, chunk[3] == 0x43 else {
+        return nil
+    }
+    // Magic(4B) + MetadataSize(2B) + Profile(1B) + Width(2B) + Height(2B) + ...
+    guard chunk.count >= 4 + 2 + 1 + 2 + 2 else { return nil }
+    var offset = 4
+    let metadataSize = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
+    offset += 2
+    guard metadataSize >= 9 else { return nil }
+    let profile = chunk[offset]
+    guard profile == 0x01 else { return nil }
+    offset += 1
+    let w = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
+    offset += 2
+    let h = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
+    return (w, h)
+}
+
 class CoreDecoder {
     let maxLayer: Int
     let width: Int
@@ -14,6 +36,7 @@ class CoreDecoder {
     /// Decode a GOP chunk into one or more YCbCrImages.
     /// Mode=0x00 (Temporal): applies inverse temporal DWT to reconstruct original frames.
     /// Mode=0x01 (Direct): outputs frames directly.
+    @inline(__always)
     func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
         guard chunk.count >= 11 else {
             throw DecodeError.insufficientDataContext("decodeGOP: chunk.count=\(chunk.count) < 11")
@@ -86,27 +109,6 @@ public struct Decoder: Sendable {
         self.maxConcurrency = maxConcurrency
     }
 
-    /// Parse VEVC header chunk to extract width/height from metadata.
-    /// Returns (width, height) if the chunk is a valid VEVC header, nil otherwise.
-    private static func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int)? {
-        guard chunk.count >= 4, chunk[0] == 0x56, chunk[1] == 0x45, chunk[2] == 0x56, chunk[3] == 0x43 else {
-            return nil
-        }
-        // Magic(4B) + MetadataSize(2B) + Profile(1B) + Width(2B) + Height(2B) + ...
-        guard chunk.count >= 4 + 2 + 1 + 2 + 2 else { return nil }
-        var offset = 4
-        let metadataSize = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
-        offset += 2
-        guard metadataSize >= 9 else { return nil }
-        let profile = chunk[offset]
-        guard profile == 0x01 else { return nil }
-        offset += 1
-        let w = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
-        offset += 2
-        let h = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
-        return (w, h)
-    }
-
     /// Decodes a stream of VEVC chunks into a stream of images.
     /// First chunk may be a VEVC header (Magic + Metadata), followed by GOP chunks.
     /// Each GOP chunk is a self-contained unit that decodes to one or more frames.
@@ -123,17 +125,23 @@ public struct Decoder: Sendable {
                 var effectiveWidth = 0
                 var effectiveHeight = 0
                 
-                // Consume leading VEVC header chunk(s) before entering decode loop
+                // VEVCヘッダは最初の1チャンクのみ (READMEフォーマット仕様)
                 var pendingGOPChunk: [UInt8]? = nil
-                while let chunk = await iterator.next() {
-                    if let (w, h) = Decoder.parseVEVCHeaderChunk(chunk) {
+                if let firstChunk = await iterator.next() {
+                    if let (w, h) = parseVEVCHeaderChunk(firstChunk) {
                         effectiveWidth = w
                         effectiveHeight = h
-                        continue // skip header chunk
+                        // ヘッダの次のチャンクがGOPチャンク
+                        pendingGOPChunk = await iterator.next()
+                    } else {
+                        // ヘッダなし: 最初のチャンクがGOPチャンク
+                        pendingGOPChunk = firstChunk
                     }
-                    pendingGOPChunk = chunk
-                    break
                 }
+                
+                let decoderMaxLayer = self.maxLayer
+                let decoderWidth = effectiveWidth
+                let decoderHeight = effectiveHeight
                 
                 do {
                     try await withThrowingTaskGroup(of: (Int, [YCbCrImage]).self) { group in
@@ -143,11 +151,8 @@ public struct Decoder: Sendable {
                         func submitChunk(_ chunk: [UInt8]) {
                             let idx = currentGOPIndex
                             currentGOPIndex += 1
-                            let localMaxLayer = self.maxLayer
-                            let localWidth = effectiveWidth
-                            let localHeight = effectiveHeight
                             group.addTask {
-                                let decoder = CoreDecoder(maxLayer: localMaxLayer, width: localWidth, height: localHeight)
+                                let decoder = CoreDecoder(maxLayer: decoderMaxLayer, width: decoderWidth, height: decoderHeight)
                                 return (idx, try await decoder.decodeGOP(chunk: chunk))
                             }
                             activeTasks += 1
@@ -259,7 +264,6 @@ public struct Decoder: Sendable {
     
     /// Decode VEVC data from a FileHandle (file or stdin).
     /// Reads the VEVC header and GOP chunks, then decodes via streaming pipeline.
-    /// VEVCReader の機能を統合: ヘッダ解析とチャンク読み込みを Decoder 内で完結させる。
     public func decode(fileHandle: FileHandle) -> AsyncThrowingStream<YCbCrImage, Error> {
         let stream = AsyncStream<[UInt8]> { continuation in
             Task {
@@ -318,17 +322,18 @@ public struct Decoder: Sendable {
         }
         return self.decode(stream: stream)
     }
+
+    @inline(__always)
+    private func readFully(fileHandle: FileHandle, count: Int) -> Data {
+        var result = Data()
+        var remaining = count
+        while remaining > 0 {
+            let data = fileHandle.readData(ofLength: remaining)
+            if data.isEmpty { break }
+            result.append(data)
+            remaining -= data.count
+        }
+        return result
+    }
 }
 
-/// FileHandle からの確実な読み込み (途中で分割される可能性に対応)
-private func readFully(fileHandle: FileHandle, count: Int) -> Data {
-    var result = Data()
-    var remaining = count
-    while remaining > 0 {
-        let data = fileHandle.readData(ofLength: remaining)
-        if data.isEmpty { break }
-        result.append(data)
-        remaining -= data.count
-    }
-    return result
-}

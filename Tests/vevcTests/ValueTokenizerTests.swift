@@ -89,7 +89,7 @@ final class ValueTokenizerTests: XCTestCase {
         var decoder = try EntropyDecoder(data: data)
         var decPairs: [(run: Int, val: Int16)] = []
         for i in 0..<encPairs.count {
-            let pair = decoder.readPair(isParentZero: encPairs[i].isParentZero)
+            let pair = decoder.readPair(contextIdx: encPairs[i].contextIdx)
             decPairs.append(pair)
         }
         

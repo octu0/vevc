@@ -28,7 +28,6 @@ public enum DecodeError: Error, CustomStringConvertible {
     }
 }
 
-
 @inline(__always)
 func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
@@ -89,8 +88,6 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         
         current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, mvs: mvs)
     }
-    
-
     
     return current
 }
@@ -444,7 +441,6 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     let crBlocks = try decodePlaneSubbands32(data: bufCr, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
     let chunkSize = 4
-    
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
@@ -543,15 +539,9 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     let crBlocks = try decodePlaneSubbands16(data: bufCr, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
     let chunkSize = 4
-    
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-
-    
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-
-
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
@@ -623,56 +613,50 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    var _yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
+    var tmpYBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    var _cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
+    var tmpCbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    var _crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
+    var tmpCrBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
     
     if isIFrame {
         var predDCY: Int16 = 0
-        for i in _yBlocks.indices {
-            let diff = _yBlocks[i].data[0]
+        for i in tmpYBlocks.indices {
+            let diff = tmpYBlocks[i].data[0]
             let qDC = diff + predDCY
-            _yBlocks[i].data[0] = qDC
+            tmpYBlocks[i].data[0] = qDC
             predDCY = qDC
         }
         var predDCCb: Int16 = 0
-        for i in _cbBlocks.indices {
-            let diff = _cbBlocks[i].data[0]
+        for i in tmpCbBlocks.indices {
+            let diff = tmpCbBlocks[i].data[0]
             let qDC = diff + predDCCb
-            _cbBlocks[i].data[0] = qDC
+            tmpCbBlocks[i].data[0] = qDC
             predDCCb = qDC
         }
         var predDCCr: Int16 = 0
-        for i in _crBlocks.indices {
-            let diff = _crBlocks[i].data[0]
+        for i in tmpCrBlocks.indices {
+            let diff = tmpCrBlocks[i].data[0]
             let qDC = diff + predDCCr
-            _crBlocks[i].data[0] = qDC
+            tmpCrBlocks[i].data[0] = qDC
             predDCCr = qDC
         }
     }
     
-    let yBlocks = _yBlocks
-    let cbBlocks = _cbBlocks
-    let crBlocks = _crBlocks
+    let yBlocks = tmpYBlocks
+    let cbBlocks = tmpCbBlocks
+    let crBlocks = tmpCrBlocks
     
     let chunkSize = 4
-    
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-
-    
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-
-
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-
 
     try await withThrowingTaskGroup(of: [(Block2D, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
@@ -719,8 +703,6 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
-
-
 @Sendable @inline(__always)
 func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
@@ -758,7 +740,6 @@ func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
     }
     return rowResults
 }
-
 
 @Sendable @inline(__always)
 func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
@@ -798,7 +779,6 @@ func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
     return rowResults
 }
 
-
 @Sendable @inline(__always)
 func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
@@ -836,7 +816,6 @@ func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
     }
     return rowResults
 }
-
 
 @Sendable @inline(__always)
 func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
@@ -876,7 +855,6 @@ func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
     return rowResults
 }
 
-
 @Sendable @inline(__always)
 func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
@@ -914,7 +892,6 @@ func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
     }
     return rowResults
 }
-
 
 @Sendable @inline(__always)
 func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], prev: Image16, qt: QuantizationTable) -> [(Block2D, Int, Int)] {
@@ -954,7 +931,6 @@ func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
     return rowResults
 }
 
-
 @Sendable @inline(__always)
 func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
@@ -984,7 +960,6 @@ func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, c
     }
     return rowResults
 }
-
 
 @Sendable @inline(__always)
 func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
@@ -1016,7 +991,6 @@ func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
     return rowResults
 }
 
-
 @Sendable @inline(__always)
 func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [Block2D], qt: QuantizationTable) -> [(Block2D, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
@@ -1046,5 +1020,3 @@ func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
     }
     return rowResults
 }
-
-

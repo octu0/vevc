@@ -1,7 +1,5 @@
 import Foundation
 
-
-
 @inline(__always)
 private func buildVEVCHeader(width: Int, height: Int, framerate: Int) -> [UInt8] {
     var header: [UInt8] = [0x56, 0x45, 0x56, 0x43] // Magic 'VEVC'
@@ -64,7 +62,6 @@ public class VEVCEncoder {
         return result
     }
 
-    
     public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
         let width = self.width
         let height = self.height
@@ -285,8 +282,6 @@ actor LayersEncodeActor {
     }
 }
 
-
-/// 簡易かつ高速なシーンチェンジ判定用ヘルパー (Yプレーンのみ、4ピクセルおきにSAD算出)
 @inline(__always)
 private func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
     guard a.yPlane.count == b.yPlane.count, 0 < a.yPlane.count else { return 0 }
@@ -306,7 +301,7 @@ private func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
 /// and previous PlaneData420 Y planes by sampling representative blocks.
 /// Returns average per-pixel SAD as an Int for RateController input.
 @inline(__always)
-func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Int {
+private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Int {
     let width = current.width
     let height = current.height
     guard 0 < width && 0 < height else { return 0 }
@@ -344,7 +339,7 @@ func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Int {
     return 0 < totalPixels ? totalSAD / totalPixels : 0
 }
 
-func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
+private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
     let probeStep = 64
     let qt = QuantizationTable(baseStep: probeStep)
     

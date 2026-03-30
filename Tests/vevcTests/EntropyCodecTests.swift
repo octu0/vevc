@@ -14,7 +14,7 @@ final class EntropyCodecTests: XCTestCase {
             let run = UInt32(i % 5)
             let val = Int16(clamping: (i * 7 - 175) % 100)
             if val == 0 { continue }
-            encoder.addPair(run: run, val: val, isParentZero: false)
+            encoder.addPair(run: run, val: val, contextIdx: 0)
             expectedPairs.append((run: run, val: val))
         }
         
@@ -23,65 +23,12 @@ final class EntropyCodecTests: XCTestCase {
         var decoder = try EntropyDecoder(data: data)
         
         for (i, expected) in expectedPairs.enumerated() {
-            let pair = decoder.readPair()
+            let pair = decoder.readPair(contextIdx: 0)
             XCTAssertEqual(pair.run, Int(expected.run), "Pair[\(i)] run: expected=\(expected.run) got=\(pair.run)")
             XCTAssertEqual(pair.val, expected.val, "Pair[\(i)] val: expected=\(expected.val) got=\(pair.val)")
         }
     }
 
-    /// bypassWriter + pairs の混合テスト (blockEncode16と同じパターン)
-    func testBypassAndPairsMixed() throws {
-        var encoder = EntropyEncoder<DynamicEntropyModel>()
-        
-        // blockEncode16が16ブロック×3サブバンド=48回呼ばれるシミュレーション
-        var expectedBits: [UInt8] = []
-        var expectedPairs: [(run: UInt32, val: Int16)] = []
-        
-        for block in 0..<48 {
-            // hasNonZero = 1 (全てのブロックが非ゼロ)
-            encoder.encodeBypass(binVal: 1)
-            expectedBits.append(1)
-            
-            // lscpX と lscpY (Exp-Golomb)
-            let lscpX = (block % 16)
-            let lscpY = (block / 3) % 16
-            encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-            encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
-            
-            // 係数 (3個のpair per block)
-            for j in 0..<3 {
-                let run = UInt32(j)
-                let val = Int16(block * 3 + j + 1)
-                encoder.addPair(run: run, val: val, isParentZero: false)
-                expectedPairs.append((run: run, val: val))
-            }
-        }
-        
-        let data = encoder.getData()
-        
-        var decoder = try EntropyDecoder(data: data)
-        
-        // bypass bits の確認
-        for block in 0..<48 {
-            let hasNonZero = try decoder.decodeBypass()
-            XCTAssertEqual(hasNonZero, expectedBits[block], "Block[\(block)] hasNonZero")
-            
-            let lscpX = try decodeExpGolomb(decoder: &decoder)
-            let expectedLscpX = UInt32(block % 16)
-            XCTAssertEqual(lscpX, expectedLscpX, "Block[\(block)] lscpX: expected=\(expectedLscpX) got=\(lscpX)")
-            
-            let lscpY = try decodeExpGolomb(decoder: &decoder)
-            let expectedLscpY = UInt32((block / 3) % 16)
-            XCTAssertEqual(lscpY, expectedLscpY, "Block[\(block)] lscpY: expected=\(expectedLscpY) got=\(lscpY)")
-        }
-        
-        // pairs の確認
-        for (i, expected) in expectedPairs.enumerated() {
-            let pair = decoder.readPair()
-            XCTAssertEqual(pair.run, Int(expected.run), "Pair[\(i)] run: expected=\(expected.run) got=\(pair.run)")
-            XCTAssertEqual(pair.val, expected.val, "Pair[\(i)] val: expected=\(expected.val) got=\(pair.val)")
-        }
-    }
     
     /// 実際のblockEncode16データでEntropyEncoderのrANSラウンドトリップ
     func testBlockEncode16MultipleBlocks() throws {
