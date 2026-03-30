@@ -6,118 +6,78 @@ public enum EncodeError: Error {
     case unsupportedArchitecture
 }
 
+
+
 @inline(__always)
-func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout EntropyEncoder<M>) {
-    var q = val
-    var bits = 0
-    while q > 0 {
-        bits += 1
-        q >>= 1
-    }
-    for _ in 0..<bits {
-        encoder.encodeBypass(binVal: 0)
-    }
-    encoder.encodeBypass(binVal: 1)
-    for i in stride(from: bits - 1, through: 0, by: -1) {
-        encoder.encodeBypass(binVal: UInt8((val >> i) & 1))
-    }
+func getContextIdx(idx: Int, isParentZero: Bool = false) -> Int {
+    return isParentZero ? 1 : 0
 }
 
 @inline(__always)
-func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, isParentZero: Bool = false) {
-    encoder.addPair(run: UInt32(run), val: val, isParentZero: isParentZero)
+func isBlockAllZero(block: BlockView?) -> Bool {
+    guard let b = block else { return false }
+    for y in 0..<b.height {
+        let ptr = b.rowPointer(y: y)
+        for x in 0..<b.width {
+            if ptr[x] != 0 { return false }
+        }
+    }
+    return true
+}
+
+@inline(__always)
+func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, contextIdx: Int = 0) {
+    encoder.addPair(run: UInt32(run), val: val, contextIdx: contextIdx)
 }
 
 @inline(__always)
 func blockEncode32<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
-    var lscpX = -1
-    var lscpY = -1
-    let zero16 = SIMD16<Int16>(repeating: 0)
-    for y in stride(from: 32 - 1, through: 0, by: -1) {
-        let ptr = block.rowPointer(y: y)
-        let v1 = UnsafeRawPointer(ptr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-        if any(v1 .!= zero16) {
-            for x in stride(from: 31, through: 16, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
+    var lsci = -1
+    for idx in stride(from: 1024 - 1, through: 0, by: -1) {
+        let (x, y) = ZOrder.coords32[idx]
+        if block.rowPointer(y: y)[x] != 0 {
+            lsci = idx
+            break
         }
-        if lscpX != -1 { break }
-        
-        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-        if any(v0 .!= zero16) {
-            for x in stride(from: 15, through: 0, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
-        }
-        if lscpX != -1 { break }
     }
 
-    if lscpX == -1 {
+    if lsci == -1 {
         encoder.encodeBypass(binVal: 0)
         return
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addLSCI(val: UInt32(lsci))
 
     var run = 0
-    for y in 0...lscpY {
-        let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (32 - 1)
-        for x in 0...endX {
-            let val = ptr[x]
-            if val == 0 {
-                run += 1
-            } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: false)
-                run = 0
-            }
+    var currentIdx = 0
+    for idx in 0...lsci {
+        let (x, y) = ZOrder.coords32[idx]
+        let val = block.rowPointer(y: y)[x]
+        let isParentZero = isBlockAllZero(block: parentBlock)
+        if val == 0 {
+            run += 1
+        } else {
+            let ctx = getContextIdx(idx: currentIdx, isParentZero: isParentZero)
+            encodeCoeffRun(val: val, encoder: &encoder, run: run, contextIdx: ctx)
+            run = 0
+            currentIdx = idx + 1
         }
     }
 }
 
 @inline(__always)
 func blockEncode16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
-    var lscpX = -1
-    var lscpY = -1
-    let zero8 = SIMD8<Int16>(repeating: 0)
-    for y in stride(from: 16 - 1, through: 0, by: -1) {
-        let ptr = block.rowPointer(y: y)
-        let v1 = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
-        if any(v1 .!= zero8) {
-            for x in stride(from: 15, through: 8, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
+    var lsci = -1
+    for idx in stride(from: 256 - 1, through: 0, by: -1) {
+        let (x, y) = ZOrder.coords16[idx]
+        if block.rowPointer(y: y)[x] != 0 {
+            lsci = idx
+            break
         }
-        if lscpX != -1 { break }
-        
-        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        if any(v0 .!= zero8) {
-            for x in stride(from: 7, through: 0, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
-        }
-        if lscpX != -1 { break }
     }
 
-    if lscpX == -1 {
+    if lsci == -1 {
         encoder.encodeBypass(binVal: 0)
         // Decoder invokes clearAll(), so encoder side must also zero clear to guarantee match during reconstruction
         for y in 0..<16 {
@@ -130,71 +90,43 @@ func blockEncode16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addLSCI(val: UInt32(lsci))
 
     var run = 0
-    for y in 0...lscpY {
-        let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (16 - 1)
-        for x in 0...endX {
-            let val = ptr[x]
-            if val == 0 {
-                run += 1
-            } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: false)
-                run = 0
-            }
+    var currentIdx = 0
+    for idx in 0...lsci {
+        let (x, y) = ZOrder.coords16[idx]
+        let val = block.rowPointer(y: y)[x]
+        let isParentZero = isBlockAllZero(block: parentBlock)
+        if val == 0 {
+            run += 1
+        } else {
+            let ctx = getContextIdx(idx: currentIdx, isParentZero: isParentZero)
+            encodeCoeffRun(val: val, encoder: &encoder, run: run, contextIdx: ctx)
+            run = 0
+            currentIdx = idx + 1
         }
     }
     
-    // Zero clear positions beyond LSCP (Decoder clearAll -> decodes up to lscp, so beyond lscp is 0)
-    // Encoder side also zeros beyond lscp to guarantee match with decoder during reconstruction
-    let lscpPtr = block.rowPointer(y: lscpY)
-    for x in (lscpX + 1)..<16 {
-        lscpPtr[x] = 0
-    }
-    for y in (lscpY + 1)..<16 {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<16 {
-            ptr[x] = 0
-        }
+    // Zero clear positions beyond LSCI
+    for idx in (lsci + 1)..<256 {
+        let (x, y) = ZOrder.coords16[idx]
+        block.rowPointer(y: y)[x] = 0
     }
 }
 
 @inline(__always)
 func blockEncode8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
-    var lscpX = -1
-    var lscpY = -1
-    let zero4 = SIMD4<Int16>(repeating: 0)
-    for y in stride(from: 8 - 1, through: 0, by: -1) {
-        let ptr = block.rowPointer(y: y)
-        let v1 = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
-        if any(v1 .!= zero4) {
-            for x in stride(from: 7, through: 4, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
+    var lsci = -1
+    for idx in stride(from: 64 - 1, through: 0, by: -1) {
+        let (x, y) = ZOrder.coords8[idx]
+        if block.rowPointer(y: y)[x] != 0 {
+            lsci = idx
+            break
         }
-        if lscpX != -1 { break }
-        
-        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-        if any(v0 .!= zero4) {
-            for x in stride(from: 3, through: 0, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
-        }
-        if lscpX != -1 { break }
     }
 
-    if lscpX == -1 {
+    if lsci == -1 {
         encoder.encodeBypass(binVal: 0)
         // Decoder invokes clearAll(), so encoder side must also zero clear to guarantee match during reconstruction
         for y in 0..<8 {
@@ -207,70 +139,43 @@ func blockEncode8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, blo
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addLSCI(val: UInt32(lsci))
 
     var run = 0
-    for y in 0...lscpY {
-        let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (8 - 1)
-        for x in 0...endX {
-            let val = ptr[x]
-            if val == 0 {
-                run += 1
-            } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: false)
-                run = 0
-            }
+    var currentIdx = 0
+    for idx in 0...lsci {
+        let (x, y) = ZOrder.coords8[idx]
+        let val = block.rowPointer(y: y)[x]
+        let isParentZero = isBlockAllZero(block: parentBlock)
+        if val == 0 {
+            run += 1
+        } else {
+            let ctx = getContextIdx(idx: currentIdx, isParentZero: isParentZero)
+            encodeCoeffRun(val: val, encoder: &encoder, run: run, contextIdx: ctx)
+            run = 0
+            currentIdx = idx + 1
         }
     }
     
-    // Zero clear positions beyond LSCP (Decoder clearAll -> decodes up to lscp, so beyond lscp is 0)
-    let lscpPtr = block.rowPointer(y: lscpY)
-    for x in (lscpX + 1)..<8 {
-        lscpPtr[x] = 0
-    }
-    for y in (lscpY + 1)..<8 {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<8 {
-            ptr[x] = 0
-        }
+    // Zero clear positions beyond LSCI
+    for idx in (lsci + 1)..<64 {
+        let (x, y) = ZOrder.coords8[idx]
+        block.rowPointer(y: y)[x] = 0
     }
 }
 
 @inline(__always)
 func blockEncode4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
-    var lscpX = -1
-    var lscpY = -1
-    let zero2 = SIMD2<Int16>(repeating: 0)
-    for y in stride(from: 4 - 1, through: 0, by: -1) {
-        let ptr = block.rowPointer(y: y)
-        let v1 = UnsafeRawPointer(ptr.advanced(by: 2)).loadUnaligned(as: SIMD2<Int16>.self)
-        if any(v1 .!= zero2) {
-            for x in stride(from: 3, through: 2, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
+    var lsci = -1
+    for idx in stride(from: 16 - 1, through: 0, by: -1) {
+        let (x, y) = ZOrder.coords4[idx]
+        if block.rowPointer(y: y)[x] != 0 {
+            lsci = idx
+            break
         }
-        if lscpX != -1 { break }
-        
-        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
-        if any(v0 .!= zero2) {
-            for x in stride(from: 1, through: 0, by: -1) {
-                if ptr[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
-        }
-        if lscpX != -1 { break }
     }
 
-    if lscpX == -1 {
+    if lsci == -1 {
         encoder.encodeBypass(binVal: 0)
         for y in 0..<4 {
             let ptr = block.rowPointer(y: y)
@@ -282,34 +187,28 @@ func blockEncode4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, blo
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addLSCI(val: UInt32(lsci))
 
     var run = 0
-    for y in 0...lscpY {
-        let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (4 - 1)
-        for x in 0...endX {
-            let val = ptr[x]
-            if val == 0 {
-                run += 1
-            } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: false)
-                run = 0
-            }
+    var currentIdx = 0
+    for idx in 0...lsci {
+        let (x, y) = ZOrder.coords4[idx]
+        let val = block.rowPointer(y: y)[x]
+        let isParentZero = isBlockAllZero(block: parentBlock)
+        if val == 0 {
+            run += 1
+        } else {
+            let ctx = getContextIdx(idx: currentIdx, isParentZero: isParentZero)
+            encodeCoeffRun(val: val, encoder: &encoder, run: run, contextIdx: ctx)
+            run = 0
+            currentIdx = idx + 1
         }
     }
     
-    // Zero clear beyond LSCP
-    let lscpPtr = block.rowPointer(y: lscpY)
-    for x in (lscpX + 1)..<4 {
-        lscpPtr[x] = 0
-    }
-    for y in (lscpY + 1)..<4 {
-        let ptr = block.rowPointer(y: y)
-        for x in 0..<4 {
-            ptr[x] = 0
-        }
+    // Zero clear beyond LSCI
+    for idx in (lsci + 1)..<16 {
+        let (x, y) = ZOrder.coords4[idx]
+        block.rowPointer(y: y)[x] = 0
     }
 }
 
@@ -420,8 +319,8 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         encoder.encodeBypass(binVal: 1)
         let lscpX = lscpIdx % 4
         let lscpY = lscpIdx / 4
-        encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-        encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+        encoder.addLSCI(val: UInt32(lscpX))
+        encoder.addLSCI(val: UInt32(lscpY))
 
         var run = 0
         for i in 0...lscpIdx {
@@ -496,8 +395,8 @@ func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         encoder.encodeBypass(binVal: 1)
         let lscpX = UInt32(lscpIdx % 8)
         let lscpY = UInt32(lscpIdx / 8)
-        encodeExpGolomb(val: lscpX, encoder: &encoder)
-        encodeExpGolomb(val: lscpY, encoder: &encoder)
+        encoder.addLSCI(val: UInt32(lscpX))
+        encoder.addLSCI(val: UInt32(lscpY))
         
         lastVal = last
         
@@ -574,8 +473,8 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     encoder.encodeBypass(binVal: 1)
     let lscpX = UInt32(lscpIdx % 16)
     let lscpY = UInt32(lscpIdx / 16)
-    encodeExpGolomb(val: lscpX, encoder: &encoder)
-    encodeExpGolomb(val: lscpY, encoder: &encoder)
+    encoder.addLSCI(val: UInt32(lscpX))
+    encoder.addLSCI(val: UInt32(lscpY))
 
     lastVal = last
 
