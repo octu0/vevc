@@ -346,6 +346,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
             }
         }
         metrics = mets
+        frameBox.decodedBuffers.removeAll() // Clear memory!
     }
 
     return (encTime, decTime, compSize, metrics, frameBox.frames)
@@ -529,6 +530,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
             }
         }
         metrics = mets
+        frameBox.decodedBuffers.removeAll() // Clear memory!
     }
 
     return (encTime, decTime, compSize, metrics, frameBox.frames)
@@ -698,6 +700,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
             }
         }
         metrics = mets
+        frameBox.decodedBuffers.removeAll() // Clear memory!
     }
 
     return (encTime, decTime, compSize, metrics)
