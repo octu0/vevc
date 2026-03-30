@@ -194,6 +194,7 @@ The encoder writes a `staticBit` flag in the stream header so the decoder knows 
 
 ### Optimizations
 
+- **Z-Order (Morton Code) Scan**: Subband frequencies are serialized using fractal curves to maximize spatial contiguity of zeros, vastly improving zero-run lengths.
 - **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
 - **O(1) Token Lookup**: 16384-entry LUT for instant cumulative-frequency → token resolution
 - **Zero-Run RLE**: DWT zero coefficients compressed as run-length tokens
