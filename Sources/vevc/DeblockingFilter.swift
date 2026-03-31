@@ -155,15 +155,10 @@ private func deblockFilterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>
     
     let (newP1, newP0, newQ0, newQ1) = deblockComputeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
     
-    let p1Ptr = UnsafeMutableRawPointer(base + offP1).assumingMemoryBound(to: SIMD16<Int16>.self)
-    let p0Ptr = UnsafeMutableRawPointer(base + offP0).assumingMemoryBound(to: SIMD16<Int16>.self)
-    let q0Ptr = UnsafeMutableRawPointer(base + offQ0).assumingMemoryBound(to: SIMD16<Int16>.self)
-    let q1Ptr = UnsafeMutableRawPointer(base + offQ1).assumingMemoryBound(to: SIMD16<Int16>.self)
-    
-    p1Ptr.pointee = newP1
-    p0Ptr.pointee = newP0
-    q0Ptr.pointee = newQ0
-    q1Ptr.pointee = newQ1
+    UnsafeMutableRawPointer(base + offP1).storeBytes(of: newP1, as: SIMD16<Int16>.self)
+    UnsafeMutableRawPointer(base + offP0).storeBytes(of: newP0, as: SIMD16<Int16>.self)
+    UnsafeMutableRawPointer(base + offQ0).storeBytes(of: newQ0, as: SIMD16<Int16>.self)
+    UnsafeMutableRawPointer(base + offQ1).storeBytes(of: newQ1, as: SIMD16<Int16>.self)
 }
 
 @inline(__always)

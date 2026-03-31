@@ -382,12 +382,15 @@ private func performDequantizeSIMD8(_ vec: SIMD8<Int16>, step: Int32) -> SIMD8<I
     )
     
     let stepVec = SIMD4<Int32>(repeating: step)
-    let rLow32 = vLow32 &* stepVec
-    let rHigh32 = vHigh32 &* stepVec
+    let maxSafe = SIMD4<Int32>(repeating: 16382)
+    let minSafe = SIMD4<Int32>(repeating: -16382)
+    
+    let rLow32 = (vLow32 &* stepVec).clamped(lowerBound: minSafe, upperBound: maxSafe)
+    let rHigh32 = (vHigh32 &* stepVec).clamped(lowerBound: minSafe, upperBound: maxSafe)
     
     return SIMD8<Int16>(
-        Int16(clamping: rLow32[0]), Int16(clamping: rLow32[1]), Int16(clamping: rLow32[2]), Int16(clamping: rLow32[3]),
-        Int16(clamping: rHigh32[0]), Int16(clamping: rHigh32[1]), Int16(clamping: rHigh32[2]), Int16(clamping: rHigh32[3])
+        Int16(rLow32[0]), Int16(rLow32[1]), Int16(rLow32[2]), Int16(rLow32[3]),
+        Int16(rHigh32[0]), Int16(rHigh32[1]), Int16(rHigh32[2]), Int16(rHigh32[3])
     )
 }
 
@@ -397,10 +400,13 @@ private func performDequantizeSIMD4(_ vec: SIMD4<Int16>, step: Int32) -> SIMD4<I
         Int32(vec[0]), Int32(vec[1]), Int32(vec[2]), Int32(vec[3])
     )
     let stepVec = SIMD4<Int32>(repeating: step)
-    let r = vals &* stepVec
+    let maxSafe = SIMD4<Int32>(repeating: 16382)
+    let minSafe = SIMD4<Int32>(repeating: -16382)
+    
+    let r = (vals &* stepVec).clamped(lowerBound: minSafe, upperBound: maxSafe)
     
     return SIMD4<Int16>(
-        Int16(clamping: r[0]), Int16(clamping: r[1]), Int16(clamping: r[2]), Int16(clamping: r[3])
+        Int16(r[0]), Int16(r[1]), Int16(r[2]), Int16(r[3])
     )
 }
 
@@ -501,7 +507,8 @@ internal func dequantizeSIMDGeneric(_ block: inout BlockView, q: Quantizer) {
         while i < block.width {
             let val = Int32(ptr[i])
             let res = val &* step
-            ptr[i] = Int16(clamping: res)
+            let clampedRes = max(-16382, min(16382, res))
+            ptr[i] = Int16(clampedRes)
             i += 1
         }
     }
@@ -622,7 +629,9 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Qu
             let uVal = UInt16(bitPattern: ptr[i])
             let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
             let decoded = Int16(bitPattern: decodedUInt)
-            ptr[i] = Int16(clamping: (Int32(decoded) &* step))
+            let res = Int32(decoded) &* step
+            let clampedRes = max(-16382, min(16382, res))
+            ptr[i] = Int16(clampedRes)
             i += 1
         }
     }

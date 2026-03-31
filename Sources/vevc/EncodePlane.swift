@@ -525,12 +525,29 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count {
+            if let sList = sads {
                 let col = i % cbColCount32
                 let row = i / cbColCount32
+                var sadVal = Int.max
+                if sList.count > 0 {
+                    let r2 = row * 2
+                    let c2 = col * 2
+                    var maxSad = 0
+                    for dr in 0..<2 {
+                        let rr = r2 + dr
+                        if rr >= yRowCount32 { continue }
+                        for dc in 0..<2 {
+                            let cc = c2 + dc
+                            if cc >= yColCount32 { continue }
+                            let lIdx = rr * yColCount32 + cc
+                            if lIdx < sList.count { maxSad = max(maxSad, sList[lIdx]) }
+                        }
+                    }
+                    sadVal = maxSad
+                }
                 let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
                                                     colCount: cbColCount32, rowCount: cbRowCount32)
-                if sList[i] < threshold { blocks[i].clearAll() }
+                if sadVal < threshold { blocks[i].clearAll() }
             }
         }
         for i in blocks.indices {
@@ -542,12 +559,29 @@ func preparePlaneLayer32(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count {
+            if let sList = sads {
                 let col = i % cbColCount32
                 let row = i / cbColCount32
+                var sadVal = Int.max
+                if sList.count > 0 {
+                    let r2 = row * 2
+                    let c2 = col * 2
+                    var maxSad = 0
+                    for dr in 0..<2 {
+                        let rr = r2 + dr
+                        if rr >= yRowCount32 { continue }
+                        for dc in 0..<2 {
+                            let cc = c2 + dc
+                            if cc >= yColCount32 { continue }
+                            let lIdx = rr * yColCount32 + cc
+                            if lIdx < sList.count { maxSad = max(maxSad, sList[lIdx]) }
+                        }
+                    }
+                    sadVal = maxSad
+                }
                 let threshold = spatialSADThreshold(baseSAD: 75, blockCol: col, blockRow: row,
                                                     colCount: cbColCount32, rowCount: cbRowCount32)
-                if sList[i] < threshold { blocks[i].clearAll() }
+                if sadVal < threshold { blocks[i].clearAll() }
             }
         }
         for i in blocks.indices {
@@ -596,12 +630,29 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     async let taskBufCb = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count {
+            if let sList = sads {
                 let col = i % cbColCount16
                 let row = i / cbColCount16
+                var sadVal = Int.max
+                if sList.count > 0 {
+                    let r2 = row * 2
+                    let c2 = col * 2
+                    var maxSad = 0
+                    for dr in 0..<2 {
+                        let rr = r2 + dr
+                        if rr >= yRowCount16 { continue }
+                        for dc in 0..<2 {
+                            let cc = c2 + dc
+                            if cc >= yColCount16 { continue }
+                            let lIdx = rr * yColCount16 + cc
+                            if lIdx < sList.count { maxSad = max(maxSad, sList[lIdx]) }
+                        }
+                    }
+                    sadVal = maxSad
+                }
                 let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
                                                     colCount: cbColCount16, rowCount: cbRowCount16)
-                if sList[i] < threshold { blocks[i].clearAll() }
+                if sadVal < threshold { blocks[i].clearAll() }
             }
         }
         for i in blocks.indices {
@@ -613,12 +664,29 @@ func preparePlaneLayer16(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quan
     async let taskBufCr = { () -> ([Int16], [Block2D]) in
         var (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy)
         for i in blocks.indices {
-            if let sList = sads, i < sList.count {
+            if let sList = sads {
                 let col = i % cbColCount16
                 let row = i / cbColCount16
+                var sadVal = Int.max
+                if sList.count > 0 {
+                    let r2 = row * 2
+                    let c2 = col * 2
+                    var maxSad = 0
+                    for dr in 0..<2 {
+                        let rr = r2 + dr
+                        if rr >= yRowCount16 { continue }
+                        for dc in 0..<2 {
+                            let cc = c2 + dc
+                            if cc >= yColCount16 { continue }
+                            let lIdx = rr * yColCount16 + cc
+                            if lIdx < sList.count { maxSad = max(maxSad, sList[lIdx]) }
+                        }
+                    }
+                    sadVal = maxSad
+                }
                 let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row,
                                                     colCount: cbColCount16, rowCount: cbRowCount16)
-                if sList[i] < threshold { blocks[i].clearAll() }
+                if sadVal < threshold { blocks[i].clearAll() }
             }
         }
         for i in blocks.indices {
@@ -884,7 +952,7 @@ func reconstructPlaneLayer32Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
                     dequantizeSIMDSignedMapping16(&hlView, q: qt.qMid)
                     dequantizeSIMDSignedMapping16(&lhView, q: qt.qMid)
                     dequantizeSIMDSignedMapping16(&hhView, q: qt.qHigh)
-                    if startX == 128 && startY == 224 && width == 320 {
+                    if startX == 416 && startY == 192 {
                         var sumHL = 0, sumLH = 0, sumHH = 0, sumLL = 0
                         for y in 0..<16 {
                             for x in 0..<16 {
@@ -894,7 +962,7 @@ func reconstructPlaneLayer32Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
                                 sumLL += Int(view.rowPointer(y: y)[x])
                             }
                         }
-                        print("ENC HF sums at (128, 224): HL=\(sumHL) LH=\(sumLH) HH=\(sumHH) LL=\(sumLL)")
+                        print("ENC Cb sums at (416, 192): HL=\(sumHL) LH=\(sumLH) HH=\(sumHH) LL=\(sumLL)")
                     }
                     invDwt2d_32(&view)
                 }
@@ -1313,7 +1381,15 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     let (bufCb, reconCb, base8CbBlocks) = await taskBufCb
     let (bufCr, reconCr, base8CrBlocks) = await taskBufCr
     
-    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
+    var mutReconY = reconY
+    var mutReconCb = reconCb
+    var mutReconCr = reconCr
+    
+    clampPlane16(&mutReconY)
+    clampPlane16(&mutReconCb)
+    clampPlane16(&mutReconCr)
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
@@ -1448,6 +1524,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
     applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     
+    clampPlane16(&mutReconY)
+    clampPlane16(&mutReconCb)
+    clampPlane16(&mutReconCr)
+    
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
@@ -1516,9 +1596,13 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     var l1crBlocksMut = l1crBlocks
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocksMut, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
-    let reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
-    let reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    var reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocksMut, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
+    var reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    var reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    
+    clampPlane16(&reconL1Y)
+    clampPlane16(&reconL1Cb)
+    clampPlane16(&reconL1Cr)
     
     // Build Image16 from Layer16 reconstruction
     let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
@@ -1547,6 +1631,10 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
     // applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     // applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    
+    clampPlane16(&mutReconL2Y)
+    clampPlane16(&mutReconL2Cb)
+    clampPlane16(&mutReconL2Cr)
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
@@ -1676,7 +1764,10 @@ func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs
                             let srcX = targetX + x
                             let safeSrcX = max(0, min(srcX, width - 1))
                             let predPixel = srcRowPtr[safeSrcX]
-                            dstPtr[x] = dstPtr[x] &+ predPixel
+                            var v = dstPtr[x] &+ predPixel
+                            if v < -128 { v = -128 }
+                            else if v > 127 { v = 127 }
+                            dstPtr[x] = v
                         }
                     }
                 }

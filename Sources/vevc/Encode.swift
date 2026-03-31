@@ -43,6 +43,13 @@ func blockEncode32<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
 
     if lsci == -1 {
         encoder.encodeBypass(binVal: 0)
+        // Decoder invokes clearAll(), so encoder side must also zero clear to guarantee match during reconstruction
+        for y in 0..<32 {
+            let ptr = block.rowPointer(y: y)
+            for x in 0..<32 {
+                ptr[x] = 0
+            }
+        }
         return
     }
     encoder.encodeBypass(binVal: 1)
@@ -63,6 +70,12 @@ func blockEncode32<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
             run = 0
             currentIdx = idx + 1
         }
+    }
+    
+    // Zero clear positions beyond LSCI
+    for idx in (lsci + 1)..<1024 {
+        let (x, y) = ZOrder.coords32[idx]
+        block.rowPointer(y: y)[x] = 0
     }
 }
 
@@ -566,12 +579,12 @@ func isEffectivelyZero32(data: UnsafeMutableBufferPointer<Int16>, threshold: Int
 
     let zeroVec = SIMD16<Int16>(repeating: 0)
     for i in stride(from: 0, to: 512, by: 16) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD16<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i)
+        ptr.storeBytes(of: zeroVec, as: SIMD16<Int16>.self)
     }
     for y in 0..<16 {
-        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16).assumingMemoryBound(to: SIMD16<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16)
+        ptr.storeBytes(of: zeroVec, as: SIMD16<Int16>.self)
     }
     return true
 }
@@ -602,12 +615,12 @@ func isEffectivelyZero16(data: UnsafeMutableBufferPointer<Int16>, threshold: Int
 
     let zeroVec = SIMD8<Int16>(repeating: 0)
     for i in stride(from: 0, to: 128, by: 8) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD8<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i)
+        ptr.storeBytes(of: zeroVec, as: SIMD8<Int16>.self)
     }
     for y in 0..<8 {
-        let ptr = UnsafeMutableRawPointer(base + y * 16 + 8).assumingMemoryBound(to: SIMD8<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(base + y * 16 + 8)
+        ptr.storeBytes(of: zeroVec, as: SIMD8<Int16>.self)
     }
     return true
 }
@@ -638,12 +651,12 @@ func isEffectivelyZero8(data: UnsafeMutableBufferPointer<Int16>, threshold: Int)
 
     let zeroVec = SIMD4<Int16>(repeating: 0)
     for i in stride(from: 0, to: 32, by: 4) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD4<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i)
+        ptr.storeBytes(of: zeroVec, as: SIMD4<Int16>.self)
     }
     for y in 0..<4 {
-        let ptr = UnsafeMutableRawPointer(base + y * 8 + 4).assumingMemoryBound(to: SIMD4<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(base + y * 8 + 4)
+        ptr.storeBytes(of: zeroVec, as: SIMD4<Int16>.self)
     }
     return true
 }
@@ -788,12 +801,12 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
 
     let zeroVec = SIMD2<Int16>(repeating: 0)
     for i in stride(from: 0, to: 8, by: 2) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i)
+        ptr.storeBytes(of: zeroVec, as: SIMD2<Int16>.self)
     }
     for y in 0..<2 {
-        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
+        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2)
+        ptr.storeBytes(of: zeroVec, as: SIMD2<Int16>.self)
     }
     return true
 }
@@ -833,12 +846,12 @@ func isEffectivelyZeroBase32(data: UnsafeMutableBufferPointer<Int16>, threshold:
     }
 
     for i in stride(from: 0, to: 512, by: 16) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD16<Int16>.self)
-        ptr.pointee = zeroVec16
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i)
+        ptr.storeBytes(of: zeroVec16, as: SIMD16<Int16>.self)
     }
     for y in 0..<16 {
-        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16).assumingMemoryBound(to: SIMD16<Int16>.self)
-        ptr.pointee = zeroVec16
+        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16)
+        ptr.storeBytes(of: zeroVec16, as: SIMD16<Int16>.self)
     }
     return true
 }

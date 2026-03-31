@@ -8,10 +8,10 @@ struct Int16Reader {
     @inline(__always)
     func row(x: Int, y: Int, size: Int) -> [Int16] {
         var r = [Int16](repeating: 0, count: size)
-        let safeY = min(y, height - 1)
-        
+        let (_, safeY) = boundaryRepeat(width, height, x, y)
         let limit = min(size, width - x)
-        if 0 < limit {
+        
+        if x >= 0 && limit > 0 {
             data.withUnsafeBufferPointer { ptr in
                 guard let basePtr = ptr.baseAddress else { return }
                 let base = basePtr.advanced(by: safeY * width + x)
@@ -20,17 +20,17 @@ struct Int16Reader {
                     dstBase.update(from: base, count: limit)
                     
                     if limit < size {
-                        let lastVal = dst[limit - 1]
                         for i in limit..<size {
-                            dst[i] = lastVal
+                            let (px, _) = boundaryRepeat(width, height, x + i, safeY)
+                            dstBase[i] = ptr[safeY * width + px]
                         }
                     }
                 }
             }
         } else {
-            let lastVal = data[safeY * width + (width - 1)]
             for i in 0..<size {
-                r[i] = lastVal
+                let (px, _) = boundaryRepeat(width, height, x + i, safeY)
+                r[i] = data[safeY * width + px]
             }
         }
         
@@ -44,25 +44,25 @@ struct Int16Reader {
             
             for line in 0..<blockHeight {
                 let currentY = y + line
-                let safeY = min(currentY, self.height - 1)
-                
                 let dstPtr = view.rowPointer(y: line)
+                
+                let (_, safeY) = boundaryRepeat(self.width, self.height, x, currentY)
                 let limit = min(blockWidth, self.width - x)
                 
-                if 0 < limit {
+                if x >= 0 && limit > 0 {
                     let srcPtr = srcBase.advanced(by: safeY * self.width + x)
                     dstPtr.update(from: srcPtr, count: limit)
                     
                     if limit < blockWidth {
-                        let lastVal = dstPtr[limit - 1]
                         for i in limit..<blockWidth {
-                            dstPtr[i] = lastVal
+                            let (px, _) = boundaryRepeat(self.width, self.height, x + i, safeY)
+                            dstPtr[i] = srcBase[safeY * self.width + px]
                         }
                     }
                 } else {
-                    let lastVal = srcBuf[safeY * self.width + (self.width - 1)]
                     for i in 0..<blockWidth {
-                        dstPtr[i] = lastVal
+                        let (px, _) = boundaryRepeat(self.width, self.height, x + i, safeY)
+                        dstPtr[i] = srcBase[safeY * self.width + px]
                     }
                 }
             }
@@ -89,6 +89,7 @@ struct PlaneData420 {
 }
 
 extension PlaneData420 {
+
     init(img16: Image16) {
         self.width = img16.width
         self.height = img16.height
@@ -109,7 +110,6 @@ extension PlaneData420 {
                 dst.withUnsafeMutableBufferPointer { dstBuf in
                     guard let srcPtr = srcBuf.baseAddress, let dstPtr = dstBuf.baseAddress else { return }
                     var i = 0
-                    #if arch(arm64) || arch(x86_64) || arch(wasm32)
                     let offset128 = SIMD8<Int16>(repeating: 128)
                     let zero8 = SIMD8<Int16>.zero
                     let max255 = SIMD8<Int16>(repeating: 255)
@@ -120,7 +120,7 @@ extension PlaneData420 {
                         UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
                         i += 8
                     }
-                    #endif
+
                     while i < count {
                         let v = srcPtr[i]
                         switch v {
@@ -150,7 +150,6 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
         guard let srcPtr = src.baseAddress, let dstPtr = dst.baseAddress else { return }
         let count = min(src.count, dst.count)
         var i = 0
-        #if arch(arm64) || arch(x86_64) || arch(wasm32)
         let offset128 = SIMD8<Int16>(repeating: 128)
         while i + 8 <= count {
             let u8 = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<UInt8>.self)
@@ -158,7 +157,6 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
             UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: i16, as: SIMD8<Int16>.self)
             i += 8
         }
-        #endif
         while i < count {
             dstPtr[i] = Int16(srcPtr[i]) - 128
             i += 1
@@ -815,6 +813,13 @@ struct Image16: Sendable {
                 }
             }
         }
+    }
+    
+    @inline(__always)
+    public mutating func clampAll(min: Int16 = -128, max: Int16 = 127) {
+        clampPlane16(&y, min: min, max: max)
+        clampPlane16(&cb, min: min, max: max)
+        clampPlane16(&cr, min: min, max: max)
     }
 }
 

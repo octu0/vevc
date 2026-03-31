@@ -496,6 +496,7 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     }
 
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
+    sub.clampAll()
     return sub
 }
 
@@ -583,6 +584,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
         }
     }
     
+    sub.clampAll()
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
@@ -670,6 +672,7 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
         }
     }
     
+    sub.clampAll()
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
@@ -741,6 +744,18 @@ func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
                 dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                if w == 416 && h == 192 {
+                    var sumHL = 0, sumLH = 0, sumHH = 0, sumLL = 0
+                    for y in 0..<16 {
+                        for x in 0..<16 {
+                            sumHL += Int(hlView.rowPointer(y: y)[x])
+                            sumLH += Int(lhView.rowPointer(y: y)[x])
+                            sumHH += Int(hhView.rowPointer(y: y)[x])
+                            sumLL += Int(view.rowPointer(y: y)[x])
+                        }
+                    }
+                    print("DEC Cb sums at (416, 192): HL=\(sumHL) LH=\(sumLH) HH=\(sumHH) LL=\(sumLL)")
+                }
                 invDwt2d_32(&view)
             }
             rowResults.append((block, w, h))

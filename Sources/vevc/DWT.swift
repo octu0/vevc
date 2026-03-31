@@ -10,17 +10,42 @@ struct Subbands {
     let size: Int
 }
 
-@inline(__always)
-private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: Int) -> Subbands {
-    let half = size / 2
-    return Subbands(
-        ll: BlockView(base: base, width: half, height: half, stride: stride),
-        hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: stride),
-        lh: BlockView(base: base.advanced(by: half * stride), width: half, height: half, stride: stride),
-        hh: BlockView(base: base.advanced(by: half * stride + half), width: half, height: half, stride: stride),
-        size: half
-    )
-}
+    @inline(__always)
+    private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: Int) -> Subbands {
+        let half = size / 2
+        return Subbands(
+            ll: BlockView(base: base, width: half, height: half, stride: stride),
+            hl: BlockView(base: base.advanced(by: half), width: half, height: half, stride: stride),
+            lh: BlockView(base: base.advanced(by: half * stride), width: half, height: half, stride: stride),
+            hh: BlockView(base: base.advanced(by: half * stride + half), width: half, height: half, stride: stride),
+            size: half
+        )
+    }
+
+    // MARK: - Overflow-Safe Int16 Arithmetic
+    // In DWT Lifting, input values bounded at ~16382 can double at every cascade column/row dimension,
+    // easily wrapping around Int16 boundaries during regular SIMD addition `(A &+ B &+ 2) &>> 2`.
+    // We rewrite the operation strictly avoiding the explicit sum to prevent the diamond ringing artifacts.
+
+    extension SIMD where Scalar == Int16 {
+        @inline(__always)
+        internal func addShift1(_ other: Self) -> Self {
+            let halfA = self &>> 1
+            let halfB = other &>> 1
+            let sumHalf = halfA &+ halfB
+            let remainder = (self & 1) &+ (other & 1)
+            return sumHalf &+ (remainder &>> 1)
+        }
+
+        @inline(__always)
+        internal func addShift2(_ other: Self) -> Self {
+            let halfA = self &>> 1
+            let halfB = other &>> 1
+            let sumHalf = halfA &+ halfB
+            let remainder = (self & 1) &+ (other & 1) &+ 2
+            return (sumHalf &+ (remainder &>> 1)) &>> 1
+        }
+    }
 
 // MARK: - LeGall 5/3 Lifting
 
@@ -33,12 +58,9 @@ func lift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     // Predict: H[n] -= (L[n] + L[n+1]) >> 1
     // Boundary mirror: L[n+1] for last element uses L[n] itself
     let lowShifted = SIMD2<Int16>(low[1], low[1])
-    high &-= (low &+ lowShifted) &>> 1
-
-    // Update: L[n] += (H[n-1] + H[n] + 2) >> 2
-    // Boundary mirror: H[n-1] for first element uses H[n] itself
+    high &-= low.addShift1(lowShifted)
     let highShifted = SIMD2<Int16>(high[0], high[0])
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    low &+= highShifted.addShift2(high)
 
     // Output: [L0, L1, H0, H1]
     buffer[0 * stride] = low[0]; buffer[1 * stride] = low[1]
@@ -53,11 +75,9 @@ func invLift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 
     // Inverse Update: L[n] -= (H[n-1] + H[n] + 2) >> 2
     let highShifted = SIMD2<Int16>(high[0], high[0])
-    low &-= (highShifted &+ high &+ 2) &>> 2
-
-    // Inverse Predict: H[n] += (L[n] + L[n+1]) >> 1
+    low &-= highShifted.addShift2(high)
     let lowShifted = SIMD2<Int16>(low[1], low[1])
-    high &+= (low &+ lowShifted) &>> 1
+    high &+= low.addShift1(lowShifted)
 
     // Interleave back: [L0, H0, L1, H1]
     buffer[0 * stride] = low[0]; buffer[1 * stride] = high[0]
@@ -70,10 +90,9 @@ func lift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var high = SIMD4<Int16>(buffer[1 * stride], buffer[3 * stride], buffer[5 * stride], buffer[7 * stride])
 
     let lowShifted = SIMD4<Int16>(low[1], low[2], low[3], low[3])
-    high &-= (low &+ lowShifted) &>> 1
-
+    high &-= low.addShift1(lowShifted)
     let highShifted = SIMD4<Int16>(high[0], high[0], high[1], high[2])
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    low &+= highShifted.addShift2(high)
 
     buffer[0 * stride] = low[0]; buffer[1 * stride] = low[1]; buffer[2 * stride] = low[2]; buffer[3 * stride] = low[3]
     buffer[4 * stride] = high[0]; buffer[5 * stride] = high[1]; buffer[6 * stride] = high[2]; buffer[7 * stride] = high[3]
@@ -91,10 +110,9 @@ func lift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     )
 
     let lowShifted = SIMD8<Int16>(low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[7])
-    high &-= (low &+ lowShifted) &>> 1
-
+    high &-= low.addShift1(lowShifted)
     let highShifted = SIMD8<Int16>(high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6])
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    low &+= highShifted.addShift2(high)
 
     buffer[0 * stride] = low[0]; buffer[1 * stride] = low[1]; buffer[2 * stride] = low[2]; buffer[3 * stride] = low[3]
     buffer[4 * stride] = low[4]; buffer[5 * stride] = low[5]; buffer[6 * stride] = low[6]; buffer[7 * stride] = low[7]
@@ -121,13 +139,12 @@ func lift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
         low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[8],
         low[9], low[10], low[11], low[12], low[13], low[14], low[15], low[15]
     )
-    high &-= (low &+ lowShifted) &>> 1
-
+    high &-= low.addShift1(lowShifted)
     let highShifted = SIMD16<Int16>(
         high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6],
         high[7], high[8], high[9], high[10], high[11], high[12], high[13], high[14]
     )
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    low &+= highShifted.addShift2(high)
 
     buffer[0 * stride] = low[0]; buffer[1 * stride] = low[1]; buffer[2 * stride] = low[2]; buffer[3 * stride] = low[3]
     buffer[4 * stride] = low[4]; buffer[5 * stride] = low[5]; buffer[6 * stride] = low[6]; buffer[7 * stride] = low[7]
@@ -145,10 +162,9 @@ func invLift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var high = SIMD4<Int16>(buffer[4 * stride], buffer[5 * stride], buffer[6 * stride], buffer[7 * stride])
 
     let highShifted = SIMD4<Int16>(high[0], high[0], high[1], high[2])
-    low &-= (highShifted &+ high &+ 2) &>> 2
-
+    low &-= highShifted.addShift2(high)
     let lowShifted = SIMD4<Int16>(low[1], low[2], low[3], low[3])
-    high &+= (low &+ lowShifted) &>> 1
+    high &+= low.addShift1(lowShifted)
 
     buffer[0 * stride] = low[0]; buffer[1 * stride] = high[0]
     buffer[2 * stride] = low[1]; buffer[3 * stride] = high[1]
@@ -168,10 +184,9 @@ func invLift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     )
 
     let highShifted = SIMD8<Int16>(high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6])
-    low &-= (highShifted &+ high &+ 2) &>> 2
-
+    low &-= highShifted.addShift2(high)
     let lowShifted = SIMD8<Int16>(low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[7])
-    high &+= (low &+ lowShifted) &>> 1
+    high &+= low.addShift1(lowShifted)
 
     buffer[0 * stride] = low[0]; buffer[1 * stride] = high[0]
     buffer[2 * stride] = low[1]; buffer[3 * stride] = high[1]
@@ -202,13 +217,12 @@ func invLift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
         high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6],
         high[7], high[8], high[9], high[10], high[11], high[12], high[13], high[14]
     )
-    low &-= (highShifted &+ high &+ 2) &>> 2
-
+    low &-= highShifted.addShift2(high)
     let lowShifted = SIMD16<Int16>(
         low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[8],
         low[9], low[10], low[11], low[12], low[13], low[14], low[15], low[15]
     )
-    high &+= (low &+ lowShifted) &>> 1
+    high &+= low.addShift1(lowShifted)
 
     buffer[0 * stride] = low[0]; buffer[1 * stride] = high[0]
     buffer[2 * stride] = low[1]; buffer[3 * stride] = high[1]

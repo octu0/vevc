@@ -25,7 +25,7 @@ final class QuantTests: XCTestCase {
         let q = Quantizer(step: step, roundToNearest: roundToNearest)
         
         let originalValues: [Int16] = (0..<(width * height)).map { i in
-            Int16.random(in: -32767...32767)
+            Int16.random(in: -16382...16382)
         }
         
         block.withView { view in
@@ -78,6 +78,41 @@ final class QuantTests: XCTestCase {
             for step in steps {
                 performRoundTripTest(width: size, height: size, step: step, roundToNearest: false, signedMapping: true)
                 performRoundTripTest(width: size, height: size, step: step, roundToNearest: true, signedMapping: true)
+            }
+        }
+    }
+    
+    // Add strict test for negative drift off-by-one error in dequantizeSIMDSignedMapping
+    func testSignedMappingNegativeDrift() {
+        var block = Block2D(width: 8, height: 8)
+        let q = Quantizer(step: 1, roundToNearest: false)
+        
+        block.withView { view in
+            for y in 0..<8 {
+                for x in 0..<8 {
+                    // Fill with simple negative values
+                    view[y, x] = Int16(-1 - (y * 8 + x))
+                }
+            }
+            // Create a copy of the original values
+            var original = [Int16](repeating: 0, count: 64)
+            for y in 0..<8 {
+                for x in 0..<8 {
+                    original[y * 8 + x] = view[y, x]
+                }
+            }
+            
+            // Encode -> Decode
+            quantizeSIMDSignedMapping(&view, q: q)
+            dequantizeSIMDSignedMapping(&view, q: q)
+            
+            // With step=1 and no rounding, the reconstructed values MUST be exactly identical
+            for y in 0..<8 {
+                for x in 0..<8 {
+                    let orig = original[y * 8 + x]
+                    let recon = view[y, x]
+                    XCTAssertEqual(orig, recon, "Signed mapping exhibited drift! Original: \(orig), Recon: \(recon)")
+                }
             }
         }
     }
