@@ -500,6 +500,8 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     }
 
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     return sub
 }
 
