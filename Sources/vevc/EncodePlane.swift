@@ -884,18 +884,6 @@ func reconstructPlaneLayer32Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
                     dequantizeSIMDSignedMapping16(&hlView, q: qt.qMid)
                     dequantizeSIMDSignedMapping16(&lhView, q: qt.qMid)
                     dequantizeSIMDSignedMapping16(&hhView, q: qt.qHigh)
-                    if startX == 128 && startY == 224 && width == 320 {
-                        var sumHL = 0, sumLH = 0, sumHH = 0, sumLL = 0
-                        for y in 0..<16 {
-                            for x in 0..<16 {
-                                sumHL += Int(hlView.rowPointer(y: y)[x])
-                                sumLH += Int(lhView.rowPointer(y: y)[x])
-                                sumHH += Int(hhView.rowPointer(y: y)[x])
-                                sumLL += Int(view.rowPointer(y: y)[x])
-                            }
-                        }
-                        print("ENC HF sums at (128, 224): HL=\(sumHL) LH=\(sumLH) HH=\(sumHH) LL=\(sumLL)")
-                    }
                     invDwt2d_32(&view)
                 }
                 

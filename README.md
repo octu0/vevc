@@ -122,7 +122,7 @@ SW: Software, HWA: Hardware Acceleration
 #### 1. Frame 1572 (VEVC Min SSIM)
 | Original | VEVC | H.264(SW) | H.265(SW) |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/versus_vevc_min_frame1572_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1572_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1572_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1572_hevc.png" width="200" /> |
+| <img src="docs/versus_vevc_min_frame1632_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1632_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1632_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1632_hevc.png" width="200" /> |
 
 (CC) Blender Foundation | [mango.blender.org](https://mango.blender.org)
 
