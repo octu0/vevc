@@ -57,11 +57,10 @@ struct BlockView {
 
     @inline(__always)
     func clearAll() {
-        if width == stride {
-            base.initialize(repeating: 0, count: width * height)
-        } else {
-            for y in 0..<height {
-                rowPointer(y: y).initialize(repeating: 0, count: width)
+        for y in 0..<height {
+            let ptr = rowPointer(y: y)
+            for x in 0..<width {
+                ptr[x] = 0
             }
         }
     }

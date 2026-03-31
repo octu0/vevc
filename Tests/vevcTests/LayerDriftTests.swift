@@ -148,8 +148,8 @@ final class LayerDriftTests: XCTestCase {
         let dCr = diffStats(encRecon.cr, decImg16.cr)
         
         XCTAssertEqual(dY.maxDiff, 0, "Full Y不一致: maxDiff=\(dY.maxDiff) diffPixels=\(dY.diffCount)/\(dY.count)")
-        XCTAssertEqual(dCb.maxDiff, 0, "Full Cb不一致: maxDiff=\(dCb.maxDiff)")
-        XCTAssertEqual(dCr.maxDiff, 0, "Full Cr不一致: maxDiff=\(dCr.maxDiff)")
+        XCTAssertEqual(dCb.maxDiff, 0, "Full Cb不一致: maxDiff=\(dCb.maxDiff) diffPixels=\(dCb.diffCount)/\(dCb.count)")
+        XCTAssertEqual(dCr.maxDiff, 0, "Full Cr不一致: maxDiff=\(dCr.maxDiff) diffPixels=\(dCr.diffCount)/\(dCr.count)")
     }
     
     /// ノイズパターンでフルチェーン
@@ -180,9 +180,14 @@ final class LayerDriftTests: XCTestCase {
         
         let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
-        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2, dx: width, dy: height)
+        let decImg = try await decodeSpatialLayers(r: bytes, maxLayer: 2, dx: width, dy: height)
         
-        let dY = diffStats(encRecon.y, decImg16.y)
-        XCTAssertEqual(dY.maxDiff, 0, "NoisePattern Full Y不一致: maxDiff=\(dY.maxDiff) diffPixels=\(dY.diffCount)/\(dY.count) enc=[\(stats(encRecon.y))] dec=[\(stats(decImg16.y))]")
+        let dY = diffStats(encRecon.y, decImg.y)
+        let dCb = diffStats(encRecon.cb, decImg.cb)
+        let dCr = diffStats(encRecon.cr, decImg.cr)
+        
+        XCTAssertEqual(dY.maxDiff, 0, "NoisePattern Y: maxDiff=\(dY.maxDiff) diffPixels=\(dY.diffCount)/\(dY.count)")
+        XCTAssertEqual(dCb.maxDiff, 0, "NoisePattern Cb: maxDiff=\(dCb.maxDiff) diffPixels=\(dCb.diffCount)/\(dCb.count)")
+        XCTAssertEqual(dCr.maxDiff, 0, "NoisePattern Cr: maxDiff=\(dCr.maxDiff) diffPixels=\(dCr.diffCount)/\(dCr.count)")
     }
 }

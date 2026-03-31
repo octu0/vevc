@@ -75,8 +75,9 @@ do {
     let imageStream = decoder.decode(fileHandle: inFileHandle)
     for try await image in imageStream {
         if y4mWriter == nil {
-            // FPS is not available from Decoder directly; use default 30fps
-            let fpsHeader = "F30:1"
+            // Use stream fps or fallback to 30fps
+            let fps = image.fps ?? 30
+            let fpsHeader = "F\(fps):1"
             y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
         }
         

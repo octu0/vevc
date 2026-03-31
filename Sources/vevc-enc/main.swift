@@ -102,17 +102,12 @@ do {
     var frameCount = 0
     let startTime = Date()
 
-    let frameStream = AsyncStream<YCbCrImage> { continuation in
-        Task {
-            do {
-                while let image = try y4mReader.readFrame() {
-                    continuation.yield(image)
-                }
-                continuation.finish()
-            } catch {
-                fputs("Failed to read frame: \(error)\n", stderr)
-                continuation.finish()
-            }
+    let frameStream = AsyncStream<YCbCrImage> {
+        do {
+            return try y4mReader.readFrame()
+        } catch {
+            fputs("Failed to read frame: \(error)\n", stderr)
+            return nil
         }
     }
 

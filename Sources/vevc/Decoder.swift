@@ -3,11 +3,11 @@ import Foundation
 /// Parse VEVC header chunk to extract width/height from metadata.
 /// Returns (width, height) if the chunk is a valid VEVC header, nil otherwise.
 @inline(__always)
-private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int)? {
+private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int, Int)? {
     guard chunk.count >= 4, chunk[0] == 0x56, chunk[1] == 0x45, chunk[2] == 0x56, chunk[3] == 0x43 else {
         return nil
     }
-    // Magic(4B) + MetadataSize(2B) + Profile(1B) + Width(2B) + Height(2B) + ...
+    // Magic(4B) + MetadataSize(2B) + Profile(1B) + Width(2B) + Height(2B) + optional FPS(2B)
     guard chunk.count >= 4 + 2 + 1 + 2 + 2 else { return nil }
     var offset = 4
     let metadataSize = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
@@ -19,7 +19,12 @@ private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int)? {
     let w = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
     offset += 2
     let h = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
-    return (w, h)
+    offset += 2
+    // Skip ColorGamut (1B)
+    offset += 1
+    guard chunk.count >= offset + 2 else { return (w, h, 30) }
+    let fps = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
+    return (w, h, fps)
 }
 
 class CoreDecoder {
@@ -137,7 +142,7 @@ public struct Decoder: Sendable {
                 var nextGOPIndexToYield = 0
                 var completedGOPs: [Int: [YCbCrImage]] = [:]
                 
-                guard let firstChunk = await iterator.next(), let (effectiveWidth, effectiveHeight) = parseVEVCHeaderChunk(firstChunk) else {
+                guard let firstChunk = await iterator.next(), let (effectiveWidth, effectiveHeight, effectiveFps) = parseVEVCHeaderChunk(firstChunk) else {
                     continuation.finish(throwing: DecodeError.insufficientDataContext("missing VEVC header chunk"))
                     return
                 }
@@ -164,7 +169,8 @@ public struct Decoder: Sendable {
                             
                             // Yield frames in order
                             while let consecutiveFrames = completedGOPs[nextGOPIndexToYield] {
-                                for frame in consecutiveFrames {
+                                for var frame in consecutiveFrames {
+                                    frame.fps = effectiveFps
                                     continuation.yield(frame)
                                 }
                                 completedGOPs.removeValue(forKey: nextGOPIndexToYield)

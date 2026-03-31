@@ -884,6 +884,18 @@ func reconstructPlaneLayer32Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
                     dequantizeSIMDSignedMapping16(&hlView, q: qt.qMid)
                     dequantizeSIMDSignedMapping16(&lhView, q: qt.qMid)
                     dequantizeSIMDSignedMapping16(&hhView, q: qt.qHigh)
+                    if startX == 128 && startY == 224 && width == 320 {
+                        var sumHL = 0, sumLH = 0, sumHH = 0, sumLL = 0
+                        for y in 0..<16 {
+                            for x in 0..<16 {
+                                sumHL += Int(hlView.rowPointer(y: y)[x])
+                                sumLH += Int(lhView.rowPointer(y: y)[x])
+                                sumHH += Int(hhView.rowPointer(y: y)[x])
+                                sumLL += Int(view.rowPointer(y: y)[x])
+                            }
+                        }
+                        print("ENC HF sums at (128, 224): HL=\(sumHL) LH=\(sumLH) HH=\(sumHH) LL=\(sumLL)")
+                    }
                     invDwt2d_32(&view)
                 }
                 
@@ -1223,28 +1235,13 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
         }
         
-        if isIFrame {
-            var predDC: Int16 = 0
-            for i in blocks.indices {
-                let qDC = blocks[i].data[0]
-                blocks[i].data[0] = qDC - predDC
-                predDC = qDC
-            }
-        }
+        // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
-        if isIFrame {
-            var predDC: Int16 = 0
-            for i in blocks.indices {
-                let diff = blocks[i].data[0]
-                let qDC = diff + predDC
-                blocks[i].data[0] = qDC
-                predDC = qDC
-            }
-        }
+
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY)
@@ -1272,28 +1269,12 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         
-        if isIFrame {
-            var predDC: Int16 = 0
-            for i in blocks.indices {
-                let qDC = blocks[i].data[0]
-                blocks[i].data[0] = qDC - predDC
-                predDC = qDC
-            }
-        }
+        // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
-        if isIFrame {
-            var predDC: Int16 = 0
-            for i in blocks.indices {
-                let diff = blocks[i].data[0]
-                let qDC = diff + predDC
-                blocks[i].data[0] = qDC
-                predDC = qDC
-            }
-        }
-        
+
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane, quantizedBlocks)
@@ -1317,28 +1298,12 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         
-        if isIFrame {
-            var predDC: Int16 = 0
-            for i in blocks.indices {
-                let qDC = blocks[i].data[0]
-                blocks[i].data[0] = qDC - predDC
-                predDC = qDC
-            }
-        }
+        // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
         let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
-        if isIFrame {
-            var predDC: Int16 = 0
-            for i in blocks.indices {
-                let diff = blocks[i].data[0]
-                let qDC = diff + predDC
-                blocks[i].data[0] = qDC
-                predDC = qDC
-            }
-        }
-        
+
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane, quantizedBlocks)
@@ -1546,27 +1511,27 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
-    let reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
-    let reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
-    
-    // Build Image16 from Layer16 reconstruction
-    let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
-    
     var l1yBlocksMut = l1yBlocks
     var l1cbBlocksMut = l1cbBlocks
     var l1crBlocksMut = l1crBlocks
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
+    let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocksMut, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
+    let reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    let reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    
+    // Build Image16 from Layer16 reconstruction
+    let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
+    
     var l2yBlocksMut = l2yBlocks
     var l2cbBlocksMut = l2cbBlocks
     var l2crBlocksMut = l2crBlocks
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocksMut, cbBlocks: &l2cbBlocksMut, crBlocks: &l2crBlocksMut, parentYBlocks: l1yBlocksMut, parentCbBlocks: l1cbBlocksMut, parentCrBlocks: l1crBlocksMut)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocksMut, cbBlocks: &l2cbBlocksMut, crBlocks: &l2crBlocksMut, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
     
     // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
-    let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2)
-    let reconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2)
-    let reconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2)
+    let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocksMut, prevImg: l1Img, width: dx, height: dy, qt: qtY2)
+    let reconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocksMut, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2)
+    let reconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocksMut, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2)
     
     var mutReconL2Y = reconL2Y
     var mutReconL2Cb = reconL2Cb
@@ -1580,8 +1545,8 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     
     // Apply deblocking filter (blockSize corresponds to Layer32 output)
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
-    applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
-    applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    // applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    // applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     

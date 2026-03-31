@@ -38,7 +38,7 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentBlocks: [Block2
                     tlZero != true, 
                     trZero != true, 
                     blZero != true, 
-                    brZero != true,
+                    brZero != true
                 )))
             } else {
                 tasks.append((i, .decode16))

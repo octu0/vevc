@@ -385,6 +385,7 @@ public struct YCbCrImage: Sendable {
     public let width: Int
     public let height: Int
     public let ratio: YCbCrRatio
+    public var fps: Int?
     
     public var yStride: Int {
         @inline(__always) get { width }
@@ -399,10 +400,11 @@ public struct YCbCrImage: Sendable {
         }
     }
     
-    public init(width: Int, height: Int, ratio: YCbCrRatio = .ratio420) {
+    public init(width: Int, height: Int, ratio: YCbCrRatio = .ratio420, fps: Int? = nil) {
         self.width = width
         self.height = height
         self.ratio = ratio
+        self.fps = fps
         self.yPlane = [UInt8](repeating: 0, count: (width * height))
         
         switch ratio {
@@ -444,10 +446,10 @@ public struct YCbCrImage: Sendable {
         let newHeight = Int(Double(height) * factor)
 
         guard 0 < newWidth && 0 < newHeight else {
-            return YCbCrImage(width: max(1, newWidth), height: max(1, newHeight), ratio: self.ratio)
+            return YCbCrImage(width: max(1, newWidth), height: max(1, newHeight), ratio: self.ratio, fps: self.fps)
         }
 
-        var dstImg = YCbCrImage(width: newWidth, height: newHeight, ratio: self.ratio)
+        var dstImg = YCbCrImage(width: newWidth, height: newHeight, ratio: self.ratio, fps: self.fps)
 
         boxResizePlane(
             src: self.yPlane, srcW: self.width, srcH: self.height, srcStride: self.yStride,

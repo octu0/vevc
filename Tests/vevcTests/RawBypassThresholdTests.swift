@@ -79,7 +79,7 @@ struct RawBypassThresholdTests {
         let data = encoder.getData()
 
         // getData() structure: [lsciCount(4B)] ... [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
-        var offset = 4 // skip lsciCount (which is 0 in this test)
+        let offset = 4 // skip lsciCount (which is 0 in this test)
         let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
         let modeByteOffset = offset + 4 + bypassLen + 4 // skip bypassLen(4) + bypassData + coeffCount(4)
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
@@ -96,7 +96,7 @@ struct RawBypassThresholdTests {
         encoder.flush()
         let data = encoder.getData()
 
-        var offset = 4 // skip lsciCount
+        let offset = 4 // skip lsciCount
         let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
         let modeByteOffset = offset + 4 + bypassLen + 4
         #expect(modeByteOffset < data.count, "Data should contain mode byte")

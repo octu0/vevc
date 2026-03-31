@@ -496,8 +496,6 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     }
 
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     return sub
 }
 
@@ -613,45 +611,17 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    var tmpYBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
+    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    var tmpCbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
+    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    var tmpCrBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
-    
-    if isIFrame {
-        var predDCY: Int16 = 0
-        for i in tmpYBlocks.indices {
-            let diff = tmpYBlocks[i].data[0]
-            let qDC = diff + predDCY
-            tmpYBlocks[i].data[0] = qDC
-            predDCY = qDC
-        }
-        var predDCCb: Int16 = 0
-        for i in tmpCbBlocks.indices {
-            let diff = tmpCbBlocks[i].data[0]
-            let qDC = diff + predDCCb
-            tmpCbBlocks[i].data[0] = qDC
-            predDCCb = qDC
-        }
-        var predDCCr: Int16 = 0
-        for i in tmpCrBlocks.indices {
-            let diff = tmpCrBlocks[i].data[0]
-            let qDC = diff + predDCCr
-            tmpCrBlocks[i].data[0] = qDC
-            predDCCr = qDC
-        }
-    }
-    
-    let yBlocks = tmpYBlocks
-    let cbBlocks = tmpCbBlocks
-    let crBlocks = tmpCrBlocks
+    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
     
     let chunkSize = 4
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
@@ -882,9 +852,9 @@ func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
                 var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
                 var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
                 invDwt2d_16(&view)
             }
             rowResults.append((block, w, h))
@@ -920,9 +890,9 @@ func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
                 var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
                 var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
+                dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
                 invDwt2d_16(&view)
             }
             rowResults.append((block, w, h))
