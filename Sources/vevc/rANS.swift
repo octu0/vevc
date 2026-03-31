@@ -18,10 +18,30 @@ let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 /// Build static rANS model from predetermined frequency data.
 /// Normalizes the provided raw frequency array to sum exactly to RANS_SCALE.
 private func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
-    var model = rANSModel()
-    let freqsInt = rawFreqs.map { Int($0) }
-    model.normalize(sigCounts: [0, 0], tokenCounts: freqsInt)
-    return model
+    var freqs = rawFreqs
+    let sum: UInt32 = freqs.reduce(0, +)
+    
+    // Adjust the largest element to make sum == RANS_SCALE
+    if sum != RANS_SCALE {
+        var maxIdx = 0
+        var maxVal: UInt32 = 0
+        for i in 0..<64 {
+            if freqs[i] > maxVal {
+                maxVal = freqs[i]
+                maxIdx = i
+            }
+        }
+        if sum < RANS_SCALE {
+            freqs[maxIdx] += (RANS_SCALE - sum)
+        } else {
+            let diff = sum - RANS_SCALE
+            if freqs[maxIdx] > diff {
+                freqs[maxIdx] -= diff
+            }
+        }
+    }
+    
+    return rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqs)
 }
 
 // Static tables derived from actual data:
@@ -79,207 +99,8 @@ let staticValModel1 = buildStaticModel(rawFreqs: [
        1,    1,    1,    1,    1,   1,    1,   1,
 ])
 
-// MARK: - Context-Adaptive Static Models
-// 8 contexts based on Z-Order index and isParentZero
-
-let staticRunModelCtx0 = buildStaticModel(rawFreqs: [
-    2898423,585077,257377,109651,80448,68104,42490,38727,
-    40600,26950,37533,24946,19134,21634,19342,20895,
-     2590, 2658, 1681, 1712, 2194, 3409, 1295, 2265,
-     1234, 1195, 1372, 1294, 1036, 1884, 1145, 1841,
-     1353, 1009, 2368, 3395, 9515,12445, 1135, 1048,
-     1185,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx1 = buildStaticModel(rawFreqs: [
-    221726,98745,46998,27444,17574,23930,11844,13460,
-     7392, 6726, 4721, 3988, 3416, 2149, 1371,  516,
-      347,  298,  294,  291,  271,  196,  182,  167,
-      163,  160,  130,  113,  139,  142,  126,  135,
-       79,   83,  111,  298,  389,  356,   62,   35,
-       21,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx2 = buildStaticModel(rawFreqs: [
-    853091,342539,154261,79458,64067,57391,25794,21341,
-    12728, 9679, 7770, 4333, 2757, 2081, 2024, 1849,
-     1551, 1443, 1433, 1183, 1355, 1841,  946,  904,
-      669,  664,  486,  530,  510,  494,  433,  457,
-      369,  326,  596,  913, 1206,  867,  215,  102,
-       48,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx3 = buildStaticModel(rawFreqs: [
-    483578,217381,115009,59342,50743,51073,25650,23436,
-    20057,16021,18975,11558, 9381, 7643, 7611, 7069,
-     6014, 5470, 4765, 4085, 4644, 6075, 2903, 2863,
-     2151, 2011, 1842, 1504, 1420, 1566, 1238, 1432,
-     1066, 1013, 1692, 2821, 4073, 3210, 3225, 1253,
-      162,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx4 = buildStaticModel(rawFreqs: [
-    10859, 8463, 7746, 6423, 7433, 9226, 5597, 6841,
-     6408, 4946, 7747, 6011, 4341, 5675, 5360, 6714,
-      258,  217,  168,  158,  205,  287,  120,  241,
-      113,   97,  164,  121,  122,  183,  134,  171,
-      131,   85,  201,  327,  920, 1712,    6,    1,
-        2,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx5 = buildStaticModel(rawFreqs: [
-     3683, 3229, 1721, 1206,  846, 1604,  662,  858,
-      503,  535,  426,  377,  310,  216,  145,   35,
-       30,   30,   26,   27,   18,   18,   17,   14,
-       18,   16,    6,   14,   20,    8,    8,    9,
-       10,    8,   15,   32,   32,   31,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx6 = buildStaticModel(rawFreqs: [
-    15303,12167, 6038, 3402, 3086, 4394, 1610, 1709,
-      975,  840,  588,  343,  181,  158,  173,  128,
-      113,  113,  115,   76,   73,  112,   72,   64,
-       59,   71,   48,   50,   31,   37,   35,   49,
-       32,   37,   50,  105,  117,   72,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModelCtx7 = buildStaticModel(rawFreqs: [
-     8774, 6152, 3790, 2573, 2125, 2254, 1329, 1219,
-     1004,  850,  803,  630,  552,  428,  415,  375,
-      323,  288,  236,  243,  213,  251,  136,  167,
-      109,  115,  108,   66,   75,   83,   36,   65,
-       43,   37,   67,   93,   64,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx0 = buildStaticModel(rawFreqs: [
-        1,1180350,890924,764250,361637,201118,162265,136160,
-    90472,67948,55849,50791,37343,31780,26014,24789,
-    19131,17058,14616,14083,11098,10378, 8784, 8987,
-     7198, 6967, 5859, 6130, 4945, 4978, 4180,    1,
-     7952, 6672,11195,16051,19241,19596,22258,23578,
-      963,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx1 = buildStaticModel(rawFreqs: [
-        1,151011,    1,170242,    1,38808,    1,41722,
-        1,16068,    1,17425,    1, 8564,    1, 9023,
-        1, 5224,    1, 5542,    1, 3507,    1, 3721,
-        1, 2380,    1, 2638,    1, 1789,    1,    1,
-     1921, 1367, 2512, 3728, 4235, 3391, 1554,  213,
-        3,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx2 = buildStaticModel(rawFreqs: [
-        1,487749,    1,534747,    1,137043,    1,143959,
-        1,59247,    1,61478,    1,31989,    1,33003,
-        1,19816,    1,20285,    1,13587,    1,13996,
-        1, 9674,    1, 9956,    1, 7196,    1,    1,
-     7528, 5581,10091,14924,17085,13821, 6724, 1199,
-       26,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx3 = buildStaticModel(rawFreqs: [
-        1,381426,    1,410845,    1,99881,    1,104624,
-        1,39193,    1,42834,    1,19840,    1,21277,
-        1,11791,    1,12143,    1, 7506,    1, 7832,
-        1, 4965,    1, 5181,    1, 3253,    1,    1,
-     3593, 2224, 4106, 5057, 3989, 1345,  118,    2,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx4 = buildStaticModel(rawFreqs: [
-        1,41477,    1,69838,    1, 1685,    1, 2132,
-        1,  267,    1,  317,    1,   51,    1,   94,
-        1,   18,    1,   28,    1,    3,    1,    4,
-        1,    2,    1,    6,    1,    3,    1,    1,
-        2,    1,    1,    4,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx5 = buildStaticModel(rawFreqs: [
-        1, 6261,    1, 8892,    1,  513,    1,  687,
-        1,  113,    1,  142,    1,   31,    1,   59,
-        1,    8,    1,   30,    1,    4,    1,    9,
-        1,    1,    1,    8,    1,    2,    1,    1,
-        1,    1,    1,    2,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx6 = buildStaticModel(rawFreqs: [
-        1,19602,    1,26958,    1, 2085,    1, 2489,
-        1,  429,    1,  519,    1,  129,    1,  181,
-        1,   53,    1,   78,    1,   17,    1,   32,
-        1,    9,    1,   15,    1,    4,    1,    1,
-        6,    4,    4,    8,    2,    2,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticValModelCtx7 = buildStaticModel(rawFreqs: [
-        1,13743,    1,17064,    1, 1756,    1, 2104,
-        1,  402,    1,  501,    1,  135,    1,  173,
-        1,   56,    1,   78,    1,   24,    1,   20,
-        1,    5,    1,   11,    1,    4,    1,    1,
-        2,    2,    4,    6,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-        1,    1,    1,    1,    1,    1,    1,    1,
-])
-
-let staticRunModels: [rANSModel] = [
-    staticRunModelCtx0, staticRunModelCtx1, staticRunModelCtx2, staticRunModelCtx3,
-    staticRunModelCtx4, staticRunModelCtx5, staticRunModelCtx6, staticRunModelCtx7
-]
-
-let staticValModels: [rANSModel] = Array(repeating: staticValModelCtx0, count: 8)
-
-// MARK: - LSCI Static Table
-// Model for LSCI 'bits' (0...10). Uses 64 slots for compatibility, but only 0...10 are active.
-let staticLsciModel = buildStaticModel(rawFreqs: [
-    8000, 4000, 2000, 1000, 500, 250, 125, 60,
-      30,   15,    8,    4,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-])
-let staticLsciModels: [rANSModel] = Array(repeating: staticLsciModel, count: 8)
-
 // MARK: - DPCM Static Tables
+// Measured from real 1080p video (ToS-4k-1080.y4m, 1802 frames, 44139379 pairs).
 // DPCM has no isParentZero concept, so only one run/val model pair is needed.
 // Both isParentZero=false and isParentZero=true use the same tables.
 
@@ -306,11 +127,7 @@ let staticDPCMValModel = buildStaticModel(rawFreqs: [
        1,    1,    1,    1,    1,    1,    1,    1,
        1,    1,    1,    1,    1,    1,    1,    1,
        1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
 ])
-
-let staticDPCMRunModels: [rANSModel] = Array(repeating: staticDPCMRunModel, count: 8)
-let staticDPCMValModels: [rANSModel] = Array(repeating: staticDPCMValModel, count: 8)
 
 // MARK: - rANS Probability Model
 
@@ -341,7 +158,6 @@ struct rANSModel {
         buildLUT()
     }
     
-    @inline(__always)
     private mutating func buildLUT() {
         tokenLUT.withUnsafeMutableBufferPointer { ptr in
             for sym in 0..<64 {
@@ -355,7 +171,6 @@ struct rANSModel {
         }
     }
     
-    @inline(__always)
     mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
         let totalSig = sigCounts[0] + sigCounts[1]
         if totalSig == 0 {
@@ -457,13 +272,11 @@ struct rANSEncoder {
         state = (q << RANS_SCALE_BITS) + (state - q * freq) + cumFreq
     }
     
-    @inline(__always)
     mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: state))
         stream.append(UInt16(truncatingIfNeeded: state >> 16))
     }
     
-    @inline(__always)
     func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
@@ -578,7 +391,6 @@ struct Interleaved4rANSEncoder {
         }
     }
     
-    @inline(__always)
     mutating func flush() {
         stream.append(UInt16(truncatingIfNeeded: states.3))
         stream.append(UInt16(truncatingIfNeeded: states.3 >> 16))
@@ -590,7 +402,6 @@ struct Interleaved4rANSEncoder {
         stream.append(UInt16(truncatingIfNeeded: states.0 >> 16))
     }
     
-    @inline(__always)
     func getBitstream() -> [UInt8] {
         let count = stream.count
         var bytes = [UInt8](repeating: 0, count: count * 2)
@@ -714,7 +525,6 @@ struct InterleavedrANSEncoder {
         states[lane] = state
     }
     
-    @inline(__always)
     mutating func flush() {
         for lane in 0..<4 {
             streams[lane].append(UInt16(truncatingIfNeeded: states[lane]))
@@ -724,7 +534,6 @@ struct InterleavedrANSEncoder {
     
     /// merge 4 streams into a single bitstream
     /// format: [len0(4bytes)][len1(4bytes)][len2(4bytes)][len3(4bytes)][stream0][stream1][stream2][stream3]
-    @inline(__always)
     func getBitstream() -> [UInt8] {
         var bytes = [UInt8]()
         
@@ -864,6 +673,7 @@ struct InterleavedrANSDecoder {
     }
 }
 
+
 struct BypassWriter {
     private(set) var bytes: [UInt8]
     private var buffer: UInt64
@@ -906,7 +716,6 @@ struct BypassWriter {
         }
     }
     
-    @inline(__always)
     mutating func flush() {
         guard 0 < bitsInBuffer else { return }
         while bitsInBuffer >= 8 {
@@ -981,6 +790,8 @@ struct BypassReader {
         return (totalBitsRead + 7) / 8
     }
 }
+
+import Foundation
 
 @inline(__always)
 func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
@@ -1117,7 +928,6 @@ struct ZOrder {
         return z
     }
     
-    @inline(__always)
     private static func buildZOrder(size: Int) -> [(x: Int, y: Int)] {
         var arr = [(x: Int, y: Int)](repeating: (0, 0), count: size * size)
         for y in 0..<size {

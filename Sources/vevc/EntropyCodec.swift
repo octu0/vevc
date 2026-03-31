@@ -14,12 +14,14 @@ protocol EntropyModelProvider {
     static var isStaticMode: Bool { get }
     static var isDPCMMode: Bool { get }
     static func generateModels(
-        runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel])
+        runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
+        runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
+    ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel)
     
     static func writeHeaders(
         into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
+        runModel0: rANSModel, valModel0: rANSModel,
+        runModel1: rANSModel, valModel1: rANSModel
     )
 }
 
@@ -29,15 +31,17 @@ struct StaticEntropyModel: EntropyModelProvider {
     
     @inline(__always)
     static func generateModels(
-        runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel]) {
-        return (staticRunModels, staticValModels)
+        runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
+        runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
+    ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
+        return (staticRunModel0, staticValModel0, staticRunModel1, staticValModel1)
     }
     
     @inline(__always)
     static func writeHeaders(
         into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
+        runModel0: rANSModel, valModel0: rANSModel,
+        runModel1: rANSModel, valModel1: rANSModel
     ) {}
 }
 
@@ -56,47 +60,45 @@ struct DynamicEntropyModel: EntropyModelProvider {
     
     @inline(__always)
     static func generateModels(
-        runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel]) {
+        runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
+        runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
+    ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
         // Estimate pair count from run token counts (each pair produces one run token)
-        let totalPairs: Int = runTokenCounts.reduce(0) { $0 + $1.reduce(0, +) }
+        let totalPairs: Int = runTokenCounts0.reduce(0, +) + runTokenCounts1.reduce(0, +)
         
         // Fallback to static tables when pair count is below threshold
         // to avoid frequency table header overhead exceeding compression benefit
         if totalPairs < dynamicThreshold {
-            return (Array(staticRunModels[0..<2]), staticValModels)
+            return (staticRunModel0, staticValModel0, staticRunModel1, staticValModel1)
         }
         
-        var rm = [rANSModel](repeating: rANSModel(), count: 2)
-        
-        for i in 0..<2 {
-            rm[i].normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts[i])
-        }
-        
-        // Val models are consolidated into context 0 to prevent context dilution
-        var vmModel = rANSModel()
-        vmModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts[0])
-        let vm = [rANSModel](repeating: vmModel, count: 8)
-        
-        return (rm, vm)
+        var rm0 = rANSModel()
+        var vm0 = rANSModel()
+        var rm1 = rANSModel()
+        var vm1 = rANSModel()
+        rm0.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts0)
+        vm0.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts0)
+        rm1.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts1)
+        vm1.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts1)
+        return (rm0, vm0, rm1, vm1)
     }
     
     @inline(__always)
     static func writeHeaders(
         into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
+        runModel0: rANSModel, valModel0: rANSModel,
+        runModel1: rANSModel, valModel1: rANSModel
     ) {
         // Check if we fell back to static tables by comparing tokenFreqs pointers
         // If the model's tokenFreqs match the static tables, skip writing headers
-        if runModels[0].tokenFreqs == staticRunModels[0].tokenFreqs
-            && valModels[0].tokenFreqs == staticValModels[0].tokenFreqs {
+        if runModel0.tokenFreqs == staticRunModel0.tokenFreqs
+            && valModel0.tokenFreqs == staticValModel0.tokenFreqs {
             return
         }
-        for i in 0..<2 {
-            writeCompressedFreqTable(&out, freqs: runModels[i].tokenFreqs)
-        }
-        // Val models are consolidated: write only one header
-        writeCompressedFreqTable(&out, freqs: valModels[0].tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: valModel0.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: runModel1.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: valModel1.tokenFreqs)
     }
 }
 
@@ -108,29 +110,30 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
     
     @inline(__always)
     static func generateModels(
-        runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel]) {
-        return (Array(staticDPCMRunModels[0..<2]), staticDPCMValModels)
+        runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
+        runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
+    ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
+        // DPCM uses the same model for both isParentZero=false and true
+        return (staticDPCMRunModel, staticDPCMValModel, staticDPCMRunModel, staticDPCMValModel)
     }
     
     @inline(__always)
     static func writeHeaders(
         into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
+        runModel0: rANSModel, valModel0: rANSModel,
+        runModel1: rANSModel, valModel1: rANSModel
     ) {}
 }
 
 struct EntropyEncoder<Model: EntropyModelProvider> {
     var bypassWriter: BypassWriter
-    var pairs: [(run: UInt32, val: Int16, contextIdx: Int)]
-    var lscis: [(bits: UInt8, bypassBits: UInt32, bypassLen: UInt32)]
+    var pairs: [(run: UInt32, val: Int16, isParentZero: Bool)]
     var trailingZeros: UInt32
     private(set) var coeffCount: Int
 
     init() {
         self.bypassWriter = BypassWriter()
         self.pairs = []
-        self.lscis = []
         self.trailingZeros = 0
         self.coeffCount = 0
     }
@@ -141,19 +144,9 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
     }
 
     @inline(__always)
-    mutating func addPair(run: UInt32, val: Int16, contextIdx: Int) {
-        pairs.append((run: run, val: val, contextIdx: contextIdx))
+    mutating func addPair(run: UInt32, val: Int16, isParentZero: Bool = false) {
+        pairs.append((run: run, val: val, isParentZero: isParentZero))
         coeffCount += Int(run) + 1
-    }
-    
-    @inline(__always)
-    mutating func addLSCI(val: UInt32) {
-        var q = val
-        var bits = 0
-        while q > 0 { bits += 1; q >>= 1 }
-        let bypassBits = bits > 0 ? val & ((1 << (bits - 1)) - 1) : 0
-        let bypassLen = Int(max(0, bits - 1))
-        lscis.append((bits: UInt8(bits), bypassBits: bypassBits, bypassLen: UInt32(bypassLen)))
     }
     
     @inline(__always)
@@ -171,34 +164,6 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
     mutating func getData() -> [UInt8] {
         var out = [UInt8]()
         out.reserveCapacity(pairs.count * 4 + 128)
-        
-        let lsciCount = UInt32(lscis.count)
-        appendUInt32BE(&out, lsciCount)
-        if lsciCount > 0 {
-            var lsciEncoder = rANSEncoder()
-            var lsciBypassWriter = BypassWriter()
-            
-            for lsci in lscis.reversed() {
-                let sym = Int(lsci.bits)
-                lsciEncoder.encodeSymbol(
-                    cumFreq: staticLsciModels[0].tokenCumFreqs[sym],
-                    freq: staticLsciModels[0].tokenFreqs[sym]
-                )
-            }
-            lsciEncoder.flush()
-            let lsciRansOut = lsciEncoder.getBitstream()
-            
-            appendUInt32BE(&out, UInt32(lsciRansOut.count))
-            out.append(contentsOf: lsciRansOut)
-            
-            for lsci in lscis {
-                lsciBypassWriter.writeBits(lsci.bypassBits, count: Int(lsci.bypassLen))
-            }
-            lsciBypassWriter.flush()
-            let lsciBypassData = lsciBypassWriter.bytes
-            appendUInt32BE(&out, UInt32(lsciBypassData.count))
-            out.append(contentsOf: lsciBypassData)
-        }
         
         bypassWriter.flush()
         let metaBypassData = bypassWriter.bytes
@@ -252,8 +217,10 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-        var runTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: 2)
-        var valTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: 2)
+        var runTokenCounts0 = Array(repeating: 0, count: 64)
+        var valTokenCounts0 = Array(repeating: 0, count: 64)
+        var runTokenCounts1 = Array(repeating: 0, count: 64)
+        var valTokenCounts1 = Array(repeating: 0, count: 64)
         
         for lane in 0..<4 {
             let start = chunkStarts[lane]
@@ -273,15 +240,20 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
                 chunkValTokens[lane].append(valResult.token)
                 chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)
 
-                runTokenCounts[pair.contextIdx][Int(runResult.token)] += 1
-                valTokenCounts[0][Int(valResult.token)] += 1
+                if pair.isParentZero {
+                    runTokenCounts1[Int(runResult.token)] += 1
+                    valTokenCounts1[Int(valResult.token)] += 1
+                } else {
+                    runTokenCounts0[Int(runResult.token)] += 1
+                    valTokenCounts0[Int(valResult.token)] += 1
+                }
             }
         }
         
-        // trailing zeros: add to lane3, use contextIdx 0 by default
+        // trailing zeros: add to lane3
         if hasTrailingZeros {
             let runResult = valueTokenizeUnsigned(trailingZeros)
-            runTokenCounts[0][Int(runResult.token)] += 1
+            runTokenCounts0[Int(runResult.token)] += 1
             chunkRunTokens[3].append(runResult.token)
             chunkBypassWriters[3].writeBits(runResult.bypassBits, count: runResult.bypassLen)
         }
@@ -290,16 +262,21 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             chunkBypassWriters[lane].flush()
         }
         // Cap frequencies to 16-bit to ensure bitstream serialization perfectly matches what the decoder reads
-        for ctx in 0..<2 {
-            for i in 0..<64 {
-                if runTokenCounts[ctx][i] > 65535 { runTokenCounts[ctx][i] = 65535 }
-                if valTokenCounts[ctx][i] > 65535 { valTokenCounts[ctx][i] = 65535 }
-            }
+        for i in 0..<64 {
+            if runTokenCounts0[i] > 65535 { runTokenCounts0[i] = 65535 }
+            if valTokenCounts0[i] > 65535 { valTokenCounts0[i] = 65535 }
+            if runTokenCounts1[i] > 65535 { runTokenCounts1[i] = 65535 }
+            if valTokenCounts1[i] > 65535 { valTokenCounts1[i] = 65535 }
         }
         
-        let models = Model.generateModels(runTokenCounts: &runTokenCounts, valTokenCounts: &valTokenCounts)
-        let runModels = models.runModels
-        let valModels = models.valModels
+        let models = Model.generateModels(
+            runTokenCounts0: &runTokenCounts0, valTokenCounts0: &valTokenCounts0,
+            runTokenCounts1: &runTokenCounts1, valTokenCounts1: &valTokenCounts1
+        )
+        let runModel0 = models.runModel0
+        let valModel0 = models.valModel0
+        let runModel1 = models.runModel1
+        let valModel1 = models.valModel1
         
         // Flags byte: bit6=isStatic, bit5=isDPCM, bit0=hasTrailingZeros
         // Determine isStatic dynamically: if writeHeaders writes nothing,
@@ -320,7 +297,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         }
         
         let preHeaderSize = out.count
-        Model.writeHeaders(into: &out, runModels: runModels, valModels: valModels)
+        Model.writeHeaders(into: &out, runModel0: runModel0, valModel0: valModel0, runModel1: runModel1, valModel1: valModel1)
         let headerWasWritten = out.count > preHeaderSize
         
         // Set the isStatic flag based on whether headers were actually written
@@ -341,8 +318,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         // trailing zeros (lane 3)
         if hasTrailingZeros {
             let trailingRunToken = chunkRunTokens[3].last!
-            // TZ uses context 0
-            enc.encodeSymbol(lane: 3, cumFreq: runModels[0].tokenCumFreqs[Int(trailingRunToken)], freq: runModels[0].tokenFreqs[Int(trailingRunToken)])
+            enc.encodeSymbol(lane: 3, cumFreq: runModel0.tokenCumFreqs[Int(trailingRunToken)], freq: runModel0.tokenFreqs[Int(trailingRunToken)])
         }
         
         // encode each lane in reverse order
@@ -354,13 +330,20 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             
             for i in stride(from: pairEnd - 1, through: 0, by: -1) {
                 let pairIdx = chunkStartIdx + i
-                let ctx = pairs[pairIdx].contextIdx
+                let isParentZero = pairs[pairIdx].isParentZero
                 let vt = valTokens[i]
-                
-                enc.encodeSymbol(lane: lane, cumFreq: valModels[ctx].tokenCumFreqs[Int(vt)], freq: valModels[ctx].tokenFreqs[Int(vt)])
+                if isParentZero {
+                    enc.encodeSymbol(lane: lane, cumFreq: valModel1.tokenCumFreqs[Int(vt)], freq: valModel1.tokenFreqs[Int(vt)])
+                } else {
+                    enc.encodeSymbol(lane: lane, cumFreq: valModel0.tokenCumFreqs[Int(vt)], freq: valModel0.tokenFreqs[Int(vt)])
+                }
                 
                 let rt = runTokens[i]
-                enc.encodeSymbol(lane: lane, cumFreq: runModels[ctx].tokenCumFreqs[Int(rt)], freq: runModels[ctx].tokenFreqs[Int(rt)])
+                if isParentZero {
+                    enc.encodeSymbol(lane: lane, cumFreq: runModel1.tokenCumFreqs[Int(rt)], freq: runModel1.tokenFreqs[Int(rt)])
+                } else {
+                    enc.encodeSymbol(lane: lane, cumFreq: runModel0.tokenCumFreqs[Int(rt)], freq: runModel0.tokenFreqs[Int(rt)])
+                }
             }
         }
         
@@ -411,16 +394,14 @@ struct EntropyDecoder {
     var pairs: [(run: UInt32, val: Int16)] = []
     private var pairIndex: Int = 0
     
-    // Extracted LSCIs
-    var lsciDecoded: [UInt32] = []
-    var lsciReadIndex: Int = 0
-    
     private var isRawMode: Bool = false
     private var totalPairEntries: Int = 0
     private var chunkStarts: [Int] = []
     private var hasTrailingZeros: Bool = false
-    private var runModels: [rANSModel] = []
-    private var valModels: [rANSModel] = []
+    private var runModel0: rANSModel!
+    private var valModel0: rANSModel!
+    private var runModel1: rANSModel!
+    private var valModel1: rANSModel!
     private var chunkBypassReaders: [BypassReader] = []
     private var ransDecoder: Interleaved4rANSDecoder!
 
@@ -428,47 +409,6 @@ struct EntropyDecoder {
         var offset = 0
         
         guard 4 <= data.count else { throw DecodeError.insufficientData }
-        let lsciCount = try readUInt32BEFromBytes(data, offset: &offset)
-        
-        self.lsciDecoded = []
-        self.lsciReadIndex = 0
-        if lsciCount > 0 {
-            self.lsciDecoded.reserveCapacity(Int(lsciCount))
-            
-            let lsciRansLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard offset + lsciRansLen <= data.count else { throw DecodeError.insufficientData }
-            let lsciRansData = Array(data[offset..<(offset + lsciRansLen)])
-            var lsciDecoder = rANSDecoder(bitstream: lsciRansData)
-            offset += lsciRansLen
-            
-            var bitsData = [UInt8]()
-            bitsData.reserveCapacity(Int(lsciCount))
-            for _ in 0..<Int(lsciCount) {
-                let cf = lsciDecoder.getCumulativeFreq()
-                let result = staticLsciModels[0].findToken(cf: cf)
-                bitsData.append(result.token)
-                lsciDecoder.advanceSymbol(cumFreq: result.cumFreq, freq: result.freq)
-            }
-            
-            let lsciBypassLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard offset + lsciBypassLen <= data.count else { throw DecodeError.insufficientData }
-            let lsciBypassData = Array(data[offset..<(offset + lsciBypassLen)])
-            var lsciBypassReader = BypassReader(data: lsciBypassData)
-            offset += lsciBypassLen
-            
-            for bits in bitsData {
-                if bits == 0 {
-                    self.lsciDecoded.append(0)
-                } else {
-                    let bypassLen = Int(max(0, Int(bits) - 1))
-                    let bypassBits = lsciBypassReader.readBits(count: bypassLen)
-                    let val = (UInt32(1) << bypassLen) | bypassBits
-                    self.lsciDecoded.append(val)
-                }
-            }
-        }
-        
-        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
         let bypassLen = try readUInt32BEFromBytes(data, offset: &offset)
         
         guard offset + Int(bypassLen) <= data.count else { throw DecodeError.insufficientData }
@@ -544,30 +484,29 @@ struct EntropyDecoder {
         
         if isStaticTable, isDPCMTable {
             // Static DPCM mode: use DPCM-specific static tables
-            self.runModels = Array(staticDPCMRunModels[0..<2])
-            self.valModels = staticDPCMValModels
+            self.runModel0 = staticDPCMRunModel
+            self.valModel0 = staticDPCMValModel
+            self.runModel1 = staticDPCMRunModel
+            self.valModel1 = staticDPCMValModel
         } else if isStaticTable {
             // Static DWT mode: no frequency tables in bitstream
-            self.runModels = Array(staticRunModels[0..<2])
-            self.valModels = staticValModels
+            self.runModel0 = staticRunModel0
+            self.valModel0 = staticValModel0
+            self.runModel1 = staticRunModel1
+            self.valModel1 = staticValModel1
         } else {
             // Legacy dynamic table mode: read frequency tables from bitstream
-            // Context 0-1 for Run, Context 0 for Val
-            var rm = [rANSModel]()
-            rm.reserveCapacity(2)
+            let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
             
-            for _ in 0..<2 {
-                let freqs = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-                rm.append(rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqs))
-            }
+            let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.valModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs0)
             
-            // Read single consolidated Val model
-            let valFreqs = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-            let vmModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valFreqs)
-            let vm = [rANSModel](repeating: vmModel, count: 8)
+            let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.runModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs1)
             
-            self.runModels = rm
-            self.valModels = vm
+            let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            self.valModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs1)
         }
         
         // 4-way bypass data
@@ -605,15 +544,7 @@ struct EntropyDecoder {
     }
     
     @inline(__always)
-    mutating func decodeLSCI() throws -> UInt32 {
-        guard lsciReadIndex < lsciDecoded.count else { throw DecodeError.insufficientData }
-        let lsci = lsciDecoded[lsciReadIndex]
-        lsciReadIndex += 1
-        return lsci
-    }
-    
-    @inline(__always)
-    mutating func readPair(contextIdx: Int) -> (run: Int, val: Int16) {
+    mutating func readPair(isParentZero: Bool = false) -> (run: Int, val: Int16) {
         if isRawMode {
             guard pairIndex < pairs.count else { return (0, 0) }
             let pair = pairs[pairIndex]
@@ -632,8 +563,7 @@ struct EntropyDecoder {
         
         if isTZPair {
             let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-            // TZ uses context 0
-            let rtInfo = runModels[0].findToken(cf: cfRun)
+            let rtInfo = runModel0.findToken(cf: cfRun)
             ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
             
             let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
@@ -644,7 +574,7 @@ struct EntropyDecoder {
             return (Int(zeroRun), 0)
         } else {
             let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-            let rtInfo = runModels[contextIdx].findToken(cf: cfRun)
+            let rtInfo = isParentZero ? runModel1.findToken(cf: cfRun) : runModel0.findToken(cf: cfRun)
             ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
             
             let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
@@ -652,7 +582,7 @@ struct EntropyDecoder {
             let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
             
             let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
-            let vtInfo = valModels[contextIdx].findToken(cf: cfVal)
+            let vtInfo = isParentZero ? valModel1.findToken(cf: cfVal) : valModel0.findToken(cf: cfVal)
             ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
             
             let valBypassLen = valueBypassLength(for: vtInfo.token)
@@ -667,7 +597,6 @@ struct EntropyDecoder {
 
 // MARK: - Motion Vector rANS Codec
 
-@inline(__always)
 func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
     var tokensDx = [UInt8]()
     var tokensDy = [UInt8]()
@@ -721,7 +650,6 @@ func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
     return out
 }
 
-@inline(__always)
 func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
     var offset = 0
     let freqsDx = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
@@ -762,4 +690,3 @@ func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
     }
     return mvs
 }
-

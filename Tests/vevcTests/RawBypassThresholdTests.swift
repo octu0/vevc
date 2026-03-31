@@ -29,7 +29,7 @@ struct RawBypassThresholdTests {
         encoder.encodeBypass(binVal: 1) // exp-golomb for lscpY=0
 
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
+            encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
         }
         if trailingZeros > 0 {
             encoder.addTrailingZeros(trailingZeros)
@@ -73,13 +73,13 @@ struct RawBypassThresholdTests {
         let pairs = generateRealisticPairs(count: 10)
         var encoder = EntropyEncoder<StaticEntropyModel>()
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
+            encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
         }
         encoder.flush()
         let data = encoder.getData()
 
-        // getData() structure: [lsciCount(4B)] ... [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
-        let offset = 4 // skip lsciCount (which is 0 in this test)
+        // getData() structure: [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
+        let offset = 0 // bypassLen is at the beginning before Z-order
         let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
         let modeByteOffset = offset + 4 + bypassLen + 4 // skip bypassLen(4) + bypassData + coeffCount(4)
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
@@ -91,12 +91,12 @@ struct RawBypassThresholdTests {
         let pairs = generateRealisticPairs(count: 64)
         var encoder = EntropyEncoder<StaticEntropyModel>()
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
+            encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
         }
         encoder.flush()
         let data = encoder.getData()
 
-        let offset = 4 // skip lsciCount
+        let offset = 0 // bypassLen is at the beginning before Z-order
         let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
         let modeByteOffset = offset + 4 + bypassLen + 4
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
@@ -172,7 +172,7 @@ struct RawBypassThresholdTests {
             encoder.encodeBypass(binVal: 1) // lscpX exp-golomb terminator
             encoder.encodeBypass(binVal: 1) // lscpY exp-golomb terminator
             for pair in originalPairs {
-                encoder.addPair(run: pair.run, val: pair.val, contextIdx: 0)
+                encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
             }
             encoder.flush()
             let data = encoder.getData()
@@ -185,7 +185,7 @@ struct RawBypassThresholdTests {
             let _ = try decoder.decodeBypass() // lscpY
 
             for (idx, original) in originalPairs.enumerated() {
-                let decoded = decoder.readPair(contextIdx: 0)
+                let decoded = decoder.readPair(isParentZero: false)
                 #expect(decoded.run == Int(original.run),
                        "Roundtrip mismatch at pair \(idx)/\(count): run expected=\(original.run) got=\(decoded.run)")
                 #expect(decoded.val == original.val,

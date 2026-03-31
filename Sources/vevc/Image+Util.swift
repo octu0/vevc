@@ -223,27 +223,3 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
     }
     return rawData
 }
-
-@inline(__always)
-public func clampPlane16(_ plane: inout [Int16], min: Int16 = -128, max: Int16 = 127) {
-    let count = plane.count
-    let minVec = SIMD16<Int16>(repeating: min)
-    let maxVec = SIMD16<Int16>(repeating: max)
-    plane.withUnsafeMutableBufferPointer { ptr in
-        guard let base = ptr.baseAddress else { return }
-        var i = 0
-        while i <= count - 16 {
-            let vecPtr = base.advanced(by: i)
-            var vec = UnsafeRawPointer(vecPtr).loadUnaligned(as: SIMD16<Int16>.self)
-            vec.replace(with: minVec, where: vec .< minVec)
-            vec.replace(with: maxVec, where: vec .> maxVec)
-            UnsafeMutableRawPointer(vecPtr).storeBytes(of: vec, as: SIMD16<Int16>.self)
-            i += 16
-        }
-        while i < count {
-            if base[i] < min { base[i] = min }
-            else if base[i] > max { base[i] = max }
-            i += 1
-        }
-    }
-}

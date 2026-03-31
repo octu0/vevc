@@ -105,8 +105,7 @@ final class LayerDriftTests: XCTestCase {
         let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
         let l1dx = sub2.width
         let l1dy = sub2.height
-        var reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
-        clampPlane16(&reconL1Y)
+        let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
         
         // デコーダ: Base8 → Layer16
         let (decBase, _, _, _) = try await decodeBase8(r: layer0, layer: 0, dx: sub1.width, dy: sub1.height, isIFrame: true)

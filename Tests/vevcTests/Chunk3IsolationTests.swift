@@ -4,7 +4,7 @@ import XCTest
 /// chunk[3]のpairsだけを独立にエンコード/デコードして問題を分離
 final class Chunk3IsolationTests: XCTestCase {
     
-    private func generateRealPairs() async -> [(run: UInt32, val: Int16, contextIdx: Int)] {
+    private func generateRealPairs() async -> [(run: UInt32, val: Int16, isParentZero: Bool)] {
         let width = 128
         let height = 128
         
@@ -69,14 +69,14 @@ final class Chunk3IsolationTests: XCTestCase {
         // chunk[3]のpairsだけを新しいEntropyEncoderに渡す
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for pair in chunk3Pairs {
-            encoder.addPair(run: pair.run, val: pair.val, contextIdx: pair.contextIdx)
+            encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
         }
         
         let data = encoder.getData()
         var decoder = try EntropyDecoder(data: data)
         var decPairs: [(run: Int, val: Int16)] = []
         for i in 0..<encoder.pairs.count {
-            let pair = decoder.readPair(contextIdx: encoder.pairs[i].contextIdx)
+            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
             decPairs.append(pair)
         }
         
@@ -113,14 +113,14 @@ final class Chunk3IsolationTests: XCTestCase {
             
             var encoder = EntropyEncoder<DynamicEntropyModel>()
             for pair in chunkPairs {
-                encoder.addPair(run: pair.run, val: pair.val, contextIdx: pair.contextIdx)
+                encoder.addPair(run: pair.run, val: pair.val, isParentZero: pair.isParentZero)
             }
             
             let data = encoder.getData()
             var decoder = try EntropyDecoder(data: data)
             var decPairs: [(run: Int, val: Int16)] = []
             for i in 0..<encoder.pairs.count {
-                let pair = decoder.readPair(contextIdx: encoder.pairs[i].contextIdx)
+                let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
                 decPairs.append(pair)
             }
             

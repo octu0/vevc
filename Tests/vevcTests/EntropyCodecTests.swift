@@ -14,7 +14,7 @@ final class EntropyCodecTests: XCTestCase {
             let run = UInt32(i % 5)
             let val = Int16(clamping: (i * 7 - 175) % 100)
             if val == 0 { continue }
-            encoder.addPair(run: run, val: val, contextIdx: 0)
+            encoder.addPair(run: run, val: val, isParentZero: false)
             expectedPairs.append((run: run, val: val))
         }
         
@@ -23,7 +23,7 @@ final class EntropyCodecTests: XCTestCase {
         var decoder = try EntropyDecoder(data: data)
         
         for (i, expected) in expectedPairs.enumerated() {
-            let pair = decoder.readPair(contextIdx: 0)
+            let pair = decoder.readPair(isParentZero: false)
             XCTAssertEqual(pair.run, Int(expected.run), "Pair[\(i)] run: expected=\(expected.run) got=\(pair.run)")
             XCTAssertEqual(pair.val, expected.val, "Pair[\(i)] val: expected=\(expected.val) got=\(pair.val)")
         }

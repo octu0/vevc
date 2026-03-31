@@ -294,52 +294,6 @@ final class ChromaBlockTests: XCTestCase {
         let proposedRatio = mseChrProposed / max(mseLuma, 0.001)
         XCTAssertLessThan(proposedRatio, 4.0, "提案クロマ/輝度MSE比が4倍以内であるべき")
     }
-
-    /// ChromaブロックのSADインデックスマッピングが正しくLumaを参照しているかテストする
-    /// Layer32/Layer16のクロマ間引きにおいて、リニアなインデックス参照による色化け（Ghostingノイズ）を防ぐための検証
-    func testChromaSADIndexMapping() async throws {
-        let width = 3840
-        let height = 2160
-        let cbDx = (width + 1) / 2
-        let cbDy = (height + 1) / 2
-        
-        let yColCount32 = (width + 31) / 32
-        let cbColCount32 = (cbDx + 31) / 32
-        let cbRowCount32 = (cbDy + 31) / 32
-        
-        guard cbColCount32 > 0 && cbRowCount32 > 0 else {
-            XCTFail("Invalid dimensions")
-            return
-        }
-        
-        // ランダムな位置のChromaブロックを抽出してインデックスマッピングをテスト
-        let testIndices = [
-            0,
-            1,
-            cbColCount32 + 1, // row=1, col=1
-            (cbRowCount32 - 1) * cbColCount32 + (cbColCount32 - 1) // bottom-right
-        ]
-        
-        for i in testIndices {
-            let col = i % cbColCount32
-            let row = i / cbColCount32
-            let lumaIdx = (row * 2) * yColCount32 + (col * 2)
-            
-            // Luma空間上のブロック座標
-            let lumaCol = lumaIdx % yColCount32
-            let lumaRow = lumaIdx / yColCount32
-            
-            let lumaX = lumaCol * 32
-            let lumaY = lumaRow * 32
-            
-            // ChromaブロックがカバーするLuma空間上の座標（2倍）
-            let chromaX_inLumaSpace = col * 64
-            let chromaY_inLumaSpace = row * 64
-            
-            XCTAssertEqual(lumaX, chromaX_inLumaSpace, "ChromaブロックのX座標マッピングがLuma空間と一致しません。 色化け・Ghostingノイズの原因になります。")
-            XCTAssertEqual(lumaY, chromaY_inLumaSpace, "ChromaブロックのY座標マッピングがLuma空間と一致しません。 色化け・Ghostingノイズの原因になります。")
-        }
-    }
 }
 
 // 簡易的な決定論的乱数生成器
