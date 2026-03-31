@@ -688,7 +688,7 @@ struct BypassWriter {
     
     init() {
         self.bytes = []
-        self.bytes.reserveCapacity(256)
+        self.bytes.reserveCapacity(1024)
         self.buffer = 0
         self.bitsInBuffer = 0
     }

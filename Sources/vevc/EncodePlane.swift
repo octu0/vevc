@@ -135,11 +135,14 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) asy
         while startRow < rowCount {
             let endRow = min(startRow + chunkSize, rowCount)
             let sRow = startRow
+            let colCount32 = (width + 31) / 32
             group.addTask {
                 var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                chunkResults.reserveCapacity(endRow - sRow)
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     var rowResults: [(Block2D, Int, Int)] = []
+                    rowResults.reserveCapacity(colCount32)
                     for w in stride(from: 0, to: width, by: 32) {
                         var block = Block2D(width: 32, height: 32)
                         block.withView { view in
@@ -230,11 +233,14 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) asy
         while startRow < rowCount {
             let endRow = min(startRow + chunkSize, rowCount)
             let sRow = startRow
+            let colCount16 = (width + 15) / 16
             group.addTask {
                 var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                chunkResults.reserveCapacity(endRow - sRow)
                 for i in sRow..<endRow {
                     let h = (i * 16)
                     var rowResults: [(Block2D, Int, Int)] = []
+                    rowResults.reserveCapacity(colCount16)
                     for w in stride(from: 0, to: width, by: 16) {
                         var block = Block2D(width: 16, height: 16)
                         block.withView { view in
@@ -314,11 +320,14 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
         while startRow < rowCount {
             let endRow = min(startRow + chunkSize, rowCount)
             let sRow = startRow
+            let colCount8 = (width + 7) / 8
             group.addTask {
                 var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                chunkResults.reserveCapacity(endRow - sRow)
                 for i in sRow..<endRow {
                     let h = (i * 8)
                     var rowResults: [(Block2D, Int, Int)] = []
+                    rowResults.reserveCapacity(colCount8)
                     for w in stride(from: 0, to: width, by: 8) {
                         var block = Block2D(width: 8, height: 8)
                         block.withView { view in
@@ -363,11 +372,14 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int)
         while startRow < rowCount {
             let endRow = min(startRow + chunkSize, rowCount)
             let sRow = startRow
+            let colCountB32 = (width + 31) / 32
             group.addTask {
                 var chunkResults: [(Int, [(Block2D, Int, Int)])] = []
+                chunkResults.reserveCapacity(endRow - sRow)
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     var rowResults: [(Block2D, Int, Int)] = []
+                    rowResults.reserveCapacity(colCountB32)
                     for w in stride(from: 0, to: width, by: 32) {
                         var block = Block2D(width: 32, height: 32)
                         block.withView { view in

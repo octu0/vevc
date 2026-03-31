@@ -57,10 +57,18 @@ struct BlockView {
 
     @inline(__always)
     func clearAll() {
+        var i = 0
+        let zero16 = SIMD16<Int16>.zero
         for y in 0..<height {
             let ptr = rowPointer(y: y)
-            for x in 0..<width {
-                ptr[x] = 0
+            i = 0
+            while i + 16 <= width {
+                UnsafeMutableRawPointer(ptr + i).storeBytes(of: zero16, as: SIMD16<Int16>.self)
+                i += 16
+            }
+            while i < width {
+                ptr[i] = 0
+                i += 1
             }
         }
     }
@@ -92,6 +100,19 @@ struct Block2D: Sendable {
     
     @inline(__always)
     mutating func clearAll() {
-        self.data = [Int16](repeating: 0, count: self.data.count)
+        data.withUnsafeMutableBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            let count = buf.count
+            var i = 0
+            let zero16 = SIMD16<Int16>.zero
+            while i + 16 <= count {
+                UnsafeMutableRawPointer(base + i).storeBytes(of: zero16, as: SIMD16<Int16>.self)
+                i += 16
+            }
+            while i < count {
+                base[i] = 0
+                i += 1
+            }
+        }
     }
 }

@@ -134,6 +134,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
     init() {
         self.bypassWriter = BypassWriter()
         self.pairs = []
+        self.pairs.reserveCapacity(512)
         self.trailingZeros = 0
         self.coeffCount = 0
     }
