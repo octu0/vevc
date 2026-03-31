@@ -589,6 +589,10 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
         }
     }
     
+    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 16, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
 
@@ -675,6 +679,10 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
             }
         }
     }
+    
+    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 8, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
     
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
