@@ -58,7 +58,26 @@ var packageTargets: [Target] = [
 ]
 
 if isWasmBuild {
-
+    packageDeps.append(.package(url: "https://github.com/swiftwasm/JavaScriptKit", from: "0.45.0"))
+    packageProducts.append(.executable(name: "wasm", targets: ["wasm"]))
+    
+    packageTargets.append(
+        .executableTarget(
+            name: "wasm",
+            dependencies: [
+                "vevc",
+                .product(name: "JavaScriptKit", package: "JavaScriptKit"),
+                .product(name: "JavaScriptEventLoop", package: "JavaScriptKit")
+            ],
+            swiftSettings: [
+                .enableExperimentalFeature("Extern"),
+                .unsafeFlags(["-Ounchecked", "-wmo", "-Xcc", "-msimd128"], .when(platforms: [.wasi]))
+            ],
+            plugins: [
+                .plugin(name: "BridgeJS", package: "JavaScriptKit")
+            ]
+        )
+    )
 }
 
 let package = Package(

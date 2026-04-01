@@ -241,6 +241,10 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 
 ---
 
+# Online DEMO
+
+[vevc wasm demo](https://octu0.github.io/vevc-wasm-demo/)
+
 ## Internals
 
 The core components of the implementation consist of the following files:
