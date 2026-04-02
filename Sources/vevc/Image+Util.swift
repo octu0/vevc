@@ -93,30 +93,30 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
                 let yVal0 = Int(yBase[i]) << 10
                 let cbDiff0 = Int(cbBase[i]) - 128
                 let crDiff0 = Int(crBase[i]) - 128
-                let r0 = (yVal0 + (1436 * crDiff0) + 512) >> 10
-                let g0 = (yVal0 - (352 * cbDiff0) - (731 * crDiff0) + 512) >> 10
-                let b0 = (yVal0 + (1815 * cbDiff0) + 512) >> 10
+                let r0 = (yVal0 + (1436 * crDiff0)) >> 10
+                let g0 = (yVal0 - (352 * cbDiff0) - (731 * crDiff0)) >> 10
+                let b0 = (yVal0 + (1815 * cbDiff0)) >> 10
                 
                 let yVal1 = Int(yBase[i+1]) << 10
                 let cbDiff1 = Int(cbBase[i+1]) - 128
                 let crDiff1 = Int(crBase[i+1]) - 128
-                let r1 = (yVal1 + (1436 * crDiff1) + 512) >> 10
-                let g1 = (yVal1 - (352 * cbDiff1) - (731 * crDiff1) + 512) >> 10
-                let b1 = (yVal1 + (1815 * cbDiff1) + 512) >> 10
+                let r1 = (yVal1 + (1436 * crDiff1)) >> 10
+                let g1 = (yVal1 - (352 * cbDiff1) - (731 * crDiff1)) >> 10
+                let b1 = (yVal1 + (1815 * cbDiff1)) >> 10
                 
                 let yVal2 = Int(yBase[i+2]) << 10
                 let cbDiff2 = Int(cbBase[i+2]) - 128
                 let crDiff2 = Int(crBase[i+2]) - 128
-                let r2 = (yVal2 + (1436 * crDiff2) + 512) >> 10
-                let g2 = (yVal2 - (352 * cbDiff2) - (731 * crDiff2) + 512) >> 10
-                let b2 = (yVal2 + (1815 * cbDiff2) + 512) >> 10
+                let r2 = (yVal2 + (1436 * crDiff2)) >> 10
+                let g2 = (yVal2 - (352 * cbDiff2) - (731 * crDiff2)) >> 10
+                let b2 = (yVal2 + (1815 * cbDiff2)) >> 10
                 
                 let yVal3 = Int(yBase[i+3]) << 10
                 let cbDiff3 = Int(cbBase[i+3]) - 128
                 let crDiff3 = Int(crBase[i+3]) - 128
-                let r3 = (yVal3 + (1436 * crDiff3) + 512) >> 10
-                let g3 = (yVal3 - (352 * cbDiff3) - (731 * crDiff3) + 512) >> 10
-                let b3 = (yVal3 + (1815 * cbDiff3) + 512) >> 10
+                let r3 = (yVal3 + (1436 * crDiff3)) >> 10
+                let g3 = (yVal3 - (352 * cbDiff3) - (731 * crDiff3)) >> 10
+                let b3 = (yVal3 + (1815 * cbDiff3)) >> 10
                 
                 let offset = i * 4
                 outBase[offset + 0] = UInt8(clamping: r0)
@@ -146,9 +146,9 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
                 let cbDiff = Int(cbBase[i]) - 128
                 let crDiff = Int(crBase[i]) - 128
                 
-                let r = (yVal + (1436 * crDiff) + 512) >> 10
-                let g = (yVal - (352 * cbDiff) - (731 * crDiff) + 512) >> 10
-                let b = (yVal + (1815 * cbDiff) + 512) >> 10
+                let r = (yVal + (1436 * crDiff)) >> 10
+                let g = (yVal - (352 * cbDiff) - (731 * crDiff)) >> 10
+                let b = (yVal + (1815 * cbDiff)) >> 10
                 
                 let offset = i * 4
                 outBase[offset + 0] = UInt8(clamping: r)
@@ -172,26 +172,26 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
                     let yVal0 = Int(yBase[yRowOffset + x]) << 10
                     let cbDiff0 = Int(cbBase[cOff0]) - 128
                     let crDiff0 = Int(crBase[cOff0]) - 128
-                    let r0 = (yVal0 + (1436 * crDiff0) + 512) >> 10
-                    let g0 = (yVal0 - (352 * cbDiff0) - (731 * crDiff0) + 512) >> 10
-                    let b0 = (yVal0 + (1815 * cbDiff0) + 512) >> 10
+                    let r0 = (yVal0 + (1436 * crDiff0)) >> 10
+                    let g0 = (yVal0 - (352 * cbDiff0) - (731 * crDiff0)) >> 10
+                    let b0 = (yVal0 + (1815 * cbDiff0)) >> 10
                     
                     let yVal1 = Int(yBase[yRowOffset + x + 1]) << 10
-                    let r1 = (yVal1 + (1436 * crDiff0) + 512) >> 10
-                    let g1 = (yVal1 - (352 * cbDiff0) - (731 * crDiff0) + 512) >> 10
-                    let b1 = (yVal1 + (1815 * cbDiff0) + 512) >> 10
+                    let r1 = (yVal1 + (1436 * crDiff0)) >> 10
+                    let g1 = (yVal1 - (352 * cbDiff0) - (731 * crDiff0)) >> 10
+                    let b1 = (yVal1 + (1815 * cbDiff0)) >> 10
                     
                     let yVal2 = Int(yBase[yRowOffset + x + 2]) << 10
                     let cbDiff2 = Int(cbBase[cOff2]) - 128
                     let crDiff2 = Int(crBase[cOff2]) - 128
-                    let r2 = (yVal2 + (1436 * crDiff2) + 512) >> 10
-                    let g2 = (yVal2 - (352 * cbDiff2) - (731 * crDiff2) + 512) >> 10
-                    let b2 = (yVal2 + (1815 * cbDiff2) + 512) >> 10
+                    let r2 = (yVal2 + (1436 * crDiff2)) >> 10
+                    let g2 = (yVal2 - (352 * cbDiff2) - (731 * crDiff2)) >> 10
+                    let b2 = (yVal2 + (1815 * cbDiff2)) >> 10
                     
                     let yVal3 = Int(yBase[yRowOffset + x + 3]) << 10
-                    let r3 = (yVal3 + (1436 * crDiff2) + 512) >> 10
-                    let g3 = (yVal3 - (352 * cbDiff2) - (731 * crDiff2) + 512) >> 10
-                    let b3 = (yVal3 + (1815 * cbDiff2) + 512) >> 10
+                    let r3 = (yVal3 + (1436 * crDiff2)) >> 10
+                    let g3 = (yVal3 - (352 * cbDiff2) - (731 * crDiff2)) >> 10
+                    let b3 = (yVal3 + (1815 * cbDiff2)) >> 10
                     
                     let offset = outRowOffset + (x * 4)
                     outBase[offset + 0]  = UInt8(clamping: r0); outBase[offset + 1]  = UInt8(clamping: g0); outBase[offset + 2]  = UInt8(clamping: b0); outBase[offset + 3]  = 255
@@ -207,9 +207,9 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
                     let cbDiff = Int(cbBase[cOff]) - 128
                     let crDiff = Int(crBase[cOff]) - 128
                     
-                    let r = (yVal + (1436 * crDiff) + 512) >> 10
-                    let g = (yVal - (352 * cbDiff) - (731 * crDiff) + 512) >> 10
-                    let b = (yVal + (1815 * cbDiff) + 512) >> 10
+                    let r = (yVal + (1436 * crDiff)) >> 10
+                    let g = (yVal - (352 * cbDiff) - (731 * crDiff)) >> 10
+                    let b = (yVal + (1815 * cbDiff)) >> 10
                     
                     let offset = outRowOffset + (x * 4)
                     outBase[offset + 0] = UInt8(clamping: r)
