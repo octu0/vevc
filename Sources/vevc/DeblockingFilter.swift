@@ -8,8 +8,14 @@ func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockS
     
     // tc controls maximum clipping: smaller tc -> less smoothing, prevents blurring of real edges.
     // beta controls edge detection: smaller beta -> preserves more detailed textures.
-    let tc = Int16(min(12, max(2, qStep / 3)))
-    let beta = Int32(min(45, max(12, qStep)))
+    // Use non-linear integer scaling to prevent over-smoothing at low qStep,
+    // while allowing strong deblocking at high qStep where boundaries are severe.
+    let qBase = max(0, qStep)
+    let tcNonLinear = (qBase * qBase) / 400 + (qBase / 3)
+    let tc = Int16(min(40, max(2, tcNonLinear)))
+    
+    let betaNonLinear = (qBase * qBase) / 200 + qBase
+    let beta = Int32(min(128, max(12, betaNonLinear)))
     
     // Vertical Edges (x = blockSize, 2*blockSize, ...)
     plane.withUnsafeMutableBufferPointer { buffer in

@@ -633,12 +633,14 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Qu
 @inline(__always)
 func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
     let step = Int(qt.step)
-    let sLL3 = isChroma ? max(1, step * 3 / 4) : max(1, step)
+    
+    // LL3 (4x4 low frequency subband) should precisely use qLow to retain DC and prevent macroblock boundary jumps.
+    let qLL3 = qt.qLow
+    
     let sHL3 = isChroma ? max(1, step * 4 / 4) : max(1, step * 5 / 4)
     let sHL2 = isChroma ? max(1, step * 5 / 4) : max(1, step * 6 / 4)
     let sHL1 = isChroma ? max(1, step * 6 / 4) : max(1, step * 8 / 4)
 
-    let qLL3 = Quantizer(step: sLL3, roundToNearest: true)
     let qHL3 = Quantizer(step: sHL3, roundToNearest: true)
     let qHL2 = Quantizer(step: sHL2, roundToNearest: true)
     let qHL1 = Quantizer(step: sHL1, roundToNearest: true)
@@ -671,7 +673,7 @@ func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: B
         
         for y in 0..<4 {
             let rowOffset = y * 32
-            for x in 0..<4   { base[rowOffset + x] = applyQLL3(base[rowOffset + x]) }
+            // LL3 is left unquantized here; it will be in-loop quantized in blockEncodeIntra4
             for x in 4..<8   { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL3mul, bias: qHL3bias, shift: qHL3shift) }
             for x in 8..<16  { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL2mul, bias: qHL2bias, shift: qHL2shift) }
             for x in 16..<32 { base[rowOffset + x] = applyQSM(base[rowOffset + x], mul: qHL1mul, bias: qHL1bias, shift: qHL1shift) }
@@ -700,12 +702,13 @@ func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: B
 @inline(__always)
 func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
     let step = Int(qt.step)
-    let sLL3 = isChroma ? max(1, step * 3 / 4) : max(1, step)
+    
+    let qLL3 = qt.qLow
+    
     let sHL3 = isChroma ? max(1, step * 4 / 4) : max(1, step * 5 / 4)
     let sHL2 = isChroma ? max(1, step * 5 / 4) : max(1, step * 6 / 4)
     let sHL1 = isChroma ? max(1, step * 6 / 4) : max(1, step * 8 / 4)
 
-    let qLL3 = Quantizer(step: sLL3, roundToNearest: true)
     let qHL3 = Quantizer(step: sHL3, roundToNearest: true)
     let qHL2 = Quantizer(step: sHL2, roundToNearest: true)
     let qHL1 = Quantizer(step: sHL1, roundToNearest: true)
@@ -732,7 +735,7 @@ func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma:
 
         for y in 0..<4 {
             let rowOffset = y * 32
-            for x in 0..<4   { base[rowOffset + x] = applyDQLL3(base[rowOffset + x]) }
+            // LL3 is left fully reconstructed by blockDecodeIntra4; skip applying dequantization
             for x in 4..<8   { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL3) }
             for x in 8..<16  { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL2) }
             for x in 16..<32 { base[rowOffset + x] = applyDQSM(base[rowOffset + x], s: sHL1) }

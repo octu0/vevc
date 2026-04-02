@@ -344,7 +344,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?,
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
+func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int, colCount: Int, qtLL: Int32) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
@@ -364,21 +364,33 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
     
     let consumed = brFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let dataSlice = Array(data[consumed...])
     
+    var offset = consumed
+    let modesLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
+    guard offset + modesLen <= data.count else { throw DecodeError.insufficientData }
+    let modesData = Array(data[offset..<(offset + modesLen)])
+    offset += modesLen
+    
+    let (modes, _) = try decodeModes(data: modesData, count: blockCount)
+    
+    let dataSlice = Array(data[offset...])
     var decoder = try EntropyDecoder(data: dataSlice)
     
     let half = 8 / 2
 
-    var lastVal: Int16 = 0
+    var intraCtx = IntraContext(blockSize: 4, colCount: colCount)
     var nzCur = 0
     let nzCount = nonZeroIndices.count
     for i in 0..<blockCount {
+        let col = i % colCount
+        let row = i / colCount
+        if col == 0 { intraCtx.resetLeft() }
+
         if nzCur < nzCount && nonZeroIndices[nzCur] == i {
             nzCur += 1
             try blocks[i].withView { view in
                 var llView = BlockView(base: view.base, width: half, height: half, stride: 8)
-                try blockDecodeDPCM4(decoder: &decoder, block: &llView, lastVal: &lastVal)
+                try blockDecodeIntra4(decoder: &decoder, block: &llView, qtLL: qtLL, ctx: &intraCtx, col: col, row: row, rawMode: modes[i])
                 
                 var hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 8)
                 try blockDecode4(decoder: &decoder, block: &hlView, parentBlock: nil)
@@ -390,7 +402,10 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
                 try blockDecode4(decoder: &decoder, block: &hhView, parentBlock: nil)
             }
         } else {
-            lastVal = 0
+            blocks[i].withView { view in
+                let llView = BlockView(base: view.base, width: half, height: half, stride: 8)
+                intraCtx.update(col: col, block: llView)
+            }
         }
     }
 
@@ -403,7 +418,6 @@ enum DecodeTaskBase32 {
     case split8(Bool, Bool, Bool, Bool)
 }
 
-@inline(__always)
 func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
     var blocks: [Block2D] = []
     blocks.reserveCapacity(blockCount)
@@ -528,8 +542,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
     return blocks
 }
 
-@inline(__always)
-func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throws {
+func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D], colCount: Int, qtLL: Int32) throws {
     var bwFlags = BypassReader(data: data)
     var tasks: [(Int, Bool)] = []
     tasks.reserveCapacity(blocks.count)
@@ -546,13 +559,29 @@ func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throw
     
     let consumed = bwFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let entropyData = Array(data[consumed...])
+    
+    var offset = consumed
+    let modesLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
+    guard offset + modesLen <= data.count else { throw DecodeError.insufficientData }
+    let modesData = Array(data[offset..<(offset + modesLen)])
+    offset += modesLen
+    
+    let (modes, _) = try decodeModes(data: modesData, count: blocks.count)
+    
+    let entropyData = Array(data[offset...])
     var decoder = try EntropyDecoder(data: entropyData)
-    var lastVal: Int16 = 0
+    var intraCtx = IntraContext(blockSize: 4, colCount: colCount)
     
     for (i, skip) in tasks {
+        let col = i % colCount
+        let row = i / colCount
+        if col == 0 { intraCtx.resetLeft() }
+        
         if skip {
-            lastVal = 0
+            blocks[i].withView { view in
+                let ll3 = BlockView(base: view.base, width: 4, height: 4, stride: view.stride)
+                intraCtx.update(col: col, block: ll3)
+            }
             continue
         }
         
@@ -570,8 +599,8 @@ func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throw
             let lh3 = BlockView(base: view.base.advanced(by: 4 * view.stride), width: 4, height: 4, stride: view.stride)
             let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
             
-            var m_ll3 = ll3, m_hl3 = hl3, m_lh3 = lh3, m_hh3 = hh3
-            try blockDecodeDPCM4(decoder: &decoder, block: &m_ll3, lastVal: &lastVal)
+            var mut_ll3 = ll3, m_hl3 = hl3, m_lh3 = lh3, m_hh3 = hh3
+            try blockDecodeIntra4(decoder: &decoder, block: &mut_ll3, qtLL: qtLL, ctx: &intraCtx, col: col, row: row, rawMode: modes[i])
             try blockDecode4(decoder: &decoder, block: &m_hl3, parentBlock: nil)
             try blockDecode4(decoder: &decoder, block: &m_lh3, parentBlock: nil)
             try blockDecode4(decoder: &decoder, block: &m_hh3, parentBlock: nil)

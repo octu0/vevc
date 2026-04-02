@@ -439,6 +439,120 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
 }
 
 @inline(__always)
+func blockEncodeIntra4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: inout BlockView, qtLL: Quantizer, ctx: inout IntraContext, col: Int, row: Int, outModes: inout [UInt8]) {
+    var bestMode: IntraMode = .dc
+    var minSAD: Int32 = Int32.max
+    var bestResidual = [Int16](repeating: 0, count: 16)
+    
+    let candidateModes: [IntraMode] = [.dc, .horizontal, .vertical, .planar]
+    var predBuf = [Int16](repeating: 0, count: 16)
+    
+    for mode in candidateModes {
+        predBuf.withUnsafeMutableBufferPointer { ptr in
+            predictIntra4(mode: mode, col: col, row: row, ctx: ctx, ptrOut: ptr.baseAddress!)
+        }
+        
+        var sad: Int32 = 0
+        var residuals = [Int16](repeating: 0, count: 16)
+        var i = 0
+        let mul = qtLL.mul
+        let shift = Int32(qtLL.shift)
+        let bias = qtLL.bias
+        let step = Int32(qtLL.step)
+        
+        for y in 0..<4 {
+            let ptrY = block.rowPointer(y: y)
+            for x in 0..<4 {
+                let origUnquantized = ptrY[x]
+                let pred = predBuf[i]
+                let res = origUnquantized &- pred
+                
+                // Force round-to-nearest instead of using Quantizer's DeadZone for accurate reconstruction
+                let offset = step >> 1
+                let resInt32 = Int32(res)
+                let qResInt32: Int32
+                if resInt32 >= 0 {
+                    qResInt32 = (resInt32 + offset) / step
+                } else {
+                    qResInt32 = (resInt32 - offset) / step
+                }
+                let qRes = Int16(qResInt32)
+                
+                residuals[i] = qRes
+                
+                // Dequantize and reconstruct (in-loop)
+                let reconRes = Int16(clamping: qResInt32 &* step)
+                let recon = pred &+ reconRes
+                
+                // SAD calculation (distortion of reconstructed vs original)
+                let diff = Int32(origUnquantized) - Int32(recon)
+                sad += diff < 0 ? -diff : diff
+                
+                i += 1
+            }
+        }
+        
+        if sad < minSAD {
+            minSAD = sad
+            bestMode = mode
+            for j in 0..<16 { bestResidual[j] = residuals[j] }
+        }
+    }
+    
+    let m = bestMode.rawValue
+    outModes.append(UInt8(m))
+    
+    var lscpIdx = -1
+    for i in stride(from: 15, through: 0, by: -1) {
+        if bestResidual[i] != 0 {
+            lscpIdx = i
+            break
+        }
+    }
+    
+    if lscpIdx == -1 {
+        encoder.encodeBypass(binVal: 0)
+    } else {
+        encoder.encodeBypass(binVal: 1)
+        let lscpX = UInt32(lscpIdx % 4)
+        let lscpY = UInt32(lscpIdx / 4)
+        encodeExpGolomb(val: lscpX, encoder: &encoder)
+        encodeExpGolomb(val: lscpY, encoder: &encoder)
+        
+        var run = 0
+        for i in 0...lscpIdx {
+            let diff = bestResidual[i]
+            if diff == 0 {
+                run += 1
+            } else {
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                run = 0
+            }
+        }
+    }
+    
+    // Write reconstructed pixels back to block for Inverse DWT, and update context
+    predBuf.withUnsafeMutableBufferPointer { ptr in
+        predictIntra4(mode: bestMode, col: col, row: row, ctx: ctx, ptrOut: ptr.baseAddress!)
+    }
+    
+    var idx = 0
+    let step = Int32(qtLL.step)
+    for y in 0..<4 {
+        let ptrY = block.rowPointer(y: y)
+        for x in 0..<4 {
+            let qRes = bestResidual[idx]
+            let reconRes = Int16(clamping: Int32(qRes) &* step)
+            let recon = predBuf[idx] &+ reconRes
+            ptrY[x] = recon
+            idx += 1
+        }
+    }
+    
+    ctx.update(col: col, block: block)
+}
+
+@inline(__always)
 func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
@@ -848,7 +962,7 @@ func shouldSplit16(data: UnsafeMutableBufferPointer<Int16>, skipLL: Bool) -> Boo
 }
 
 @inline(__always)
-func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int, isPFrame: Bool = false) -> Bool {
+func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: Int, isPFrame: Bool = false, qtLL: Int32 = 1) -> Bool {
     guard let base = data.baseAddress else { return false }
     
     let th = Int16(threshold)
@@ -860,8 +974,10 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
         let ptr = base + y * 4
         let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
         if isPFrame {
-            let overPos = vec .> thPos
-            let underNeg = vec .< thNeg
+            // Apply LL quantizer ratio since LL is unquantized in-loop!
+            let qVec = vec / SIMD2<Int16>(repeating: Int16(clamping: qtLL))
+            let overPos = qVec .> thPos
+            let underNeg = qVec .< thNeg
             let mask = overPos .| underNeg
             if any(mask) { return false }
         } else {
@@ -900,14 +1016,15 @@ func isEffectivelyZeroBase4(data: UnsafeMutableBufferPointer<Int16>, threshold: 
 }
 
 @inline(__always)
-func isEffectivelyZeroBase32(data: UnsafeMutableBufferPointer<Int16>, threshold: Int) -> Bool {
+func isEffectivelyZeroBase32(data: UnsafeMutableBufferPointer<Int16>, threshold: Int, qtLL: Int32 = 1) -> Bool {
     guard let base = data.baseAddress else { return false }
     // Check LL
     let zeroVec16 = SIMD16<Int16>(repeating: 0)
     for y in 0..<16 {
         let ptr = base + y * 32
         let vec: SIMD16<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-        let mask = vec .!= zeroVec16
+        let qVec = vec / SIMD16<Int16>(repeating: Int16(clamping: qtLL))
+        let mask = qVec .!= zeroVec16
         if any(mask) { return false }
     }
     
@@ -1204,13 +1321,13 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFrame: Bool = false) -> [UInt8] {
+func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFrame: Bool = false, colCount: Int, qtLL: Quantizer) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
         let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-            return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold, isPFrame: isPFrame)
+            return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold, isPFrame: isPFrame, qtLL: Int32(qtLL.step))
         }
         if isZero {
             bwFlags.writeBit(true)
@@ -1226,31 +1343,46 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFr
     let zeroCount = blocks.count - nonZeroIndices.count
     let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
     let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
-    debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
     
     var encoder = EntropyEncoder<DynamicEntropyModel>()
     var lastVal: Int16 = 0
     
+    var intraCtx = IntraContext(blockSize: 4, colCount: colCount)
+    var outModes: [UInt8] = []
+    outModes.reserveCapacity(blocks.count)
     var nzCur = 0
     let nzCount = nonZeroIndices.count
     for i in blocks.indices {
+        let col = i % colCount
+        let row = i / colCount
+        if col == 0 { intraCtx.resetLeft() }
+
         if nzCur < nzCount && nonZeroIndices[nzCur] == i {
             nzCur += 1
 
             blocks[i].withView { view in
                 let subs = getSubbands8(view: view)
-                blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
+                var mut_ll = subs.ll
+                blockEncodeIntra4(encoder: &encoder, block: &mut_ll, qtLL: qtLL, ctx: &intraCtx, col: col, row: row, outModes: &outModes)
                 blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
                 blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
                 blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
             }
         } else {
-            lastVal = 0
+            blocks[i].withView { view in
+                let subs = getSubbands8(view: view)
+                intraCtx.update(col: col, block: subs.ll)
+                outModes.append(UInt8(IntraMode.dc.rawValue)) // Zero block skipped Mode (DC)
+            }
         }
     }
     
     encoder.flush()
     var out = bwFlags.bytes
+    let encodedModes = encodeModes(modes: outModes)
+    appendUInt32BE(&out, UInt32(encodedModes.count))
+    out.append(contentsOf: encodedModes)
+    
     out.append(contentsOf: encoder.getData())
     return out
 }
@@ -1262,7 +1394,7 @@ enum EncodeTaskBase32 {
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int, qtLL: Int32) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTaskBase32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1270,7 +1402,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     var zeroCount = 0
     for i in blocks.indices {
         let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-            return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
+            return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold, qtLL: qtLL)
         }
         if isZero {
             bwFlags.writeBit(true)
@@ -1306,7 +1438,6 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     }
     bwFlags.flush()
     let zeroPermyriad32 = (zeroCount * 10000) / max(1, blocks.count)
-    debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(zeroPermyriad32 / 100).\(zeroPermyriad32 / 10 % 10)%")
     
     var encoder = EntropyEncoder<StaticDPCMEntropyModel>()
     var lastVal: Int16 = 0
@@ -1453,7 +1584,7 @@ func calculateSADAndMaxBlockSAD(res: PlaneData420, mbSize: Int) -> (meanSAD: Int
 // MARK: - Cascaded Encoding
 
 @inline(__always)
-func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, colCount: Int, qtLL: Quantizer) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, Bool)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1461,7 +1592,7 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     var zeroCount = 0
     for i in blocks.indices {
         let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
-            return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
+            return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold, qtLL: Int32(qtLL.step))
         }
         if isZero {
             bwFlags.writeBit(true)
@@ -1478,11 +1609,22 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     debugLog("    [CascadedSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(zeroPermyriadCasc / 100).\(zeroPermyriadCasc / 10 % 10)%")
     
     var encoder = EntropyEncoder<DynamicEntropyModel>()
-    var lastVal: Int16 = 0
+    
+    var intraCtx = IntraContext(blockSize: 4, colCount: colCount)
+    var outModes: [UInt8] = []
+    outModes.reserveCapacity(blocks.count)
     
     for (i, skip) in tasks {
+        let col = i % colCount
+        let row = i / colCount
+        if col == 0 { intraCtx.resetLeft() }
+
         if skip {
-            lastVal = 0
+            blocks[i].withView { view in
+                let ll3 = BlockView(base: view.base, width: 4, height: 4, stride: view.stride)
+                intraCtx.update(col: col, block: ll3)
+                outModes.append(UInt8(IntraMode.dc.rawValue))
+            }
             continue
         }
         
@@ -1500,7 +1642,8 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
             let lh3 = BlockView(base: view.base.advanced(by: 4 * view.stride), width: 4, height: 4, stride: view.stride)
             let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
             
-            blockEncodeDPCM4(encoder: &encoder, block: ll3, lastVal: &lastVal)
+            var mut_ll3 = ll3
+            blockEncodeIntra4(encoder: &encoder, block: &mut_ll3, qtLL: qtLL, ctx: &intraCtx, col: col, row: row, outModes: &outModes)
             blockEncode4(encoder: &encoder, block: hl3, parentBlock: nil)
             blockEncode4(encoder: &encoder, block: lh3, parentBlock: nil)
             blockEncode4(encoder: &encoder, block: hh3, parentBlock: nil)
@@ -1517,6 +1660,10 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     
     encoder.flush()
     var out = bwFlags.bytes
+    let encodedModes = encodeModes(modes: outModes)
+    appendUInt32BE(&out, UInt32(encodedModes.count))
+    out.append(contentsOf: encodedModes)
+    
     out.append(contentsOf: encoder.getData())
     return out
 }
