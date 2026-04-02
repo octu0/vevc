@@ -117,12 +117,6 @@ final class Block2D: @unchecked Sendable {
         return try body(&view)
     }
 
-    /// 後方互換: data.withUnsafeMutableBufferPointer の代替
-    @inline(__always)
-    func withUnsafeMutableBufferPointer<R>(_ body: (UnsafeMutableBufferPointer<Int16>) throws -> R) rethrows -> R {
-        let buf = UnsafeMutableBufferPointer(start: base, count: count)
-        return try body(buf)
-    }
 
     @inline(__always)
     func clearAll() {

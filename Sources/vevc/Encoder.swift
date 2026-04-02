@@ -361,7 +361,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     let reader = ImageReader(img: img)
     @inline(__always)
     func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-        var block = Block2D(width: w, height: h)
+        let block = Block2D(width: w, height: h)
         block.withView { view in
             for i in 0..<h {
                 view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
@@ -372,7 +372,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
 
     @inline(__always)
     func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-        var block = Block2D(width: w, height: h)
+        let block = Block2D(width: w, height: h)
         block.withView { view in
             for i in 0..<h {
                 view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
@@ -383,7 +383,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
 
     @inline(__always)
     func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-        var block = Block2D(width: w, height: h)
+        let block = Block2D(width: w, height: h)
         block.withView { view in
             for i in 0..<h {
                 view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
@@ -486,9 +486,7 @@ private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> I
     quantizeSIMD(&sub.lh, q: qt.qMid)
     quantizeSIMD(&sub.hh, q: qt.qHigh)
     
-    let isZero = block.withUnsafeMutableBufferPointer { ptr in
-        return isEffectivelyZeroBase4(data: ptr, threshold: 0)
-    }
+    let isZero = isEffectivelyZeroBase4(data: block.base, threshold: 0)
     if isZero {
         return 1
     }
