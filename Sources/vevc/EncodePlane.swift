@@ -1002,7 +1002,6 @@ func reconstructPlaneLayer32Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1075,6 +1074,7 @@ func reconstructPlaneLayer16Y(blocks: [Block2D], prevImg: Image16, width: Int, h
             }
         }
     }
+    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1147,7 +1147,7 @@ func reconstructPlaneLayer16Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
+    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 8, qStep: Int(qt.step))
     return plane
 }
 
@@ -1220,7 +1220,7 @@ func reconstructPlaneLayer16Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
+    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 8, qStep: Int(qt.step))
     return plane
 }
 
