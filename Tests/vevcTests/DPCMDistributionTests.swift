@@ -68,9 +68,7 @@ final class DPCMDistributionTests: XCTestCase {
             var lastVal: Int16 = 0
             
             for i in blocks.indices {
-                let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
-                    return isEffectivelyZeroBase32(data: ptr, threshold: 3)
-                }
+                let isZero = isEffectivelyZeroBase32(data: blocks[i].base, threshold: 3)
                 if isZero {
                     lastVal = 0
                     continue

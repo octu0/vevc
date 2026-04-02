@@ -7,14 +7,16 @@ final class BlockRoundtripTests: XCTestCase {
     /// blockEncode16→blockDecode16 ラウンドトリップ（量子化済みデータ）
     func testBlockEncode16Roundtrip() throws {
         // 量子化後のSignedMappingデータを模擬（-50〜50の範囲のランダムな値）
-        var block = Block2D(width: 16, height: 16)
-        block.setData((0..<256).map { i in
-            let v = Int16(clamping: (i &* 7 + 13) % 101 - 50)
-            return v
-        })
+        let block = Block2D(width: 16, height: 16)
+        let temp256 = (0..<256).map { i -> Int16 in
+            Int16(clamping: (i &* 7 + 13) % 101 - 50)
+        }
+        temp256.withUnsafeBufferPointer { src in
+            block.base.update(from: src.baseAddress!, count: 256)
+        }
         
         // エンコード前のデータを保存
-        let originalData = Array(block.data)
+        let originalData = Array(UnsafeBufferPointer(start: block.base, count: 256))
         
         // blockEncode16
         var encoder = EntropyEncoder<DynamicEntropyModel>()
@@ -25,10 +27,10 @@ final class BlockRoundtripTests: XCTestCase {
         let encoded = encoder.getData()
         
         // blockEncode16のゼロクリア修正後のデータ
-        let afterEncodeData = Array(block.data)
+        let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
         
         // blockDecode16
-        var decBlock = Block2D(width: 16, height: 16)
+        let decBlock = Block2D(width: 16, height: 16)
         var decoder = try EntropyDecoder(data: encoded)
         decBlock.withView { view in
             try! blockDecode16(decoder: &decoder, block: &view, parentBlock: nil)
@@ -42,10 +44,13 @@ final class BlockRoundtripTests: XCTestCase {
     
     /// blockEncode8→blockDecode8 ラウンドトリップ
     func testBlockEncode8Roundtrip() throws {
-        var block = Block2D(width: 8, height: 8)
-        block.setData((0..<64).map { i in
+        let block = Block2D(width: 8, height: 8)
+        let temp64 = (0..<64).map { i -> Int16 in
             Int16(clamping: (i &* 11 + 3) % 61 - 30)
-        })
+        }
+        temp64.withUnsafeBufferPointer { src in
+            block.base.update(from: src.baseAddress!, count: 64)
+        }
         
         let originalData = Array(block.data)
         
@@ -58,7 +63,7 @@ final class BlockRoundtripTests: XCTestCase {
         
         let afterEncodeData = Array(block.data)
         
-        var decBlock = Block2D(width: 8, height: 8)
+        let decBlock = Block2D(width: 8, height: 8)
         var decoder = try EntropyDecoder(data: encoded)
         decBlock.withView { view in
             try! blockDecode8(decoder: &decoder, block: &view, parentBlock: nil)
@@ -71,7 +76,7 @@ final class BlockRoundtripTests: XCTestCase {
     
     /// blockEncode16 ゼロクリアデバッグ: lscp超がクリアされるか確認
     func testBlockEncode16ZeroClear() throws {
-        var block = Block2D(width: 16, height: 16)
+        let block = Block2D(width: 16, height: 16)
         // lscp = (5, 5) になるように設計
         // (5,5)以降に非ゼロデータを入れる
         for i in 0..<256 {
@@ -87,7 +92,7 @@ final class BlockRoundtripTests: XCTestCase {
             }
         }
         
-        let beforeData = Array(block.data)
+        let beforeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         block.withView { view in
@@ -97,7 +102,7 @@ final class BlockRoundtripTests: XCTestCase {
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
         // ただしblockEncode16はstride=16のBlockViewで動作
         // Block2D.withViewではstride=widthなので stride=16
-        let afterData = Array(block.data)
+        let afterData = Array(UnsafeBufferPointer(start: block.base, count: 256))
         
         // (5,5)以降のデータがゼロかチェック
         for y in 0..<16 {
@@ -112,7 +117,7 @@ final class BlockRoundtripTests: XCTestCase {
     
     /// stride=32のBlockView（実際の32x32ブロック内サブバンド）でblockEncode16→blockDecode16ラウンドトリップ
     func testBlockEncode16RoundtripStride32() throws {
-        var block32 = Block2D(width: 32, height: 32)
+        let block32 = Block2D(width: 32, height: 32)
         // HLサブバンド (offset=16, stride=32) にデータをセット
         block32.withView { view in
             let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
@@ -146,7 +151,7 @@ final class BlockRoundtripTests: XCTestCase {
         }
         
         // デコード (stride=32)  
-        var decBlock32 = Block2D(width: 32, height: 32)
+        let decBlock32 = Block2D(width: 32, height: 32)
         var decoder = try EntropyDecoder(data: encoded)
         decBlock32.withView { view in
             var hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)

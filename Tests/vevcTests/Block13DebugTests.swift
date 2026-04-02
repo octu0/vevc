@@ -38,14 +38,10 @@ final class Block13DebugTests: XCTestCase {
         
         var blockInfos: [(isZero: Bool, forceSplit: Bool)] = []
         for i in blocks.indices {
-            let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
-                return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
-            }
+            let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             var forceSplit = false
             if isZero != true {
-                forceSplit = blocks[i].withUnsafeMutableBufferPointer { ptr in
-                    return shouldSplit32(data: ptr, skipLL: true)
-                }
+                forceSplit = shouldSplit32(data: blocks[i].base, skipLL: true)
             }
             blockInfos.append((isZero: isZero, forceSplit: forceSplit))
         }
@@ -69,8 +65,8 @@ final class Block13DebugTests: XCTestCase {
         
         // block 13 の詳細比較
         for bi in [12, 13, 14] {
-            var encBlk = blocks2[bi]
-            var decBlk = decBlocks[bi]
+            let encBlk = blocks2[bi]
+            let decBlk = decBlocks[bi]
             
             var diffHL = 0, diffLH = 0, diffHH = 0
             var firstDiffDetail = ""
@@ -119,8 +115,8 @@ final class Block13DebugTests: XCTestCase {
         // 全ブロックの不一致カウント
         var failBlocks: [Int] = []
         for bi in 0..<blocks2.count {
-            var encBlk = blocks2[bi]
-            var decBlk = decBlocks[bi]
+            let encBlk = blocks2[bi]
+            let decBlk = decBlocks[bi]
             var hasDiff = false
             encBlk.withView { encView in
                 decBlk.withView { decView in

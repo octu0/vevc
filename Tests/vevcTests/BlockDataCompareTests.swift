@@ -59,8 +59,8 @@ final class BlockDataCompareTests: XCTestCase {
         var firstDiffBlockHL = -1
         
         for i in 0..<min(encYBlocks.count, decYBlocks.count) {
-            var encBlk = encYBlocks[i]
-            var decBlk = decYBlocks[i]
+            let encBlk = encYBlocks[i]
+            let decBlk = decYBlocks[i]
             
             encBlk.withView { encView in
                 decBlk.withView { decView in

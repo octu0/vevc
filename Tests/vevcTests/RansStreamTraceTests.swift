@@ -31,9 +31,7 @@ final class RansStreamTraceTests: XCTestCase {
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in blocks.indices {
-            let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
-                return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
-            }
+            let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
             blocks[i].withView { view in
                 let subs = getSubbands32(view: view)

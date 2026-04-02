@@ -697,9 +697,9 @@ func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
         let h: Int = i * 32
         for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 32 / 2
-            var ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
+            let ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
             ll.withView { srcView in
                 block.withView { destView in
                     for yi in 0..<half {
@@ -735,9 +735,9 @@ func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
         let h: Int = i * 32
         for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 32 / 2
-            var ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
+            let ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
             ll.withView { srcView in
                 block.withView { destView in
                     for yi in 0..<half {
@@ -773,9 +773,9 @@ func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
         let h: Int = i * 32
         for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 32 / 2
-            var ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
+            let ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
             ll.withView { srcView in
                 block.withView { destView in
                     for yi in 0..<half {
@@ -811,9 +811,9 @@ func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
         let h: Int = i * 16
         for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 16 / 2
-            var ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
+            let ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
             ll.withView { srcView in
                 block.withView { destView in
                     for yi in 0..<half {
@@ -849,9 +849,9 @@ func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
         let h: Int = i * 16
         for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 16 / 2
-            var ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
+            let ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
             ll.withView { srcView in
                 block.withView { destView in
                     for yi in 0..<half {
@@ -887,9 +887,9 @@ func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
         let h: Int = i * 16
         for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 16 / 2
-            var ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
+            let ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
             ll.withView { srcView in
                 block.withView { destView in
                     for yi in 0..<half {
@@ -925,7 +925,7 @@ func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, c
         let h: Int = i * 8
         for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 8 / 2
             block.withView { view in
                 let base = view.base
@@ -955,7 +955,7 @@ func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
         let h: Int = i * 8
         for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 8 / 2
             block.withView { view in
                 let base = view.base
@@ -985,7 +985,7 @@ func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
         let h: Int = i * 8
         for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
-            var block: Block2D = blocks[blockIndex]
+            let block: Block2D = blocks[blockIndex]
             let half: Int = 8 / 2
             block.withView { view in
                 let base = view.base
