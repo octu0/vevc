@@ -81,4 +81,64 @@ final class QuantTests: XCTestCase {
             }
         }
     }
+    func testCascadedQuantizeRoundTrip() {
+        let size = 32
+        let step = 100
+        
+        var blockLuma = Block2D(width: size, height: size)
+        var blockChroma = Block2D(width: size, height: size)
+        
+        let originalValues: [Int16] = (0..<(size * size)).map { _ in
+            Int16.random(in: -200...200)
+        }
+        
+        blockLuma.withView { view in
+            for y in 0..<size {
+                for x in 0..<size {
+                    view[y, x] = originalValues[y * size + x]
+                }
+            }
+        }
+        
+        blockChroma.withView { view in
+            for y in 0..<size {
+                for x in 0..<size {
+                    view[y, x] = originalValues[y * size + x]
+                }
+            }
+        }
+        
+        let qt = QuantizationTable(baseStep: step, isChroma: false, layerIndex: 2)
+        let qtChroma = QuantizationTable(baseStep: step, isChroma: true, layerIndex: 2)
+        
+        quantizeCascaded32(block: &blockLuma, qt: qt, isChroma: false)
+        dequantizeCascaded32(block: &blockLuma, qt: qt, isChroma: false)
+        
+        quantizeCascaded32(block: &blockChroma, qt: qtChroma, isChroma: true)
+        dequantizeCascaded32(block: &blockChroma, qt: qtChroma, isChroma: true)
+        
+        var lumaErrorDiff: Int64 = 0
+        var chromaErrorDiff: Int64 = 0
+        
+        blockLuma.withView { view in
+            for y in 0..<size {
+                for x in 0..<size {
+                    let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
+                    lumaErrorDiff += Int64(diff)
+                }
+            }
+        }
+        blockChroma.withView { view in
+            for y in 0..<size {
+                for x in 0..<size {
+                    let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
+                    chromaErrorDiff += Int64(diff)
+                }
+            }
+        }
+        
+        // 修正前はLumaとChromaが同様のアルゴリズムのため誤差が同じかそれに近くなる。
+        // TDDにおける修正後であれば、Chroma専用のより細かい（小さな）ステップを用いるため、誤差がより小さくなるはず。
+        XCTAssertLessThan(chromaErrorDiff, lumaErrorDiff, "Chroma should have smaller quantization error due to finer quantization steps.")
+    }
 }

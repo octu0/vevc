@@ -633,10 +633,15 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: inout BlockView, q: Qu
 @inline(__always)
 func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
     let step = Int(qt.step)
-    let qLL3 = Quantizer(step: max(1, step), roundToNearest: true)
-    let qHL3 = Quantizer(step: max(1, step * 5 / 4), roundToNearest: true)
-    let qHL2 = Quantizer(step: max(1, step * 6 / 4), roundToNearest: true)
-    let qHL1 = Quantizer(step: max(1, step * 8 / 4), roundToNearest: true)
+    let sLL3 = isChroma ? max(1, step * 3 / 4) : max(1, step)
+    let sHL3 = isChroma ? max(1, step * 4 / 4) : max(1, step * 5 / 4)
+    let sHL2 = isChroma ? max(1, step * 5 / 4) : max(1, step * 6 / 4)
+    let sHL1 = isChroma ? max(1, step * 6 / 4) : max(1, step * 8 / 4)
+
+    let qLL3 = Quantizer(step: sLL3, roundToNearest: true)
+    let qHL3 = Quantizer(step: sHL3, roundToNearest: true)
+    let qHL2 = Quantizer(step: sHL2, roundToNearest: true)
+    let qHL1 = Quantizer(step: sHL1, roundToNearest: true)
 
     block.data.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
@@ -695,10 +700,15 @@ func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: B
 @inline(__always)
 func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
     let step = Int(qt.step)
-    let qLL3 = Quantizer(step: max(1, step), roundToNearest: true)
-    let qHL3 = Quantizer(step: max(1, step * 5 / 4), roundToNearest: true)
-    let qHL2 = Quantizer(step: max(1, step * 6 / 4), roundToNearest: true)
-    let qHL1 = Quantizer(step: max(1, step * 8 / 4), roundToNearest: true)
+    let sLL3 = isChroma ? max(1, step * 3 / 4) : max(1, step)
+    let sHL3 = isChroma ? max(1, step * 4 / 4) : max(1, step * 5 / 4)
+    let sHL2 = isChroma ? max(1, step * 5 / 4) : max(1, step * 6 / 4)
+    let sHL1 = isChroma ? max(1, step * 6 / 4) : max(1, step * 8 / 4)
+
+    let qLL3 = Quantizer(step: sLL3, roundToNearest: true)
+    let qHL3 = Quantizer(step: sHL3, roundToNearest: true)
+    let qHL2 = Quantizer(step: sHL2, roundToNearest: true)
+    let qHL1 = Quantizer(step: sHL1, roundToNearest: true)
 
     block.data.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
