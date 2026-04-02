@@ -643,7 +643,7 @@ func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: B
     let qHL2 = Quantizer(step: sHL2, roundToNearest: true)
     let qHL1 = Quantizer(step: sHL1, roundToNearest: true)
 
-    block.data.withUnsafeMutableBufferPointer { ptr in
+    block.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
         
         // Cache parameters to avoid struct access overhead
@@ -710,7 +710,7 @@ func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma:
     let qHL2 = Quantizer(step: sHL2, roundToNearest: true)
     let qHL1 = Quantizer(step: sHL1, roundToNearest: true)
 
-    block.data.withUnsafeMutableBufferPointer { ptr in
+    block.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
 
         let sLL3 = Int32(qLL3.step)

@@ -35,9 +35,9 @@ final class EntropyCodecTests: XCTestCase {
         // 16ブロック分のデータを作成
         var blocks = (0..<16).map { _ in Block2D(width: 16, height: 16) }
         for i in 0..<16 {
-            blocks[i].data = (0..<256).map { idx in
+            blocks[i].setData((0..<256).map { idx in
                 Int16(clamping: (i * 256 + idx) &* 7 % 41 - 20)
-            }
+            })
         }
         
         // 全ブロックをエンコード
@@ -62,7 +62,7 @@ final class EntropyCodecTests: XCTestCase {
         // 比較 (blockEncode16後のデータ vs デコード後)
         for i in 0..<16 {
             for idx in 0..<256 {
-                XCTAssertEqual(blocks[i].data[idx], decBlocks[i].data[idx], "Block[\(i)] idx=\(idx) enc=\(blocks[i].data[idx]) dec=\(decBlocks[i].data[idx])")
+                XCTAssertEqual(blocks[i].base[idx], decBlocks[i].base[idx], "Block[\(i)] idx=\(idx) enc=\(blocks[i].base[idx]) dec=\(decBlocks[i].base[idx])")
             }
         }
     }

@@ -971,7 +971,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
         } else {
             blockThreshold = zeroThreshold
         }
-        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+        let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
             return isEffectivelyZero32(data: ptr, threshold: blockThreshold)
         }
         if isZero {
@@ -990,7 +990,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
         } else {
             bwFlags.writeBit(false)
             
-            let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            let forceSplit = blocks[i].withUnsafeMutableBufferPointer { ptr in
                 return shouldSplit32(data: ptr, skipLL: true)
             }
             if forceSplit {
@@ -1079,7 +1079,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
         } else {
             blockThreshold = zeroThreshold
         }
-        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+        let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
             return isEffectivelyZero16(data: ptr, threshold: blockThreshold)
         }
         if isZero {
@@ -1097,7 +1097,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
             zeroCount += 1
         } else {
             bwFlags.writeBit(false)
-            let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            let forceSplit = blocks[i].withUnsafeMutableBufferPointer { ptr in
                 return shouldSplit16(data: ptr, skipLL: true)
             }
             if forceSplit {
@@ -1168,7 +1168,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
-        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+        let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
             return isEffectivelyZero8(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
@@ -1209,7 +1209,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFr
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
-        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+        let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
             return isEffectivelyZeroBase4(data: ptr, threshold: zeroThreshold, isPFrame: isPFrame)
         }
         if isZero {
@@ -1269,7 +1269,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
     
     var zeroCount = 0
     for i in blocks.indices {
-        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+        let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
             return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
         }
         if isZero {
@@ -1279,7 +1279,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
             zeroCount += 1
         } else {
             bwFlags.writeBit(false)
-            let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            let forceSplit = blocks[i].withUnsafeMutableBufferPointer { ptr in
                 return shouldSplit32(data: ptr, skipLL: false)
             }
             if forceSplit {
@@ -1460,7 +1460,7 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
     
     var zeroCount = 0
     for i in blocks.indices {
-        let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+        let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
             return isEffectivelyZeroBase32(data: ptr, threshold: zeroThreshold)
         }
         if isZero {

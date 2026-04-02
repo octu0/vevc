@@ -27,7 +27,7 @@ final class QuantRoundtripTests: XCTestCase {
         var block = Block2D(width: size, height: size)
         // テスト値をコピー
         for i in 0..<(size * size) {
-            block.data[i] = testValues[i]
+            block.base[i] = testValues[i]
         }
         
         // 量子化（SignedMapping = ジグザグエンコード付き）
@@ -36,7 +36,7 @@ final class QuantRoundtripTests: XCTestCase {
         }
         
         // ジグザグエンコード後の値を保存
-        let quantized = block.data
+        let quantized = Array(block.data)
         
         // 逆量子化（SignedMapping = ジグザグデコード付き）
         block.withView { view in
@@ -46,7 +46,7 @@ final class QuantRoundtripTests: XCTestCase {
         // 元の値と比較
         for i in 0..<(size * size) {
             let original = testValues[i]
-            let restored = block.data[i]
+            let restored = block.base[i]
             let zigzag = quantized[i]
             XCTAssertEqual(original, restored, 
                 "位置[\(i/size),\(i%size)]: 元=\(original), zigzag=\(zigzag), 復元=\(restored)")
@@ -71,10 +71,10 @@ final class QuantRoundtripTests: XCTestCase {
                 default:
                     v = Int16(x + y)       // 0..+30
                 }
-                block.data[y * size + x] = v
+                block.base[y * size + x] = v
             }
         }
-        let original = block.data
+        let original = Array(block.data)
         
         block.withView { view in
             quantizeSIMDSignedMapping(&view, q: qt.qLow)
@@ -85,8 +85,8 @@ final class QuantRoundtripTests: XCTestCase {
         
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
-            if original[i] != block.data[i] {
-                mismatches.append((i, original[i], block.data[i]))
+            if original[i] != block.base[i] {
+                mismatches.append((i, original[i], block.base[i]))
             }
         }
         XCTAssertTrue(mismatches.isEmpty, 
@@ -103,10 +103,10 @@ final class QuantRoundtripTests: XCTestCase {
         for y in 0..<size {
             for x in 0..<size {
                 let hash = (x &* 2654435761) ^ (y &* 2246822519)
-                block.data[y * size + x] = Int16(clamping: (hash % 256) - 128)
+                block.base[y * size + x] = Int16(clamping: (hash % 256) - 128)
             }
         }
-        let original = block.data
+        let original = Array(block.data)
         
         block.withView { view in
             quantizeSIMDSignedMapping(&view, q: qt.qLow)
@@ -117,8 +117,8 @@ final class QuantRoundtripTests: XCTestCase {
         
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
-            if original[i] != block.data[i] {
-                mismatches.append((i, original[i], block.data[i]))
+            if original[i] != block.base[i] {
+                mismatches.append((i, original[i], block.base[i]))
             }
         }
         XCTAssertTrue(mismatches.isEmpty, 
@@ -143,7 +143,7 @@ final class QuantRoundtripTests: XCTestCase {
             47, -47, 53, -53, 59, -59, 61, -61
         ]
         for i in 0..<(size * size) {
-            block.data[i] = testValues[i]
+            block.base[i] = testValues[i]
         }
         
         block.withView { view in
@@ -156,7 +156,7 @@ final class QuantRoundtripTests: XCTestCase {
         var signMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
-            let restored = block.data[i]
+            let restored = block.base[i]
             // ゼロ以外の値は符号が保持されるべき
             if orig != 0 && restored != 0 {
                 let origSign = 0 < orig
@@ -189,14 +189,14 @@ final class QuantRoundtripTests: XCTestCase {
         
         // Mid test
         var blockMid = Block2D(width: size, height: size)
-        for i in 0..<(size * size) { blockMid.data[i] = testValues[i] }
+        for i in 0..<(size * size) { blockMid.base[i] = testValues[i] }
         blockMid.withView { view in quantizeSIMDSignedMapping(&view, q: qt.qMid) }
         blockMid.withView { view in dequantizeSIMDSignedMapping(&view, q: qt.qMid) }
         
         var midSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
-            let restored = blockMid.data[i]
+            let restored = blockMid.base[i]
             if orig != 0 && restored != 0 {
                 if (0 < orig) != (0 < restored) {
                     midSignMismatches.append((i, orig, restored))
@@ -209,14 +209,14 @@ final class QuantRoundtripTests: XCTestCase {
         
         // High test
         var blockHigh = Block2D(width: size, height: size)
-        for i in 0..<(size * size) { blockHigh.data[i] = testValues[i] }
+        for i in 0..<(size * size) { blockHigh.base[i] = testValues[i] }
         blockHigh.withView { view in quantizeSIMDSignedMapping(&view, q: qt.qHigh) }
         blockHigh.withView { view in dequantizeSIMDSignedMapping(&view, q: qt.qHigh) }
         
         var highSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
-            let restored = blockHigh.data[i]
+            let restored = blockHigh.base[i]
             if orig != 0 && restored != 0 {
                 if (0 < orig) != (0 < restored) {
                     highSignMismatches.append((i, orig, restored))

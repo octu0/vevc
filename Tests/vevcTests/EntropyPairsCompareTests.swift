@@ -40,7 +40,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         var tasks: [(Int, EncodeTask32)] = []
         
         for i in blocks.indices {
-            let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
                 return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
             }
             if isZero {
@@ -58,7 +58,7 @@ final class EntropyPairsCompareTests: XCTestCase {
             } else {
                 bwFlags.writeBit(false)
                 
-                let forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+                let forceSplit = blocks[i].withUnsafeMutableBufferPointer { ptr in
                     return shouldSplit32(data: ptr, skipLL: true)
                 }
                 if forceSplit {

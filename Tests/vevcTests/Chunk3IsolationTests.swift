@@ -37,7 +37,7 @@ final class Chunk3IsolationTests: XCTestCase {
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in blocks.indices {
-            let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
                 return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
             }
             if isZero { continue }

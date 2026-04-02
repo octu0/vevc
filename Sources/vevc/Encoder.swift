@@ -486,7 +486,7 @@ private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> I
     quantizeSIMD(&sub.lh, q: qt.qMid)
     quantizeSIMD(&sub.hh, q: qt.qHigh)
     
-    let isZero = block.data.withUnsafeMutableBufferPointer { ptr in
+    let isZero = block.withUnsafeMutableBufferPointer { ptr in
         return isEffectivelyZeroBase4(data: ptr, threshold: 0)
     }
     if isZero {

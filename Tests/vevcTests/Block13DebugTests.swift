@@ -38,12 +38,12 @@ final class Block13DebugTests: XCTestCase {
         
         var blockInfos: [(isZero: Bool, forceSplit: Bool)] = []
         for i in blocks.indices {
-            let isZero = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+            let isZero = blocks[i].withUnsafeMutableBufferPointer { ptr in
                 return isEffectivelyZero32(data: ptr, threshold: safeThreshold)
             }
             var forceSplit = false
             if isZero != true {
-                forceSplit = blocks[i].data.withUnsafeMutableBufferPointer { ptr in
+                forceSplit = blocks[i].withUnsafeMutableBufferPointer { ptr in
                     return shouldSplit32(data: ptr, skipLL: true)
                 }
             }

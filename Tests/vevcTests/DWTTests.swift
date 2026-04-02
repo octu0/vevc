@@ -18,9 +18,9 @@ final class DWTTests: XCTestCase {
     private func performRoundtrip(size: Int) {
         var block: Block2D = Block2D(width: size, height: size)
         for i: Int in 0..<block.data.count {
-            block.data[i + 0] = Int16.random(in: -512...511)
+            block.base[i + 0] = Int16.random(in: -512...511)
         }
-        let originalData: [Int16] = block.data
+        let originalData: [Int16] = Array(block.data)
 
         block.withView { (view: inout BlockView) in
             switch size {
@@ -38,7 +38,7 @@ final class DWTTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(block.data, originalData, "Roundtrip failed for size \(size)")
+        XCTAssertEqual(Array(block.data), originalData, "Roundtrip failed for size \(size)")
     }
 
     func testDWT2DRoundtrip() {
@@ -49,18 +49,18 @@ final class DWTTests: XCTestCase {
             for y in 0..<size {
                 for x in 0..<size {
                     let index = (y * size) + x
-                    block.data[index] = Int16.random(in: (-1 * 1000)...1000)
+                    block.base[index] = Int16.random(in: (-1 * 1000)...1000)
                 }
             }
 
-            let originalData = block.data
+            let originalData = Array(block.data)
 
             block.withView { view in
                 _ = dwt2d(&view, size: size)
                 invDwt2d(&view, size: size)
             }
 
-            XCTAssertEqual(block.data, originalData, "Roundtrip failed for size \(size)")
+            XCTAssertEqual(Array(block.data), originalData, "Roundtrip failed for size \(size)")
         }
     }
 
@@ -73,11 +73,12 @@ final class DWTTests: XCTestCase {
             for y in 0..<size {
                 for x in 0..<size {
                     let index = (y * size) + x
-                    blockScalar.data[index] = Int16.random(in: (-1 * 1000)...1000)
+                    blockScalar.base[index] = Int16.random(in: (-1 * 1000)...1000)
                 }
             }
 
-            var blockSIMD = blockScalar
+            var blockSIMD = Block2D(width: size, height: size)
+            blockSIMD.setData(Array(blockScalar.data))
 
             blockScalar.withView { view in
                 _ = dwt2dScalar(&view, size: size)
@@ -88,7 +89,7 @@ final class DWTTests: XCTestCase {
                 _ = dwt2d(&view, size: size)
             }
 
-            XCTAssertEqual(blockSIMD.data, blockScalar.data, "SIMD vs Scalar mismatch for dwt2d size \(size)")
+            XCTAssertEqual(Array(blockSIMD.data), Array(blockScalar.data), "SIMD vs Scalar mismatch for dwt2d size \(size)")
 
             blockScalar.withView { view in
                 invDwt2dScalar(&view, size: size)
@@ -98,7 +99,7 @@ final class DWTTests: XCTestCase {
                 invDwt2d(&view, size: size)
             }
 
-            XCTAssertEqual(blockSIMD.data, blockScalar.data, "SIMD vs Scalar mismatch for invDwt2d size \(size)")
+            XCTAssertEqual(Array(blockSIMD.data), Array(blockScalar.data), "SIMD vs Scalar mismatch for invDwt2d size \(size)")
         }
         #endif
     }
@@ -118,10 +119,10 @@ final class DWTTests: XCTestCase {
     private func runRoundTripTest(size: Int) {
         var block = Block2D(width: size, height: size)
         for i in 0..<block.data.count {
-            block.data[i] = Int16.random(in: (-1 * 1000)...1000)
+            block.base[i] = Int16.random(in: (-1 * 1000)...1000)
         }
 
-        let originalData = block.data
+        let originalData = Array(block.data)
 
         block.withView { view in
             switch size {
@@ -149,7 +150,7 @@ final class DWTTests: XCTestCase {
             }
         }
 
-        XCTAssertEqual(block.data, originalData, "Roundtrip failed for size \(size)")
+        XCTAssertEqual(Array(block.data), originalData, "Roundtrip failed for size \(size)")
     }
 
     func testLift53Lossless() {
@@ -190,11 +191,11 @@ final class DWTTests: XCTestCase {
             var block = Block2D(width: size, height: size)
             for y in 0..<size {
                 for x in 0..<size {
-                    block.data[(y * size) + x] = Int16.random(in: -1000...1000)
+                    block.base[(y * size) + x] = Int16.random(in: -1000...1000)
                 }
             }
 
-            let originalData = block.data
+            let originalData = Array(block.data)
 
             block.withView { view in
                 switch size {
@@ -212,7 +213,7 @@ final class DWTTests: XCTestCase {
                 }
             }
 
-            XCTAssertEqual(block.data, originalData, "Failed for block size \(size)")
+            XCTAssertEqual(Array(block.data), originalData, "Failed for block size \(size)")
         }
     }
     

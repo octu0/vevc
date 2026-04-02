@@ -8,13 +8,13 @@ final class BlockRoundtripTests: XCTestCase {
     func testBlockEncode16Roundtrip() throws {
         // 量子化後のSignedMappingデータを模擬（-50〜50の範囲のランダムな値）
         var block = Block2D(width: 16, height: 16)
-        block.data = (0..<256).map { i in
+        block.setData((0..<256).map { i in
             let v = Int16(clamping: (i &* 7 + 13) % 101 - 50)
             return v
-        }
+        })
         
         // エンコード前のデータを保存
-        let originalData = block.data
+        let originalData = Array(block.data)
         
         // blockEncode16
         var encoder = EntropyEncoder<DynamicEntropyModel>()
@@ -25,7 +25,7 @@ final class BlockRoundtripTests: XCTestCase {
         let encoded = encoder.getData()
         
         // blockEncode16のゼロクリア修正後のデータ
-        let afterEncodeData = block.data
+        let afterEncodeData = Array(block.data)
         
         // blockDecode16
         var decBlock = Block2D(width: 16, height: 16)
@@ -36,18 +36,18 @@ final class BlockRoundtripTests: XCTestCase {
         
         // エンコード後のデータとデコード後のデータを比較
         for i in 0..<256 {
-            XCTAssertEqual(afterEncodeData[i], decBlock.data[i], "idx=\(i) y:\(i/16) x:\(i%16): encAfter=\(afterEncodeData[i]) dec=\(decBlock.data[i]) original=\(originalData[i])")
+            XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/16) x:\(i%16): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
         }
     }
     
     /// blockEncode8→blockDecode8 ラウンドトリップ
     func testBlockEncode8Roundtrip() throws {
         var block = Block2D(width: 8, height: 8)
-        block.data = (0..<64).map { i in
+        block.setData((0..<64).map { i in
             Int16(clamping: (i &* 11 + 3) % 61 - 30)
-        }
+        })
         
-        let originalData = block.data
+        let originalData = Array(block.data)
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         block.withView { view in
@@ -56,7 +56,7 @@ final class BlockRoundtripTests: XCTestCase {
         encoder.flush()
         let encoded = encoder.getData()
         
-        let afterEncodeData = block.data
+        let afterEncodeData = Array(block.data)
         
         var decBlock = Block2D(width: 8, height: 8)
         var decoder = try EntropyDecoder(data: encoded)
@@ -65,7 +65,7 @@ final class BlockRoundtripTests: XCTestCase {
         }
         
         for i in 0..<64 {
-            XCTAssertEqual(afterEncodeData[i], decBlock.data[i], "idx=\(i) y:\(i/8) x:\(i%8): encAfter=\(afterEncodeData[i]) dec=\(decBlock.data[i]) original=\(originalData[i])")
+            XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/8) x:\(i%8): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
         }
     }
     
@@ -75,19 +75,19 @@ final class BlockRoundtripTests: XCTestCase {
         // lscp = (5, 5) になるように設計
         // (5,5)以降に非ゼロデータを入れる
         for i in 0..<256 {
-            block.data[i] = Int16(i + 1)  // 全て非ゼロ
+            block.base[i] = Int16(i + 1)  // 全て非ゼロ
         }
         // (5,5)より後を全てゼロにしてlscpを(5,5)にする
         for y in 0..<16 {
             for x in 0..<16 {
                 let idx = y * 16 + x
                 if 5 < y || (y == 5 && 5 < x) {
-                    block.data[idx] = 0
+                    block.base[idx] = 0
                 }
             }
         }
         
-        let beforeData = block.data
+        let beforeData = Array(block.data)
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         block.withView { view in
@@ -97,7 +97,7 @@ final class BlockRoundtripTests: XCTestCase {
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
         // ただしblockEncode16はstride=16のBlockViewで動作
         // Block2D.withViewではstride=widthなので stride=16
-        let afterData = block.data
+        let afterData = Array(block.data)
         
         // (5,5)以降のデータがゼロかチェック
         for y in 0..<16 {
