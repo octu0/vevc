@@ -94,11 +94,11 @@ func evaluateQuantizeLayer16(block: inout Block2D, qt: QuantizationTable) {
 func evaluateQuantizeBase8(block: inout Block2D, qt: QuantizationTable) {
     block.withView { view in
         let subs = getSubbands8(view: view)
-        _ = subs.ll
+        var ll = subs.ll
         var hl = subs.hl
         var lh = subs.lh
         var hh = subs.hh
-        // quantizeSIMD4(&ll, q: qt.qLow) // LL is quantized in-loop within blockEncodeIntra4
+        quantizeSIMD4(&ll, q: qt.qLow)
         quantizeSIMDSignedMapping4(&hl, q: qt.qMid)
         quantizeSIMDSignedMapping4(&lh, q: qt.qMid)
         quantizeSIMDSignedMapping4(&hh, q: qt.qHigh)
@@ -754,11 +754,11 @@ func reconstructPlaneBase8(blocks: [Block2D], width: Int, height: Int, qt: Quant
                 
                 blk.withView { view in
                     let base = view.base
-                    _ = BlockView(base: base, width: 4, height: 4, stride: 8)
+                    var llView = BlockView(base: base, width: 4, height: 4, stride: 8)
                     var hlView = BlockView(base: base.advanced(by: 4), width: 4, height: 4, stride: 8)
                     var lhView = BlockView(base: base.advanced(by: 32), width: 4, height: 4, stride: 8)
                     var hhView = BlockView(base: base.advanced(by: 36), width: 4, height: 4, stride: 8)
-                    // dequantizeSIMD4(&llView, q: qt.qLow) // LL is dequantized in-loop within blockEncodeIntra4
+                    dequantizeSIMD4(&llView, q: qt.qLow)
                     dequantizeSIMDSignedMapping4(&hlView, q: qt.qMid)
                     dequantizeSIMDSignedMapping4(&lhView, q: qt.qMid)
                     dequantizeSIMDSignedMapping4(&hhView, q: qt.qHigh)
@@ -1002,7 +1002,7 @@ func reconstructPlaneLayer32Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
             }
         }
     }
-    // applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step)) // REMOVED
+    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1075,7 +1075,6 @@ func reconstructPlaneLayer16Y(blocks: [Block2D], prevImg: Image16, width: Int, h
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1148,7 +1147,7 @@ func reconstructPlaneLayer16Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 8, qStep: Int(qt.step))
+    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1221,7 +1220,7 @@ func reconstructPlaneLayer16Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 8, qStep: Int(qt.step))
+    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1234,7 +1233,6 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     
     let yColCount8 = (dx + 7) / 8
     let yRowCount8 = (dy + 7) / 8
-    let cColCount8 = (cbDx + 7) / 8
     
     async let taskBufY = { () -> ([UInt8], [Int16], [Block2D]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy)
@@ -1255,7 +1253,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
         
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame, colCount: yColCount8, qtLL: qtY.qLow)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
 
         
@@ -1288,7 +1286,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame, colCount: cColCount8, qtLL: qtC.qLow)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
 
         let quantizedBlocks = blocks
@@ -1317,7 +1315,7 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame, colCount: cColCount8, qtLL: qtC.qLow)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
         
 
         let quantizedBlocks = blocks
@@ -1416,7 +1414,7 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
             evaluateQuantizeBase32(block: &blocks[i], qt: qtY)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
-        let buf = encodeCascadedPlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, colCount: (dx + 31) / 32, qtLL: qtY.qLow)
+        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase32(blocks: blocks, width: dx, height: dy, qt: qtY)
         return (buf, reconPlane)
     }()
@@ -1428,10 +1426,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            quantizeCascaded32(block: &blocks[i], qt: qtC, isChroma: true)
+            evaluateQuantizeBase32(block: &blocks[i], qt: qtC)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodeCascadedPlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, colCount: (cbDx + 31) / 32, qtLL: qtC.qLow)
+        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane)
     }()
@@ -1443,10 +1441,10 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
         }
         for i in blocks.indices {
-            quantizeCascaded32(block: &blocks[i], qt: qtC, isChroma: true)
+            evaluateQuantizeBase32(block: &blocks[i], qt: qtC)
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodeCascadedPlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, colCount: (cbDx + 31) / 32, qtLL: qtC.qLow)
+        let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let reconPlane = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC)
         return (buf, reconPlane)
     }()

@@ -310,57 +310,6 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: inout BlockView, las
 }
 
 @inline(__always)
-func blockDecodeIntra4(decoder: inout EntropyDecoder, block: inout BlockView, qtLL: Int32, ctx: inout IntraContext, col: Int, row: Int, rawMode: UInt8) throws {
-    guard let mode = IntraMode(rawValue: rawMode) else {
-        throw DecodeError.invalidBlockDataContext("Invalid IntraMode: \(rawMode)")
-    }
-    
-    let hasNonZero = try decoder.decodeBypass()
-    var lscpIdx = -1
-    if hasNonZero == 1 {
-        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-        guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("Intra4 lscp out of range: (\(lscpX), \(lscpY))") }
-        lscpIdx = lscpY * 4 + lscpX
-    }
-
-    block.clearAll()
-    if lscpIdx >= 0 {
-        var currentIdx = 0
-        while currentIdx <= lscpIdx {
-            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: false)
-            currentIdx += run
-            if currentIdx <= lscpIdx {
-                let y = currentIdx / 4
-                let x = currentIdx % 4
-                let ptr = block.rowPointer(y: y)
-                ptr[x] = val
-            }
-            currentIdx += 1
-        }
-    }
-    
-    var predBuf = [Int16](repeating: 0, count: 16)
-    predBuf.withUnsafeMutableBufferPointer { ptr in
-        predictIntra4(mode: mode, col: col, row: row, ctx: ctx, ptrOut: ptr.baseAddress!)
-    }
-    
-    var i = 0
-    for y in 0..<4 {
-        let ptrY = block.rowPointer(y: y)
-        for x in 0..<4 {
-            let qRes = ptrY[x]
-            let reconRes = Int16(clamping: Int32(qRes) &* qtLL)
-            let recon = predBuf[i] &+ reconRes
-            ptrY[x] = recon
-            i += 1
-        }
-    }
-    
-    ctx.update(col: col, block: block)
-}
-
-@inline(__always)
 func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
@@ -672,17 +621,17 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY, colCount: colCountY, qtLL: Int32(qtY.qLow.step))
+    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb, colCount: colCountCb, qtLL: Int32(qtC.qLow.step))
+    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr, colCount: colCountCr, qtLL: Int32(qtC.qLow.step))
+    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
     
     let chunkSize = 4
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
@@ -980,11 +929,11 @@ func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, c
             let half: Int = 8 / 2
             block.withView { view in
                 let base = view.base
-                _ = BlockView(base: base, width: half, height: half, stride: 8)
+                var llView = BlockView(base: base, width: half, height: half, stride: 8)
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
                 var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
                 var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                // dequantizeSIMD(&llView, q: qt.qLow) // LL is dequantized in-loop within blockDecodeIntra4
+                dequantizeSIMD(&llView, q: qt.qLow)
                 dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
@@ -1010,11 +959,11 @@ func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
             let half: Int = 8 / 2
             block.withView { view in
                 let base = view.base
-                _ = BlockView(base: base, width: half, height: half, stride: 8)
+                var llView = BlockView(base: base, width: half, height: half, stride: 8)
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
                 var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
                 var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                // dequantizeSIMD(&llView, q: qt.qLow) // LL is dequantized in-loop within blockDecodeIntra4
+                dequantizeSIMD(&llView, q: qt.qLow)
                 dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
@@ -1040,11 +989,11 @@ func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
             let half: Int = 8 / 2
             block.withView { view in
                 let base = view.base
-                _ = BlockView(base: base, width: half, height: half, stride: 8)
+                var llView = BlockView(base: base, width: half, height: half, stride: 8)
                 var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
                 var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
                 var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                // dequantizeSIMD(&llView, q: qt.qLow) // LL is dequantized in-loop within blockDecodeIntra4
+                dequantizeSIMD(&llView, q: qt.qLow)
                 dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)

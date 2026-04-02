@@ -343,11 +343,6 @@ struct rANSDecoder {
             }
         }
     }
-    
-    @inline(__always)
-    func getConsumedBytes() -> Int {
-        return offset
-    }
 }
 
 // MARK: - Interleaved 4-way rANS Encoder
