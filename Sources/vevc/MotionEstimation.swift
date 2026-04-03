@@ -61,7 +61,7 @@ struct MotionEstimation {
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
         
-        if zeroSad < 150 {
+        if zeroSad < 64 {
             return (0, 0, zeroSad)
         }
         
