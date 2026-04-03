@@ -94,12 +94,9 @@ class CoreDecoder {
                 continue
             }
             
-            // 双方向予測の判定: GOP後半のP-frame かつ I-frameの復元結果がある場合
-            // エンコーダ側と同一の判定ロジック: GOP中間点以降のP-frameに双方向予測を適用
-            let gopMidpoint = max(2, frameData.count / 2)
-            let isInSecondHalf = (idx >= gopMidpoint)
+            // 双方向予測の判定: 【実験】全P-frameに双方向予測を適用
             let isPFrame = (previousReconstructed != nil)
-            let useBidirectional = isInSecondHalf && isPFrame && firstReconstructed != nil && frameData.count >= 3
+            let useBidirectional = isPFrame && firstReconstructed != nil && frameData.count >= 2
             
             let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
             let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd)

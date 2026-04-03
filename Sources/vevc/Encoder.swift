@@ -178,7 +178,7 @@ actor LayersEncodeActor {
         // デコーダ側でもI-frameの復元結果を使用するため、入力原データではなく復元結果を使用
         var firstReconstructed: PlaneData420? = nil
         
-        for (frameIdx, plane) in planes.enumerated() {
+        for (_, plane) in planes.enumerated() {
             // Duplicate frame detection: if current frame pixels are identical
             // to the previous frame, emit a copy frame (empty data, FrameLen=0)
             // instead of encoding the full frame. This saves significant data
@@ -214,14 +214,9 @@ actor LayersEncodeActor {
             }
             
             // 双方向予測の適用判定:
-            // GOP後半のP-frame（中間点以降）かつGOPサイズが3以上かつI-frameの復元結果がある場合、
-            // I-frameの復元結果を後方参照として双方向予測を使用する。
-            // GOP後半では前方参照（前フレーム復元結果）からの蓄積誤差が大きくなるため、
-            // 後方参照（I-frame復元結果）を併用して残差を低減する。
-            // GOP中間点 = planes.count / 2 (例: GOPサイズ60なら30フレーム目以降)
-            let gopMidpoint = max(2, planes.count / 2)
-            let isInSecondHalf = (frameIdx >= gopMidpoint)
-            let useBidirectional = isPFrame && isInSecondHalf && firstReconstructed != nil && planes.count >= 3
+            // 【実験】全P-frameに双方向予測を適用し、効果の上限を測定する。
+            // I-frameの復元結果を後方参照として全P-frameで利用する。
+            let useBidirectional = isPFrame && firstReconstructed != nil && planes.count >= 2
             
             let bytes: [UInt8]
             let reconstructed: PlaneData420

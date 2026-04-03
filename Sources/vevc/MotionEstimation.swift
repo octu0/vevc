@@ -70,7 +70,7 @@ struct MotionEstimation {
         var bestCoarseDx: Int = 0
         var bestCoarseDy: Int = 0
         
-        // Hardcoded tuple array for coarse search to bypass AST explosion
+        // Hardcoded tuple array for coarse search (±2, step=2)
         let coarseOffsets: [(Int, Int)] = [
             (-2, -2), (0, -2), (2, -2),
             (-2,  0),          (2,  0),
@@ -84,7 +84,7 @@ struct MotionEstimation {
             fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + dx, y: by + dy, dest: tPtr)
             let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
             
-            let penalty: Int = getPenalty(dx: dx, dy: dy, lambda: 80)
+            let penalty: Int = getPenalty(dx: dx, dy: dy, lambda: 40)
             let totalSad: Int = sad + penalty
             
             if totalSad < bestCoarseSad {
@@ -116,7 +116,7 @@ struct MotionEstimation {
             fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
             let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
             
-            let penalty: Int = getPenalty(dx: fineDx, dy: fineDy, lambda: 80)
+            let penalty: Int = getPenalty(dx: fineDx, dy: fineDy, lambda: 40)
             let totalSad: Int = sad + penalty
             
             if totalSad < bestFineSad {
