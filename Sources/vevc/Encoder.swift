@@ -362,34 +362,31 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     @inline(__always)
     func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
         let block = Block2D(width: w, height: h)
-        block.withView { view in
-            for i in 0..<h {
-                view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
-            }
+        let view = block.view
+        for i in 0..<h {
+            view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
         }
-        return block
+            return block
     }
 
     @inline(__always)
     func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
         let block = Block2D(width: w, height: h)
-        block.withView { view in
-            for i in 0..<h {
-                view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
-            }
+        let view = block.view
+        for i in 0..<h {
+            view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
         }
-        return block
+            return block
     }
 
     @inline(__always)
     func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
         let block = Block2D(width: w, height: h)
-        block.withView { view in
-            for i in 0..<h {
-                view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
-            }
+        let view = block.view
+        for i in 0..<h {
+            view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
         }
-        return block
+            return block
     }
     
     for (sx, sy) in points {
@@ -477,14 +474,13 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
 }
 
 private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
-    var sub = block.withView { view in
-        return dwt2d_8_sb(&view)
-    }
+    let view = block.view
+    let sub = dwt2d_8_sb(view)
     
-    quantizeSIMD(&sub.ll, q: qt.qLow)
-    quantizeSIMD(&sub.hl, q: qt.qMid)
-    quantizeSIMD(&sub.lh, q: qt.qMid)
-    quantizeSIMD(&sub.hh, q: qt.qHigh)
+    quantizeSIMD(sub.ll, q: qt.qLow)
+    quantizeSIMD(sub.hl, q: qt.qMid)
+    quantizeSIMD(sub.lh, q: qt.qMid)
+    quantizeSIMD(sub.hh, q: qt.qHigh)
     
     let isZero = isEffectivelyZeroBase4(data: block.base, threshold: 0)
     if isZero {

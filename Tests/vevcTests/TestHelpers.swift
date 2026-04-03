@@ -19,38 +19,38 @@ func invLift53(_ buffer: UnsafeMutableBufferPointer<Int16>, count: Int, stride: 
     }
 }
 
-func dwt2d(_ block: inout BlockView, size: Int) -> Subbands {
+func dwt2d(_ block: BlockView, size: Int) -> Subbands {
     switch size {
-    case 32: return dwt2d_32_sb(&block)
-    case 16: return dwt2d_16_sb(&block)
-    case 8: return dwt2d_8_sb(&block)
+    case 32: return dwt2d_32_sb(block)
+    case 16: return dwt2d_16_sb(block)
+    case 8: return dwt2d_8_sb(block)
     default: fatalError()
     }
 }
 
-func invDwt2d(_ block: inout BlockView, size: Int) {
+func invDwt2d(_ block: BlockView, size: Int) {
     switch size {
-    case 32: invDwt2d_32(&block)
-    case 16: invDwt2d_16(&block)
-    case 8: invDwt2d_8(&block)
+    case 32: invDwt2d_32(block)
+    case 16: invDwt2d_16(block)
+    case 8: invDwt2d_8(block)
     default: fatalError()
     }
 }
 
-func dwt2dScalar(_ block: inout BlockView, size: Int) -> Subbands {
+func dwt2dScalar(_ block: BlockView, size: Int) -> Subbands {
     switch size {
-    case 32: return dwt2d_32_sb(&block)
-    case 16: return dwt2d_16_sb(&block)
-    case 8: return dwt2d_8_sb(&block)
+    case 32: return dwt2d_32_sb(block)
+    case 16: return dwt2d_16_sb(block)
+    case 8: return dwt2d_8_sb(block)
     default: fatalError()
     }
 }
 
-func invDwt2dScalar(_ block: inout BlockView, size: Int) {
+func invDwt2dScalar(_ block: BlockView, size: Int) {
     switch size {
-    case 32: invDwt2d_32(&block)
-    case 16: invDwt2d_16(&block)
-    case 8: invDwt2d_8(&block)
+    case 32: invDwt2d_32(block)
+    case 16: invDwt2d_16(block)
+    case 8: invDwt2d_8(block)
     default: fatalError()
     }
 }
@@ -63,10 +63,10 @@ func blockEncode(encoder: inout EntropyEncoder<DynamicEntropyModel>, block: Bloc
     }
 }
 
-func blockDecode(decoder: inout EntropyDecoder, block: inout BlockView, size: Int) throws {
+func blockDecode(decoder: inout EntropyDecoder, block: BlockView, size: Int) throws {
     switch size {
-    case 16: try blockDecode16(decoder: &decoder, block: &block, parentBlock: nil)
-    case 8: try blockDecode8(decoder: &decoder, block: &block, parentBlock: nil)
+    case 16: try blockDecode16(decoder: &decoder, block: block, parentBlock: nil)
+    case 8: try blockDecode8(decoder: &decoder, block: block, parentBlock: nil)
     default: fatalError()
     }
 }

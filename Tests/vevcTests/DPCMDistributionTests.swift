@@ -73,14 +73,13 @@ final class DPCMDistributionTests: XCTestCase {
                     lastVal = 0
                     continue
                 }
-                blocks[i].withView { view in
-                    let subs = getSubbands32(view: view)
-                    blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-                    blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
-                    blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-                    blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
-                }
-            }
+                let view = blocks[i].view
+                let subs = getSubbands32(view: view)
+                blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+                        }
             encoder.flush()
             
             // collect token distribution from pairs

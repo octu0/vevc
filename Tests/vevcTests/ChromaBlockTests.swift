@@ -238,46 +238,43 @@ final class ChromaBlockTests: XCTestCase {
 
             // ブロックを作成して量子化→逆量子化
             var block = Block2D(width: blockSize, height: blockSize)
-            block.withView { view in
-                for y in 0..<blockSize {
-                    let ptr = view.rowPointer(y: y)
-                    for x in 0..<blockSize {
-                        ptr[x] = originalValues[y * blockSize + x]
-                    }
+            var view = block.view
+            for y in 0..<blockSize {
+                let ptr = view.rowPointer(y: y)
+                for x in 0..<blockSize {
+                    ptr[x] = originalValues[y * blockSize + x]
                 }
-                dwt2d_8(&view)
             }
-
+            dwt2d_8(view)
+        
             // 量子化
             evaluateQuantizeBase8(block: &block, qt: qt)
 
             // 逆量子化
-            block.withView { view in
-                let half = blockSize / 2
-                let base = view.base
-                var llView = BlockView(base: base, width: half, height: half, stride: blockSize)
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
-                var lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
-                var hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
-                dequantizeSIMD(&llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_8(&view)
-            }
-
+            view = block.view
+            let half = blockSize / 2
+            let base = view.base
+            var llView = BlockView(base: base, width: half, height: half, stride: blockSize)
+            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
+            var lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
+            var hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
+            dequantizeSIMD(llView, q: qt.qLow)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_8(view)
+        
             // MSE計算
             var mse: Double = 0
-            block.withView { view in
-                for y in 0..<blockSize {
-                    let ptr = view.rowPointer(y: y)
-                    for x in 0..<blockSize {
-                        let diff = Double(ptr[x]) - Double(originalValues[y * blockSize + x])
-                        mse += diff * diff
-                    }
+            view = block.view
+            for y in 0..<blockSize {
+                let ptr = view.rowPointer(y: y)
+                for x in 0..<blockSize {
+                    let diff = Double(ptr[x]) - Double(originalValues[y * blockSize + x])
+                    mse += diff * diff
                 }
             }
-            mse /= Double(blockSize * blockSize)
+                    mse /= Double(blockSize * blockSize)
             distortions.append((step: step, mse: mse))
         }
 

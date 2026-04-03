@@ -43,17 +43,16 @@ final class EntropyPairsCompareTests: XCTestCase {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero {
                 bwFlags.writeBit(true)
-                blocks[i].withView { view in
-                    let half = 32 / 2
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    hlView.clearAll()
-                    lhView.clearAll()
-                    hhView.clearAll()
-                }
-            } else {
+                let view = blocks[i].view
+                let half = 32 / 2
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                hlView.clearAll()
+                lhView.clearAll()
+                hhView.clearAll()
+                        } else {
                 bwFlags.writeBit(false)
                 
                 let forceSplit = shouldSplit32(data: blocks[i].base, skipLL: true)
@@ -76,37 +75,36 @@ final class EntropyPairsCompareTests: XCTestCase {
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         
         for (i, task) in tasks {
-            blocks[i].withView { view in
-                let subs = getSubbands32(view: view)
-                switch task {
-                case .encode16:
-                    blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
-                    blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-                    blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
-                case .split8(let tl, let tr, let bl, let br):
-                    if tl {
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32), parentBlock: nil)
-                    }
-                    if tr {
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    }
-                    if bl {
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    }
-                    if br {
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                        blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    }
+            let view = blocks[i].view
+            let subs = getSubbands32(view: view)
+            switch task {
+            case .encode16:
+                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            case .split8(let tl, let tr, let bl, let br):
+                if tl {
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32), parentBlock: nil)
+                }
+                if tr {
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                }
+                if bl {
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
+                }
+                if br {
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
                 }
             }
-        }
+                }
         
         // エンコーダのpairとbypassを保存
         let encPairs = encoder.pairs
@@ -152,52 +150,51 @@ final class EntropyPairsCompareTests: XCTestCase {
         var decBlocks = (0..<blocks.count).map { _ in Block2D(width: 32, height: 32) }
         
         for (i, task) in tasks {
-            try decBlocks[i].withView { view in
-                let subs = getSubbands32(view: view)
-                switch task {
-                case .encode16:
-                    var hlView = BlockView(base: subs.hl.base, width: 16, height: 16, stride: 32)
-                    try blockDecode16(decoder: &decoder2, block: &hlView, parentBlock: nil)
-                    var lhView = BlockView(base: subs.lh.base, width: 16, height: 16, stride: 32)
-                    try blockDecode16(decoder: &decoder2, block: &lhView, parentBlock: nil)
-                    var hhView = BlockView(base: subs.hh.base, width: 16, height: 16, stride: 32)
-                    try blockDecode16(decoder: &decoder2, block: &hhView, parentBlock: nil)
-                case .split8(let tl, let tr, let bl, let br):
-                    if tl {
-                        var hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
-                        var lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
-                        var hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder2, block: &hl, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &lh, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &hh, parentBlock: nil)
-                    }
-                    if tr {
-                        var hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                        var lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                        var hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder2, block: &hl, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &lh, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &hh, parentBlock: nil)
-                    }
-                    if bl {
-                        var hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                        var lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                        var hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder2, block: &hl, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &lh, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &hh, parentBlock: nil)
-                    }
-                    if br {
-                        var hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                        var lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                        var hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                        try blockDecode8(decoder: &decoder2, block: &hl, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &lh, parentBlock: nil)
-                        try blockDecode8(decoder: &decoder2, block: &hh, parentBlock: nil)
-                    }
+            let view = decBlocks[i].view
+            let subs = getSubbands32(view: view)
+            switch task {
+            case .encode16:
+                var hlView = BlockView(base: subs.hl.base, width: 16, height: 16, stride: 32)
+                try blockDecode16(decoder: &decoder2, block: hlView, parentBlock: nil)
+                var lhView = BlockView(base: subs.lh.base, width: 16, height: 16, stride: 32)
+                try blockDecode16(decoder: &decoder2, block: lhView, parentBlock: nil)
+                var hhView = BlockView(base: subs.hh.base, width: 16, height: 16, stride: 32)
+                try blockDecode16(decoder: &decoder2, block: hhView, parentBlock: nil)
+            case .split8(let tl, let tr, let bl, let br):
+                if tl {
+                    var hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                }
+                if tr {
+                    var hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                }
+                if bl {
+                    var hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                }
+                if br {
+                    var hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    var hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
                 }
             }
-        }
+                }
         
         // HL/LH/HH比較
         var totalDiff = 0
@@ -205,18 +202,16 @@ final class EntropyPairsCompareTests: XCTestCase {
         for bi in 0..<blocks.count {
             var encBlk = blocks[bi]
             var decBlk = decBlocks[bi]
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
-                            if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
-                            if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
-                        }
-                    }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
+                    if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
+                    if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
                 }
             }
-        }
+                        }
         
         if 0 < totalDiff {
             XCTFail("Direct entropy roundtrip: totalDiff=\(totalDiff) firstDiffBlock=\(firstDiffBlock)")

@@ -21,42 +21,41 @@ final class QuantTests: XCTestCase {
     }
     
     func performRoundTripTest(width: Int, height: Int, step: Int, roundToNearest: Bool, signedMapping: Bool) {
-        var block = Block2D(width: width, height: height)
+        let block = Block2D(width: width, height: height)
         let q = Quantizer(step: step, roundToNearest: roundToNearest)
         
         let originalValues: [Int16] = (0..<(width * height)).map { i in
             Int16.random(in: -32767...32767)
         }
         
-        block.withView { view in
-            for y in 0..<height {
-                for x in 0..<width {
-                    view[y, x] = originalValues[y * width + x]
-                }
-            }
-            
-            if signedMapping {
-                quantizeSIMDSignedMapping(&view, q: q)
-                dequantizeSIMDSignedMapping(&view, q: q)
-            } else {
-                quantizeSIMD(&view, q: q)
-                dequantizeSIMD(&view, q: q)
-            }
-            
-            for y in 0..<height {
-                for x in 0..<width {
-                    let original = Int32(originalValues[y * width + x])
-                    let reconstructed = Int32(view[y, x])
-                    let diff = abs(original - reconstructed)
-                    
-                    // The error should be at most step.
-                    // Due to fixed-point precision with 16-bit shift, it might be step + 1 in some cases.
-                    let limit = roundToNearest ? (Int32(step) / 2 + 1) : (Int32(step) + 1)
-                    XCTAssertLessThanOrEqual(diff, limit, "Error too large at (\(x), \(y)) for step \(step), roundToNearest: \(roundToNearest), signedMapping: \(signedMapping), original: \(original), recon: \(reconstructed), size: \(width)x\(height)")
-                }
+        var view = block.view
+        for y in 0..<height {
+            for x in 0..<width {
+                view[y, x] = originalValues[y * width + x]
             }
         }
-    }
+        
+        if signedMapping {
+            quantizeSIMDSignedMapping(view, q: q)
+            dequantizeSIMDSignedMapping(view, q: q)
+        } else {
+            quantizeSIMD(view, q: q)
+            dequantizeSIMD(view, q: q)
+        }
+        
+        for y in 0..<height {
+            for x in 0..<width {
+                let original = Int32(originalValues[y * width + x])
+                let reconstructed = Int32(view[y, x])
+                let diff = abs(original - reconstructed)
+                
+                // The error should be at most step.
+                // Due to fixed-point precision with 16-bit shift, it might be step + 1 in some cases.
+                let limit = roundToNearest ? (Int32(step) / 2 + 1) : (Int32(step) + 1)
+                XCTAssertLessThanOrEqual(diff, limit, "Error too large at (\(x), \(y)) for step \(step), roundToNearest: \(roundToNearest), signedMapping: \(signedMapping), original: \(original), recon: \(reconstructed), size: \(width)x\(height)")
+            }
+        }
+        }
     
     func testQuantizeRoundTrip() {
         let sizes = [8, 16, 32, 4]
@@ -92,22 +91,20 @@ final class QuantTests: XCTestCase {
             Int16.random(in: -200...200)
         }
         
-        blockLuma.withView { view in
-            for y in 0..<size {
-                for x in 0..<size {
-                    view[y, x] = originalValues[y * size + x]
-                }
+        var view = blockLuma.view
+        for y in 0..<size {
+            for x in 0..<size {
+                view[y, x] = originalValues[y * size + x]
             }
         }
-        
-        blockChroma.withView { view in
-            for y in 0..<size {
-                for x in 0..<size {
-                    view[y, x] = originalValues[y * size + x]
-                }
+            
+        view = blockChroma.view
+        for y in 0..<size {
+            for x in 0..<size {
+                view[y, x] = originalValues[y * size + x]
             }
         }
-        
+            
         let qt = QuantizationTable(baseStep: step, isChroma: false, layerIndex: 2)
         let qtChroma = QuantizationTable(baseStep: step, isChroma: true, layerIndex: 2)
         
@@ -120,23 +117,21 @@ final class QuantTests: XCTestCase {
         var lumaErrorDiff: Int64 = 0
         var chromaErrorDiff: Int64 = 0
         
-        blockLuma.withView { view in
-            for y in 0..<size {
-                for x in 0..<size {
-                    let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
-                    lumaErrorDiff += Int64(diff)
-                }
+        view = blockLuma.view
+        for y in 0..<size {
+            for x in 0..<size {
+                let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
+                lumaErrorDiff += Int64(diff)
             }
         }
-        blockChroma.withView { view in
-            for y in 0..<size {
-                for x in 0..<size {
-                    let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
-                    chromaErrorDiff += Int64(diff)
-                }
+            view = blockChroma.view
+        for y in 0..<size {
+            for x in 0..<size {
+                let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
+                chromaErrorDiff += Int64(diff)
             }
         }
-        
+            
         // 修正前はLumaとChromaが同様のアルゴリズムのため誤差が同じかそれに近くなる。
         // TDDにおける修正後であれば、Chroma専用のより細かい（小さな）ステップを用いるため、誤差がより小さくなるはず。
         XCTAssertLessThan(chromaErrorDiff, lumaErrorDiff, "Chroma should have smaller quantization error due to finer quantization steps.")

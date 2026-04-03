@@ -62,41 +62,39 @@ final class BlockDataCompareTests: XCTestCase {
             let encBlk = encYBlocks[i]
             let decBlk = decYBlocks[i]
             
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    let half = 16
-                    // HL comparison
-                    for y in 0..<half {
-                        let encPtr = encView.base.advanced(by: y * 32 + half)
-                        let decPtr = decView.base.advanced(by: y * 32 + half)
-                        for x in 0..<half {
-                            let d = abs(Int(encPtr[x]) - Int(decPtr[x]))
-                            if 0 < d {
-                                totalDiffHL += 1
-                                if maxDiffHL < d { maxDiffHL = d }
-                                if firstDiffBlockHL < 0 { firstDiffBlockHL = i }
-                            }
-                        }
-                    }
-                    // LH comparison
-                    for y in 0..<half {
-                        let encPtr = encView.base.advanced(by: (y + half) * 32)
-                        let decPtr = decView.base.advanced(by: (y + half) * 32)
-                        for x in 0..<half {
-                            if encPtr[x] != decPtr[x] { totalDiffLH += 1 }
-                        }
-                    }
-                    // HH comparison
-                    for y in 0..<half {
-                        let encPtr = encView.base.advanced(by: (y + half) * 32 + half)
-                        let decPtr = decView.base.advanced(by: (y + half) * 32 + half)
-                        for x in 0..<half {
-                            if encPtr[x] != decPtr[x] { totalDiffHH += 1 }
-                        }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            let half = 16
+            // HL comparison
+            for y in 0..<half {
+                let encPtr = encView.base.advanced(by: y * 32 + half)
+                let decPtr = decView.base.advanced(by: y * 32 + half)
+                for x in 0..<half {
+                    let d = abs(Int(encPtr[x]) - Int(decPtr[x]))
+                    if 0 < d {
+                        totalDiffHL += 1
+                        if maxDiffHL < d { maxDiffHL = d }
+                        if firstDiffBlockHL < 0 { firstDiffBlockHL = i }
                     }
                 }
             }
-        }
+            // LH comparison
+            for y in 0..<half {
+                let encPtr = encView.base.advanced(by: (y + half) * 32)
+                let decPtr = decView.base.advanced(by: (y + half) * 32)
+                for x in 0..<half {
+                    if encPtr[x] != decPtr[x] { totalDiffLH += 1 }
+                }
+            }
+            // HH comparison
+            for y in 0..<half {
+                let encPtr = encView.base.advanced(by: (y + half) * 32 + half)
+                let decPtr = decView.base.advanced(by: (y + half) * 32 + half)
+                for x in 0..<half {
+                    if encPtr[x] != decPtr[x] { totalDiffHH += 1 }
+                }
+            }
+                        }
         
         XCTAssertEqual(totalDiffHL, 0, "Layer32 Y HL不一致: \(totalDiffHL) pixels, maxDiff=\(maxDiffHL), firstBlock=\(firstDiffBlockHL)")
         XCTAssertEqual(totalDiffLH, 0, "Layer32 Y LH不一致: \(totalDiffLH) pixels")

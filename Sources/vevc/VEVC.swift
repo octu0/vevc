@@ -117,6 +117,12 @@ final class Block2D: @unchecked Sendable {
         return try body(&view)
     }
 
+    /// BlockViewを動的に生成
+    @inline(__always)
+    var view: BlockView {
+        return BlockView(base: base, width: width, height: height, stride: stride)
+    }
+
 
     @inline(__always)
     func clearAll() {
@@ -132,17 +138,5 @@ final class Block2D: @unchecked Sendable {
         }
     }
 
-    /// 後方互換: テスト等で block.data[i] / block.data = [...] を使えるように維持
-    var data: UnsafeMutableBufferPointer<Int16> {
-        get { UnsafeMutableBufferPointer(start: base, count: count) }
-    }
 
-    /// 後方互換: block.data = [Int16](...) パターンの代替
-    func setData(_ values: [Int16]) {
-        let copyCount = min(values.count, count)
-        values.withUnsafeBufferPointer { src in
-            guard let srcBase = src.baseAddress else { return }
-            base.update(from: srcBase, count: copyCount)
-        }
-    }
 }

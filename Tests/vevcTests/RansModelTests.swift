@@ -39,13 +39,12 @@ final class RansModelTests: XCTestCase {
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
-            blocks[i].withView { view in
-                let subs = getSubbands32(view: view)
-                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
-                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
-            }
-        }
+            let view = blocks[i].view
+            let subs = getSubbands32(view: view)
+            blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+                }
         
         // pairs からrunTokenCountsとvalTokenCountsを計算
         for pair in encoder.pairs {

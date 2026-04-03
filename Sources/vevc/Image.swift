@@ -38,7 +38,7 @@ struct Int16Reader {
     }
     
     @inline(__always)
-    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: inout BlockView) {
+    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         data.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             
@@ -674,87 +674,84 @@ struct Image16: Sendable {
     
     @inline(__always)
     func getY(x: Int, y yPos: Int, size: Int) -> Block2D {
-        var block = Block2D(width: size, height: size)
-        block.withView { v in
-            self.y.withUnsafeBufferPointer { srcBuf in
-                guard let srcBase = srcBuf.baseAddress else { return }
-                // Fast path: block entirely within bounds → bulk row copy
-                if x >= 0 && yPos >= 0 && (x + size) <= width && (yPos + size) <= height {
-                    for h in 0..<size {
-                        let dstPtr = v.rowPointer(y: h)
-                        let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
-                        dstPtr.update(from: srcPtr, count: size)
-                    }
-                } else {
-                    for h in 0..<size {
-                        let dstPtr = v.rowPointer(y: h)
-                        for w in 0..<size {
-                            let (px, py) = boundaryRepeat(width, height, (x + w), (yPos + h))
-                            dstPtr[w] = srcBase[py * width + px]
-                        }
+        let block = Block2D(width: size, height: size)
+        let v = block.view
+        self.y.withUnsafeBufferPointer { srcBuf in
+            guard let srcBase = srcBuf.baseAddress else { return }
+            // Fast path: block entirely within bounds → bulk row copy
+            if x >= 0 && yPos >= 0 && (x + size) <= width && (yPos + size) <= height {
+                for h in 0..<size {
+                    let dstPtr = v.rowPointer(y: h)
+                    let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
+                    dstPtr.update(from: srcPtr, count: size)
+                }
+            } else {
+                for h in 0..<size {
+                    let dstPtr = v.rowPointer(y: h)
+                    for w in 0..<size {
+                        let (px, py) = boundaryRepeat(width, height, (x + w), (yPos + h))
+                        dstPtr[w] = srcBase[py * width + px]
                     }
                 }
             }
         }
-        return block
+            return block
     }
     
     @inline(__always)
     func getCb(x: Int, y yPos: Int, size: Int) -> Block2D {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        var block = Block2D(width: size, height: size)
-        block.withView { v in
-            self.cb.withUnsafeBufferPointer { srcBuf in
-                guard let srcBase = srcBuf.baseAddress else { return }
-                // Fast path: block entirely within bounds → bulk row copy
-                if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
-                    for h in 0..<size {
-                        let dstPtr = v.rowPointer(y: h)
-                        let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                        dstPtr.update(from: srcPtr, count: size)
-                    }
-                } else {
-                    for h in 0..<size {
-                        let dstPtr = v.rowPointer(y: h)
-                        for w in 0..<size {
-                            let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
-                            dstPtr[w] = srcBase[py * cWidth + px]
-                        }
+        let block = Block2D(width: size, height: size)
+        let v = block.view
+        self.cb.withUnsafeBufferPointer { srcBuf in
+            guard let srcBase = srcBuf.baseAddress else { return }
+            // Fast path: block entirely within bounds → bulk row copy
+            if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
+                for h in 0..<size {
+                    let dstPtr = v.rowPointer(y: h)
+                    let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
+                    dstPtr.update(from: srcPtr, count: size)
+                }
+            } else {
+                for h in 0..<size {
+                    let dstPtr = v.rowPointer(y: h)
+                    for w in 0..<size {
+                        let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
+                        dstPtr[w] = srcBase[py * cWidth + px]
                     }
                 }
             }
         }
-        return block
+            return block
     }
     
     @inline(__always)
     func getCr(x: Int, y yPos: Int, size: Int) -> Block2D {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        var block = Block2D(width: size, height: size)
-        block.withView { v in
-            self.cr.withUnsafeBufferPointer { srcBuf in
-                guard let srcBase = srcBuf.baseAddress else { return }
-                // Fast path: block entirely within bounds → bulk row copy
-                if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
-                    for h in 0..<size {
-                        let dstPtr = v.rowPointer(y: h)
-                        let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                        dstPtr.update(from: srcPtr, count: size)
-                    }
-                } else {
-                    for h in 0..<size {
-                        let dstPtr = v.rowPointer(y: h)
-                        for w in 0..<size {
-                            let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
-                            dstPtr[w] = srcBase[py * cWidth + px]
-                        }
+        let block = Block2D(width: size, height: size)
+        let v = block.view
+        self.cr.withUnsafeBufferPointer { srcBuf in
+            guard let srcBase = srcBuf.baseAddress else { return }
+            // Fast path: block entirely within bounds → bulk row copy
+            if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
+                for h in 0..<size {
+                    let dstPtr = v.rowPointer(y: h)
+                    let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
+                    dstPtr.update(from: srcPtr, count: size)
+                }
+            } else {
+                for h in 0..<size {
+                    let dstPtr = v.rowPointer(y: h)
+                    for w in 0..<size {
+                        let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
+                        dstPtr[w] = srcBase[py * cWidth + px]
                     }
                 }
             }
         }
-        return block
+            return block
     }
     
     @inline(__always)
@@ -774,14 +771,13 @@ struct Image16: Sendable {
         
         self.y.withUnsafeMutableBufferPointer { destBuf in
             guard let destBase = destBuf.baseAddress else { return }
-            data.withView { v in
-                for h in 0..<loopH {
-                    let srcPtr = v.rowPointer(y: dataOffsetY + h)
-                    let destPtr = destBase.advanced(by: (validStartY + h) * width + validStartX)
-                    destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
-                }
+            let v = data.view
+            for h in 0..<loopH {
+                let srcPtr = v.rowPointer(y: dataOffsetY + h)
+                let destPtr = destBase.advanced(by: (validStartY + h) * width + validStartX)
+                destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
-        }
+                }
     }
     
     @inline(__always)
@@ -804,14 +800,13 @@ struct Image16: Sendable {
         
         self.cb.withUnsafeMutableBufferPointer { destBuf in
             guard let destBase = destBuf.baseAddress else { return }
-            data.withView { v in
-                for h in 0..<loopH {
-                    let srcPtr = v.rowPointer(y: dataOffsetY + h)
-                    let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
-                    destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
-                }
+            let v = data.view
+            for h in 0..<loopH {
+                let srcPtr = v.rowPointer(y: dataOffsetY + h)
+                let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
+                destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
-        }
+                }
     }
     
     @inline(__always)
@@ -834,14 +829,13 @@ struct Image16: Sendable {
         
         self.cr.withUnsafeMutableBufferPointer { destBuf in
             guard let destBase = destBuf.baseAddress else { return }
-            data.withView { v in
-                for h in 0..<loopH {
-                    let srcPtr = v.rowPointer(y: dataOffsetY + h)
-                    let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
-                    destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
-                }
+            let v = data.view
+            for h in 0..<loopH {
+                let srcPtr = v.rowPointer(y: dataOffsetY + h)
+                let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
+                destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
-        }
+                }
     }
 }
 

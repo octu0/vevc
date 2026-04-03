@@ -71,13 +71,12 @@ final class ValueTokenizerTests: XCTestCase {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
             
-            blocks[i].withView { view in
-                let subs = getSubbands32(view: view)
-                blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
-                blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-                blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
-            }
-        }
+            let view = blocks[i].view
+            let subs = getSubbands32(view: view)
+            blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+                }
         
         print("=== Encoder: pairs=\(encoder.pairs.count) coeffCount=\(encoder.coeffCount) trailingZeros=\(encoder.trailingZeros) ===")
         

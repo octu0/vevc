@@ -128,7 +128,7 @@ func decodeCoeffRun(decoder: inout EntropyDecoder, isParentZero: Bool) throws ->
 }
 
 @inline(__always)
-func blockDecode32(decoder: inout EntropyDecoder, block: inout BlockView, parentBlock: BlockView?) throws {
+func blockDecode32(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -159,7 +159,7 @@ func blockDecode32(decoder: inout EntropyDecoder, block: inout BlockView, parent
 }
 
 @inline(__always)
-func blockDecode16(decoder: inout EntropyDecoder, block: inout BlockView, parentBlock: BlockView?) throws {
+func blockDecode16(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -191,7 +191,7 @@ func blockDecode16(decoder: inout EntropyDecoder, block: inout BlockView, parent
 }
 
 @inline(__always)
-func blockDecode8(decoder: inout EntropyDecoder, block: inout BlockView, parentBlock: BlockView?) throws {
+func blockDecode8(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -222,7 +222,7 @@ func blockDecode8(decoder: inout EntropyDecoder, block: inout BlockView, parentB
 }
 
 @inline(__always)
-func blockDecode4(decoder: inout EntropyDecoder, block: inout BlockView, parentBlock: BlockView?) throws {
+func blockDecode4(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         block.clearAll()
@@ -254,7 +254,7 @@ func blockDecode4(decoder: inout EntropyDecoder, block: inout BlockView, parentB
 }
 
 @inline(__always)
-func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -310,7 +310,7 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: inout BlockView, las
 }
 
 @inline(__always)
-func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -358,7 +358,7 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: inout BlockView, las
 }
 
 @inline(__always)
-func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: inout BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -700,26 +700,23 @@ func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
             let block: Block2D = blocks[blockIndex]
             let half: Int = 32 / 2
             let ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
-            ll.withView { srcView in
-                block.withView { destView in
-                    for yi in 0..<half {
-                        let srcPtr = srcView.rowPointer(y: yi)
-                        let destPtr = destView.rowPointer(y: yi)
-                        destPtr.update(from: srcPtr, count: half)
-                    }
-                }
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
             }
-            block.withView { view in
-                let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_32(&view)
-            }
-            rowResults.append((block, w, h))
+                            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_32(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -738,26 +735,23 @@ func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let block: Block2D = blocks[blockIndex]
             let half: Int = 32 / 2
             let ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
-            ll.withView { srcView in
-                block.withView { destView in
-                    for yi in 0..<half {
-                        let srcPtr = srcView.rowPointer(y: yi)
-                        let destPtr = destView.rowPointer(y: yi)
-                        destPtr.update(from: srcPtr, count: half)
-                    }
-                }
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
             }
-            block.withView { view in
-                let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_32(&view)
-            }
-            rowResults.append((block, w, h))
+                            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_32(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -776,26 +770,23 @@ func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let block: Block2D = blocks[blockIndex]
             let half: Int = 32 / 2
             let ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
-            ll.withView { srcView in
-                block.withView { destView in
-                    for yi in 0..<half {
-                        let srcPtr = srcView.rowPointer(y: yi)
-                        let destPtr = destView.rowPointer(y: yi)
-                        destPtr.update(from: srcPtr, count: half)
-                    }
-                }
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
             }
-            block.withView { view in
-                let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_32(&view)
-            }
-            rowResults.append((block, w, h))
+                            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_32(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -814,26 +805,23 @@ func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
             let block: Block2D = blocks[blockIndex]
             let half: Int = 16 / 2
             let ll: Block2D = prev.getY(x: w / 2, y: h / 2, size: half)
-            ll.withView { srcView in
-                block.withView { destView in
-                    for yi in 0..<half {
-                        let srcPtr = srcView.rowPointer(y: yi)
-                        let destPtr = destView.rowPointer(y: yi)
-                        destPtr.update(from: srcPtr, count: half)
-                    }
-                }
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
             }
-            block.withView { view in
-                let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_16(&view)
-            }
-            rowResults.append((block, w, h))
+                            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_16(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -852,26 +840,23 @@ func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let block: Block2D = blocks[blockIndex]
             let half: Int = 16 / 2
             let ll: Block2D = prev.getCb(x: w / 2, y: h / 2, size: half)
-            ll.withView { srcView in
-                block.withView { destView in
-                    for yi in 0..<half {
-                        let srcPtr = srcView.rowPointer(y: yi)
-                        let destPtr = destView.rowPointer(y: yi)
-                        destPtr.update(from: srcPtr, count: half)
-                    }
-                }
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
             }
-            block.withView { view in
-                let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
-                invDwt2d_16(&view)
-            }
-            rowResults.append((block, w, h))
+                            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+            invDwt2d_16(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -890,26 +875,23 @@ func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let block: Block2D = blocks[blockIndex]
             let half: Int = 16 / 2
             let ll: Block2D = prev.getCr(x: w / 2, y: h / 2, size: half)
-            ll.withView { srcView in
-                block.withView { destView in
-                    for yi in 0..<half {
-                        let srcPtr = srcView.rowPointer(y: yi)
-                        let destPtr = destView.rowPointer(y: yi)
-                        destPtr.update(from: srcPtr, count: half)
-                    }
-                }
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
             }
-            block.withView { view in
-                let base = view.base
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                var lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                var hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
-                invDwt2d_16(&view)
-            }
-            rowResults.append((block, w, h))
+                            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+            invDwt2d_16(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -927,19 +909,18 @@ func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, c
             let blockIndex: Int = i * colCount + xIdx
             let block: Block2D = blocks[blockIndex]
             let half: Int = 8 / 2
-            block.withView { view in
-                let base = view.base
-                var llView = BlockView(base: base, width: half, height: half, stride: 8)
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeSIMD(&llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_8(&view)
-            }
-            rowResults.append((block, w, h))
+            let view = block.view
+            let base = view.base
+            let llView = BlockView(base: base, width: half, height: half, stride: 8)
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+            let lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+            let hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+            dequantizeSIMD(llView, q: qt.qLow)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_8(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -957,19 +938,18 @@ func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
             let blockIndex: Int = i * colCount + xIdx
             let block: Block2D = blocks[blockIndex]
             let half: Int = 8 / 2
-            block.withView { view in
-                let base = view.base
-                var llView = BlockView(base: base, width: half, height: half, stride: 8)
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeSIMD(&llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_8(&view)
-            }
-            rowResults.append((block, w, h))
+            let view = block.view
+            let base = view.base
+            let llView = BlockView(base: base, width: half, height: half, stride: 8)
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+            let lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+            let hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+            dequantizeSIMD(llView, q: qt.qLow)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_8(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults
@@ -987,19 +967,18 @@ func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
             let blockIndex: Int = i * colCount + xIdx
             let block: Block2D = blocks[blockIndex]
             let half: Int = 8 / 2
-            block.withView { view in
-                let base = view.base
-                var llView = BlockView(base: base, width: half, height: half, stride: 8)
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                var lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                var hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeSIMD(&llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_8(&view)
-            }
-            rowResults.append((block, w, h))
+            let view = block.view
+            let base = view.base
+            let llView = BlockView(base: base, width: half, height: half, stride: 8)
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
+            let lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
+            let hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
+            dequantizeSIMD(llView, q: qt.qLow)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_8(view)
+                    rowResults.append((block, w, h))
         }
     }
     return rowResults

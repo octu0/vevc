@@ -71,40 +71,38 @@ final class Block13DebugTests: XCTestCase {
             var diffHL = 0, diffLH = 0, diffHH = 0
             var firstDiffDetail = ""
             
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    // HL
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            let ev = encView.base.advanced(by: y * 32 + 16)[x]
-                            let dv = decView.base.advanced(by: y * 32 + 16)[x]
-                            if ev != dv {
-                                diffHL += 1
-                                if firstDiffDetail.isEmpty {
-                                    firstDiffDetail = "HL y:\(y) x:\(x) enc=\(ev) dec=\(dv)"
-                                }
-                            }
-                        }
-                    }
-                    // LH
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            let ev = encView.base.advanced(by: (y + 16) * 32)[x]
-                            let dv = decView.base.advanced(by: (y + 16) * 32)[x]
-                            if ev != dv { diffLH += 1 }
-                        }
-                    }
-                    // HH
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            let ev = encView.base.advanced(by: (y + 16) * 32 + 16)[x]
-                            let dv = decView.base.advanced(by: (y + 16) * 32 + 16)[x]
-                            if ev != dv { diffHH += 1 }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            // HL
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    let ev = encView.base.advanced(by: y * 32 + 16)[x]
+                    let dv = decView.base.advanced(by: y * 32 + 16)[x]
+                    if ev != dv {
+                        diffHL += 1
+                        if firstDiffDetail.isEmpty {
+                            firstDiffDetail = "HL y:\(y) x:\(x) enc=\(ev) dec=\(dv)"
                         }
                     }
                 }
             }
-            
+            // LH
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    let ev = encView.base.advanced(by: (y + 16) * 32)[x]
+                    let dv = decView.base.advanced(by: (y + 16) * 32)[x]
+                    if ev != dv { diffLH += 1 }
+                }
+            }
+            // HH
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    let ev = encView.base.advanced(by: (y + 16) * 32 + 16)[x]
+                    let dv = decView.base.advanced(by: (y + 16) * 32 + 16)[x]
+                    if ev != dv { diffHH += 1 }
+                }
+            }
+                            
             print("=== Block[\(bi)] ===")
             print("  HL diff: \(diffHL), LH diff: \(diffLH), HH diff: \(diffHH)")
             if firstDiffDetail.isEmpty != true {
@@ -118,18 +116,16 @@ final class Block13DebugTests: XCTestCase {
             let encBlk = blocks2[bi]
             let decBlk = decBlocks[bi]
             var hasDiff = false
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { hasDiff = true }
-                            if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { hasDiff = true }
-                            if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { hasDiff = true }
-                        }
-                    }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { hasDiff = true }
+                    if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { hasDiff = true }
+                    if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { hasDiff = true }
                 }
             }
-            if hasDiff { failBlocks.append(bi) }
+                            if hasDiff { failBlocks.append(bi) }
         }
         
         print("=== Total fail blocks: \(failBlocks) ===")

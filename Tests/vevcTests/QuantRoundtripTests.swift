@@ -24,25 +24,23 @@ final class QuantRoundtripTests: XCTestCase {
         
         let qt = QuantizationTable(baseStep: 1)
         
-        var block = Block2D(width: size, height: size)
+        let block = Block2D(width: size, height: size)
         // テスト値をコピー
         for i in 0..<(size * size) {
             block.base[i] = testValues[i]
         }
         
         // 量子化（SignedMapping = ジグザグエンコード付き）
-        block.withView { view in
-            quantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        
+        var view = block.view
+        quantizeSIMDSignedMapping(view, q: qt.qLow)
+            
         // ジグザグエンコード後の値を保存
-        let quantized = Array(block.data)
+        let quantized = Array(UnsafeBufferPointer(start: block.base, count: size * size))
         
         // 逆量子化（SignedMapping = ジグザグデコード付き）
-        block.withView { view in
-            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        
+        view = block.view
+        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+            
         // 元の値と比較
         for i in 0..<(size * size) {
             let original = testValues[i]
@@ -58,7 +56,7 @@ final class QuantRoundtripTests: XCTestCase {
         let size = 16
         let qt = QuantizationTable(baseStep: 1)
         
-        var block = Block2D(width: size, height: size)
+        let block = Block2D(width: size, height: size)
         // 正と負の両方を含むテストパターン
         for y in 0..<size {
             for x in 0..<size {
@@ -74,15 +72,13 @@ final class QuantRoundtripTests: XCTestCase {
                 block.base[y * size + x] = v
             }
         }
-        let original = Array(block.data)
+        let original = Array(UnsafeBufferPointer(start: block.base, count: size * size))
         
-        block.withView { view in
-            quantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        block.withView { view in
-            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        
+        var view = block.view
+        quantizeSIMDSignedMapping(view, q: qt.qLow)
+            view = block.view
+        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+            
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             if original[i] != block.base[i] {
@@ -99,22 +95,20 @@ final class QuantRoundtripTests: XCTestCase {
         let size = 32
         let qt = QuantizationTable(baseStep: 1)
         
-        var block = Block2D(width: size, height: size)
+        let block = Block2D(width: size, height: size)
         for y in 0..<size {
             for x in 0..<size {
                 let hash = (x &* 2654435761) ^ (y &* 2246822519)
                 block.base[y * size + x] = Int16(clamping: (hash % 256) - 128)
             }
         }
-        let original = Array(block.data)
+        let original = Array(UnsafeBufferPointer(start: block.base, count: size * size))
         
-        block.withView { view in
-            quantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        block.withView { view in
-            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        
+        var view = block.view
+        quantizeSIMDSignedMapping(view, q: qt.qLow)
+            view = block.view
+        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+            
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             if original[i] != block.base[i] {
@@ -131,7 +125,7 @@ final class QuantRoundtripTests: XCTestCase {
         let size = 8
         let qt = QuantizationTable(baseStep: 2) // qLow.step=2
         
-        var block = Block2D(width: size, height: size)
+        let block = Block2D(width: size, height: size)
         let testValues: [Int16] = [
             10, -10, 20, -20, 30, -30, 0, 0,
             5, -5, 15, -15, 25, -25, 35, -35,
@@ -146,13 +140,11 @@ final class QuantRoundtripTests: XCTestCase {
             block.base[i] = testValues[i]
         }
         
-        block.withView { view in
-            quantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        block.withView { view in
-            dequantizeSIMDSignedMapping(&view, q: qt.qLow)
-        }
-        
+        var view = block.view
+        quantizeSIMDSignedMapping(view, q: qt.qLow)
+            view = block.view
+        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+            
         var signMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
@@ -188,10 +180,12 @@ final class QuantRoundtripTests: XCTestCase {
         ]
         
         // Mid test
-        var blockMid = Block2D(width: size, height: size)
+        let blockMid = Block2D(width: size, height: size)
         for i in 0..<(size * size) { blockMid.base[i] = testValues[i] }
-        blockMid.withView { view in quantizeSIMDSignedMapping(&view, q: qt.qMid) }
-        blockMid.withView { view in dequantizeSIMDSignedMapping(&view, q: qt.qMid) }
+        var view = blockMid.view
+        quantizeSIMDSignedMapping(view, q: qt.qMid)
+        view = blockMid.view
+        dequantizeSIMDSignedMapping(view, q: qt.qMid)
         
         var midSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
@@ -208,10 +202,12 @@ final class QuantRoundtripTests: XCTestCase {
             midSignMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
         
         // High test
-        var blockHigh = Block2D(width: size, height: size)
+        let blockHigh = Block2D(width: size, height: size)
         for i in 0..<(size * size) { blockHigh.base[i] = testValues[i] }
-        blockHigh.withView { view in quantizeSIMDSignedMapping(&view, q: qt.qHigh) }
-        blockHigh.withView { view in dequantizeSIMDSignedMapping(&view, q: qt.qHigh) }
+        view = blockHigh.view
+        quantizeSIMDSignedMapping(view, q: qt.qHigh)
+        view = blockHigh.view
+        dequantizeSIMDSignedMapping(view, q: qt.qHigh)
         
         var highSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {

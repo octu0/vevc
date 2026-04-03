@@ -320,7 +320,7 @@ private func transpose32x32InPlace(_ base: UnsafeMutablePointer<Int16>, stride s
 // converting all SIMD operations to contiguous memory access.
 
 @inline(__always)
-func dwt2d_8(_ block: inout BlockView) {
+func dwt2d_8(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Row lifting (stride=1, contiguous)
@@ -338,13 +338,13 @@ func dwt2d_8(_ block: inout BlockView) {
 }
 
 @inline(__always)
-func dwt2d_8_sb(_ block: inout BlockView) -> Subbands {
-    dwt2d_8(&block)
+func dwt2d_8_sb(_ block: BlockView) -> Subbands {
+    dwt2d_8(block)
     return makeSubbands(base: block.base, size: 8, stride: block.stride)
 }
 
 @inline(__always)
-func dwt2d_16(_ block: inout BlockView) {
+func dwt2d_16(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Row lifting (stride=1, contiguous)
@@ -362,13 +362,13 @@ func dwt2d_16(_ block: inout BlockView) {
 }
 
 @inline(__always)
-func dwt2d_16_sb(_ block: inout BlockView) -> Subbands {
-    dwt2d_16(&block)
+func dwt2d_16_sb(_ block: BlockView) -> Subbands {
+    dwt2d_16(block)
     return makeSubbands(base: block.base, size: 16, stride: block.stride)
 }
 
 @inline(__always)
-func dwt2d_32(_ block: inout BlockView) {
+func dwt2d_32(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Row lifting (stride=1, contiguous)
@@ -386,13 +386,13 @@ func dwt2d_32(_ block: inout BlockView) {
 }
 
 @inline(__always)
-func dwt2d_32_sb(_ block: inout BlockView) -> Subbands {
-    dwt2d_32(&block)
+func dwt2d_32_sb(_ block: BlockView) -> Subbands {
+    dwt2d_32(block)
     return makeSubbands(base: block.base, size: 32, stride: block.stride)
 }
 
 @inline(__always)
-func invDwt2d_8(_ block: inout BlockView) {
+func invDwt2d_8(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Inverse column lifting via transpose: transpose -> invLift rows -> transpose back
@@ -410,7 +410,7 @@ func invDwt2d_8(_ block: inout BlockView) {
 }
 
 @inline(__always)
-func invDwt2d_16(_ block: inout BlockView) {
+func invDwt2d_16(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Inverse column lifting via transpose
@@ -428,7 +428,7 @@ func invDwt2d_16(_ block: inout BlockView) {
 }
 
 @inline(__always)
-func invDwt2d_32(_ block: inout BlockView) {
+func invDwt2d_32(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Inverse column lifting via transpose

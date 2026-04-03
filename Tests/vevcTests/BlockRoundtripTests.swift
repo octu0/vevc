@@ -20,10 +20,9 @@ final class BlockRoundtripTests: XCTestCase {
         
         // blockEncode16
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        block.withView { view in
-            blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
-        }
-        encoder.flush()
+        var view = block.view
+        blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
+            encoder.flush()
         let encoded = encoder.getData()
         
         // blockEncode16のゼロクリア修正後のデータ
@@ -32,10 +31,9 @@ final class BlockRoundtripTests: XCTestCase {
         // blockDecode16
         let decBlock = Block2D(width: 16, height: 16)
         var decoder = try EntropyDecoder(data: encoded)
-        decBlock.withView { view in
-            try! blockDecode16(decoder: &decoder, block: &view, parentBlock: nil)
-        }
-        
+        view = decBlock.view
+        try! blockDecode16(decoder: &decoder, block: view, parentBlock: nil)
+            
         // エンコード後のデータとデコード後のデータを比較
         for i in 0..<256 {
             XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/16) x:\(i%16): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
@@ -52,23 +50,21 @@ final class BlockRoundtripTests: XCTestCase {
             block.base.update(from: src.baseAddress!, count: 64)
         }
         
-        let originalData = Array(block.data)
+        let originalData = Array(UnsafeBufferPointer(start: block.base, count: 64))
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        block.withView { view in
-            blockEncode8(encoder: &encoder, block: view, parentBlock: nil)
-        }
-        encoder.flush()
+        var view = block.view
+        blockEncode8(encoder: &encoder, block: view, parentBlock: nil)
+            encoder.flush()
         let encoded = encoder.getData()
         
-        let afterEncodeData = Array(block.data)
+        let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 64))
         
         let decBlock = Block2D(width: 8, height: 8)
         var decoder = try EntropyDecoder(data: encoded)
-        decBlock.withView { view in
-            try! blockDecode8(decoder: &decoder, block: &view, parentBlock: nil)
-        }
-        
+        view = decBlock.view
+        try! blockDecode8(decoder: &decoder, block: view, parentBlock: nil)
+            
         for i in 0..<64 {
             XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/8) x:\(i%8): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
         }
@@ -95,10 +91,9 @@ final class BlockRoundtripTests: XCTestCase {
         let beforeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        block.withView { view in
-            blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
-        }
-        
+        let view = block.view
+        blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
+            
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
         // ただしblockEncode16はstride=16のBlockViewで動作
         // Block2D.withViewではstride=widthなので stride=16
@@ -119,57 +114,52 @@ final class BlockRoundtripTests: XCTestCase {
     func testBlockEncode16RoundtripStride32() throws {
         let block32 = Block2D(width: 32, height: 32)
         // HLサブバンド (offset=16, stride=32) にデータをセット
-        block32.withView { view in
-            let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            for y in 0..<16 {
-                let ptr = hlView.rowPointer(y: y)
-                for x in 0..<16 {
-                    ptr[x] = Int16(clamping: (y * 16 + x) &* 7 % 41 - 20)
-                }
+        var view = block32.view
+        var hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
+        for y in 0..<16 {
+            let ptr = hlView.rowPointer(y: y)
+            for x in 0..<16 {
+                ptr[x] = Int16(clamping: (y * 16 + x) &* 7 % 41 - 20)
             }
         }
-        
+            
         // エンコード (stride=32)
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        block32.withView { view in
-            let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            blockEncode16(encoder: &encoder, block: hlView, parentBlock: nil)
-        }
-        encoder.flush()
+        view = block32.view
+        hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
+        blockEncode16(encoder: &encoder, block: hlView, parentBlock: nil)
+            encoder.flush()
         let encoded = encoder.getData()
         
         // エンコード後のHLサブバンドデータ
         var encAfterHL = [Int16](repeating: 0, count: 256)
-        block32.withView { view in
-            let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            for y in 0..<16 {
-                let ptr = hlView.rowPointer(y: y)
-                for x in 0..<16 {
-                    encAfterHL[y * 16 + x] = ptr[x]
-                }
+        view = block32.view
+        hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
+        for y in 0..<16 {
+            let ptr = hlView.rowPointer(y: y)
+            for x in 0..<16 {
+                encAfterHL[y * 16 + x] = ptr[x]
             }
         }
-        
+            
         // デコード (stride=32)  
         let decBlock32 = Block2D(width: 32, height: 32)
         var decoder = try EntropyDecoder(data: encoded)
-        decBlock32.withView { view in
-            var hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            try! blockDecode16(decoder: &decoder, block: &hlView, parentBlock: nil)
-        }
-        
+        view = decBlock32.view
+        hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
+        try! blockDecode16(decoder: &decoder, block: hlView, parentBlock: nil)
+            
         // デコード後のHLデータ
         var decHL = [Int16](repeating: 0, count: 256)
-        decBlock32.withView { view in
-            let hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            for y in 0..<16 {
-                let ptr = hlView.rowPointer(y: y)
-                for x in 0..<16 {
-                    decHL[y * 16 + x] = ptr[x]
-                }
+        view = decBlock32.view
+        hlView = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: 32)
+        for y in 0..<16 {
+            let ptr = hlView.rowPointer(y: y)
+            for x in 0..<16 {
+                decHL[y * 16 + x] = ptr[x]
             }
         }
-        
+            
         // 比較
         var diffCount = 0
         for i in 0..<256 {

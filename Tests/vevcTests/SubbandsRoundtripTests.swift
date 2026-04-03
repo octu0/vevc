@@ -11,45 +11,43 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         // 各ブロックのHL/LH/HHにデータをセット（LLは0のまま）
         for bi in 0..<3 {
-            blocks[bi].withView { view in
-                let half = 16
-                // HL (right-top quadrant)
-                for y in 0..<half {
-                    let ptr = view.base.advanced(by: y * 32 + half)
-                    for x in 0..<half {
-                        ptr[x] = Int16(clamping: (bi * 100 + y * 16 + x) &* 7 % 41 - 20)
-                    }
-                }
-                // LH (left-bottom quadrant) 
-                for y in 0..<half {
-                    let ptr = view.base.advanced(by: (y + half) * 32)
-                    for x in 0..<half {
-                        ptr[x] = Int16(clamping: (bi * 200 + y * 16 + x) &* 11 % 37 - 18)
-                    }
-                }
-                // HH (right-bottom quadrant)
-                for y in 0..<half {
-                    let ptr = view.base.advanced(by: (y + half) * 32 + half)
-                    for x in 0..<half {
-                        ptr[x] = Int16(clamping: (bi * 300 + y * 16 + x) &* 13 % 31 - 15)
-                    }
+            let view = blocks[bi].view
+            let half = 16
+            // HL (right-top quadrant)
+            for y in 0..<half {
+                let ptr = view.base.advanced(by: y * 32 + half)
+                for x in 0..<half {
+                    ptr[x] = Int16(clamping: (bi * 100 + y * 16 + x) &* 7 % 41 - 20)
                 }
             }
-        }
+            // LH (left-bottom quadrant) 
+            for y in 0..<half {
+                let ptr = view.base.advanced(by: (y + half) * 32)
+                for x in 0..<half {
+                    ptr[x] = Int16(clamping: (bi * 200 + y * 16 + x) &* 11 % 37 - 18)
+                }
+            }
+            // HH (right-bottom quadrant)
+            for y in 0..<half {
+                let ptr = view.base.advanced(by: (y + half) * 32 + half)
+                for x in 0..<half {
+                    ptr[x] = Int16(clamping: (bi * 300 + y * 16 + x) &* 13 % 31 - 15)
+                }
+            }
+                }
         
         // エンコード前のHL/LH/HHを保存
         var origHL: [[Int16]] = []
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
-            blocks[bi].withView { view in
-                for y in 0..<16 {
-                    let ptr = view.base.advanced(by: y * 32 + 16)
-                    for x in 0..<16 {
-                        hl[y * 16 + x] = ptr[x]
-                    }
+            let view = blocks[bi].view
+            for y in 0..<16 {
+                let ptr = view.base.advanced(by: y * 32 + 16)
+                for x in 0..<16 {
+                    hl[y * 16 + x] = ptr[x]
                 }
             }
-            origHL.append(hl)
+                    origHL.append(hl)
         }
         
         // encodePlaneSubbands32
@@ -59,15 +57,14 @@ final class SubbandsRoundtripTests: XCTestCase {
         var encAfterHL: [[Int16]] = []
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
-            blocks[bi].withView { view in
-                for y in 0..<16 {
-                    let ptr = view.base.advanced(by: y * 32 + 16)
-                    for x in 0..<16 {
-                        hl[y * 16 + x] = ptr[x]
-                    }
+            let view = blocks[bi].view
+            for y in 0..<16 {
+                let ptr = view.base.advanced(by: y * 32 + 16)
+                for x in 0..<16 {
+                    hl[y * 16 + x] = ptr[x]
                 }
             }
-            encAfterHL.append(hl)
+                    encAfterHL.append(hl)
         }
         
         // decodePlaneSubbands32
@@ -78,15 +75,14 @@ final class SubbandsRoundtripTests: XCTestCase {
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
             var b = decBlocks[bi]
-            b.withView { view in
-                for y in 0..<16 {
-                    let ptr = view.base.advanced(by: y * 32 + 16)
-                    for x in 0..<16 {
-                        hl[y * 16 + x] = ptr[x]
-                    }
+            let view = b.view
+            for y in 0..<16 {
+                let ptr = view.base.advanced(by: y * 32 + 16)
+                for x in 0..<16 {
+                    hl[y * 16 + x] = ptr[x]
                 }
             }
-            decHL.append(hl)
+                    decHL.append(hl)
         }
         
         // 比較: encAfterHL vs decHL
@@ -120,49 +116,46 @@ final class SubbandsRoundtripTests: XCTestCase {
         var blocks = (0..<3).map { _ in Block2D(width: 32, height: 32) }
         
         // Block0: 全象限にデータ → splitしない
-        blocks[0].withView { view in
-            for y in 0..<16 {
-                for x in 0..<16 {
-                    view.base.advanced(by: y * 32 + 16)[x] = Int16(y * 16 + x + 1)  // HL
-                    view.base.advanced(by: (y + 16) * 32)[x] = Int16(y * 16 + x + 1) // LH
-                    view.base.advanced(by: (y + 16) * 32 + 16)[x] = Int16(y * 16 + x + 1) // HH
-                }
+        var view = blocks[0].view
+        for y in 0..<16 {
+            for x in 0..<16 {
+                view.base.advanced(by: y * 32 + 16)[x] = Int16(y * 16 + x + 1)  // HL
+                view.base.advanced(by: (y + 16) * 32)[x] = Int16(y * 16 + x + 1) // LH
+                view.base.advanced(by: (y + 16) * 32 + 16)[x] = Int16(y * 16 + x + 1) // HH
             }
         }
-        
+            
         // Block1: TL象限のみデータ、他はゼロ → shouldSplit=true
-        blocks[1].withView { view in
-            // HL TL (8x8)
-            for y in 0..<8 {
-                for x in 0..<8 {
-                    view.base.advanced(by: y * 32 + 16)[x] = Int16(y * 8 + x + 1)
-                }
-            }
-            // LH TL (8x8)
-            for y in 0..<8 {
-                for x in 0..<8 {
-                    view.base.advanced(by: (y + 16) * 32)[x] = Int16(y * 8 + x + 1)
-                }
-            }
-            // HH TL (8x8)
-            for y in 0..<8 {
-                for x in 0..<8 {
-                    view.base.advanced(by: (y + 16) * 32 + 16)[x] = Int16(y * 8 + x + 1)
-                }
+        view = blocks[1].view
+        // HL TL (8x8)
+        for y in 0..<8 {
+            for x in 0..<8 {
+                view.base.advanced(by: y * 32 + 16)[x] = Int16(y * 8 + x + 1)
             }
         }
-        
+        // LH TL (8x8)
+        for y in 0..<8 {
+            for x in 0..<8 {
+                view.base.advanced(by: (y + 16) * 32)[x] = Int16(y * 8 + x + 1)
+            }
+        }
+        // HH TL (8x8)
+        for y in 0..<8 {
+            for x in 0..<8 {
+                view.base.advanced(by: (y + 16) * 32 + 16)[x] = Int16(y * 8 + x + 1)
+            }
+        }
+            
         // Block2: 全象限にデータ
-        blocks[2].withView { view in
-            for y in 0..<16 {
-                for x in 0..<16 {
-                    view.base.advanced(by: y * 32 + 16)[x] = Int16((y * 16 + x) % 30 - 15)
-                    view.base.advanced(by: (y + 16) * 32)[x] = Int16((y * 16 + x) % 25 - 12)
-                    view.base.advanced(by: (y + 16) * 32 + 16)[x] = Int16((y * 16 + x) % 20 - 10)
-                }
+        view = blocks[2].view
+        for y in 0..<16 {
+            for x in 0..<16 {
+                view.base.advanced(by: y * 32 + 16)[x] = Int16((y * 16 + x) % 30 - 15)
+                view.base.advanced(by: (y + 16) * 32)[x] = Int16((y * 16 + x) % 25 - 12)
+                view.base.advanced(by: (y + 16) * 32 + 16)[x] = Int16((y * 16 + x) % 20 - 10)
             }
         }
-        
+            
         // encodePlaneSubbands32
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil)
         
@@ -175,18 +168,16 @@ final class SubbandsRoundtripTests: XCTestCase {
             var decBlk = decBlocks[bi]
             
             var diffHL = 0, diffLH = 0, diffHH = 0
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { diffHL += 1 }
-                            if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { diffLH += 1 }
-                            if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { diffHH += 1 }
-                        }
-                    }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { diffHL += 1 }
+                    if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { diffLH += 1 }
+                    if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { diffHH += 1 }
                 }
             }
-            XCTAssertEqual(diffHL + diffLH + diffHH, 0, "Block[\(bi)] split不一致: HL=\(diffHL) LH=\(diffLH) HH=\(diffHH)")
+                            XCTAssertEqual(diffHL + diffLH + diffHH, 0, "Block[\(bi)] split不一致: HL=\(diffHL) LH=\(diffLH) HH=\(diffHH)")
         }
     }
     
@@ -239,32 +230,30 @@ final class SubbandsRoundtripTests: XCTestCase {
             var encBlk = blocks[bi]
             var decBlk = decBlocks[bi]
             
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            // HL
-                            let ev = encView.base.advanced(by: y * 32 + 16)[x]
-                            let dv = decView.base.advanced(by: y * 32 + 16)[x]
-                            let d = abs(Int(ev) - Int(dv))
-                            if 0 < d {
-                                totalDiff += 1
-                                if maxDiff < d { maxDiff = d }
-                                if firstDiffBlock < 0 { firstDiffBlock = bi }
-                            }
-                            // LH
-                            let ev2 = encView.base.advanced(by: (y + 16) * 32)[x]
-                            let dv2 = decView.base.advanced(by: (y + 16) * 32)[x]
-                            if ev2 != dv2 { totalDiff += 1 }
-                            // HH
-                            let ev3 = encView.base.advanced(by: (y + 16) * 32 + 16)[x]
-                            let dv3 = decView.base.advanced(by: (y + 16) * 32 + 16)[x]
-                            if ev3 != dv3 { totalDiff += 1 }
-                        }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    // HL
+                    let ev = encView.base.advanced(by: y * 32 + 16)[x]
+                    let dv = decView.base.advanced(by: y * 32 + 16)[x]
+                    let d = abs(Int(ev) - Int(dv))
+                    if 0 < d {
+                        totalDiff += 1
+                        if maxDiff < d { maxDiff = d }
+                        if firstDiffBlock < 0 { firstDiffBlock = bi }
                     }
+                    // LH
+                    let ev2 = encView.base.advanced(by: (y + 16) * 32)[x]
+                    let dv2 = decView.base.advanced(by: (y + 16) * 32)[x]
+                    if ev2 != dv2 { totalDiff += 1 }
+                    // HH
+                    let ev3 = encView.base.advanced(by: (y + 16) * 32 + 16)[x]
+                    let dv3 = decView.base.advanced(by: (y + 16) * 32 + 16)[x]
+                    if ev3 != dv3 { totalDiff += 1 }
                 }
             }
-        }
+                        }
         
         XCTAssertEqual(totalDiff, 0, "Real DWT blocks不一致: \(totalDiff) pixels, maxDiff=\(maxDiff), firstBlock=\(firstDiffBlock), totalBlocks=\(blocks.count)")
     }
@@ -295,18 +284,16 @@ final class SubbandsRoundtripTests: XCTestCase {
         for bi in 0..<blocks.count {
             var encBlk = blocks[bi]
             var decBlk = decBlocks[bi]
-            encBlk.withView { encView in
-                decBlk.withView { decView in
-                    for y in 0..<16 {
-                        for x in 0..<16 {
-                            if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
-                            if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
-                            if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
-                        }
-                    }
+            let encView = encBlk.view
+            let decView = decBlk.view
+            for y in 0..<16 {
+                for x in 0..<16 {
+                    if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
+                    if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
+                    if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
                 }
             }
-        }
+                        }
         return (totalDiff, firstDiffBlock, blocks.count)
     }
     
@@ -358,18 +345,16 @@ final class SubbandsRoundtripTests: XCTestCase {
             for bi in 0..<blocks.count {
                 var encBlk = blocks[bi]
                 var decBlk = decBlocks[bi]
-                encBlk.withView { encView in
-                    decBlk.withView { decView in
-                        for y in 0..<16 {
-                            for x in 0..<16 {
-                                if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
-                                if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
-                                if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
-                            }
-                        }
+                let encView = encBlk.view
+                let decView = decBlk.view
+                for y in 0..<16 {
+                    for x in 0..<16 {
+                        if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
+                        if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
+                        if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
                     }
                 }
-            }
+                                    }
             if 0 < totalDiff {
                 XCTFail("\(w)x\(h) (\(blocks.count)blocks) PD420: totalDiff=\(totalDiff) firstBlock=\(firstDiffBlock)")
             }

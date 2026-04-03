@@ -66,58 +66,54 @@ final class ConcurrentBox<T>: @unchecked Sendable {
 
 @inline(__always)
 func evaluateQuantizeLayer32(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        let subs = getSubbands32(view: view)
-        var hl = subs.hl
-        var lh = subs.lh
-        var hh = subs.hh
-        quantizeSIMDSignedMapping16(&hl, q: qt.qMid)
-        quantizeSIMDSignedMapping16(&lh, q: qt.qMid)
-        quantizeSIMDSignedMapping16(&hh, q: qt.qHigh)
-    }
+    let view = block.view
+    let subs = getSubbands32(view: view)
+    let hl = subs.hl
+    let lh = subs.lh
+    let hh = subs.hh
+    quantizeSIMDSignedMapping16(hl, q: qt.qMid)
+    quantizeSIMDSignedMapping16(lh, q: qt.qMid)
+    quantizeSIMDSignedMapping16(hh, q: qt.qHigh)
 }
 
 @inline(__always)
 func evaluateQuantizeLayer16(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        let subs = getSubbands16(view: view)
-        var hl = subs.hl
-        var lh = subs.lh
-        var hh = subs.hh
-        quantizeSIMDSignedMapping8(&hl, q: qt.qMid)
-        quantizeSIMDSignedMapping8(&lh, q: qt.qMid)
-        quantizeSIMDSignedMapping8(&hh, q: qt.qHigh)
-    }
+    let view = block.view
+    let subs = getSubbands16(view: view)
+    let hl = subs.hl
+    let lh = subs.lh
+    let hh = subs.hh
+    quantizeSIMDSignedMapping8(hl, q: qt.qMid)
+    quantizeSIMDSignedMapping8(lh, q: qt.qMid)
+    quantizeSIMDSignedMapping8(hh, q: qt.qHigh)
 }
 
 @inline(__always)
 func evaluateQuantizeBase8(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        let subs = getSubbands8(view: view)
-        var ll = subs.ll
-        var hl = subs.hl
-        var lh = subs.lh
-        var hh = subs.hh
-        quantizeSIMD4(&ll, q: qt.qLow)
-        quantizeSIMDSignedMapping4(&hl, q: qt.qMid)
-        quantizeSIMDSignedMapping4(&lh, q: qt.qMid)
-        quantizeSIMDSignedMapping4(&hh, q: qt.qHigh)
-    }
+    let view = block.view
+    let subs = getSubbands8(view: view)
+    let ll = subs.ll
+    let hl = subs.hl
+    let lh = subs.lh
+    let hh = subs.hh
+    quantizeSIMD4(ll, q: qt.qLow)
+    quantizeSIMDSignedMapping4(hl, q: qt.qMid)
+    quantizeSIMDSignedMapping4(lh, q: qt.qMid)
+    quantizeSIMDSignedMapping4(hh, q: qt.qHigh)
 }
 
 @inline(__always)
 func evaluateQuantizeBase32(block: inout Block2D, qt: QuantizationTable) {
-    block.withView { view in
-        let subs = getSubbands32(view: view)
-        var ll = subs.ll
-        var hl = subs.hl
-        var lh = subs.lh
-        var hh = subs.hh
-        quantizeSIMD16(&ll, q: qt.qLow)
-        quantizeSIMDSignedMapping16(&hl, q: qt.qMid)
-        quantizeSIMDSignedMapping16(&lh, q: qt.qMid)
-        quantizeSIMDSignedMapping16(&hh, q: qt.qHigh)
-    }
+    let view = block.view
+    let subs = getSubbands32(view: view)
+    let ll = subs.ll
+    let hl = subs.hl
+    let lh = subs.lh
+    let hh = subs.hh
+    quantizeSIMD16(ll, q: qt.qLow)
+    quantizeSIMDSignedMapping16(hl, q: qt.qMid)
+    quantizeSIMDSignedMapping16(lh, q: qt.qMid)
+    quantizeSIMDSignedMapping16(hh, q: qt.qHigh)
 }
 
 @inline(__always)
@@ -144,12 +140,11 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) asy
                     var rowResults: [(Block2D, Int, Int)] = []
                     rowResults.reserveCapacity(colCount32)
                     for w in stride(from: 0, to: width, by: 32) {
-                        var block = Block2D(width: 32, height: 32)
-                        block.withView { view in
-                            r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                            dwt2d_32(&view)
-                        }
-                        rowResults.append((block, w, h))
+                        let block = Block2D(width: 32, height: 32)
+                        let view = block.view
+                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
+                        dwt2d_32(view)
+                                            rowResults.append((block, w, h))
                     }
                     chunkResults.append((i, rowResults))
                 }
@@ -170,49 +165,48 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int) asy
         for i in 0..<rowCount {
             guard let res = resultsArray[i] else { continue }
             for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
+                let (llBlock, w, h) = res.1[j]
                 blocks.append(llBlock)
                 
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
                 let subSize = (32 / 2)
 
-                llBlock.withView { view in
-                    let subs = getSubbands32(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subWidth - destStartX))
+                let view = llBlock.view
+                let subs = getSubbands32(view: view)
+                let srcBase = subs.ll.base
+                let limit = min(subSize, (subWidth - destStartX))
 
-                    guard 0 < limit else { return }
+                guard 0 < limit else { return }
 
-                    if limit == subSize && (destStartY + subSize) <= subHeight {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                        dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                        dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subHeight <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 32))
-                            let dstIdx = ((dstY * subWidth) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
+                if limit == subSize && (destStartY + subSize) <= subHeight {
+                    let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                    dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                    dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+                } else {
+                    for blockY in 0..<subSize {
+                        let dstY = (destStartY + blockY)
+                        if subHeight <= dstY { continue }
+                        let srcPtr = srcBase.advanced(by: (blockY * 32))
+                        let dstIdx = ((dstY * subWidth) + destStartX)
+                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
-            }
+                        }
         }
     }
     
@@ -242,12 +236,11 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) asy
                     var rowResults: [(Block2D, Int, Int)] = []
                     rowResults.reserveCapacity(colCount16)
                     for w in stride(from: 0, to: width, by: 16) {
-                        var block = Block2D(width: 16, height: 16)
-                        block.withView { view in
-                            r.readBlock(x: w, y: h, width: 16, height: 16, into: &view)
-                            dwt2d_16(&view)
-                        }
-                        rowResults.append((block, w, h))
+                        let block = Block2D(width: 16, height: 16)
+                        let view = block.view
+                        r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
+                        dwt2d_16(view)
+                                            rowResults.append((block, w, h))
                     }
                     chunkResults.append((i, rowResults))
                 }
@@ -268,41 +261,40 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int) asy
         for i in 0..<rowCount {
             guard let res = resultsArray[i] else { continue }
             for j in res.1.indices {
-                var (llBlock, w, h) = res.1[j]
+                let (llBlock, w, h) = res.1[j]
                 blocks.append(llBlock)
                 
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
                 let subSize = (16 / 2)
 
-                llBlock.withView { view in
-                    let subs = getSubbands16(view: view)
-                    let srcBase = subs.ll.base
-                    let limit = min(subSize, (subWidth - destStartX))
+                let view = llBlock.view
+                let subs = getSubbands16(view: view)
+                let srcBase = subs.ll.base
+                let limit = min(subSize, (subWidth - destStartX))
 
-                    guard 0 < limit else { return }
+                guard 0 < limit else { return }
 
-                    if limit == subSize && (destStartY + subSize) <= subHeight {
-                        let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                        dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
-                        dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
-                    } else {
-                        for blockY in 0..<subSize {
-                            let dstY = (destStartY + blockY)
-                            if subHeight <= dstY { continue }
-                            let srcPtr = srcBase.advanced(by: (blockY * 16))
-                            let dstIdx = ((dstY * subWidth) + destStartX)
-                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                        }
+                if limit == subSize && (destStartY + subSize) <= subHeight {
+                    let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                    dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
+                    dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
+                } else {
+                    for blockY in 0..<subSize {
+                        let dstY = (destStartY + blockY)
+                        if subHeight <= dstY { continue }
+                        let srcPtr = srcBase.advanced(by: (blockY * 16))
+                        let dstIdx = ((dstY * subWidth) + destStartX)
+                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
-            }
+                        }
         }
     }
     
@@ -329,12 +321,11 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int) 
                     var rowResults: [(Block2D, Int, Int)] = []
                     rowResults.reserveCapacity(colCount8)
                     for w in stride(from: 0, to: width, by: 8) {
-                        var block = Block2D(width: 8, height: 8)
-                        block.withView { view in
-                            r.readBlock(x: w, y: h, width: 8, height: 8, into: &view)
-                            dwt2d_8(&view)
-                        }
-                        rowResults.append((block, w, h))
+                        let block = Block2D(width: 8, height: 8)
+                        let view = block.view
+                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view)
+                        dwt2d_8(view)
+                                            rowResults.append((block, w, h))
                     }
                     chunkResults.append((i, rowResults))
                 }
@@ -381,12 +372,11 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int)
                     var rowResults: [(Block2D, Int, Int)] = []
                     rowResults.reserveCapacity(colCountB32)
                     for w in stride(from: 0, to: width, by: 32) {
-                        var block = Block2D(width: 32, height: 32)
-                        block.withView { view in
-                            r.readBlock(x: w, y: h, width: 32, height: 32, into: &view)
-                            dwt2d_32(&view)
-                        }
-                        rowResults.append((block, w, h))
+                        let block = Block2D(width: 32, height: 32)
+                        let view = block.view
+                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
+                        dwt2d_32(view)
+                                            rowResults.append((block, w, h))
                     }
                     chunkResults.append((i, rowResults))
                 }
@@ -416,93 +406,85 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int)
 @inline(__always)
 func subtractCoeffs32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                let cBase = vC.base
-                let pBase = vP.base
-                for y in 0..<16 {
-                    let ptrC = cBase.advanced(by: y * 32 + 16)
-                    let ptrP = pBase.advanced(by: y * 32 + 16)
-                    let vecC = UnsafeRawPointer(ptrC).loadUnaligned(as: SIMD16<Int16>.self)
-                    let vecP = UnsafeRawPointer(ptrP).loadUnaligned(as: SIMD16<Int16>.self)
-                    let res = vecC &- vecP
-                    UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD16<Int16>.self)
-                }
-                let ptrC_bot = cBase.advanced(by: 512)
-                let ptrP_bot = pBase.advanced(by: 512)
-                for offset in stride(from: 0, to: 512, by: 16) {
-                    let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let res = vecC &- vecP
-                    UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
-                }
-            }
+        let vC = currBlocks[i].view
+        let vP = predBlocks[i].view
+        let cBase = vC.base
+        let pBase = vP.base
+        for y in 0..<16 {
+            let ptrC = cBase.advanced(by: y * 32 + 16)
+            let ptrP = pBase.advanced(by: y * 32 + 16)
+            let vecC = UnsafeRawPointer(ptrC).loadUnaligned(as: SIMD16<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrP).loadUnaligned(as: SIMD16<Int16>.self)
+            let res = vecC &- vecP
+            UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD16<Int16>.self)
         }
-    }
+        let ptrC_bot = cBase.advanced(by: 512)
+        let ptrP_bot = pBase.advanced(by: 512)
+        for offset in stride(from: 0, to: 512, by: 16) {
+            let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+            let res = vecC &- vecP
+            UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
+        }
+            }
 }
 
 @inline(__always)
 func subtractCoeffs16(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                let cBase = vC.base
-                let pBase = vP.base
-                for y in 0..<8 {
-                    let ptrC = cBase.advanced(by: y * 16 + 8)
-                    let ptrP = pBase.advanced(by: y * 16 + 8)
-                    let vecC = UnsafeRawPointer(ptrC).loadUnaligned(as: SIMD8<Int16>.self)
-                    let vecP = UnsafeRawPointer(ptrP).loadUnaligned(as: SIMD8<Int16>.self)
-                    let res = vecC &- vecP
-                    UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD8<Int16>.self)
-                }
-                let ptrC_bot = cBase.advanced(by: 128)
-                let ptrP_bot = pBase.advanced(by: 128)
-                for offset in stride(from: 0, to: 128, by: 8) {
-                    let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
-                    let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
-                    let res = vecC &- vecP
-                    UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
-                }
-            }
+        let vC = currBlocks[i].view
+        let vP = predBlocks[i].view
+        let cBase = vC.base
+        let pBase = vP.base
+        for y in 0..<8 {
+            let ptrC = cBase.advanced(by: y * 16 + 8)
+            let ptrP = pBase.advanced(by: y * 16 + 8)
+            let vecC = UnsafeRawPointer(ptrC).loadUnaligned(as: SIMD8<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrP).loadUnaligned(as: SIMD8<Int16>.self)
+            let res = vecC &- vecP
+            UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD8<Int16>.self)
         }
-    }
+        let ptrC_bot = cBase.advanced(by: 128)
+        let ptrP_bot = pBase.advanced(by: 128)
+        for offset in stride(from: 0, to: 128, by: 8) {
+            let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+            let res = vecC &- vecP
+            UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
+        }
+            }
 }
 
 @inline(__always)
 func subtractCoeffsBase8(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                let ptrC = vC.base
-                let ptrP = vP.base
-                for offset in stride(from: 0, to: 64, by: 8) {
-                    let vecC = UnsafeRawPointer(ptrC.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
-                    let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
-                    let res = vecC &- vecP
-                    UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
-                }
-            }
+        let vC = currBlocks[i].view
+        let vP = predBlocks[i].view
+        let ptrC = vC.base
+        let ptrP = vP.base
+        for offset in stride(from: 0, to: 64, by: 8) {
+            let vecC = UnsafeRawPointer(ptrC.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+            let res = vecC &- vecP
+            UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
         }
-    }
+            }
 }
 
 @inline(__always)
 func subtractCoeffsBase32(currBlocks: inout [Block2D], predBlocks: inout [Block2D]) {
     for i in currBlocks.indices {
-        currBlocks[i].withView { vC in
-            predBlocks[i].withView { vP in
-                let ptrC = vC.base
-                let ptrP = vP.base
-                for offset in stride(from: 0, to: 1024, by: 16) {
-                    let vecC = UnsafeRawPointer(ptrC.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let res = vecC &- vecP
-                    UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
-                }
-            }
+        let vC = currBlocks[i].view
+        let vP = predBlocks[i].view
+        let ptrC = vC.base
+        let ptrP = vP.base
+        for offset in stride(from: 0, to: 1024, by: 16) {
+            let vecC = UnsafeRawPointer(ptrC.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrP.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+            let res = vecC &- vecP
+            UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
         }
-    }
+            }
 }
 
 @inline(__always)
@@ -749,43 +731,39 @@ func reconstructPlaneBase8(blocks: [Block2D], width: Int, height: Int, qt: Quant
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 8)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
-                blk.withView { view in
-                    let base = view.base
-                    var llView = BlockView(base: base, width: 4, height: 4, stride: 8)
-                    var hlView = BlockView(base: base.advanced(by: 4), width: 4, height: 4, stride: 8)
-                    var lhView = BlockView(base: base.advanced(by: 32), width: 4, height: 4, stride: 8)
-                    var hhView = BlockView(base: base.advanced(by: 36), width: 4, height: 4, stride: 8)
-                    dequantizeSIMD4(&llView, q: qt.qLow)
-                    dequantizeSIMDSignedMapping4(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping4(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping4(&hhView, q: qt.qHigh)
-                    invDwt2d_8(&view)
-                }
-                
+                let view = blk.view
+                let base = view.base
+                let llView = BlockView(base: base, width: 4, height: 4, stride: 8)
+                let hlView = BlockView(base: base.advanced(by: 4), width: 4, height: 4, stride: 8)
+                let lhView = BlockView(base: base.advanced(by: 32), width: 4, height: 4, stride: 8)
+                let hhView = BlockView(base: base.advanced(by: 36), width: 4, height: 4, stride: 8)
+                dequantizeSIMD4(llView, q: qt.qLow)
+                dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
+                invDwt2d_8(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<8 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 8)
-                        }
+                    let v = blk.view
+                    for h in 0..<8 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 8)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 8, qStep: Int(qt.step))
     return plane
 }
 
@@ -810,51 +788,46 @@ func reconstructPlaneLayer32Y(blocks: [Block2D], prevImg: Image16, width: Int, h
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 32)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                var ll = prevImg.getY(x: llX, y: llY, size: 16)
+                let ll = prevImg.getY(x: llX, y: llY, size: 16)
                 
-                ll.withView { srcView in
-                    blk.withView { destView in
-                        for yi in 0..<16 {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
-                    }
+                let srcView = ll.view
+                let destView = blk.view
+                for yi in 0..<16 {
+                    let srcPtr = srcView.rowPointer(y: yi)
+                    let destPtr = destView.rowPointer(y: yi)
+                    destPtr.update(from: srcPtr, count: 16)
                 }
-                
-                blk.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
-                    dequantizeSIMDSignedMapping16(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(&hhView, q: qt.qHigh)
-                    invDwt2d_32(&view)
-                }
-                
+                                        
+                let view = blk.view
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
+                let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
+                let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
+                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                invDwt2d_32(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<32 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 32)
-                        }
+                    let v = blk.view
+                    for h in 0..<32 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 32)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
@@ -882,51 +855,46 @@ func reconstructPlaneLayer32Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 32)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                var ll = prevImg.getCb(x: llX, y: llY, size: 16)
+                let ll = prevImg.getCb(x: llX, y: llY, size: 16)
                 
-                ll.withView { srcView in
-                    blk.withView { destView in
-                        for yi in 0..<16 {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
-                    }
+                let srcView = ll.view
+                let destView = blk.view
+                for yi in 0..<16 {
+                    let srcPtr = srcView.rowPointer(y: yi)
+                    let destPtr = destView.rowPointer(y: yi)
+                    destPtr.update(from: srcPtr, count: 16)
                 }
-                
-                blk.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
-                    dequantizeSIMDSignedMapping16(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(&hhView, q: qt.qHigh)
-                    invDwt2d_32(&view)
-                }
-                
+                                        
+                let view = blk.view
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
+                let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
+                let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
+                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                invDwt2d_32(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<32 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 32)
-                        }
+                    let v = blk.view
+                    for h in 0..<32 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 32)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
@@ -954,55 +922,49 @@ func reconstructPlaneLayer32Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 32)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                var ll = prevImg.getCr(x: llX, y: llY, size: 16)
+                let ll = prevImg.getCr(x: llX, y: llY, size: 16)
                 
-                ll.withView { srcView in
-                    blk.withView { destView in
-                        for yi in 0..<16 {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
-                    }
+                let srcView = ll.view
+                let destView = blk.view
+                for yi in 0..<16 {
+                    let srcPtr = srcView.rowPointer(y: yi)
+                    let destPtr = destView.rowPointer(y: yi)
+                    destPtr.update(from: srcPtr, count: 16)
                 }
-                
-                blk.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
-                    var lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
-                    var hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
-                    dequantizeSIMDSignedMapping16(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(&hhView, q: qt.qHigh)
-                    invDwt2d_32(&view)
-                }
-                
+                                        
+                let view = blk.view
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
+                let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
+                let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
+                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                invDwt2d_32(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<32 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 32)
-                        }
+                    let v = blk.view
+                    for h in 0..<32 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 32)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1027,51 +989,46 @@ func reconstructPlaneLayer16Y(blocks: [Block2D], prevImg: Image16, width: Int, h
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 16)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                var ll = prevImg.getY(x: llX, y: llY, size: 8)
+                let ll = prevImg.getY(x: llX, y: llY, size: 8)
                 
-                ll.withView { srcView in
-                    blk.withView { destView in
-                        for yi in 0..<8 {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: 8)
-                        }
-                    }
+                let srcView = ll.view
+                let destView = blk.view
+                for yi in 0..<8 {
+                    let srcPtr = srcView.rowPointer(y: yi)
+                    let destPtr = destView.rowPointer(y: yi)
+                    destPtr.update(from: srcPtr, count: 8)
                 }
-                
-                blk.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                    var lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                    var hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                    dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
-                    invDwt2d_16(&view)
-                }
-                
+                                        
+                let view = blk.view
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
+                let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
+                let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
+                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+                invDwt2d_16(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<16 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
+                    let v = blk.view
+                    for h in 0..<16 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 16)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
@@ -1099,55 +1056,49 @@ func reconstructPlaneLayer16Cb(blocks: [Block2D], prevImg: Image16, width: Int, 
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 16)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                var ll = prevImg.getCb(x: llX, y: llY, size: 8)
+                let ll = prevImg.getCb(x: llX, y: llY, size: 8)
                 
-                ll.withView { srcView in
-                    blk.withView { destView in
-                        for yi in 0..<8 {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: 8)
-                        }
-                    }
+                let srcView = ll.view
+                let destView = blk.view
+                for yi in 0..<8 {
+                    let srcPtr = srcView.rowPointer(y: yi)
+                    let destPtr = destView.rowPointer(y: yi)
+                    destPtr.update(from: srcPtr, count: 8)
                 }
-                
-                blk.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                    var lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                    var hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                    dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
-                    invDwt2d_16(&view)
-                }
-                
+                                        
+                let view = blk.view
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
+                let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
+                let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
+                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+                invDwt2d_16(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<16 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
+                    let v = blk.view
+                    for h in 0..<16 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 16)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1172,55 +1123,49 @@ func reconstructPlaneLayer16Cr(blocks: [Block2D], prevImg: Image16, width: Int, 
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 16)
                 
-                var blk = blocks[idx]
+                let blk = blocks[idx]
                 idx += 1
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                var ll = prevImg.getCr(x: llX, y: llY, size: 8)
+                let ll = prevImg.getCr(x: llX, y: llY, size: 8)
                 
-                ll.withView { srcView in
-                    blk.withView { destView in
-                        for yi in 0..<8 {
-                            let srcPtr = srcView.rowPointer(y: yi)
-                            let destPtr = destView.rowPointer(y: yi)
-                            destPtr.update(from: srcPtr, count: 8)
-                        }
-                    }
+                let srcView = ll.view
+                let destView = blk.view
+                for yi in 0..<8 {
+                    let srcPtr = srcView.rowPointer(y: yi)
+                    let destPtr = destView.rowPointer(y: yi)
+                    destPtr.update(from: srcPtr, count: 8)
                 }
-                
-                blk.withView { view in
-                    let base = view.base
-                    var hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                    var lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                    var hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                    dequantizeSIMDSignedMapping8(&hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(&lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(&hhView, q: qt.qHigh)
-                    invDwt2d_16(&view)
-                }
-                
+                                        
+                let view = blk.view
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
+                let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
+                let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
+                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+                invDwt2d_16(view)
+                            
                 if !isEdgeY && !isEdgeX {
-                    blk.withView { v in
-                        for h in 0..<16 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
+                    let v = blk.view
+                    for h in 0..<16 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 16)
                     }
-                } else if loopH > 0 && loopW > 0 {
-                    blk.withView { v in
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
+                                } else if loopH > 0 && loopW > 0 {
+                    let v = blk.view
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
                     }
-                }
+                                }
             }
         }
     }
-    applyDeblockingFilter(plane: &plane, width: width, height: height, blockSize: 16, qStep: Int(qt.step))
     return plane
 }
 
@@ -1327,7 +1272,15 @@ func encodePlaneBase8(pd: PlaneData420, sads: [Int]?, layer: UInt8, qtY: Quantiz
     let (bufCb, reconCb, base8CbBlocks) = await taskBufCb
     let (bufCr, reconCr, base8CrBlocks) = await taskBufCr
     
-    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
+    var mutReconY = reconY
+    var mutReconCb = reconCb
+    var mutReconCr = reconCr
+    
+    applyDeblockingFilter(plane: &mutReconY, width: dx, height: dy, blockSize: 8, qStep: Int(qtY.step))
+    applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
@@ -1357,40 +1310,38 @@ func reconstructPlaneBase32(blocks: [Block2D], width: Int, height: Int, qt: Quan
     plane.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for idx in blocks.indices {
-            var blk = blocks[idx]
+            let blk = blocks[idx]
             let row = idx / colCount
             let col = idx % colCount
             let startY = row * 32
             let startX = col * 32
             
-            blk.withView { view in
-                let half = 16
-                let base = view.base
-                var llView = BlockView(base: base, width: half, height: half, stride: 32)
-                var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                var lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                var hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                dequantizeSIMD(&llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping(&hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping(&hhView, q: qt.qHigh)
-                invDwt2d_32(&view)
-            }
-            
+            let view = blk.view
+            let half = 16
+            let base = view.base
+            let llView = BlockView(base: base, width: half, height: half, stride: 32)
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            dequantizeSIMD(llView, q: qt.qLow)
+            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            invDwt2d_32(view)
+                    
             let validEndY = min(height, startY + 32)
             let validEndX = min(width, startX + 32)
             let loopH = validEndY - startY
             let loopW = validEndX - startX
             
             if loopH > 0 && loopW > 0 {
-                blk.withView { v in
-                    for h in 0..<loopH {
-                        let srcPtr = v.rowPointer(y: h)
-                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                        destPtr.update(from: srcPtr, count: loopW)
-                    }
+                let v = blk.view
+                for h in 0..<loopH {
+                    let srcPtr = v.rowPointer(y: h)
+                    let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                    destPtr.update(from: srcPtr, count: loopW)
                 }
-            }
+                        }
         }
     }
     
@@ -1457,7 +1408,6 @@ func encodePlaneBase32(pd: PlaneData420, predictedPd: PlaneData420?, layer: UInt
     var mutReconCb = reconCb
     var mutReconCr = reconCr
     
-    // Apply deblocking filter
     applyDeblockingFilter(plane: &mutReconY, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
     applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
@@ -1530,12 +1480,16 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     var l1crBlocksMut = l1crBlocks
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocksMut, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
-    let reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
-    let reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    var mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocksMut, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
+    var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    
+    applyDeblockingFilter(plane: &mutReconL1Y, width: l1dx, height: l1dy, blockSize: 16, qStep: Int(qtY1.step))
+    applyDeblockingFilter(plane: &mutReconL1Cb, width: l1cbDx, height: l1cbDy, blockSize: 8, qStep: Int(qtC1.step))
+    applyDeblockingFilter(plane: &mutReconL1Cr, width: l1cbDx, height: l1cbDy, blockSize: 8, qStep: Int(qtC1.step))
     
     // Build Image16 from Layer16 reconstruction
-    let l1Img = Image16(width: l1dx, height: l1dy, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
+    let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     
     var l2yBlocksMut = l2yBlocks
     var l2cbBlocksMut = l2cbBlocks
