@@ -29,7 +29,7 @@ public enum DecodeError: Error, CustomStringConvertible {
 }
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
 
     // Compute per-layer dimensions matching encoder DWT subband sizes:
@@ -45,6 +45,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
 
     // encodeSpatialLayers appends layer0, then layer1, then layer2.
     var mvs: [MotionVector]? = nil
+    var refDirs: [Bool]? = nil
     let mvCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
     let mvDataLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     
@@ -53,6 +54,26 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         
         mvs = try decodeMVs(data: Array(r[offset..<(offset + mvDataLen)]), count: mvCount)
         offset += mvDataLen
+    }
+    
+    // 参照方向フラグの読み取り（双方向予測フレームの場合のみ存在）
+    if mvCount > 0 && nextPd != nil {
+        let refDirByteCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
+        if refDirByteCount > 0 {
+            guard (offset + refDirByteCount) <= r.count else { throw DecodeError.insufficientData }
+            let refDirBuf = Array(r[offset..<(offset + refDirByteCount)])
+            offset += refDirByteCount
+            
+            var dirs = [Bool]()
+            dirs.reserveCapacity(mvCount)
+            for i in 0..<mvCount {
+                let byteIdx = i / 8
+                let bitIdx = i % 8
+                let isBackward = (byteIdx < refDirBuf.count) && ((refDirBuf[byteIdx] & UInt8(1 << bitIdx)) != 0)
+                dirs.append(isBackward)
+            }
+            refDirs = dirs
+        }
     }
     
     let len0 = try readUInt32BEFromBytes(r, offset: &offset)
@@ -86,7 +107,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         
-        current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, mvs: mvs)
+        current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs)
     }
     
     return current
@@ -408,7 +429,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?, predictedPd: PlaneData420? = nil, mvs: [MotionVector]? = nil) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [Block2D]?, parentCbBlocks: [Block2D]?, parentCrBlocks: [Block2D]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: [MotionVector]? = nil, refDirs: [Bool]? = nil) async throws -> Image16 {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -494,9 +515,17 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     }
     
     if let tPrev = predictedPd, let mvs = mvs {
-        applyMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
-        applyMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
-        applyMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        if let tNext = nextPd, let dirs = refDirs {
+            // 双方向予測: 参照方向フラグに基づいて前方/後方をブロックごとに選択
+            applyBidirectionalMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+            applyBidirectionalMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+            applyBidirectionalMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        } else {
+            // 前方予測のみ（既存パス）
+            applyMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+            applyMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+            applyMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+        }
     }
 
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))

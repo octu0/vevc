@@ -1545,6 +1545,126 @@ func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, maxbitrat
     return (out, reconstructed)
 }
 
+/// 双方向予測対応のencodeSpatialLayers
+/// nextPdが非nilの場合、前方(predictedPd)と後方(nextPd)の両方でMV探索し、ブロックごとにSADが小さい方を選択する。
+/// ビットストリームには参照方向フラグを追加する。
+@inline(__always)
+func encodeSpatialLayers(pd: PlaneData420, predictedPd: PlaneData420?, nextPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
+    // 後方参照がない場合は既存の前方のみのパスにフォールバック
+    guard let pPd = predictedPd, let nPd = nextPd else {
+        return try await encodeSpatialLayers(pd: pd, predictedPd: predictedPd, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+    }
+    
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    
+    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
+    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2)
+    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1)
+    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1)
+    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
+    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
+    
+    // 双方向MV計算: 前方・後方の両方でMV探索し、ブロックごとにSADが小さい方を選択
+    let (mvs, sads, refDirs) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd)
+    
+    // 参照方向に基づくピクセルレベル残差計算
+    var mutPdY = pd.y
+    var mutPdCb = pd.cb
+    var mutPdCr = pd.cr
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
+
+    let isPFrame = true
+    
+    let (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    let (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
+    
+    let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+    
+    let l1dx = sub2.width
+    let l1dy = sub2.height
+    let l1cbDx = ((l1dx + 1) / 2)
+    let l1cbDy = ((l1dy + 1) / 2)
+    var l1yBlocksMut = l1yBlocks
+    var l1cbBlocksMut = l1cbBlocks
+    var l1crBlocksMut = l1crBlocks
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocksMut, cbBlocks: &l1cbBlocksMut, crBlocks: &l1crBlocksMut, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    
+    var mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocksMut, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1)
+    var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocksMut, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1)
+    
+    applyDeblockingFilter(plane: &mutReconL1Y, width: l1dx, height: l1dy, blockSize: 16, qStep: Int(qtY1.step))
+    applyDeblockingFilter(plane: &mutReconL1Cb, width: l1cbDx, height: l1cbDy, blockSize: 8, qStep: Int(qtC1.step))
+    applyDeblockingFilter(plane: &mutReconL1Cr, width: l1cbDx, height: l1cbDy, blockSize: 8, qStep: Int(qtC1.step))
+    
+    let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    
+    var l2yBlocksMut = l2yBlocks
+    var l2cbBlocksMut = l2cbBlocks
+    var l2crBlocksMut = l2crBlocks
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocksMut, cbBlocks: &l2cbBlocksMut, crBlocks: &l2crBlocksMut, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+    
+    let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocksMut, prevImg: l1Img, width: dx, height: dy, qt: qtY2)
+    let reconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocksMut, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2)
+    let reconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocksMut, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2)
+    
+    var mutReconL2Y = reconL2Y
+    var mutReconL2Cb = reconL2Cb
+    var mutReconL2Cr = reconL2Cr
+    
+    // 双方向動き補償の加算（再構成）
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 8)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
+    
+    applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
+    applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
+    
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
+    
+    debugLog("  [Summary/BiDir] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
+    
+    var out: [UInt8] = []
+    
+    let mvCount = mvs.count
+    appendUInt32BE(&out, UInt32(mvCount))
+    
+    // MVデータ + 参照方向フラグをシリアライズ
+    let mvData = encodeMVs(mvs: mvs)
+    appendUInt32BE(&out, UInt32(mvData.count))
+    out.append(contentsOf: mvData)
+    
+    // 参照方向フラグ: ブロックごとに1bit、バイト単位でパッキング
+    let refDirByteCount = (refDirs.count + 7) / 8
+    appendUInt32BE(&out, UInt32(refDirByteCount))
+    var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
+    for i in refDirs.indices {
+        if refDirs[i] {
+            refDirBuf[i / 8] |= UInt8(1 << (i % 8))
+        }
+    }
+    out.append(contentsOf: refDirBuf)
+
+    appendUInt32BE(&out, UInt32(layer0.count))
+    out.append(contentsOf: layer0)
+    
+    appendUInt32BE(&out, UInt32(layer1.count))
+    out.append(contentsOf: layer1)
+    
+    appendUInt32BE(&out, UInt32(layer2.count))
+    out.append(contentsOf: layer2)
+    
+    return (out, reconstructed)
+}
+
 @inline(__always)
 func computeMotionVectors(curr: PlaneData420, prev: PlaneData420) async -> ([MotionVector], [Int]) {
     let dx = curr.width
@@ -1579,6 +1699,150 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420) async -> ([Mot
         sads.append(sad)
     }
     return (mvs, sads)
+}
+
+/// 双方向MV計算: 前方(prev)と後方(next)の両方でMV探索し、ブロックごとにSADが小さい方を選択する。
+/// - Returns: (mvs, sads, refDirs) refDirsはブロックごとの参照方向フラグ (false=前方, true=後方)
+@inline(__always)
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420) async -> ([MotionVector], [Int], [Bool]) {
+    let dx = curr.width
+    let dy = curr.height
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+    
+    // 現在フレームのDWT LL帯域（Base8解像度）を計算
+    let (_, currSub2) = await extractSingleTransformBlocks32(r: curr.rY, width: dx, height: dy)
+    let (_, currSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
+    let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy)
+
+    // 前方参照のDWT LL帯域
+    let (_, prevSub2) = await extractSingleTransformBlocks32(r: prev.rY, width: dx, height: dy)
+    let (_, prevSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
+    
+    // 後方参照のDWT LL帯域
+    let (_, nextSub2) = await extractSingleTransformBlocks32(r: next.rY, width: dx, height: dy)
+    let (_, nextSub1) = await extractSingleTransformBlocks16(r: Int16Reader(data: nextSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy)
+    
+    let targetWidth = l0dx
+    let targetHeight = l0dy
+    let colCount = (targetWidth + 7) / 8
+    
+    var mvs = [MotionVector]()
+    var sads = [Int]()
+    var refDirs = [Bool]()
+    mvs.reserveCapacity(currBlocks8.count)
+    sads.reserveCapacity(currBlocks8.count)
+    refDirs.reserveCapacity(currBlocks8.count)
+    
+    for idx in currBlocks8.indices {
+        let col = idx % colCount
+        let row = idx / colCount
+        let bx = col * 8
+        let by = row * 8
+        
+        // 前方MV探索
+        let (fwdMV, fwdSAD) = MotionEstimation.searchPixels(currPlane: currSub1, prevPlane: prevSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+        
+        // 後方MV探索
+        let (bwdMV, bwdSAD) = MotionEstimation.searchPixels(currPlane: currSub1, prevPlane: nextSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+        
+        // SADが小さい方を選択
+        if bwdSAD < fwdSAD {
+            mvs.append(bwdMV)
+            sads.append(bwdSAD)
+            refDirs.append(true) // 後方参照
+        } else {
+            mvs.append(fwdMV)
+            sads.append(fwdSAD)
+            refDirs.append(false) // 前方参照
+        }
+    }
+    return (mvs, sads, refDirs)
+}
+
+/// 参照方向フラグに基づく双方向動き補償のピクセル減算
+/// refDirsの各要素がfalseなら前方参照(prevPlane)、trueなら後方参照(nextPlane)を使用
+@inline(__always)
+func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+    let colCount = (width + blockSize - 1) / blockSize
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        prevPlane.withUnsafeBufferPointer { prevBuf in
+            nextPlane.withUnsafeBufferPointer { nextBuf in
+                guard let prevBase = prevBuf.baseAddress, let nextBase = nextBuf.baseAddress else { return }
+                for row in 0..<((height + blockSize - 1) / blockSize) {
+                    for col in 0..<colCount {
+                        let mvIndex = min(row * colCount + col, mvs.count - 1)
+                        let mv = mvs[mvIndex]
+                        let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
+                        let srcBase = isBackward ? nextBase : prevBase
+                        let blockX = col * blockSize
+                        let blockY = row * blockSize
+                        let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                        let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                        let targetX = blockX + shiftX
+                        let targetY = blockY + shiftY
+                        for y in 0..<min(blockSize, height - blockY) {
+                            let dstY = blockY + y
+                            let srcY = targetY + y
+                            let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                            let safeSrcY = max(0, min(srcY, height - 1))
+                            let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                            for x in 0..<min(blockSize, width - blockX) {
+                                let srcX = targetX + x
+                                let safeSrcX = max(0, min(srcX, width - 1))
+                                let predPixel = srcRowPtr[safeSrcX]
+                                dstPtr[x] = dstPtr[x] &- predPixel
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 参照方向フラグに基づく双方向動き補償のピクセル加算（デコーダ・再構成用）
+@inline(__always)
+func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+    let colCount = (width + blockSize - 1) / blockSize
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        guard let dstBase = dstBuf.baseAddress else { return }
+        prevPlane.withUnsafeBufferPointer { prevBuf in
+            nextPlane.withUnsafeBufferPointer { nextBuf in
+                guard let prevBase = prevBuf.baseAddress, let nextBase = nextBuf.baseAddress else { return }
+                for row in 0..<((height + blockSize - 1) / blockSize) {
+                    for col in 0..<colCount {
+                        let mvIndex = min(row * colCount + col, mvs.count - 1)
+                        let mv = mvs[mvIndex]
+                        let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
+                        let srcBase = isBackward ? nextBase : prevBase
+                        let blockX = col * blockSize
+                        let blockY = row * blockSize
+                        let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                        let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                        let targetX = blockX + shiftX
+                        let targetY = blockY + shiftY
+                        for y in 0..<min(blockSize, height - blockY) {
+                            let dstY = blockY + y
+                            let srcY = targetY + y
+                            let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                            let safeSrcY = max(0, min(srcY, height - 1))
+                            let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                            for x in 0..<min(blockSize, width - blockX) {
+                                let srcX = targetX + x
+                                let safeSrcX = max(0, min(srcX, width - 1))
+                                let predPixel = srcRowPtr[safeSrcX]
+                                dstPtr[x] = dstPtr[x] &+ predPixel
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @inline(__always)

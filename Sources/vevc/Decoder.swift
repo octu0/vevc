@@ -81,6 +81,9 @@ class CoreDecoder {
         var decodedPlanes = [PlaneData420?](repeating: nil, count: frameData.count)
         
         var previousReconstructed: PlaneData420? = nil
+        // 双方向予測: GOP先頭フレーム（I-frame）の復元結果を後方参照として保持
+        var firstReconstructed: PlaneData420? = nil
+        
         for (idx, data) in frameData.enumerated() {
             // Copy frame: reuse previous reconstructed frame verbatim.
             // This is valid because the encoder only emits FrameLen=0 when
@@ -90,10 +93,24 @@ class CoreDecoder {
                 // Do NOT update previousReconstructed — it stays the same
                 continue
             }
-            let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed)
+            
+            // 双方向予測の判定: GOP後半のP-frame かつ I-frameの復元結果がある場合
+            // エンコーダ側と同一の判定ロジック: GOP中間点以降のP-frameに双方向予測を適用
+            let gopMidpoint = max(2, frameData.count / 2)
+            let isInSecondHalf = (idx >= gopMidpoint)
+            let isPFrame = (previousReconstructed != nil)
+            let useBidirectional = isInSecondHalf && isPFrame && firstReconstructed != nil && frameData.count >= 3
+            
+            let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
+            let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd)
             let pd = PlaneData420(img16: img16)
             decodedPlanes[idx] = pd
             previousReconstructed = pd
+            
+            // I-frame（先頭フレーム）の復元結果を保存
+            if firstReconstructed == nil {
+                firstReconstructed = pd
+            }
         }
         
         let validPlanes = decodedPlanes.map { $0! }

@@ -174,7 +174,11 @@ actor LayersEncodeActor {
         var previousInputPlane: PlaneData420? = nil
         var isFirstEncoded = true
         
-        for plane in planes {
+        // 双方向予測用: GOP先頭フレーム（I-frame）の復元結果を後方参照として保持
+        // デコーダ側でもI-frameの復元結果を使用するため、入力原データではなく復元結果を使用
+        var firstReconstructed: PlaneData420? = nil
+        
+        for (frameIdx, plane) in planes.enumerated() {
             // Duplicate frame detection: if current frame pixels are identical
             // to the previous frame, emit a copy frame (empty data, FrameLen=0)
             // instead of encoding the full frame. This saves significant data
@@ -209,10 +213,30 @@ actor LayersEncodeActor {
                 frameQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
             }
             
-            let (bytes, reconstructed) = try await encodeSpatialLayers(
-                pd: plane, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
-                qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
-            )
+            // 双方向予測の適用判定:
+            // GOP後半のP-frame（中間点以降）かつGOPサイズが3以上かつI-frameの復元結果がある場合、
+            // I-frameの復元結果を後方参照として双方向予測を使用する。
+            // GOP後半では前方参照（前フレーム復元結果）からの蓄積誤差が大きくなるため、
+            // 後方参照（I-frame復元結果）を併用して残差を低減する。
+            // GOP中間点 = planes.count / 2 (例: GOPサイズ60なら30フレーム目以降)
+            let gopMidpoint = max(2, planes.count / 2)
+            let isInSecondHalf = (frameIdx >= gopMidpoint)
+            let useBidirectional = isPFrame && isInSecondHalf && firstReconstructed != nil && planes.count >= 3
+            
+            let bytes: [UInt8]
+            let reconstructed: PlaneData420
+            
+            if useBidirectional {
+                (bytes, reconstructed) = try await encodeSpatialLayers(
+                    pd: plane, predictedPd: previousReconstructed, nextPd: firstReconstructed,
+                    maxbitrate: localMaxbitrate, qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
+                )
+            } else {
+                (bytes, reconstructed) = try await encodeSpatialLayers(
+                    pd: plane, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
+                    qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
+                )
+            }
             encodedFrames.append(bytes)
             
             // Feed back to rate controller for next frame's qStep prediction
@@ -225,6 +249,11 @@ actor LayersEncodeActor {
                 rateController.consumePFrame(bits: encodedBits, qStep: Int(frameQtY.step), sad: frameSAD)
             }
             previousReconstructed = reconstructed
+            
+            // I-frame（先頭フレーム）の復元結果を保存
+            if firstReconstructed == nil {
+                firstReconstructed = reconstructed
+            }
         }
         
         var gopBody: [UInt8] = []
