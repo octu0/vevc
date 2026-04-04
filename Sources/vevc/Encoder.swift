@@ -384,8 +384,8 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     var totalSampleBits = 0
     let reader = ImageReader(img: img)
     @inline(__always)
-    func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-        let block = Block2D(width: w, height: h)
+    func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> BlockView {
+        let block = BlockView.allocate(width: w, height: h)
         let view = block.view
         for i in 0..<h {
             view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
@@ -394,8 +394,8 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     }
 
     @inline(__always)
-    func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-        let block = Block2D(width: w, height: h)
+    func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> BlockView {
+        let block = BlockView.allocate(width: w, height: h)
         let view = block.view
         for i in 0..<h {
             view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
@@ -404,8 +404,8 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     }
 
     @inline(__always)
-    func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> Block2D {
-        let block = Block2D(width: w, height: h)
+    func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> BlockView {
+        let block = BlockView.allocate(width: w, height: h)
         let view = block.view
         for i in 0..<h {
             view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
@@ -497,7 +497,7 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
     return bodyBits + headerBits
 }
 
-private func measureBlockBits8(block: inout Block2D, qt: QuantizationTable) -> Int {
+private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) -> Int {
     let view = block.view
     let sub = dwt2d_8_sb(view)
     

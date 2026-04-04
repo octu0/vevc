@@ -24,22 +24,21 @@ final class QuantRoundtripTests: XCTestCase {
         
         let qt = QuantizationTable(baseStep: 1)
         
-        let block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         // テスト値をコピー
         for i in 0..<(size * size) {
             block.base[i] = testValues[i]
         }
         
         // 量子化（SignedMapping = ジグザグエンコード付き）
-        var view = block.view
-        quantizeSIMDSignedMapping(view, q: qt.qLow)
+        quantizeSIMDSignedMapping(block, q: qt.qLow)
             
         // ジグザグエンコード後の値を保存
         let quantized = Array(UnsafeBufferPointer(start: block.base, count: size * size))
         
         // 逆量子化（SignedMapping = ジグザグデコード付き）
-        view = block.view
-        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+        dequantizeSIMDSignedMapping(block, q: qt.qLow)
             
         // 元の値と比較
         for i in 0..<(size * size) {
@@ -56,7 +55,8 @@ final class QuantRoundtripTests: XCTestCase {
         let size = 16
         let qt = QuantizationTable(baseStep: 1)
         
-        let block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         // 正と負の両方を含むテストパターン
         for y in 0..<size {
             for x in 0..<size {
@@ -74,10 +74,8 @@ final class QuantRoundtripTests: XCTestCase {
         }
         let original = Array(UnsafeBufferPointer(start: block.base, count: size * size))
         
-        var view = block.view
-        quantizeSIMDSignedMapping(view, q: qt.qLow)
-            view = block.view
-        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+        quantizeSIMDSignedMapping(block, q: qt.qLow)
+        dequantizeSIMDSignedMapping(block, q: qt.qLow)
             
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
@@ -95,7 +93,8 @@ final class QuantRoundtripTests: XCTestCase {
         let size = 32
         let qt = QuantizationTable(baseStep: 1)
         
-        let block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         for y in 0..<size {
             for x in 0..<size {
                 let hash = (x &* 2654435761) ^ (y &* 2246822519)
@@ -104,10 +103,8 @@ final class QuantRoundtripTests: XCTestCase {
         }
         let original = Array(UnsafeBufferPointer(start: block.base, count: size * size))
         
-        var view = block.view
-        quantizeSIMDSignedMapping(view, q: qt.qLow)
-            view = block.view
-        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+        quantizeSIMDSignedMapping(block, q: qt.qLow)
+        dequantizeSIMDSignedMapping(block, q: qt.qLow)
             
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
@@ -125,7 +122,8 @@ final class QuantRoundtripTests: XCTestCase {
         let size = 8
         let qt = QuantizationTable(baseStep: 2) // qLow.step=2
         
-        let block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         let testValues: [Int16] = [
             10, -10, 20, -20, 30, -30, 0, 0,
             5, -5, 15, -15, 25, -25, 35, -35,
@@ -140,10 +138,8 @@ final class QuantRoundtripTests: XCTestCase {
             block.base[i] = testValues[i]
         }
         
-        var view = block.view
-        quantizeSIMDSignedMapping(view, q: qt.qLow)
-            view = block.view
-        dequantizeSIMDSignedMapping(view, q: qt.qLow)
+        quantizeSIMDSignedMapping(block, q: qt.qLow)
+        dequantizeSIMDSignedMapping(block, q: qt.qLow)
             
         var signMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
@@ -180,12 +176,11 @@ final class QuantRoundtripTests: XCTestCase {
         ]
         
         // Mid test
-        let blockMid = Block2D(width: size, height: size)
+        let blockMid = BlockView.allocate(width: size, height: size)
+        defer { blockMid.deallocate() }
         for i in 0..<(size * size) { blockMid.base[i] = testValues[i] }
-        var view = blockMid.view
-        quantizeSIMDSignedMapping(view, q: qt.qMid)
-        view = blockMid.view
-        dequantizeSIMDSignedMapping(view, q: qt.qMid)
+        quantizeSIMDSignedMapping(blockMid, q: qt.qMid)
+        dequantizeSIMDSignedMapping(blockMid, q: qt.qMid)
         
         var midSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
@@ -202,12 +197,11 @@ final class QuantRoundtripTests: XCTestCase {
             midSignMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
         
         // High test
-        let blockHigh = Block2D(width: size, height: size)
+        let blockHigh = BlockView.allocate(width: size, height: size)
+        defer { blockHigh.deallocate() }
         for i in 0..<(size * size) { blockHigh.base[i] = testValues[i] }
-        view = blockHigh.view
-        quantizeSIMDSignedMapping(view, q: qt.qHigh)
-        view = blockHigh.view
-        dequantizeSIMDSignedMapping(view, q: qt.qHigh)
+        quantizeSIMDSignedMapping(blockHigh, q: qt.qHigh)
+        dequantizeSIMDSignedMapping(blockHigh, q: qt.qHigh)
         
         var highSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {

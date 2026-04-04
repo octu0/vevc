@@ -237,8 +237,9 @@ final class ChromaBlockTests: XCTestCase {
             let qt = QuantizationTable(baseStep: step)
 
             // ブロックを作成して量子化→逆量子化
-            var block = Block2D(width: blockSize, height: blockSize)
-            var view = block.view
+            var block = BlockView.allocate(width: blockSize, height: blockSize)
+            defer { block.deallocate() }
+            var view = block
             for y in 0..<blockSize {
                 let ptr = view.rowPointer(y: y)
                 for x in 0..<blockSize {

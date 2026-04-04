@@ -16,23 +16,23 @@ final class DWTTests: XCTestCase {
     }
 
     private func performRoundtrip(size: Int) {
-        let block: Block2D = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         for i: Int in 0..<(size * size) {
             block.base[i + 0] = Int16.random(in: -512...511)
         }
         let originalData: [Int16] = Array(UnsafeBufferPointer(start: block.base, count: size * size))
 
-        let view = block.view
         switch size {
         case 8:
-            dwt2d_8(view)
-            invDwt2d_8(view)
+            dwt2d_8(block)
+            invDwt2d_8(block)
         case 16:
-            dwt2d_16(view)
-            invDwt2d_16(view)
+            dwt2d_16(block)
+            invDwt2d_16(block)
         case 32:
-            dwt2d_32(view)
-            invDwt2d_32(view)
+            dwt2d_32(block)
+            invDwt2d_32(block)
         default:
             XCTFail("Unsupported size: \(size)")
         }
@@ -44,7 +44,8 @@ final class DWTTests: XCTestCase {
         let sizes = [8, 16, 32]
 
         for size in sizes {
-            let block = Block2D(width: size, height: size)
+            let block = BlockView.allocate(width: size, height: size)
+            defer { block.deallocate() }
             for y in 0..<size {
                 for x in 0..<size {
                     let index = (y * size) + x
@@ -54,9 +55,8 @@ final class DWTTests: XCTestCase {
 
             let originalData = Array(UnsafeBufferPointer(start: block.base, count: size * size))
 
-            let view = block.view
-            _ = dwt2d(view, size: size)
-            invDwt2d(view, size: size)
+            _ = dwt2d(block, size: size)
+            invDwt2d(block, size: size)
         
             XCTAssertEqual(Array(UnsafeBufferPointer(start: block.base, count: size * size)), originalData, "Roundtrip failed for size \(size)")
         }
@@ -67,7 +67,8 @@ final class DWTTests: XCTestCase {
         let sizes = [8, 16, 32]
 
         for size in sizes {
-            let blockScalar = Block2D(width: size, height: size)
+            let blockScalar = BlockView.allocate(width: size, height: size)
+            defer { blockScalar.deallocate() }
             for y in 0..<size {
                 for x in 0..<size {
                     let index = (y * size) + x
@@ -75,28 +76,25 @@ final class DWTTests: XCTestCase {
                 }
             }
 
-            let blockSIMD = Block2D(width: size, height: size)
+            let blockSIMD = BlockView.allocate(width: size, height: size)
+            defer { blockSIMD.deallocate() }
             let scalarData = Array(UnsafeBufferPointer(start: blockScalar.base, count: size * size))
             scalarData.withUnsafeBufferPointer { ptr in
                 blockSIMD.base.update(from: ptr.baseAddress!, count: size * size)
             }
 
-            var view = blockScalar.view
-            _ = dwt2dScalar(view, size: size)
+            _ = dwt2dScalar(blockScalar, size: size)
         
-            view = blockSIMD.view
             // dwt2d will pick SIMD path for 8, 16, 32
-            _ = dwt2d(view, size: size)
+            _ = dwt2d(blockSIMD, size: size)
         
             let arrSIMD = Array(UnsafeBufferPointer(start: blockSIMD.base, count: size * size))
             let arrScalar = Array(UnsafeBufferPointer(start: blockScalar.base, count: size * size))
             XCTAssertEqual(arrSIMD, arrScalar, "SIMD vs Scalar mismatch for dwt2d size \(size)")
 
-            view = blockScalar.view
-            invDwt2dScalar(view, size: size)
+            invDwt2dScalar(blockScalar, size: size)
         
-            view = blockSIMD.view
-            invDwt2d(view, size: size)
+            invDwt2d(blockSIMD, size: size)
         
             let arrSIMD2 = Array(UnsafeBufferPointer(start: blockSIMD.base, count: size * size))
             let arrScalar2 = Array(UnsafeBufferPointer(start: blockScalar.base, count: size * size))
@@ -118,33 +116,32 @@ final class DWTTests: XCTestCase {
     }
 
     private func runRoundTripTest(size: Int) {
-        var block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         for i in 0..<(size * size) {
             block.base[i] = Int16.random(in: (-1 * 1000)...1000)
         }
 
         let originalData = Array(UnsafeBufferPointer(start: block.base, count: size * size))
 
-        var view = block.view
         switch size {
         case 8:
-            dwt2d_8(view)
+            dwt2d_8(block)
         case 16:
-            dwt2d_16(view)
+            dwt2d_16(block)
         case 32:
-            dwt2d_32(view)
+            dwt2d_32(block)
         default:
             XCTFail("Unsupported size: \(size)")
         }
     
-        view = block.view
         switch size {
         case 8:
-            invDwt2d_8(view)
+            invDwt2d_8(block)
         case 16:
-            invDwt2d_16(view)
+            invDwt2d_16(block)
         case 32:
-            invDwt2d_32(view)
+            invDwt2d_32(block)
         default:
             XCTFail("Unsupported size: \(size)")
         }
@@ -187,7 +184,8 @@ final class DWTTests: XCTestCase {
         let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
 
         for size in sizes {
-            var block = Block2D(width: size, height: size)
+            let block = BlockView.allocate(width: size, height: size)
+            defer { block.deallocate() }
             for y in 0..<size {
                 for x in 0..<size {
                     block.base[(y * size) + x] = Int16.random(in: -1000...1000)
@@ -196,17 +194,16 @@ final class DWTTests: XCTestCase {
 
             let originalData = Array(UnsafeBufferPointer(start: block.base, count: size * size))
 
-            let view = block.view
             switch size {
             case 8:
-                dwt2d_8(view)
-                invDwt2d_8(view)
+                dwt2d_8(block)
+                invDwt2d_8(block)
             case 16:
-                dwt2d_16(view)
-                invDwt2d_16(view)
+                dwt2d_16(block)
+                invDwt2d_16(block)
             case 32:
-                dwt2d_32(view)
-                invDwt2d_32(view)
+                dwt2d_32(block)
+                invDwt2d_32(block)
             default:
                 XCTFail("Unsupported size: \(size)")
             }

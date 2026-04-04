@@ -147,7 +147,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         
         // bypassのデコード比較（blockDecode16内のdecodeBypass呼び出しを再現）
         var decoder2 = try EntropyDecoder(data: entropyData)
-        var decBlocks = (0..<blocks.count).map { _ in Block2D(width: 32, height: 32) }
+        var decBlocks = (0..<blocks.count).map { _ in BlockView.allocate(width: 32, height: 32) }
         
         for (i, task) in tasks {
             let view = decBlocks[i].view

@@ -21,32 +21,32 @@ final class QuantTests: XCTestCase {
     }
     
     func performRoundTripTest(width: Int, height: Int, step: Int, roundToNearest: Bool, signedMapping: Bool) {
-        let block = Block2D(width: width, height: height)
+        var block = BlockView.allocate(width: width, height: height)
+        defer { block.deallocate() }
         let q = Quantizer(step: step, roundToNearest: roundToNearest)
         
         let originalValues: [Int16] = (0..<(width * height)).map { i in
             Int16.random(in: -32767...32767)
         }
         
-        var view = block.view
         for y in 0..<height {
             for x in 0..<width {
-                view[y, x] = originalValues[y * width + x]
+                block[y, x] = originalValues[y * width + x]
             }
         }
         
         if signedMapping {
-            quantizeSIMDSignedMapping(view, q: q)
-            dequantizeSIMDSignedMapping(view, q: q)
+            quantizeSIMDSignedMapping(block, q: q)
+            dequantizeSIMDSignedMapping(block, q: q)
         } else {
-            quantizeSIMD(view, q: q)
-            dequantizeSIMD(view, q: q)
+            quantizeSIMD(block, q: q)
+            dequantizeSIMD(block, q: q)
         }
         
         for y in 0..<height {
             for x in 0..<width {
                 let original = Int32(originalValues[y * width + x])
-                let reconstructed = Int32(view[y, x])
+                let reconstructed = Int32(block[y, x])
                 let diff = abs(original - reconstructed)
                 
                 // The error should be at most step.
@@ -55,7 +55,7 @@ final class QuantTests: XCTestCase {
                 XCTAssertLessThanOrEqual(diff, limit, "Error too large at (\(x), \(y)) for step \(step), roundToNearest: \(roundToNearest), signedMapping: \(signedMapping), original: \(original), recon: \(reconstructed), size: \(width)x\(height)")
             }
         }
-        }
+    }
     
     func testQuantizeRoundTrip() {
         let sizes = [8, 16, 32, 4]
@@ -84,24 +84,24 @@ final class QuantTests: XCTestCase {
         let size = 32
         let step = 100
         
-        var blockLuma = Block2D(width: size, height: size)
-        var blockChroma = Block2D(width: size, height: size)
+        var blockLuma = BlockView.allocate(width: size, height: size)
+        defer { blockLuma.deallocate() }
+        var blockChroma = BlockView.allocate(width: size, height: size)
+        defer { blockChroma.deallocate() }
         
         let originalValues: [Int16] = (0..<(size * size)).map { _ in
             Int16.random(in: -200...200)
         }
         
-        var view = blockLuma.view
         for y in 0..<size {
             for x in 0..<size {
-                view[y, x] = originalValues[y * size + x]
+                blockLuma[y, x] = originalValues[y * size + x]
             }
         }
             
-        view = blockChroma.view
         for y in 0..<size {
             for x in 0..<size {
-                view[y, x] = originalValues[y * size + x]
+                blockChroma[y, x] = originalValues[y * size + x]
             }
         }
             
@@ -117,17 +117,15 @@ final class QuantTests: XCTestCase {
         var lumaErrorDiff: Int64 = 0
         var chromaErrorDiff: Int64 = 0
         
-        view = blockLuma.view
         for y in 0..<size {
             for x in 0..<size {
-                let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
+                let diff = abs(Int32(blockLuma[y, x]) - Int32(originalValues[y * size + x]))
                 lumaErrorDiff += Int64(diff)
             }
         }
-            view = blockChroma.view
         for y in 0..<size {
             for x in 0..<size {
-                let diff = abs(Int32(view[y, x]) - Int32(originalValues[y * size + x]))
+                let diff = abs(Int32(blockChroma[y, x]) - Int32(originalValues[y * size + x]))
                 chromaErrorDiff += Int64(diff)
             }
         }

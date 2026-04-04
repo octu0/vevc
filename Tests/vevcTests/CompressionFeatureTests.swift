@@ -44,33 +44,31 @@ final class CompressionFeatureTests: XCTestCase {
         blockData[8] = 2
         // Rest are 0
 
-        var block = Block2D(width: size, height: size)
-        var view = block.view
+        let block = BlockView.allocate(width: size, height: size)
+        defer { block.deallocate() }
         for y in 0..<size {
-            let ptr = view.rowPointer(y: y)
+            let ptr = block.rowPointer(y: y)
             for x in 0..<size {
                 ptr[x] = blockData[y * size + x]
             }
         }
     
-        view = block.view
-        blockEncode(encoder: &encoder, block: view, size: size)
-            encoder.flush()
+        blockEncode(encoder: &encoder, block: block, size: size)
+        encoder.flush()
 
         let encodedData = encoder.getData()
         var decoder = try EntropyDecoder(data: encodedData)
 
-        var outBlock = Block2D(width: size, height: size)
+        let outBlock = BlockView.allocate(width: size, height: size)
+        defer { outBlock.deallocate() }
 
-        view = outBlock.view
-        try blockDecode(decoder: &decoder, block: view, size: size)
+        try blockDecode(decoder: &decoder, block: outBlock, size: size)
     
-        view = outBlock.view
         for y in 0..<size {
-            let ptr = view.rowPointer(y: y)
+            let ptr = outBlock.rowPointer(y: y)
             for x in 0..<size {
                 XCTAssertEqual(ptr[x], blockData[y * size + x])
             }
         }
-        }
+    }
 }

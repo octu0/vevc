@@ -637,7 +637,7 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
 // MARK: - Cascaded Quantization
 
 @inline(__always)
-func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
+func quantizeCascaded32(block: inout BlockView, qt: QuantizationTable, isChroma: Bool) {
     let step = Int(qt.step)
     let sLL3 = isChroma ? max(1, step * 3 / 4) : max(1, step)
     let sHL3 = isChroma ? max(1, step * 4 / 4) : max(1, step * 5 / 4)
@@ -701,7 +701,7 @@ func quantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: B
     }
 
 @inline(__always)
-func dequantizeCascaded32(block: inout Block2D, qt: QuantizationTable, isChroma: Bool) {
+func dequantizeCascaded32(block: inout BlockView, qt: QuantizationTable, isChroma: Bool) {
     let step = Int(qt.step)
     let sLL3 = isChroma ? max(1, step * 3 / 4) : max(1, step)
     let sHL3 = isChroma ? max(1, step * 4 / 4) : max(1, step * 5 / 4)

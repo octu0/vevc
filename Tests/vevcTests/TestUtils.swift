@@ -1,7 +1,7 @@
 import Foundation
 @testable import vevc
 
-extension Block2D {
+extension BlockView {
     var data: [Int16] {
         Array(UnsafeBufferPointer(start: base, count: stride * height))
     }

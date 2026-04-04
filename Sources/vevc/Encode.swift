@@ -993,7 +993,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBlocks: [Block2D]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1095,7 +1095,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBlocks: [Block2D]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1188,7 +1188,7 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
 }
 
 @inline(__always)
-func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -1226,7 +1226,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFrame: Bool = false) -> [UInt8] {
+func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, isPFrame: Bool = false) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -1281,7 +1281,7 @@ enum EncodeTaskBase32 {
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTaskBase32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1466,7 +1466,7 @@ func calculateSADAndMaxBlockSAD(res: PlaneData420, mbSize: Int) -> (meanSAD: Int
 // MARK: - Cascaded Encoding
 
 @inline(__always)
-func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8] {
+func encodeCascadedPlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, Bool)] = []
     tasks.reserveCapacity(blocks.count)

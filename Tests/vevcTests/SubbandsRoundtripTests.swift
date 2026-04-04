@@ -7,7 +7,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     /// 少数ブロックでencodePlaneSubbands32→decodePlaneSubbands32
     func testSubbands32Roundtrip_3blocks() async throws {
         // 3ブロック（1行3列）のテスト
-        var blocks = (0..<3).map { _ in Block2D(width: 32, height: 32) }
+        var blocks = (0..<3).map { _ in BlockView.allocate(width: 32, height: 32) }
         
         // 各ブロックのHL/LH/HHにデータをセット（LLは0のまま）
         for bi in 0..<3 {
@@ -113,7 +113,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     
     /// splitが発生するデータでencodePlaneSubbands32→decodePlaneSubbands32
     func testSubbands32Roundtrip_withSplit() async throws {
-        var blocks = (0..<3).map { _ in Block2D(width: 32, height: 32) }
+        var blocks = (0..<3).map { _ in BlockView.allocate(width: 32, height: 32) }
         
         // Block0: 全象限にデータ → splitしない
         var view = blocks[0].view

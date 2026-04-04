@@ -5,11 +5,11 @@ enum DecodeTask32 {
 }
 
 @inline(__always)
-func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentBlocks: [Block2D]?) throws -> [Block2D] {
-    var blocks: [Block2D] = []
+func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentBlocks: [BlockView]?) throws -> [BlockView] {
+    var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(Block2D(width: 32, height: 32))
+        blocks.append(BlockView.allocate(width: 32, height: 32))
     }
     
     var brFlags = BypassReader(data: data)
@@ -141,11 +141,11 @@ enum DecodeTask16 {
 }
 
 @inline(__always)
-func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [Block2D]?) throws -> [Block2D] {
-    var blocks: [Block2D] = []
+func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [BlockView]?) throws -> [BlockView] {
+    var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(Block2D(width: 16, height: 16))
+        blocks.append(BlockView.allocate(width: 16, height: 16))
     }
     
     var brFlags = BypassReader(data: data)
@@ -274,11 +274,11 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [Block2
 }
 
 @inline(__always)
-func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?, dx: Int, planeType: Int) throws -> [Block2D] {
-    var blocks: [Block2D] = []
+func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?, dx: Int, planeType: Int) throws -> [BlockView] {
+    var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(Block2D(width: 8, height: 8))
+        blocks.append(BlockView.allocate(width: 8, height: 8))
     }
     
     var brFlags = BypassReader(data: data)
@@ -307,7 +307,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?,
         let pbX = c * 4
         let pbY = r * 4
         
-        var parentBlock2D: Block2D? = nil
+        var parentBlock2D: BlockView? = nil
         if let pImg = parentImage {
             switch planeType {
             case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 4)
@@ -340,11 +340,11 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?,
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D] {
-    var blocks: [Block2D] = []
+func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [BlockView] {
+    var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(Block2D(width: 8, height: 8))
+        blocks.append(BlockView.allocate(width: 8, height: 8))
     }
     
     var brFlags = BypassReader(data: data)
@@ -399,11 +399,11 @@ enum DecodeTaskBase32 {
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2D] {
-    var blocks: [Block2D] = []
+func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [BlockView] {
+    var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(Block2D(width: 32, height: 32))
+        blocks.append(BlockView.allocate(width: 32, height: 32))
     }
     
     var brFlags = BypassReader(data: data)
@@ -523,7 +523,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
 }
 
 @inline(__always)
-func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throws {
+func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [BlockView]) throws {
     var bwFlags = BypassReader(data: data)
     var tasks: [(Int, Bool)] = []
     tasks.reserveCapacity(blocks.count)

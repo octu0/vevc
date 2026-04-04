@@ -33,7 +33,8 @@ final class EntropyCodecTests: XCTestCase {
     /// 実際のblockEncode16データでEntropyEncoderのrANSラウンドトリップ
     func testBlockEncode16MultipleBlocks() throws {
         // 16ブロック分のデータを作成
-        let blocks = (0..<16).map { _ in Block2D(width: 16, height: 16) }
+        let blocks = (0..<16).map { _ in BlockView.allocate(width: 16, height: 16) }
+        defer { for b in blocks { b.deallocate() } }
         for i in 0..<16 {
             let values = (0..<256).map { idx in
                 Int16(clamping: (i * 256 + idx) &* 7 % 41 - 20)
@@ -46,19 +47,18 @@ final class EntropyCodecTests: XCTestCase {
         // 全ブロックをエンコード
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in 0..<16 {
-            let view = blocks[i].view
-            blockEncode16(encoder: &encoder, block: view, parentBlock: nil)
-                }
+            blockEncode16(encoder: &encoder, block: blocks[i], parentBlock: nil)
+        }
         
         let data = encoder.getData()
         
         // デコード
-        let decBlocks = (0..<16).map { _ in Block2D(width: 16, height: 16) }
+        let decBlocks = (0..<16).map { _ in BlockView.allocate(width: 16, height: 16) }
+        defer { for b in decBlocks { b.deallocate() } }
         var decoder = try EntropyDecoder(data: data)
         for i in 0..<16 {
-            let view = decBlocks[i].view
-            try! blockDecode16(decoder: &decoder, block: view, parentBlock: nil)
-                }
+            try! blockDecode16(decoder: &decoder, block: decBlocks[i], parentBlock: nil)
+        }
         
         // 比較 (blockEncode16後のデータ vs デコード後)
         for i in 0..<16 {

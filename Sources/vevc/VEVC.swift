@@ -22,7 +22,7 @@ public enum Timescale: UInt8 {
 
 // MARK: - BlockView
 
-struct BlockView {
+struct BlockView: @unchecked Sendable {
     var base: UnsafeMutablePointer<Int16>
     let width: Int
     let height: Int
@@ -72,71 +72,29 @@ struct BlockView {
             }
         }
     }
-}
 
-// MARK: - Block2D
-
-final class Block2D: @unchecked Sendable {
-    let base: UnsafeMutablePointer<Int16>
-    let width: Int
-    let height: Int
-    let stride: Int
-    private let count: Int
-
-    init(width: Int, height: Int, stride: Int? = nil) {
-        self.width = width
-        self.height = height
-        self.stride = stride ?? width
-        self.count = self.stride * height
-        self.base = .allocate(capacity: self.count)
-        self.base.initialize(repeating: 0, count: self.count)
+    /// メモリ確保してBlockViewを生成する。使用後は必ずdeallocate()を呼ぶこと。
+    /// Block2Dの代替として使用する。
+    @inline(__always)
+    static func allocate(width: Int, height: Int, stride strideVal: Int? = nil) -> BlockView {
+        let s = strideVal ?? width
+        let count = s * height
+        let ptr = UnsafeMutablePointer<Int16>.allocate(capacity: count)
+        ptr.initialize(repeating: 0, count: count)
+        return BlockView(base: ptr, width: width, height: height, stride: s)
     }
 
-    deinit {
-        base.deinitialize(count: count)
+    /// allocateで確保したメモリを解放する。
+    @inline(__always)
+    func deallocate() {
+        base.deinitialize(count: stride * height)
         base.deallocate()
     }
 
-    /// BlockView互換の直接subscriptアクセス
-    @inline(__always)
-    subscript(y: Int, x: Int) -> Int16 {
-        get { base[(y * stride) + x] }
-        set { base[(y * stride) + x] = newValue }
-    }
-
-    /// BlockView互換の行ポインタ取得
-    @inline(__always)
-    func rowPointer(y: Int) -> UnsafeMutablePointer<Int16> {
-        return base.advanced(by: y * stride)
-    }
-
-    /// 後方互換: BlockView経由のアクセス（段階的に廃止予定）
-    @inline(__always)
-    func withView<R>(_ body: (inout BlockView) throws -> R) rethrows -> R {
-        var view = BlockView(base: base, width: width, height: height, stride: stride)
-        return try body(&view)
-    }
-
-    /// BlockViewを動的に生成
+    /// Block2D互換: .viewアクセスで自身を返す（既存コードとの互換性維持）
     @inline(__always)
     var view: BlockView {
-        return BlockView(base: base, width: width, height: height, stride: stride)
+        return self
     }
-
-
-    @inline(__always)
-    func clearAll() {
-        var i = 0
-        let zero16 = SIMD16<Int16>.zero
-        while i + 16 <= count {
-            UnsafeMutableRawPointer(base + i).storeBytes(of: zero16, as: SIMD16<Int16>.self)
-            i += 16
-        }
-        while i < count {
-            base[i] = 0
-            i += 1
-        }
-    }
-
-
 }
+

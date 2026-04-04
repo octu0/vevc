@@ -667,8 +667,8 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getY(x: Int, y yPos: Int, size: Int) -> Block2D {
-        let block = Block2D(width: size, height: size)
+    func getY(x: Int, y yPos: Int, size: Int) -> BlockView {
+        let block = BlockView.allocate(width: size, height: size)
         let v = block.view
         self.y.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
@@ -693,10 +693,10 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getCb(x: Int, y yPos: Int, size: Int) -> Block2D {
+    func getCb(x: Int, y yPos: Int, size: Int) -> BlockView {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        let block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
         let v = block.view
         self.cb.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
@@ -721,10 +721,10 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getCr(x: Int, y yPos: Int, size: Int) -> Block2D {
+    func getCr(x: Int, y yPos: Int, size: Int) -> BlockView {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        let block = Block2D(width: size, height: size)
+        let block = BlockView.allocate(width: size, height: size)
         let v = block.view
         self.cr.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
@@ -749,7 +749,7 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    mutating func updateY(data: inout Block2D, startX: Int, startY: Int, size: Int) {
+    mutating func updateY(data: inout BlockView, startX: Int, startY: Int, size: Int) {
         let validStartY = max(0, startY)
         let validStartX = max(0, startX)
         let validEndY = min(height, startY + size)
@@ -775,7 +775,7 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    mutating func updateCb(data: inout Block2D, startX: Int, startY: Int, size: Int) {
+    mutating func updateCb(data: inout BlockView, startX: Int, startY: Int, size: Int) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         
@@ -804,7 +804,7 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    mutating func updateCr(data: inout Block2D, startX: Int, startY: Int, size: Int) {
+    mutating func updateCr(data: inout BlockView, startX: Int, startY: Int, size: Int) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         
