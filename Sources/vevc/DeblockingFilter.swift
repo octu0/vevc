@@ -6,9 +6,9 @@ func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockS
     // Post-processing: out-of-loop like filtering for the whole generated plane.
     // It smooths boundaries between `blockSize` regions.
     
-    // tc controls maximum clipping: smaller tc -> less smoothing, prevents blurring of real edges.
-    // beta controls edge detection: smaller beta -> preserves more detailed textures.
-    let tc = Int16(min(12, max(2, qStep / 3)))
+    // tc controls maximum clipping: larger tc -> stronger smoothing at block edges.
+    // beta controls edge detection threshold: smaller beta -> preserves more detailed textures.
+    let tc = Int16(min(12, max(2, qStep / 2)))
     let beta = Int32(min(45, max(12, qStep)))
     
     // Vertical Edges (x = blockSize, 2*blockSize, ...)
