@@ -526,7 +526,7 @@ func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [BlockView]) thr
     for i in blocks.indices {
         let isZero = bwFlags.readBit()
         if isZero {
-            blocks[i].clearAll()
+            // プールから取得したブロックは既にゼロ保証済み
             tasks.append((i, true))
         } else {
             tasks.append((i, false))
