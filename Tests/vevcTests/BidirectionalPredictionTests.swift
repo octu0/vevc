@@ -69,8 +69,8 @@ final class BidirectionalPredictionTests: XCTestCase {
         let pd2 = toPlaneData420(images: [img2])[0]
         
         // 前方MV（pd0 → pd1）と後方MV（pd2 → pd1）を計算
-        let (fwdMVs, fwdSADs) = await computeMotionVectors(curr: pd1, prev: pd0)
-        let (bwdMVs, bwdSADs) = await computeMotionVectors(curr: pd1, prev: pd2)
+        let (_, fwdSADs) = await computeMotionVectors(curr: pd1, prev: pd0)
+        let (_, bwdSADs) = await computeMotionVectors(curr: pd1, prev: pd2)
         
         // ブロックごとに、前方/後方のSADを比較して選択する
         var fwdBetterCount = 0

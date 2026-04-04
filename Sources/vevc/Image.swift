@@ -109,7 +109,6 @@ extension PlaneData420 {
                 dst.withUnsafeMutableBufferPointer { dstBuf in
                     guard let srcPtr = srcBuf.baseAddress, let dstPtr = dstBuf.baseAddress else { return }
                     var i = 0
-                    #if arch(arm64) || arch(x86_64) || arch(wasm32)
                     let offset128 = SIMD8<Int16>(repeating: 128)
                     let zero8 = SIMD8<Int16>.zero
                     let max255 = SIMD8<Int16>(repeating: 255)
@@ -120,7 +119,6 @@ extension PlaneData420 {
                         UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
                         i += 8
                     }
-                    #endif
                     while i < count {
                         let v = srcPtr[i]
                         switch v {
@@ -150,7 +148,6 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
         guard let srcPtr = src.baseAddress, let dstPtr = dst.baseAddress else { return }
         let count = min(src.count, dst.count)
         var i = 0
-        #if arch(arm64) || arch(x86_64) || arch(wasm32)
         let offset128 = SIMD8<Int16>(repeating: 128)
         while i + 8 <= count {
             let u8 = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<UInt8>.self)
@@ -158,7 +155,6 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
             UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: i16, as: SIMD8<Int16>.self)
             i += 8
         }
-        #endif
         while i < count {
             dstPtr[i] = Int16(srcPtr[i]) - 128
             i += 1
@@ -253,7 +249,6 @@ func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData42
                           let resPtr = resBuf.baseAddress else { return }
                     
                     var i = 0
-                    #if arch(arm64) || arch(x86_64) || arch(wasm32)
                     let chunk = 16
                     while i + chunk <= count {
                         let cSimd = UnsafeRawPointer(cPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
@@ -262,7 +257,6 @@ func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData42
                         UnsafeMutableRawPointer(resPtr.advanced(by: i)).storeBytes(of: diffSimd, as: SIMD16<Int16>.self)
                         i += chunk
                     }
-                    #endif
                     
                     while i < count {
                         resPtr[i] = cPtr[i] &- pPtr[i]
@@ -695,7 +689,7 @@ struct Image16: Sendable {
                 }
             }
         }
-            return block
+        return block
     }
     
     @inline(__always)
@@ -723,7 +717,7 @@ struct Image16: Sendable {
                 }
             }
         }
-            return block
+        return block
     }
     
     @inline(__always)
@@ -751,7 +745,7 @@ struct Image16: Sendable {
                 }
             }
         }
-            return block
+        return block
     }
     
     @inline(__always)
@@ -777,7 +771,7 @@ struct Image16: Sendable {
                 let destPtr = destBase.advanced(by: (validStartY + h) * width + validStartX)
                 destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
-                }
+        }
     }
     
     @inline(__always)
@@ -806,7 +800,7 @@ struct Image16: Sendable {
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
                 destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
-                }
+        }
     }
     
     @inline(__always)
@@ -835,7 +829,7 @@ struct Image16: Sendable {
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
                 destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
-                }
+        }
     }
 }
 
@@ -856,14 +850,12 @@ func isPlaneIdentical(a: PlaneData420, b: PlaneData420) -> Bool {
             guard let aPtr = aBuf.baseAddress, let bPtr = bBuf.baseAddress else { return false }
             
             var i = 0
-            #if arch(arm64) || arch(x86_64) || arch(wasm32)
             while i + 16 <= count {
                 let aSimd = UnsafeRawPointer(aPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
                 let bSimd = UnsafeRawPointer(bPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
                 if any(aSimd .!= bSimd) { return false }
                 i += 16
             }
-            #endif
             
             while i < count {
                 if aPtr[i] != bPtr[i] { return false }

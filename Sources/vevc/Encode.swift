@@ -797,7 +797,6 @@ func isEffectivelyZero8(data base: UnsafeMutablePointer<Int16>, threshold: Int) 
     return true
 }
 
-
 @inline(__always)
 func checkQuadrants16x16(base: UnsafeMutablePointer<Int16>, stride: Int, q0: inout Bool, q1: inout Bool, q2: inout Bool, q3: inout Bool) {
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -1027,7 +1026,7 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
             hlView.clearAll()
             lhView.clearAll()
             hhView.clearAll()
-                    zeroCount += 1
+            zeroCount += 1
         } else {
             bwFlags.writeBit(false)
             
@@ -1070,18 +1069,18 @@ func encodePlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int, parentBl
                 let view = blocks[i].view
                 let subs = getSubbands32(view: view)
                 encodeSubbands32WithParent(task: task, encoder: &encoder, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
-                                    } else {
+            } else {
                 let view = blocks[i].view
                 let subs = getSubbands32(view: view)
                 encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs)
-                        }
+            }
         }
     } else {
         for (i, task) in tasks {
             let view = blocks[i].view
             let subs = getSubbands32(view: view)
             encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs)
-                }
+        }
     }
     
     encoder.flush()
@@ -1168,18 +1167,18 @@ func encodePlaneSubbands16(blocks: inout [Block2D], zeroThreshold: Int, parentBl
                 let view = blocks[i].view
                 let subs = getSubbands16(view: view)
                 encodeSubbands16WithParent(task: task, encoder: &encoder, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
-                                    } else {
+            } else {
                 let view = blocks[i].view
                 let subs = getSubbands16(view: view)
                 encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
-                        }
+            }
         }
     } else {
         for (i, task) in tasks {
             let view = blocks[i].view
             let subs = getSubbands16(view: view)
             encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
-                }
+        }
     }
     
     encoder.flush()
@@ -1218,7 +1217,7 @@ func encodePlaneSubbands8(blocks: inout [Block2D], zeroThreshold: Int) -> [UInt8
         blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
         blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
         blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
-        }
+    }
     
     encoder.flush()
     var out = bwFlags.bytes
@@ -1264,7 +1263,7 @@ func encodePlaneBaseSubbands8(blocks: inout [Block2D], zeroThreshold: Int, isPFr
             blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
             blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
             blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
-                } else {
+        } else {
             lastVal = 0
         }
     }
@@ -1383,7 +1382,7 @@ func encodePlaneBaseSubbands32(blocks: inout [Block2D], zeroThreshold: Int) -> [
                 blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
                 blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
             }
-                }
+        }
     }
     
     encoder.flush()
@@ -1524,7 +1523,7 @@ func encodeCascadedPlaneSubbands32(blocks: inout [Block2D], zeroThreshold: Int) 
         blockEncode16(encoder: &encoder, block: hl1, parentBlock: nil)
         blockEncode16(encoder: &encoder, block: lh1, parentBlock: nil)
         blockEncode16(encoder: &encoder, block: hh1, parentBlock: nil)
-        }
+    }
     
     encoder.flush()
     var out = bwFlags.bytes

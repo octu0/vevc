@@ -49,7 +49,6 @@ struct MotionEstimation {
         pBase: UnsafePointer<Int16>, 
         width: Int, height: Int, bx: Int, by: Int
     ) -> (Int, Int, Int) {
-        
         let oPtr = UnsafeMutablePointer<Int16>.allocate(capacity: 64)
         let tPtr = UnsafeMutablePointer<Int16>.allocate(capacity: 64)
         defer {

@@ -119,14 +119,14 @@ func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentBlocks: [Block2
                     try blockDecode8(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
             }
-                }
+        }
         
         if let pBlocks = parentBlocks, i < pBlocks.count {
             let pBlock = pBlocks[i]
             let pView = pBlock.view
             let pSubs = getSubbands16(view: pView)
             try decodeAction(pSubs.hl, pSubs.lh, pSubs.hh)
-                } else {
+        } else {
             try decodeAction(nil, nil, nil)
         }
     }
@@ -265,7 +265,7 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [Block2
             let pView = pBlock.view
             let pSubs = getSubbands8(view: pView)
             try decodeAction(pSubs.hl, pSubs.lh, pSubs.hh)
-                } else {
+        } else {
             try decodeAction(nil, nil, nil)
         }
     }
@@ -326,7 +326,7 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?,
             
             let hhView = BlockView(base: view.base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
             try blockDecode4(decoder: &decoder, block: hhView, parentBlock: parentBlock)
-                }
+        }
         
         if let pb2d = parentBlock2D {
             let pb = pb2d.view
@@ -384,7 +384,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [Block2D
             
             let hhView = BlockView(base: view.base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
             try blockDecode4(decoder: &decoder, block: hhView, parentBlock: nil)
-                } else {
+        } else {
             lastVal = 0
         }
     }
@@ -517,7 +517,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [Block2
                 try blockDecode8(decoder: &decoder, block: hh, parentBlock: nil)
             }
         }
-        }
+    }
 
     return blocks
 }
@@ -579,5 +579,5 @@ func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [Block2D]) throw
         try blockDecode16(decoder: &decoder, block: m_hl1, parentBlock: nil)
         try blockDecode16(decoder: &decoder, block: m_lh1, parentBlock: nil)
         try blockDecode16(decoder: &decoder, block: m_hh1, parentBlock: nil)
-        }
+    }
 }
