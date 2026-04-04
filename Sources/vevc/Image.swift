@@ -240,10 +240,9 @@ func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData42
         let count = c.count
         if count < 1 { return [] }
 
-        var res = [Int16](repeating: 0, count: count)
-        c.withUnsafeBufferPointer { cBuf in
-            p.withUnsafeBufferPointer { pBuf in
-                res.withUnsafeMutableBufferPointer { resBuf in
+        return [Int16](unsafeUninitializedCapacity: count) { resBuf, initializedCount in
+            c.withUnsafeBufferPointer { cBuf in
+                p.withUnsafeBufferPointer { pBuf in
                     guard let cPtr = cBuf.baseAddress,
                           let pPtr = pBuf.baseAddress,
                           let resPtr = resBuf.baseAddress else { return }
@@ -264,8 +263,8 @@ func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData42
                     }
                 }
             }
+            initializedCount = count
         }
-        return res
     }
     
     async let y = sub(c: curr.y, p: predicted.y)
@@ -282,10 +281,9 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
         let count = rW * rH
         if count < 1 { return [] }
 
-        var curr = [Int16](repeating: 0, count: count)
-        r.withUnsafeBufferPointer { rBuf in
-            p.withUnsafeBufferPointer { pBuf in
-                curr.withUnsafeMutableBufferPointer { cBuf in
+        return [Int16](unsafeUninitializedCapacity: count) { cBuf, initializedCount in
+            r.withUnsafeBufferPointer { rBuf in
+                p.withUnsafeBufferPointer { pBuf in
                     guard let rPtr = rBuf.baseAddress,
                           let pPtr = pBuf.baseAddress,
                           let cPtr = cBuf.baseAddress else { return }
@@ -312,8 +310,8 @@ func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneDa
                     }
                 }
             }
+            initializedCount = count
         }
-        return curr
     }
     
     let pCbDx = (predicted.width + 1) / 2
@@ -399,19 +397,19 @@ public struct YCbCrImage: Sendable {
         self.height = height
         self.ratio = ratio
         self.fps = fps
-        self.yPlane = [UInt8](repeating: 0, count: (width * height))
+        self.yPlane = [UInt8](unsafeUninitializedCapacity: (width * height)) { _, c in c = (width * height) }
         
         switch ratio {
         case .ratio420:
             let cw = (width + 1) / 2
             let ch = (height + 1) / 2
             let cSize = (cw * ch)
-            self.cbPlane = [UInt8](repeating: 0, count: cSize)
-            self.crPlane = [UInt8](repeating: 0, count: cSize)
+            self.cbPlane = [UInt8](unsafeUninitializedCapacity: cSize) { _, c in c = cSize }
+            self.crPlane = [UInt8](unsafeUninitializedCapacity: cSize) { _, c in c = cSize }
         case .ratio444:
             let cSize = (width * height)
-            self.cbPlane = [UInt8](repeating: 0, count: cSize)
-            self.crPlane = [UInt8](repeating: 0, count: cSize)
+            self.cbPlane = [UInt8](unsafeUninitializedCapacity: cSize) { _, c in c = cSize }
+            self.crPlane = [UInt8](unsafeUninitializedCapacity: cSize) { _, c in c = cSize }
         }
     }
     
@@ -639,6 +637,71 @@ struct ImageReader: Sendable {
         }
         return rowCr420(x: x, y: y, size: size)
     }
+
+    @inline(__always)
+    func readBlockY(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
+        if 0 <= x && 0 <= y && (y + blockHeight) <= height && (x + blockWidth) <= width {
+            img.yPlane.withUnsafeBufferPointer { srcPtr in
+                guard let srcBase = srcPtr.baseAddress else { return }
+                for h in 0..<blockHeight {
+                    let destPtr = view.rowPointer(y: h)
+                    let offset = img.yOffset(x, y + h)
+                    for w in 0..<blockWidth {
+                        destPtr[w] = Int16(srcBase[offset + w]) - 128
+                    }
+                }
+            }
+            return
+        }
+        
+        img.yPlane.withUnsafeBufferPointer { srcPtr in
+            guard let srcBase = srcPtr.baseAddress else { return }
+            for h in 0..<blockHeight {
+                let destPtr = view.rowPointer(y: h)
+                for w in 0..<blockWidth {
+                    let (px, py) = boundaryRepeat(width, height, (x + w), (y + h))
+                    let offset = img.yOffset(px, py)
+                    destPtr[w] = Int16(srcBase[offset]) - 128
+                }
+            }
+        }
+    }
+
+    @inline(__always)
+    func readBlockCb(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
+        let is444 = (img.ratio == .ratio444)
+        img.cbPlane.withUnsafeBufferPointer { srcPtr in
+            guard let srcBase = srcPtr.baseAddress else { return }
+            for h in 0..<blockHeight {
+                let destPtr = view.rowPointer(y: h)
+                for w in 0..<blockWidth {
+                    let (rPx, rPy) = boundaryRepeat(width, height, ((x + w) * 2), ((y + h) * 2))
+                    let cPx = is444 ? rPx : (rPx / 2)
+                    let cPy = is444 ? rPy : (rPy / 2)
+                    let offset = img.cOffset(cPx, cPy)
+                    destPtr[w] = Int16(srcBase[offset]) - 128
+                }
+            }
+        }
+    }
+
+    @inline(__always)
+    func readBlockCr(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
+        let is444 = (img.ratio == .ratio444)
+        img.crPlane.withUnsafeBufferPointer { srcPtr in
+            guard let srcBase = srcPtr.baseAddress else { return }
+            for h in 0..<blockHeight {
+                let destPtr = view.rowPointer(y: h)
+                for w in 0..<blockWidth {
+                    let (rPx, rPy) = boundaryRepeat(width, height, ((x + w) * 2), ((y + h) * 2))
+                    let cPx = is444 ? rPx : (rPx / 2)
+                    let cPy = is444 ? rPy : (rPy / 2)
+                    let offset = img.cOffset(cPx, cPy)
+                    destPtr[w] = Int16(srcBase[offset]) - 128
+                }
+            }
+        }
+    }
 }
 
 struct Image16: Sendable {
@@ -651,11 +714,11 @@ struct Image16: Sendable {
     init(width: Int, height: Int) {
         self.width = width
         self.height = height
-        self.y = [Int16](repeating: 0, count: width * height)
+        self.y = [Int16](unsafeUninitializedCapacity: width * height) { _, c in c = width * height }
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        self.cb = [Int16](repeating: 0, count: cWidth * cHeight)
-        self.cr = [Int16](repeating: 0, count: cWidth * cHeight)
+        self.cb = [Int16](unsafeUninitializedCapacity: cWidth * cHeight) { _, c in c = cWidth * cHeight }
+        self.cr = [Int16](unsafeUninitializedCapacity: cWidth * cHeight) { _, c in c = cWidth * cHeight }
     }
     
     init(width: Int, height: Int, y: [Int16], cb: [Int16], cr: [Int16]) {

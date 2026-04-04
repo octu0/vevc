@@ -639,6 +639,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
     return (subPlane, yBlocks, cbBlocks, crBlocks)
 }
 
+@inline(__always)
 func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?) -> [UInt8] {
     // Layer2 (32x32) contains the highest-frequency DWT subbands with the
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
@@ -714,9 +715,7 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable) -> [Int16] {
     let colCount = (width + 7) / 8
     let rowCount = (height + 7) / 8
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -763,17 +762,15 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
 func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -830,17 +827,15 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
 func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -897,17 +892,15 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
 func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -964,17 +957,15 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
 func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -1031,17 +1022,15 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
 func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -1098,17 +1087,15 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
 func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         var idx = 0
         for row in 0..<rowCount {
@@ -1165,8 +1152,8 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                                 }
             }
         }
+        initializedCount = width * height
     }
-    return plane
 }
 
 @inline(__always)
@@ -1305,9 +1292,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
 @inline(__always)
 func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable) -> [Int16] {
     let colCount = (width + 32 - 1) / 32
-    var plane = [Int16](repeating: 0, count: width * height)
-    
-    plane.withUnsafeMutableBufferPointer { dstBuf in
+    return [Int16](unsafeUninitializedCapacity: width * height) { dstBuf, initializedCount in
         guard let dstBase = dstBuf.baseAddress else { return }
         for idx in blocks.indices {
             let blk = blocks[idx]
@@ -1343,9 +1328,8 @@ func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: Qu
                 }
                         }
         }
+        initializedCount = width * height
     }
-    
-    return plane
 }
 
 @inline(__always)

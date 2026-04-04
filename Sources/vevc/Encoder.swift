@@ -367,6 +367,7 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
     return 0 < totalPixels ? totalSAD / totalPixels : 0
 }
 
+@inline(__always)
 private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> QuantizationTable {
     let probeStep = 64
     let qt = QuantizationTable(baseStep: probeStep)
@@ -390,31 +391,22 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     @inline(__always)
     func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: w, height: h)
-        let view = block.view
-        for i in 0..<h {
-            view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
-        }
-            return block
+        reader.readBlockY(x: x, y: y, width: w, height: h, into: block.view)
+        return block
     }
 
     @inline(__always)
     func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: w, height: h)
-        let view = block.view
-        for i in 0..<h {
-            view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
-        }
-            return block
+        reader.readBlockCb(x: x, y: y, width: w, height: h, into: block.view)
+        return block
     }
 
     @inline(__always)
     func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: w, height: h)
-        let view = block.view
-        for i in 0..<h {
-            view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
-        }
-            return block
+        reader.readBlockCr(x: x, y: y, width: w, height: h, into: block.view)
+        return block
     }
     
     let estPool = BlockViewPool(maxPerSize: 8)
@@ -447,6 +439,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     return QuantizationTable(baseStep: q)
 }
 
+@inline(__always)
 private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> Int {
     let count = 4 * 4
     let ptr0 = block.rowPointer(y: 0)
@@ -505,6 +498,7 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
     return bodyBits + headerBits
 }
 
+@inline(__always)
 private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) -> Int {
     let view = block.view
     let sub = dwt2d_8_sb(view)
@@ -529,6 +523,7 @@ private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) ->
     return bits
 }
 
+@inline(__always)
 private func estimateRiceBits4(block: BlockView) -> Int {
     var sumAbs = 0
     let count = (4 * 4)
