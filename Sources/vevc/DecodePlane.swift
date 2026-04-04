@@ -48,9 +48,8 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int, 
     
     let consumed = brFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let dataSlice = Array(data[consumed...])
     
-    var decoder = try EntropyDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: data, startOffset: consumed)
     
     let half = 32 / 2
     
@@ -187,9 +186,8 @@ func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int, 
     
     let consumed = brFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let dataSlice = Array(data[consumed...])
     
-    var decoder = try EntropyDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: data, startOffset: consumed)
     
     let half = 16 / 2
 
@@ -294,9 +292,8 @@ func decodePlaneSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, p
     
     let consumed = brFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let dataSlice = Array(data[consumed...])
     
-    var decoder = try EntropyDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: data, startOffset: consumed)
     
     let half = 8 / 2
 
@@ -360,9 +357,8 @@ func decodePlaneBaseSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: In
     
     let consumed = brFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let dataSlice = Array(data[consumed...])
     
-    var decoder = try EntropyDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: data, startOffset: consumed)
     
     let half = 8 / 2
 
@@ -445,9 +441,8 @@ func decodePlaneBaseSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: I
     
     let consumed = brFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let dataSlice = Array(data[consumed...])
     
-    var decoder = try EntropyDecoder(data: dataSlice)
+    var decoder = try EntropyDecoder(data: data, startOffset: consumed)
     
     let half = 32 / 2
 
@@ -540,8 +535,7 @@ func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [BlockView]) thr
     
     let consumed = bwFlags.consumedBytes
     guard consumed <= data.count else { throw DecodeError.insufficientData }
-    let entropyData = Array(data[consumed...])
-    var decoder = try EntropyDecoder(data: entropyData)
+    var decoder = try EntropyDecoder(data: data, startOffset: consumed)
     var lastVal: Int16 = 0
     
     for (i, skip) in tasks {

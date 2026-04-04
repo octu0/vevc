@@ -407,9 +407,16 @@ struct EntropyDecoder {
     private var ransDecoder: Interleaved4rANSDecoder!
 
     init(data: [UInt8]) throws {
-        var offset = 0
+        try self.init(data: data, startOffset: 0)
+    }
+    
+    /// データ配列の指定オフセットからエントロピーデコーダを初期化する。
+    /// `Array(data[startOffset...])` のようなスライスコピーを回避し、
+    /// 元の配列を直接参照してメモリアロケーションを削減する。
+    init(data: [UInt8], startOffset: Int) throws {
+        var offset = startOffset
         
-        guard 4 <= data.count else { throw DecodeError.insufficientData }
+        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
         let bypassLen = try readUInt32BEFromBytes(data, offset: &offset)
         
         guard offset + Int(bypassLen) <= data.count else { throw DecodeError.insufficientData }
