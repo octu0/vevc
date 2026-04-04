@@ -128,7 +128,8 @@ final class ChromaBlockTests: XCTestCase {
             framerate: 30,
             zeroThreshold: 3,
             keyint: 15,
-            sceneChangeThreshold: 8
+            sceneChangeThreshold: 8,
+            pool: BlockViewPool()
         )
         let decoder = CoreDecoder(width: width, height: height)
 
@@ -176,7 +177,8 @@ final class ChromaBlockTests: XCTestCase {
             framerate: 30,
             zeroThreshold: 3,
             keyint: 15,
-            sceneChangeThreshold: 8
+            sceneChangeThreshold: 8,
+            pool: BlockViewPool()
         )
         let decoder = CoreDecoder(width: width, height: height)
 

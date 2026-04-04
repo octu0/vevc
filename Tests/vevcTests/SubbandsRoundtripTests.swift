@@ -6,6 +6,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     
     /// 少数ブロックでencodePlaneSubbands32→decodePlaneSubbands32
     func testSubbands32Roundtrip_3blocks() async throws {
+        let pool = BlockViewPool()
         // 3ブロック（1行3列）のテスト
         var blocks = (0..<3).map { _ in BlockView.allocate(width: 32, height: 32) }
         
@@ -68,7 +69,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: 3, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: 3, parentBlocks: nil)
         
         // デコード後のHL
         var decHL: [[Int16]] = []
@@ -113,6 +114,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     
     /// splitが発生するデータでencodePlaneSubbands32→decodePlaneSubbands32
     func testSubbands32Roundtrip_withSplit() async throws {
+        let pool = BlockViewPool()
         var blocks = (0..<3).map { _ in BlockView.allocate(width: 32, height: 32) }
         
         // Block0: 全象限にデータ → splitしない
@@ -160,7 +162,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil)
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: 3, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: 3, parentBlocks: nil)
         
         // 各ブロックのHL/LH/HH比較
         for bi in 0..<3 {
@@ -183,6 +185,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     
     /// 実際のencodePlaneLayer32が生成するblocks（量子化後）でencodePlaneSubbands32→decodePlaneSubbands32テスト
     func testSubbands32Roundtrip_realDWTBlocks() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         
@@ -207,7 +210,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -217,7 +220,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count, parentBlocks: nil)
         
         // 比較
         XCTAssertEqual(blocks.count, decBlocks.count, "blocks count mismatch")
@@ -259,6 +262,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     }
     
     private func subbands32RoundtripForSize(width: Int, height: Int) async throws -> (totalDiff: Int, firstBlock: Int, totalBlocks: Int) {
+        let pool = BlockViewPool()
         var rY = [Int16](repeating: 0, count: width * height)
         for y in 0..<height {
             for x in 0..<width {
@@ -270,14 +274,14 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         let qtY = QuantizationTable(baseStep: 2)
         let reader = Int16Reader(data: rY, width: width, height: height)
-        var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count, parentBlocks: nil)
         
         var totalDiff = 0
         var firstDiffBlock = -1
@@ -309,6 +313,7 @@ final class SubbandsRoundtripTests: XCTestCase {
     
     /// toPlaneData420経由のデータで各サイズテスト
     func testSubbands32Roundtrip_viaPD420() async throws {
+        let pool = BlockViewPool()
         let sizes: [(Int, Int)] = [(128, 128), (256, 192), (320, 240), (640, 480)]
         for (w, h) in sizes {
             var img = YCbCrImage(width: w, height: h)
@@ -331,14 +336,14 @@ final class SubbandsRoundtripTests: XCTestCase {
             let pd = toPlaneData420(images: [img])[0]
             let qtY = QuantizationTable(baseStep: 2)
             
-            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h)
+            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool)
             for i in blocks.indices {
                 evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
             }
             
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
             let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
-            let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks.count, parentBlocks: nil)
+            let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count, parentBlocks: nil)
             
             var totalDiff = 0
             var firstDiffBlock = -1

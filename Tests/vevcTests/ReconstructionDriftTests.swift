@@ -26,6 +26,7 @@ final class ReconstructionDriftTests: XCTestCase {
     }
     
     private func verifyIFrameReconstruction(width: Int, height: Int) async throws {
+        let pool = BlockViewPool()
         var img = YCbCrImage(width: width, height: height)
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
@@ -48,9 +49,9 @@ final class ReconstructionDriftTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
         
-        let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, pool: pool, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
-        let decImg16 = try await decodeSpatialLayers(r: bytes, maxLayer: 2, dx: width, dy: height)
+        let decImg16 = try await decodeSpatialLayers(r: bytes, pool: pool, maxLayer: 2, dx: width, dy: height)
         let decRecon = PlaneData420(img16: decImg16)
         
         let encStats = stats(encRecon.y)
@@ -105,10 +106,11 @@ final class ReconstructionDriftTests: XCTestCase {
     }
     
     func testPFrameReconstructionMatch() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         var img0 = YCbCrImage(width: width, height: height)

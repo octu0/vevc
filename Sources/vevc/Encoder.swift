@@ -74,6 +74,7 @@ public class VEVCEncoder {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
+                let pool = BlockViewPool()
                 let coreEncoder = LayersEncodeActor(
                     width: width,
                     height: height,
@@ -81,7 +82,8 @@ public class VEVCEncoder {
                     framerate: framerate,
                     zeroThreshold: zeroThreshold,
                     keyint: keyint,
-                    sceneChangeThreshold: sceneChangeThreshold
+                    sceneChangeThreshold: sceneChangeThreshold,
+                    pool: pool
                 )
                 
                 do {
@@ -128,13 +130,14 @@ actor LayersEncodeActor {
     let zeroThreshold: Int
     let keyint: Int
     let sceneChangeThreshold: Int
+    let pool: BlockViewPool
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
     private var frameIndex = 0
     private var qt: QuantizationTable?
     
-    init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int) {
+    init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -142,6 +145,7 @@ actor LayersEncodeActor {
         self.zeroThreshold = zeroThreshold
         self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
+        self.pool = pool
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
@@ -223,12 +227,12 @@ actor LayersEncodeActor {
             
             if useBidirectional {
                 (bytes, reconstructed) = try await encodeSpatialLayers(
-                    pd: plane, predictedPd: previousReconstructed, nextPd: firstReconstructed,
+                    pd: plane, pool: pool, predictedPd: previousReconstructed, nextPd: firstReconstructed,
                     maxbitrate: localMaxbitrate, qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
                 )
             } else {
                 (bytes, reconstructed) = try await encodeSpatialLayers(
-                    pd: plane, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
+                    pd: plane, pool: pool, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
                     qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
                 )
             }
@@ -287,7 +291,7 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0)
         
-        let (bytes, _) = try await encodeSpatialLayers(pd: curr, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+        let (bytes, _) = try await encodeSpatialLayers(pd: curr, pool: pool, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
         
         framesSinceKeyframe += 1
         frameIndex += 1
@@ -384,8 +388,8 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     var totalSampleBits = 0
     let reader = ImageReader(img: img)
     @inline(__always)
-    func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> BlockView {
-        let block = BlockView.allocate(width: w, height: h)
+    func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
+        let block = pool.get(width: w, height: h)
         let view = block.view
         for i in 0..<h {
             view.setRow(offsetY: i, row: reader.rowY(x: x, y: y + i, size: w))
@@ -394,8 +398,8 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     }
 
     @inline(__always)
-    func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> BlockView {
-        let block = BlockView.allocate(width: w, height: h)
+    func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
+        let block = pool.get(width: w, height: h)
         let view = block.view
         for i in 0..<h {
             view.setRow(offsetY: i, row: reader.rowCb(x: x, y: y + i, size: w))
@@ -404,8 +408,8 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     }
 
     @inline(__always)
-    func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int) -> BlockView {
-        let block = BlockView.allocate(width: w, height: h)
+    func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
+        let block = pool.get(width: w, height: h)
         let view = block.view
         for i in 0..<h {
             view.setRow(offsetY: i, row: reader.rowCr(x: x, y: y + i, size: w))
@@ -413,15 +417,19 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
             return block
     }
     
+    let estPool = BlockViewPool(maxPerSize: 8)
     for (sx, sy) in points {
-        var blockY = fetchBlockY(reader: reader, x: sx, y: sy, w: w, h: h)
+        var blockY = fetchBlockY(reader: reader, x: sx, y: sy, w: w, h: h, pool: estPool)
         totalSampleBits += measureBlockBits8(block: &blockY, qt: qt)
+        estPool.put(blockY)
         
-        var blockCb = fetchBlockCb(reader: reader, x: sx, y: sy, w: w, h: h)
+        var blockCb = fetchBlockCb(reader: reader, x: sx, y: sy, w: w, h: h, pool: estPool)
         totalSampleBits += measureBlockBits8(block: &blockCb, qt: qt)
+        estPool.put(blockCb)
         
-        var blockCr = fetchBlockCr(reader: reader, x: sx, y: sy, w: w, h: h)
+        var blockCr = fetchBlockCr(reader: reader, x: sx, y: sy, w: w, h: h, pool: estPool)
         totalSampleBits += measureBlockBits8(block: &blockCr, qt: qt)
+        estPool.put(blockCr)
     }
     
     let samplePixels = points.count * (w * h) * 3

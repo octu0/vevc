@@ -29,9 +29,10 @@ final class BlockDataCompareTests: XCTestCase {
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
+        let pool = BlockViewPool()
         
         // エンコーダ: Layer32 のバイト + blocks を取得
-        var (_, encYBlocks, encCbBlocks, encCrBlocks) = try await preparePlaneLayer32(pd: pd, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (_, encYBlocks, encCbBlocks, encCrBlocks) = try await preparePlaneLayer32(pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         let layer2Bytes = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
 
         
@@ -47,7 +48,7 @@ final class BlockDataCompareTests: XCTestCase {
         
         let rowCountY = (height + 32 - 1) / 32
         let colCountY = (width + 32 - 1) / 32
-        let decYBlocks = try decodePlaneSubbands32(data: bufY, blockCount: rowCountY * colCountY, parentBlocks: nil)
+        let decYBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: nil)
         
         // encYBlocks vs decYBlocks のHL/LH/HHサブバンドを比較
         XCTAssertEqual(encYBlocks.count, decYBlocks.count, "blocks count mismatch: enc=\(encYBlocks.count) dec=\(decYBlocks.count)")

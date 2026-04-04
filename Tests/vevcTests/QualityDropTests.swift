@@ -101,10 +101,11 @@ final class QualityDropTests: XCTestCase {
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
+        let pool = BlockViewPool()
         
         // 1. Base8
-        let (bytesB8, reconB8, _, _, _) = try await encodePlaneBase8(pd: pd, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (decB8, _, _, _) = try await decodeBase8(r: bytesB8, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
+        let (bytesB8, reconB8, _, _, _) = try await encodePlaneBase8(pd: pd, pool: pool, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (decB8, _, _, _) = try await decodeBase8(r: bytesB8, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
         let decB8Pd = PlaneData420(width: pd.width, height: pd.height, y: decB8.y, cb: decB8.cb, cr: decB8.cr)
         let decImgB8 = planeDataToImage(pd: decB8Pd)
         
@@ -119,24 +120,24 @@ final class QualityDropTests: XCTestCase {
         print("Base8 Diff Y:\(diffY.diffCount)/\(diffY.count) Cb:\(diffCb.diffCount) Cr:\(diffCr.diffCount)")
         
         // 2. Layer16
-        var (sub16, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: pd, sads: nil, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (b8ReconBytes, b8Recon, _, _, _) = try await encodePlaneBase8(pd: sub16, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (sub16, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: pd, pool: pool, sads: nil, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (b8ReconBytes, b8Recon, _, _, _) = try await encodePlaneBase8(pd: sub16, pool: pool, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         
         let prevImg = Image16(width: b8Recon.width, height: b8Recon.height, y: b8Recon.y, cb: b8Recon.cb, cr: b8Recon.cr)
         let bytesL16 = entropyEncodeLayer16(dx: pd.width, dy: pd.height, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
-        let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: prevImg, width: pd.width, height: pd.height, qt: qtY)
+        let reconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: prevImg, width: pd.width, height: pd.height, qt: qtY, pool: pool)
         let cbw = (pd.width + 1) / 2
         let cbh = (pd.height + 1) / 2
-        let reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC)
-        let reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC)
-        let (_, _, _, _, _) = try await encodePlaneBase8(pd: sub16, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (decB8_sub16, _, _, _) = try await decodeBase8(r: b8ReconBytes, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
+        let reconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC, pool: pool)
+        let reconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC, pool: pool)
+        let (_, _, _, _, _) = try await encodePlaneBase8(pd: sub16, pool: pool, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (decB8_sub16, _, _, _) = try await decodeBase8(r: b8ReconBytes, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
         
         let recon16 = PlaneData420(width: pd.width, height: pd.height, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
         let decImg16 = planeDataToImage(pd: recon16)
         
-        let (decL16, _, _, _) = try await decodeLayer16(r: bytesL16, layer: 1, dx: pd.width, dy: pd.height, prev: decB8_sub16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+        let (decL16, _, _, _) = try await decodeLayer16(r: bytesL16, pool: pool, layer: 1, dx: pd.width, dy: pd.height, prev: decB8_sub16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         let decL16Pd = PlaneData420(width: pd.width, height: pd.height, y: decL16.y, cb: decL16.cb, cr: decL16.cr)
         let decImg16Final = planeDataToImage(pd: decL16Pd)
         
@@ -160,36 +161,36 @@ final class QualityDropTests: XCTestCase {
         // XCTAssertGreaterThan(decL16Ssim, 0.94, "Decoded Layer16 SSIM drop detected")
 
         // 3. Layer32 (full resolution reproduction check)
-        var (sub32, l32yBlocks, l32cbBlocks, l32crBlocks) = try await preparePlaneLayer32(pd: pd, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        var (sub16_2, l1yBlocks_2, l1cbBlocks_2, l1crBlocks_2) = try await preparePlaneLayer16(pd: sub32, sads: nil, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        let (_, b8Recon_2, _, _, _) = try await encodePlaneBase8(pd: sub16_2, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (sub32, l32yBlocks, l32cbBlocks, l32crBlocks) = try await preparePlaneLayer32(pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (sub16_2, l1yBlocks_2, l1cbBlocks_2, l1crBlocks_2) = try await preparePlaneLayer16(pd: sub32, pool: pool, sads: nil, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (_, b8Recon_2, _, _, _) = try await encodePlaneBase8(pd: sub16_2, pool: pool, sads: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
 
         let baseImg2 = Image16(width: b8Recon_2.width, height: b8Recon_2.height, y: b8Recon_2.y, cb: b8Recon_2.cb, cr: b8Recon_2.cr)
         let _ = entropyEncodeLayer16(dx: sub32.width, dy: sub32.height, layer: 1, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &l1yBlocks_2, cbBlocks: &l1cbBlocks_2, crBlocks: &l1crBlocks_2, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
 
-        let reconL1Y_2 = reconstructPlaneLayer16Y(blocks: l1yBlocks_2, prevImg: baseImg2, width: sub32.width, height: sub32.height, qt: qtY)
-        let reconL1Cb_2 = reconstructPlaneLayer16Cb(blocks: l1cbBlocks_2, prevImg: baseImg2, width: (sub32.width+1)/2, height: (sub32.height+1)/2, qt: qtC)
-        let reconL1Cr_2 = reconstructPlaneLayer16Cr(blocks: l1crBlocks_2, prevImg: baseImg2, width: (sub32.width+1)/2, height: (sub32.height+1)/2, qt: qtC)
+        let reconL1Y_2 = reconstructPlaneLayer16Y(blocks: l1yBlocks_2, prevImg: baseImg2, width: sub32.width, height: sub32.height, qt: qtY, pool: pool)
+        let reconL1Cb_2 = reconstructPlaneLayer16Cb(blocks: l1cbBlocks_2, prevImg: baseImg2, width: (sub32.width+1)/2, height: (sub32.height+1)/2, qt: qtC, pool: pool)
+        let reconL1Cr_2 = reconstructPlaneLayer16Cr(blocks: l1crBlocks_2, prevImg: baseImg2, width: (sub32.width+1)/2, height: (sub32.height+1)/2, qt: qtC, pool: pool)
         _ = Image16(width: sub32.width, height: sub32.height, y: reconL1Y_2, cb: reconL1Cb_2, cr: reconL1Cr_2)
 
         let bytesL32 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &l32yBlocks, cbBlocks: &l32cbBlocks, crBlocks: &l32crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         
         let prevImg8 = Image16(width: b8Recon_2.width, height: b8Recon_2.height, y: b8Recon_2.y, cb: b8Recon_2.cb, cr: b8Recon_2.cr)
         
-        let r1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks_2, prevImg: prevImg8, width: sub32.width, height: sub32.height, qt: qtY)
-        let r1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks_2, prevImg: prevImg8, width: (sub32.width + 1) / 2, height: (sub32.height + 1) / 2, qt: qtC)
-        let r1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks_2, prevImg: prevImg8, width: (sub32.width + 1) / 2, height: (sub32.height + 1) / 2, qt: qtC)
+        let r1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks_2, prevImg: prevImg8, width: sub32.width, height: sub32.height, qt: qtY, pool: pool)
+        let r1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks_2, prevImg: prevImg8, width: (sub32.width + 1) / 2, height: (sub32.height + 1) / 2, qt: qtC, pool: pool)
+        let r1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks_2, prevImg: prevImg8, width: (sub32.width + 1) / 2, height: (sub32.height + 1) / 2, qt: qtC, pool: pool)
         
         let prevImg16 = Image16(width: sub32.width, height: sub32.height, y: r1Y, cb: r1Cb, cr: r1Cr)
 
-        let r32Y = reconstructPlaneLayer32Y(blocks: l32yBlocks, prevImg: prevImg16, width: pd.width, height: pd.height, qt: qtY)
-        let r32Cb = reconstructPlaneLayer32Cb(blocks: l32cbBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC)
-        let r32Cr = reconstructPlaneLayer32Cr(blocks: l32crBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC)
+        let r32Y = reconstructPlaneLayer32Y(blocks: l32yBlocks, prevImg: prevImg16, width: pd.width, height: pd.height, qt: qtY, pool: pool)
+        let r32Cb = reconstructPlaneLayer32Cb(blocks: l32cbBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
+        let r32Cr = reconstructPlaneLayer32Cr(blocks: l32crBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
 
         let recon32 = PlaneData420(width: pd.width, height: pd.height, y: r32Y, cb: r32Cb, cr: r32Cr)
         let img32 = planeDataToImage(pd: recon32)
         
-        let decL32 = try await decodeLayer32(r: bytesL32, layer: 2, dx: pd.width, dy: pd.height, prev: decL16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+        let decL32 = try await decodeLayer32(r: bytesL32, pool: pool, layer: 2, dx: pd.width, dy: pd.height, prev: decL16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
         let decL32Pd = PlaneData420(width: pd.width, height: pd.height, y: decL32.y, cb: decL32.cb, cr: decL32.cr)
         let decImg32Final = planeDataToImage(pd: decL32Pd)
         

@@ -667,8 +667,8 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getY(x: Int, y yPos: Int, size: Int) -> BlockView {
-        let block = BlockView.allocate(width: size, height: size)
+    func getY(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
+        let block = pool.get(width: size, height: size)
         let v = block.view
         self.y.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
@@ -693,10 +693,10 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getCb(x: Int, y yPos: Int, size: Int) -> BlockView {
+    func getCb(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        let block = BlockView.allocate(width: size, height: size)
+        let block = pool.get(width: size, height: size)
         let v = block.view
         self.cb.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
@@ -721,10 +721,10 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getCr(x: Int, y yPos: Int, size: Int) -> BlockView {
+    func getCr(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        let block = BlockView.allocate(width: size, height: size)
+        let block = pool.get(width: size, height: size)
         let v = block.view
         self.cr.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }

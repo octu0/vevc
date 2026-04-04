@@ -35,6 +35,7 @@ final class ValueTokenizerTests: XCTestCase {
     
     /// 実際のDWTデータでEntropyEncoder→EntropyDecoder pairs roundtrip
     func testRansModeWithActualBlockData() async throws {
+        let pool = BlockViewPool()
         let width = 128
         let height = 128
         
@@ -58,7 +59,7 @@ final class ValueTokenizerTests: XCTestCase {
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
         
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }

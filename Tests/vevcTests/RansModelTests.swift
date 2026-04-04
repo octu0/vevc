@@ -6,6 +6,7 @@ final class RansModelTests: XCTestCase {
     
     /// normalize後のtokenFreqsと、writeCompressedFreqTable→readCompressedFreqTableで復元したtokenFreqsを比較
     func testFreqTableRoundtrip() async throws {
+        let pool = BlockViewPool()
         // 実DWTデータのtoken分布を再現
         var runTokenCounts = [Int](repeating: 0, count: 64)
         var valTokenCounts = [Int](repeating: 0, count: 64)
@@ -31,7 +32,7 @@ final class RansModelTests: XCTestCase {
         }
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtY) }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))

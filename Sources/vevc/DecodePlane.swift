@@ -5,11 +5,11 @@ enum DecodeTask32 {
 }
 
 @inline(__always)
-func decodePlaneSubbands32(data: [UInt8], blockCount: Int, parentBlocks: [BlockView]?) throws -> [BlockView] {
+func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]?) throws -> [BlockView] {
     var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(BlockView.allocate(width: 32, height: 32))
+        blocks.append(pool.get(width: 32, height: 32))
     }
     
     var brFlags = BypassReader(data: data)
@@ -141,11 +141,11 @@ enum DecodeTask16 {
 }
 
 @inline(__always)
-func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [BlockView]?) throws -> [BlockView] {
+func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]?) throws -> [BlockView] {
     var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(BlockView.allocate(width: 16, height: 16))
+        blocks.append(pool.get(width: 16, height: 16))
     }
     
     var brFlags = BypassReader(data: data)
@@ -274,11 +274,11 @@ func decodePlaneSubbands16(data: [UInt8], blockCount: Int, parentBlocks: [BlockV
 }
 
 @inline(__always)
-func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?, dx: Int, planeType: Int) throws -> [BlockView] {
+func decodePlaneSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentImage: Image16?, dx: Int, planeType: Int) throws -> [BlockView] {
     var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(BlockView.allocate(width: 8, height: 8))
+        blocks.append(pool.get(width: 8, height: 8))
     }
     
     var brFlags = BypassReader(data: data)
@@ -310,9 +310,9 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?,
         var parentBlock2D: BlockView? = nil
         if let pImg = parentImage {
             switch planeType {
-            case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 4)
-            case 1: parentBlock2D = pImg.getCb(x: pbX, y: pbY, size: 4)
-            default: parentBlock2D = pImg.getCr(x: pbX, y: pbY, size: 4)
+            case 0: parentBlock2D = pImg.getY(x: pbX, y: pbY, size: 4, pool: pool)
+            case 1: parentBlock2D = pImg.getCb(x: pbX, y: pbY, size: 4, pool: pool)
+            default: parentBlock2D = pImg.getCr(x: pbX, y: pbY, size: 4, pool: pool)
             }
         }
         
@@ -340,11 +340,11 @@ func decodePlaneSubbands8(data: [UInt8], blockCount: Int, parentImage: Image16?,
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8(data: [UInt8], blockCount: Int) throws -> [BlockView] {
+func decodePlaneBaseSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
     var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(BlockView.allocate(width: 8, height: 8))
+        blocks.append(pool.get(width: 8, height: 8))
     }
     
     var brFlags = BypassReader(data: data)
@@ -399,11 +399,11 @@ enum DecodeTaskBase32 {
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands32(data: [UInt8], blockCount: Int) throws -> [BlockView] {
+func decodePlaneBaseSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
     var blocks: [BlockView] = []
     blocks.reserveCapacity(blockCount)
     for _ in 0..<blockCount {
-        blocks.append(BlockView.allocate(width: 32, height: 32))
+        blocks.append(pool.get(width: 32, height: 32))
     }
     
     var brFlags = BypassReader(data: data)

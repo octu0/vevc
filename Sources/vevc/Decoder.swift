@@ -31,11 +31,13 @@ class CoreDecoder {
     let maxLayer: Int
     let width: Int
     let height: Int
+    let pool: BlockViewPool
     
     init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
+        self.pool = BlockViewPool()
     }
     
     /// Decode a GOP chunk into one or more YCbCrImages.
@@ -99,7 +101,7 @@ class CoreDecoder {
             let useBidirectional = isPFrame && firstReconstructed != nil && frameData.count >= 2
             
             let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
-            let img16 = try await decodeSpatialLayers(r: data, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd)
+            let img16 = try await decodeSpatialLayers(r: data, pool: pool, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd)
             let pd = PlaneData420(img16: img16)
             decodedPlanes[idx] = pd
             previousReconstructed = pd

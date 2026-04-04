@@ -29,7 +29,7 @@ public enum DecodeError: Error, CustomStringConvertible {
 }
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil) async throws -> Image16 {
     var offset = 0
 
     // Compute per-layer dimensions matching encoder DWT subband sizes:
@@ -82,7 +82,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
     offset += Int(len0)
     
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, layer: 0, dx: l0dx, dy: l0dy, isIFrame: (mvCount == 0))
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: (mvCount == 0))
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
@@ -94,7 +94,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         let layer1Data = Array(r[offset..<(offset + Int(len1))])
         offset += Int(len1)
         
-        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
         current = l16Img
         parentYBlocks = l16YBlocks
         parentCbBlocks = l16CbBlocks
@@ -107,7 +107,7 @@ func decodeSpatialLayers(r: [UInt8], maxLayer: Int, dx: Int, dy: Int, predictedP
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         
-        current = try await decodeLayer32(r: layer2Data, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs)
+        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs)
     }
     
     return current
@@ -429,7 +429,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: [MotionVector]? = nil, refDirs: [Bool]? = nil) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: [MotionVector]? = nil, refDirs: [Bool]? = nil) async throws -> Image16 {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -453,24 +453,24 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     
     let rowCountY = (dy + 32 - 1) / 32
     let colCountY = (dx + 32 - 1) / 32
-    let yBlocks = try decodePlaneSubbands32(data: bufY, blockCount: rowCountY * colCountY, parentBlocks: parentYBlocks)
+    let yBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: parentYBlocks)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 32 - 1) / 32
     let colCountCb = (cbDx + 32 - 1) / 32
-    let cbBlocks = try decodePlaneSubbands32(data: bufCb, blockCount: rowCountCb * colCountCb, parentBlocks: parentCbBlocks)
+    let cbBlocks = try decodePlaneSubbands32(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, parentBlocks: parentCbBlocks)
     
     let rowCountCr = (cbDy + 32 - 1) / 32
     let colCountCr = (cbDx + 32 - 1) / 32
-    let crBlocks = try decodePlaneSubbands32(data: bufCr, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
+    let crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
     let chunkSize = 4
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeLayer32ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
+            group.addTask { return decodeLayer32ProcessY(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -486,7 +486,7 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeLayer32ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
+            group.addTask { return decodeLayer32ProcessCb(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -502,7 +502,7 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeLayer32ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
+            group.addTask { return decodeLayer32ProcessCr(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -535,7 +535,7 @@ func decodeLayer32(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 }
 
 @inline(__always)
-func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
+func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -559,17 +559,17 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     
     let rowCountY = (dy + 16 - 1) / 16
     let colCountY = (dx + 16 - 1) / 16
-    let yBlocks = try decodePlaneSubbands16(data: bufY, blockCount: rowCountY * colCountY, parentBlocks: parentYBlocks)
+    let yBlocks = try decodePlaneSubbands16(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: parentYBlocks)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 16 - 1) / 16
     let colCountCb = (cbDx + 16 - 1) / 16
-    let cbBlocks = try decodePlaneSubbands16(data: bufCb, blockCount: rowCountCb * colCountCb, parentBlocks: parentCbBlocks)
+    let cbBlocks = try decodePlaneSubbands16(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, parentBlocks: parentCbBlocks)
     
     let rowCountCr = (cbDy + 16 - 1) / 16
     let colCountCr = (cbDx + 16 - 1) / 16
-    let crBlocks = try decodePlaneSubbands16(data: bufCr, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
+    let crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
     let chunkSize = 4
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
@@ -578,7 +578,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeLayer16ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
+            group.addTask { return decodeLayer16ProcessY(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -592,7 +592,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeLayer16ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
+            group.addTask { return decodeLayer16ProcessCb(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -606,7 +606,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
     
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeLayer16ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
+            group.addTask { return decodeLayer16ProcessCr(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -626,7 +626,7 @@ func decodeLayer16(r: [UInt8], layer: UInt8, dx: Int, dy: Int, prev: Image16, pa
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
+func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -650,17 +650,17 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, blockCount: rowCountY * colCountY)
+    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, blockCount: rowCountCb * colCountCb)
+    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, blockCount: rowCountCr * colCountCr)
+    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     
     let chunkSize = 4
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
@@ -669,7 +669,7 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeBase8ProcessY(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY) }
+            group.addTask { return decodeBase8ProcessY(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY) }
         }
         for try await res in group {
             for j in res.indices {
@@ -683,7 +683,7 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeBase8ProcessCb(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC) }
+            group.addTask { return decodeBase8ProcessCb(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -697,7 +697,7 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
     
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
         for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeBase8ProcessCr(taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC) }
+            group.addTask { return decodeBase8ProcessCr(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC) }
         }
         for try await res in group {
             for j in res.indices {
@@ -717,7 +717,7 @@ func decodeBase8(r: [UInt8], layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) asy
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -728,7 +728,7 @@ func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
-            let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half)
+            let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half, pool: pool)
             let srcView = ll.view
             let destView = block.view
             for yi in 0..<half {
@@ -752,7 +752,7 @@ func decodeLayer32ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -763,7 +763,7 @@ func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
-            let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half)
+            let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half, pool: pool)
             let srcView = ll.view
             let destView = block.view
             for yi in 0..<half {
@@ -787,7 +787,7 @@ func decodeLayer32ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -798,7 +798,7 @@ func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
-            let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half)
+            let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half, pool: pool)
             let srcView = ll.view
             let destView = block.view
             for yi in 0..<half {
@@ -822,7 +822,7 @@ func decodeLayer32ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
 }
 
 @Sendable @inline(__always)
-func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -833,7 +833,7 @@ func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
-            let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half)
+            let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half, pool: pool)
             let srcView = ll.view
             let destView = block.view
             for yi in 0..<half {
@@ -857,7 +857,7 @@ func decodeLayer16ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int,
 }
 
 @Sendable @inline(__always)
-func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -868,42 +868,7 @@ func decodeLayer16ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
-            let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half)
-            let srcView = ll.view
-            let destView = block.view
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            let view = block.view
-            let base = view.base
-            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-            let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-            let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-            dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-            dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-            dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-            invDwt2d_16(view)
-            rowResults.append((block, w, h))
-        }
-    }
-    return rowResults
-}
-
-@Sendable @inline(__always)
-func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return [] }
-    var rowResults: [(BlockView, Int, Int)] = []
-    for i in startRow..<endRow {
-        let h: Int = i * 16
-        for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
-            let blockIndex: Int = i * colCount + xIdx
-            let block: BlockView = blocks[blockIndex]
-            let half: Int = 16 / 2
-            let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half)
+            let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half, pool: pool)
             let srcView = ll.view
             let destView = block.view
             for yi in 0..<half {
@@ -927,7 +892,42 @@ func decodeLayer16ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+    let startRow: Int = taskIdx * chunkSize
+    let endRow: Int = min(startRow + chunkSize, rowCount)
+    guard startRow < endRow else { return [] }
+    var rowResults: [(BlockView, Int, Int)] = []
+    for i in startRow..<endRow {
+        let h: Int = i * 16
+        for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
+            let blockIndex: Int = i * colCount + xIdx
+            let block: BlockView = blocks[blockIndex]
+            let half: Int = 16 / 2
+            let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half, pool: pool)
+            let srcView = ll.view
+            let destView = block.view
+            for yi in 0..<half {
+                let srcPtr = srcView.rowPointer(y: yi)
+                let destPtr = destView.rowPointer(y: yi)
+                destPtr.update(from: srcPtr, count: half)
+            }
+            let view = block.view
+            let base = view.base
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+            invDwt2d_16(view)
+            rowResults.append((block, w, h))
+        }
+    }
+    return rowResults
+}
+
+@Sendable @inline(__always)
+func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -956,7 +956,7 @@ func decodeBase8ProcessY(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, c
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -985,7 +985,7 @@ func decodeBase8ProcessCb(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, 
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessCr(taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }

@@ -137,6 +137,7 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// I-Frameのみで下部クロマの品質が上部と同等であることを確認。
     /// 失敗する場合: エンコーダの境界ブロック処理に問題がある。
     func testIFrameChromaBottomQuality() async throws {
+        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let cWidth = (width + 1) / 2
@@ -144,7 +145,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         let chunk = try await encoder.encodeSingleFrame(image: img)
@@ -171,13 +172,14 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// 複数フレームでP-Frame品質推移を確認。
     /// 特定フレーム以降で下部クロマが急激に劣化していないか確認。
     func testPFrameChromaBottomProgression() async throws {
+        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         let frameCount = 8
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         var bottomCbPsnrs: [Double] = []
@@ -230,6 +232,7 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// エンコーダ再構築結果とデコーダ出力のクロマプレーンが一致することを確認。
     /// 不一致の場合: エンコーダ/デコーダ間の処理に非対称性がある。
     func testEncoderDecoderChromaSymmetry() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         let cWidth = (width + 1) / 2
@@ -245,10 +248,10 @@ final class ChromaBottomQualityTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
         
         // I-Frame: encode → reconstruct
-        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, pool: pool, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, maxLayer: 2, dx: width, dy: height)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height)
         let iDecodedPd = PlaneData420(img16: iDecoded)
         
         // I-Frameのクロマ差分
@@ -261,10 +264,10 @@ final class ChromaBottomQualityTests: XCTestCase {
             "I-Frame エンコーダ再構築とデコーダ出力のCr差異(MAE=\(String(format: "%.2f", iCrDiff)))が大きい → enc/dec非対称性")
         
         // P-Frame: encode (without motion compensation since it's removed)
-        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // P-Frame: decode
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon)
         let pDecodedPd = PlaneData420(img16: pDecoded)
         
         // P-Frameの残差のクロマ差分
@@ -324,6 +327,7 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// 画像の最下部8行分（最後のブロック行）のクロマPSNRと、それ以外の部分のクロマPSNRを比較。
     /// 最下行ブロックに集中的な劣化があるかを確認する。
     func testLastBlockRowChromaQuality() async throws {
+        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let cWidth = (width + 1) / 2
@@ -331,7 +335,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         let img = generateNaturalImage(width: width, height: height, seed: 42)
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         let chunk = try await encoder.encodeSingleFrame(image: img)

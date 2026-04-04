@@ -87,6 +87,7 @@ final class VevcTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(decoded[1].yPlane[0], 0)
     }
     func testDecodeBoundsCheck() async throws {
+        let pool = BlockViewPool()
         // Construct a malformed input: 
         // 3 bytes "VEL" + 1 byte GOP + 6 * 2 bytes GMV = 16 bytes header
         // Then readPlane() expects 4 bytes length.
@@ -98,7 +99,7 @@ final class VevcTests: XCTestCase {
         malformed += [0, 0, 0, 100] 
         
         do {
-            _ = try await vevc.decodeSpatialLayers(r: malformed, maxLayer: 2, dx: 64, dy: 64)
+            _ = try await vevc.decodeSpatialLayers(r: malformed, pool: pool, maxLayer: 2, dx: 64, dy: 64)
             XCTFail("Should have thrown DecodeError.insufficientData")
         } catch DecodeError.insufficientData {
             // Success
@@ -169,11 +170,12 @@ final class VevcTests: XCTestCase {
     
     /// Encoder/Decoderクラス経由（vevc-enc/vevc-decと同じパス）: 1920x1080
     func testEncoderDecoderClassRoundTrip() async throws {
+        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let frameCount = 4
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
@@ -195,12 +197,13 @@ final class VevcTests: XCTestCase {
     /// 改善する → 量子化ステップの適応ロジックに問題
     /// 改善しない → residual処理のロジックに問題
     func testComplexImageHighBitrate() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         let frameCount = 8
         
         // maxbitrateを10倍に
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 10000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 10000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         var failedFrames: [(Int, Double)] = []
@@ -253,12 +256,13 @@ final class VevcTests: XCTestCase {
     /// motion compensationが効きにくく、通常の動画よりP-Frame品質が低下する。
     /// 閾値は緩めに設定（5dB: 白ノイズレベルはここに到達しない）。
     func testComplexImageRoundTrip() async throws {
+ let pool = BlockViewPool()
 
         let width = 640
         let height = 480
         let frameCount = 20 // GOPサイズ(15)を超えるフレーム数
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         var failedFrames: [(Int, Double)] = []
@@ -311,6 +315,7 @@ final class VevcTests: XCTestCase {
     
     /// P-Frame最小再現テスト: 同一画像の繰り返しではP-Frameの品質劣化は発生しないことを確認
     func testIdenticalFramesPFrameQuality() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         let frameCount = 5
@@ -333,7 +338,7 @@ final class VevcTests: XCTestCase {
             }
         }
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
@@ -348,11 +353,12 @@ final class VevcTests: XCTestCase {
     
     /// P-Frame品質テスト: 小さな変化のみのP-Frame
     func testSmallChangePFrameQuality() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         let frameCount = 5
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {
@@ -386,6 +392,7 @@ final class VevcTests: XCTestCase {
     /// 低レベルテスト: encodeSpatialLayers→decodeSpatialLayersの直接呼び出しでP-Frame品質を確認
     /// 量子化ステップを1（最小）に設定し、量子化による劣化を排除して処理フローの正しさのみを検証
     func testSpatialLayersDirectPFrame() async throws {
+        let pool = BlockViewPool()
         let width = 640
         let height = 480
         
@@ -431,10 +438,10 @@ final class VevcTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
         
         // I-Frame: encode→reconstructを取得
-        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, pool: pool, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, maxLayer: 2, dx: width, dy: height)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height)
         let iPd = PlaneData420(img16: iDecoded)
         
         // I-Frame品質確認
@@ -442,7 +449,7 @@ final class VevcTests: XCTestCase {
         let iPsnr = calculatePSNR(original: img0.yPlane, decoded: iImg.yPlane)
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
         
-        let (pBytes, _) = try await encodeSpatialLayers(pd: pd3, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        let (pBytes, _) = try await encodeSpatialLayers(pd: pd3, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         
         // P-Frameのresidualの検証（省略して正常終了とする）
         XCTAssertFalse(pBytes.isEmpty)
@@ -452,11 +459,12 @@ final class VevcTests: XCTestCase {
     
     /// 急激なシーンチェンジを含むテスト
     func testSceneChangeRoundTrip() async throws {
+        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let frameCount = 6
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 8)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 8, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         for i in 0..<frameCount {

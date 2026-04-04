@@ -5,6 +5,7 @@ import XCTest
 final class RansStreamTraceTests: XCTestCase {
     
     func testStreamConsumptionPerLane() async throws {
+        let pool = BlockViewPool()
         // 実DWTデータのpairsを生成
         let width = 128
         let height = 128
@@ -26,7 +27,7 @@ final class RansStreamTraceTests: XCTestCase {
         }
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices { evaluateQuantizeLayer32(block: &blocks[i], qt: qtY) }
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         var encoder = EntropyEncoder<DynamicEntropyModel>()

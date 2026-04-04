@@ -27,8 +27,9 @@ final class Block13DebugTests: XCTestCase {
         
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
+        let pool = BlockViewPool()
         
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices {
             evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
         }
@@ -52,7 +53,7 @@ final class Block13DebugTests: XCTestCase {
         }
         
         // isEffectivelyZeroチェックがblockのデータを変更するため、元のブロックを再作成
-        var (blocks2, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+        var (blocks2, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks2.indices {
             evaluateQuantizeLayer32(block: &blocks2[i], qt: qtY)
         }
@@ -61,7 +62,7 @@ final class Block13DebugTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks2, zeroThreshold: safeThreshold, parentBlocks: nil)
         
         // decodePlaneSubbands32  
-        let decBlocks = try decodePlaneSubbands32(data: data, blockCount: blocks2.count, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks2.count, parentBlocks: nil)
         
         // block 13 の詳細比較
         for bi in [12, 13, 14] {

@@ -98,3 +98,93 @@ struct BlockView: @unchecked Sendable {
     }
 }
 
+// MARK: - BlockViewPool
+
+final class BlockViewPool: @unchecked Sendable {
+    /// サイズ別のプール。キーは width * height（8x8=64, 16x16=256, 32x32=1024）
+    private var pools: [Int: [BlockView]] = [:]
+    
+    /// サイズ別の保持上限（超過分は即時 deallocate）
+    private let maxPerSize: Int
+    
+    #if arch(wasm32)
+    // Wasm は単一スレッド環境のためロック不要
+    #else
+    private var lock = NSLock()
+    #endif
+    
+    init(maxPerSize: Int = 256) {
+        self.maxPerSize = maxPerSize
+    }
+    
+    deinit {
+        // 全プール内のブロックを解放
+        for (_, blocks) in pools {
+            for block in blocks {
+                block.deallocate()
+            }
+        }
+    }
+    
+    /// プールからBlockViewを取得する。プールに在庫があれば再利用し、なければ新規確保する。
+    @inline(__always)
+    func get(width: Int, height: Int) -> BlockView {
+        let key = width * height
+        
+        #if arch(wasm32)
+        if var bucket = pools[key], !bucket.isEmpty {
+            let block = bucket.removeLast()
+            pools[key] = bucket
+            return block
+        }
+        #else
+        lock.lock()
+        if var bucket = pools[key], !bucket.isEmpty {
+            let block = bucket.removeLast()
+            pools[key] = bucket
+            lock.unlock()
+            return block
+        }
+        lock.unlock()
+        #endif
+        
+        // プールに在庫がないため新規確保
+        return BlockView.allocate(width: width, height: height)
+    }
+    
+    /// BlockViewをプールに返却する。内容をゼロクリアして再利用可能にする。
+    @inline(__always)
+    func put(_ block: BlockView) {
+        let key = block.width * block.height
+        block.clearAll()
+        
+        #if arch(wasm32)
+        var bucket = pools[key] ?? []
+        if bucket.count < maxPerSize {
+            bucket.append(block)
+            pools[key] = bucket
+        } else {
+            block.deallocate()
+        }
+        #else
+        lock.lock()
+        var bucket = pools[key] ?? []
+        if bucket.count < maxPerSize {
+            bucket.append(block)
+            pools[key] = bucket
+            lock.unlock()
+        } else {
+            lock.unlock()
+            block.deallocate()
+        }
+        #endif
+    }
+    
+    /// BlockView配列を一括でプールに返却する。長寿命ブロック（配列で受け渡されるもの）用。
+    @inline(__always)
+    func putAll(_ blocks: [BlockView]) {
+        for block in blocks {
+            put(block)
+        }
+    }
+}

@@ -111,7 +111,8 @@ final class FlickerDetectionTests: XCTestCase {
             framerate: 30,
             zeroThreshold: 3,
             keyint: 30,  // 全フレームが1GOP内に入るようにする
-            sceneChangeThreshold: 8
+            sceneChangeThreshold: 8,
+            pool: BlockViewPool()
         )
         let decoder = CoreDecoder(width: width, height: height)
 
@@ -187,7 +188,8 @@ final class FlickerDetectionTests: XCTestCase {
             framerate: 30,
             zeroThreshold: 20,
             keyint: 15,
-            sceneChangeThreshold: 10
+            sceneChangeThreshold: 10,
+            pool: BlockViewPool()
         )
         let img = generateGradientFrame(width: width, height: height, frameIndex: 0)
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)

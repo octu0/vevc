@@ -7,6 +7,7 @@ final class DPCMDistributionTests: XCTestCase {
     /// 128x128画像を使ったDPCMトークン分布測定
     /// 多様なパターンを含む画像を複数生成してトークン分布を集約
     func testCollectDPCMTokenDistribution() async throws {
+        let pool = BlockViewPool()
         var globalRunCounts = [Int](repeating: 0, count: 64)
         var globalValCounts = [Int](repeating: 0, count: 64)
         var totalPairs = 0
@@ -58,7 +59,7 @@ final class DPCMDistributionTests: XCTestCase {
             let qtY = QuantizationTable(baseStep: 24, isChroma: false, layerIndex: 0)
             
             // extract blocks and quantize
-            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height)
+            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
             for i in blocks.indices {
                 evaluateQuantizeBase32(block: &blocks[i], qt: qtY)
             }

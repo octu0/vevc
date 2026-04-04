@@ -68,9 +68,10 @@ final class BidirectionalPredictionTests: XCTestCase {
         let pd1 = toPlaneData420(images: [img1])[0]
         let pd2 = toPlaneData420(images: [img2])[0]
         
+        let pool = BlockViewPool()
         // 前方MV（pd0 → pd1）と後方MV（pd2 → pd1）を計算
-        let (_, fwdSADs) = await computeMotionVectors(curr: pd1, prev: pd0)
-        let (_, bwdSADs) = await computeMotionVectors(curr: pd1, prev: pd2)
+        let (_, fwdSADs) = await computeMotionVectors(curr: pd1, prev: pd0, pool: pool)
+        let (_, bwdSADs) = await computeMotionVectors(curr: pd1, prev: pd2, pool: pool)
         
         // ブロックごとに、前方/後方のSADを比較して選択する
         var fwdBetterCount = 0
@@ -143,7 +144,7 @@ final class BidirectionalPredictionTests: XCTestCase {
             images.append(makeTestImage(width: width, height: height, seed: i * 5))
         }
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = CoreDecoder(width: width, height: height)
         
         var psnrs: [Double] = []
