@@ -127,6 +127,7 @@ final class BlockViewPool: @unchecked Sendable {
     }
     
     /// プールからBlockViewを取得する。プールに在庫があれば再利用し、なければ新規確保する。
+    /// 返却されたブロックはゼロクリア済みであることを保証する。
     @inline(__always)
     func get(width: Int, height: Int) -> BlockView {
         let key = width * height
@@ -135,6 +136,7 @@ final class BlockViewPool: @unchecked Sendable {
         if var bucket = pools[key], !bucket.isEmpty {
             let block = bucket.removeLast()
             pools[key] = bucket
+            block.clearAll() // プール再利用時にゼロ保証
             return block
         }
         #else
@@ -143,20 +145,21 @@ final class BlockViewPool: @unchecked Sendable {
             let block = bucket.removeLast()
             pools[key] = bucket
             lock.unlock()
+            block.clearAll() // ロック解除後にクリア（ロック保持時間を短縮）
             return block
         }
         lock.unlock()
         #endif
         
-        // プールに在庫がないため新規確保
+        // プールに在庫がないため新規確保（initialize(repeating:0) でゼロ保証済み）
         return BlockView.allocate(width: width, height: height)
     }
     
-    /// BlockViewをプールに返却する。内容をゼロクリアして再利用可能にする。
+    /// BlockViewをプールに返却する。クリアは get() 時に実行するため、ここではクリアしない。
+    /// これにより並列実行時の put() のロック保持時間を最小化する。
     @inline(__always)
     func put(_ block: BlockView) {
         let key = block.width * block.height
-        block.clearAll()
         
         #if arch(wasm32)
         var bucket = pools[key] ?? []

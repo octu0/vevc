@@ -328,6 +328,7 @@ func decodePlaneSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, p
         if let pb2d = parentBlock2D {
             let pb = pb2d.view
             try decodeAction(pb)
+            pool.put(pb2d) // 一時ブロックをプールに返却
         } else {
             try decodeAction(nil)
         }

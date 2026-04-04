@@ -728,6 +728,7 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
+            pool.put(ll) // 一時ブロックをプールに返却
             let view = block.view
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -763,6 +764,7 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
+            pool.put(ll)
             let view = block.view
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -798,6 +800,7 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
+            pool.put(ll)
             let view = block.view
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -833,6 +836,7 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
+            pool.put(ll)
             let view = block.view
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
@@ -868,6 +872,7 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
+            pool.put(ll)
             let view = block.view
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
@@ -903,6 +908,7 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
+            pool.put(ll)
             let view = block.view
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)

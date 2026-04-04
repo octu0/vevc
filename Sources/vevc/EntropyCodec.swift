@@ -127,16 +127,30 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
 
 struct EntropyEncoder<Model: EntropyModelProvider> {
     var bypassWriter: BypassWriter
-    var pairs: [(run: UInt32, val: Int16, isParentZero: Bool)]
+    /// SoA (Structure of Arrays): タプル配列のパディングを排除しキャッシュ効率を改善
+    var pairRuns: [UInt32]
+    var pairVals: [Int16]
+    var pairParentZeros: [Bool]
     var trailingZeros: UInt32
     private(set) var coeffCount: Int
 
     init() {
         self.bypassWriter = BypassWriter()
-        self.pairs = []
-        self.pairs.reserveCapacity(512)
+        self.pairRuns = []
+        self.pairVals = []
+        self.pairParentZeros = []
+        self.pairRuns.reserveCapacity(512)
+        self.pairVals.reserveCapacity(512)
+        self.pairParentZeros.reserveCapacity(512)
         self.trailingZeros = 0
         self.coeffCount = 0
+    }
+    
+    /// テスト互換性のための computed property（プロダクションコードでは未使用）
+    var pairs: [(run: UInt32, val: Int16, isParentZero: Bool)] {
+        (0..<pairRuns.count).map { i in
+            (run: pairRuns[i], val: pairVals[i], isParentZero: pairParentZeros[i])
+        }
     }
 
     @inline(__always)
@@ -146,7 +160,9 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
 
     @inline(__always)
     mutating func addPair(run: UInt32, val: Int16, isParentZero: Bool = false) {
-        pairs.append((run: run, val: val, isParentZero: isParentZero))
+        pairRuns.append(run)
+        pairVals.append(val)
+        pairParentZeros.append(isParentZero)
         coeffCount += Int(run) + 1
     }
     
@@ -164,7 +180,8 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
     @inline(__always)
     mutating func getData() -> [UInt8] {
         var out = [UInt8]()
-        out.reserveCapacity(pairs.count * 4 + 128)
+        let pairCount = pairRuns.count
+        out.reserveCapacity(pairCount * 4 + 128)
         
         bypassWriter.flush()
         let metaBypassData = bypassWriter.bytes
@@ -173,22 +190,21 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         
         appendUInt32BE(&out, UInt32(coeffCount))
         
-        guard pairs.isEmpty != true || 0 < trailingZeros else { return out }
+        guard pairCount > 0 || 0 < trailingZeros else { return out }
         
-        let pairCount = pairs.count
         let hasTrailingZeros = trailingZeros > 0
         let nonZeroCount = pairCount
         
         if nonZeroCount <= 32 {
             out.append(0x80)
             var rawBypass = BypassWriter()
-            for pair in pairs {
+            for i in 0..<pairCount {
                 // for zero-run
-                for _ in 0..<pair.run {
+                for _ in 0..<pairRuns[i] {
                     rawBypass.writeBit(false)
                 }
                 rawBypass.writeBit(true)
-                let valResult = valueTokenize(pair.val)
+                let valResult = valueTokenize(pairVals[i])
                 rawBypass.writeBits(UInt32(valResult.token), count: 6)
                 rawBypass.writeBits(valResult.bypassBits, count: valResult.bypassLen)
             }
@@ -231,17 +247,15 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             chunkValTokens[lane].reserveCapacity(chunkSize)
             
             for idx in start..<end {
-                let pair = pairs[idx]
-                
-                let runResult = valueTokenizeUnsigned(pair.run)
+                let runResult = valueTokenizeUnsigned(pairRuns[idx])
                 chunkRunTokens[lane].append(runResult.token)
                 chunkBypassWriters[lane].writeBits(runResult.bypassBits, count: runResult.bypassLen)
                 
-                let valResult = valueTokenize(pair.val)
+                let valResult = valueTokenize(pairVals[idx])
                 chunkValTokens[lane].append(valResult.token)
                 chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)
 
-                if pair.isParentZero {
+                if pairParentZeros[idx] {
                     runTokenCounts1[Int(runResult.token)] += 1
                     valTokenCounts1[Int(valResult.token)] += 1
                 } else {
@@ -331,7 +345,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             
             for i in stride(from: pairEnd - 1, through: 0, by: -1) {
                 let pairIdx = chunkStartIdx + i
-                let isParentZero = pairs[pairIdx].isParentZero
+                let isParentZero = pairParentZeros[pairIdx]
                 let vt = valTokens[i]
                 if isParentZero {
                     enc.encodeSymbol(lane: lane, cumFreq: valModel1.tokenCumFreqs[Int(vt)], freq: valModel1.tokenFreqs[Int(vt)])
@@ -405,6 +419,7 @@ struct EntropyDecoder {
     private var valModel1: rANSModel!
     private var chunkBypassReaders: [BypassReader] = []
     private var ransDecoder: Interleaved4rANSDecoder!
+    private var currentLane: Int = 0
 
     init(data: [UInt8]) throws {
         try self.init(data: data, startOffset: 0)
@@ -562,10 +577,11 @@ struct EntropyDecoder {
         
         guard pairIndex < totalPairEntries else { return (0, 0) }
         
-        var lane = 0
-        if pairIndex >= chunkStarts[3] { lane = 3 }
-        else if pairIndex >= chunkStarts[2] { lane = 2 }
-        else if pairIndex >= chunkStarts[1] { lane = 1 }
+        // pairIndex は単調増加するため、レーン境界を超えた時だけインクリメント
+        while currentLane < 3 && pairIndex >= chunkStarts[currentLane + 1] {
+            currentLane += 1
+        }
+        let lane = currentLane
         
         let isTZPair = (lane == 3 && hasTrailingZeros && pairIndex == chunkStarts[4] - 1)
         
