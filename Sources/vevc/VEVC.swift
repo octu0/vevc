@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 @inlinable @inline(__always)
 func debugLog(_ message: @autoclosure () -> String) {
@@ -57,6 +60,11 @@ struct BlockView: @unchecked Sendable {
 
     @inline(__always)
     func clearAll() {
+        if stride == width {
+            let total = width * height
+            UnsafeMutableRawPointer(base).initializeMemory(as: UInt8.self, repeating: 0, count: total * 2)
+            return
+        }
         var i = 0
         let zero16 = SIMD16<Int16>.zero
         for y in 0..<height {
@@ -110,14 +118,21 @@ final class BlockViewPool: @unchecked Sendable {
     #if arch(wasm32)
     // Wasm は単一スレッド環境のためロック不要
     #else
-    private var lock = NSLock()
+    private let lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
     #endif
     
     init(maxPerSize: Int = 256) {
         self.maxPerSize = maxPerSize
+        #if !arch(wasm32)
+        lock.initialize(to: os_unfair_lock())
+        #endif
     }
     
     deinit {
+        #if !arch(wasm32)
+        lock.deinitialize(count: 1)
+        lock.deallocate()
+        #endif
         // 全プール内のブロックを解放
         for (_, blocks) in pools {
             for block in blocks {
@@ -140,15 +155,15 @@ final class BlockViewPool: @unchecked Sendable {
             return block
         }
         #else
-        lock.lock()
+        os_unfair_lock_lock(lock)
         if var bucket = pools[key], !bucket.isEmpty {
             let block = bucket.removeLast()
             pools[key] = bucket
-            lock.unlock()
+            os_unfair_lock_unlock(lock)
             block.clearAll() // ロック解除後にクリア（ロック保持時間を短縮）
             return block
         }
-        lock.unlock()
+        os_unfair_lock_unlock(lock)
         #endif
         
         // プールに在庫がないため新規確保（initialize(repeating:0) でゼロ保証済み）
@@ -170,14 +185,14 @@ final class BlockViewPool: @unchecked Sendable {
             block.deallocate()
         }
         #else
-        lock.lock()
+        os_unfair_lock_lock(lock)
         var bucket = pools[key] ?? []
         if bucket.count < maxPerSize {
             bucket.append(block)
             pools[key] = bucket
-            lock.unlock()
+            os_unfair_lock_unlock(lock)
         } else {
-            lock.unlock()
+            os_unfair_lock_unlock(lock)
             block.deallocate()
         }
         #endif
