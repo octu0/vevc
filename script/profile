@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+import sys
+import os
+import subprocess
+
+def get_real_command(cmd):
+    if len(cmd) >= 2 and cmd[0] == "swift" and cmd[1] == "run":
+        config = "debug"
+        target = None
+        args_start = 2
+        
+        while args_start < len(cmd):
+            if cmd[args_start] == "-c":
+                config = cmd[args_start + 1]
+                args_start += 2
+            elif cmd[args_start].startswith("-"):
+                args_start += 1
+            else:
+                target = cmd[args_start]
+                args_start += 1
+                break
+        
+        if not target:
+            return cmd
+            
+        print(f"[Profiler] Resolving binary path for target '{target}'...")
+        bin_path_proc = subprocess.run(["swift", "build", "-c", config, "--show-bin-path"], capture_output=True, text=True)
+        if bin_path_proc.returncode != 0:
+            return cmd
+            
+        bin_path = bin_path_proc.stdout.strip()
+        real_bin = os.path.join(bin_path, target)
+        
+        print(f"[Profiler] Ensuring target is built...")
+        subprocess.run(["swift", "build", "-c", config, "--product", target], check=True)
+        
+        return [real_bin] + cmd[args_start:]
+    return cmd
+
+def main():
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <command> [args...]")
+        sys.exit(1)
+
+    cmd = get_real_command(sys.argv[1:])
+    
+    print(f"[Profiler] Starting target process: {' '.join(cmd)}")
+    target_proc = subprocess.Popen(cmd)
+    
+    print(f"[Profiler] Target PID is {target_proc.pid}. Catching sample stream...")
+    
+    sample_cmd = ["sample", str(target_proc.pid), "99999", "1", "-mayDie"]
+    sample_proc = subprocess.Popen(sample_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    
+    target_exit_code = target_proc.wait()
+    print(f"[Profiler] Target finished (exit code {target_exit_code}). Processing profile data...")
+    
+    stdout, stderr = sample_proc.communicate()
+    
+    print("\n" + "="*80)
+    print(" Performance Profile (Top User Functions Sorted by Top of Stack)")
+    print("="*80)
+    
+    in_top_stack = False
+    top_lines = []
+    
+    for line in stdout.split('\n'):
+        if line.startswith("Sort by top of stack"):
+            in_top_stack = True
+            continue
+            
+        if in_top_stack:
+            if line.startswith("Binary Images:") or line.startswith("Call graph:"):
+                break
+            
+            if line.strip() != "":
+                if "libsystem_kernel.dylib" not in line and "libsystem_pthread.dylib" not in line:
+                    top_lines.append(line.rstrip())
+                
+    if len(top_lines) == 0:
+        print("No profile data found. Process might have completed too quickly or output format changed.")
+    else:
+        for line in top_lines[:30]:
+            print(line)
+            
+    print("="*80)
+    sys.exit(target_exit_code)
+
+if __name__ == "__main__":
+    main()
