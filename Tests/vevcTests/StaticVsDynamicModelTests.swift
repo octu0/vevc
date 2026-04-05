@@ -135,18 +135,20 @@ struct StaticVsDynamicModelTests {
             encoder.flush()
             let data = encoder.getData()
 
-            var decoder = try EntropyDecoder(data: data)
-            let hasNonZero = try decoder.decodeBypass()
-            #expect(hasNonZero == 1)
-            let _ = try decoder.decodeBypass()
-            let _ = try decoder.decodeBypass()
-
-            for (pIdx, original) in pairs.enumerated() {
-                let decoded = decoder.readPair(isParentZero: false)
-                #expect(decoded.run == Int(original.run),
-                       "Dataset \(idx) pair \(pIdx): run mismatch expected=\(original.run) got=\(decoded.run)")
-                #expect(decoded.val == original.val,
-                       "Dataset \(idx) pair \(pIdx): val mismatch expected=\(original.val) got=\(decoded.val)")
+            try data.withUnsafeBufferPointer { ptr in
+                var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+                let hasNonZero = try decoder.decodeBypass()
+                #expect(hasNonZero == 1)
+                let _ = try decoder.decodeBypass() // lscpX
+                let _ = try decoder.decodeBypass() // lscpY
+                
+                for (pIdx, original) in pairs.enumerated() {
+                    let decoded = decoder.readPair(isParentZero: false)
+                    #expect(decoded.run == Int(original.run),
+                           "Dataset \(idx) pair \(pIdx): run mismatch expected=\(String(original.run)) got=\(String(decoded.run))")
+                    #expect(decoded.val == original.val,
+                           "Dataset \(idx) pair \(pIdx): val mismatch expected=\(String(original.val)) got=\(String(decoded.val))")
+                }
             }
         }
     }

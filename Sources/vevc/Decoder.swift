@@ -14,7 +14,7 @@ private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int, Int)? {
     offset += 2
     guard metadataSize >= 9 else { return nil }
     let profile = chunk[offset]
-    guard profile == 0x01 else { return nil }
+    guard profile == 0x01 || profile == 0x02 else { return nil }
     offset += 1
     let w = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
     offset += 2
@@ -24,6 +24,19 @@ private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int, Int)? {
     offset += 1
     guard chunk.count >= offset + 2 else { return (w, h, 30) }
     let fps = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
+    offset += 2 // Skip FPS
+    offset += 1 // Skip Timescale
+    
+    // Load embedded rANS models if Profile 2
+    if profile == 0x02 && chunk.count >= offset + 1536 {
+        StaticRANSModels.shared.runModel0 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.valModel0 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.runModel1 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.valModel1 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.dpcmRunModel = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.dpcmValModel = deserializeRANSModel(from: chunk, offset: &offset)
+    }
+    
     return (w, h, fps)
 }
 

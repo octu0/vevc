@@ -83,12 +83,14 @@ final class ValueTokenizerTests: XCTestCase {
         
         let encPairs = encoder.pairs
         let data = encoder.getData()
-        
-        var decoder = try EntropyDecoder(data: data)
         var decPairs: [(run: Int, val: Int16)] = []
-        for i in 0..<encPairs.count {
-            let pair = decoder.readPair(isParentZero: encPairs[i].isParentZero)
-            decPairs.append(pair)
+        
+        try data.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            for i in 0..<encPairs.count {
+                let pair = decoder.readPair(isParentZero: encPairs[i].isParentZero)
+                decPairs.append(pair)
+            }
         }
         
         print("=== Decoder: pairs=\(decPairs.count) ===")

@@ -117,85 +117,89 @@ final class EntropyPairsCompareTests: XCTestCase {
         let entropyData = encoder.getData()
         
         // デコーダでpairsを復元
-        var decoder = try EntropyDecoder(data: entropyData)
-        var decPairs: [(run: Int, val: Int16)] = []
-        for i in 0..<encoder.pairs.count {
-            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
-            decPairs.append(pair)
-        }
-        
-        print("=== EntropyEncoder pairs count: \(encPairs.count) ===")
-        print("=== EntropyDecoder pairs count: \(decPairs.count) ===")
-        print("=== coeffCount: \(encCoeffCount) ===")
-        print("=== encBypassBytes: \(encBypassBytes.count) ===")
-        print("=== entropyData: \(entropyData.count) bytes ===")
-        
-        // pairs数の比較
-        XCTAssertEqual(encPairs.count, decPairs.count, "pairs count mismatch: enc=\(encPairs.count) dec=\(decPairs.count)")
-        
-        // 各pairの比較
-        var firstDiff = -1
-        for i in 0..<min(encPairs.count, decPairs.count) {
-            if encPairs[i].run != decPairs[i].run || encPairs[i].val != decPairs[i].val {
-                if firstDiff < 0 {
-                    firstDiff = i
-                    print("First pair diff at [\(i)]: enc=(\(encPairs[i].run), \(encPairs[i].val)) dec=(\(decPairs[i].run), \(decPairs[i].val))")
+        try entropyData.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decPairs: [(run: Int, val: Int16)] = []
+            for i in 0..<encoder.pairs.count {
+                let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+                decPairs.append(pair)
+            }
+            
+            print("=== EntropyEncoder pairs count: \(encPairs.count) ===")
+            print("=== EntropyDecoder pairs count: \(decPairs.count) ===")
+            print("=== coeffCount: \(encCoeffCount) ===")
+            print("=== encBypassBytes: \(encBypassBytes.count) ===")
+            print("=== entropyData: \(entropyData.count) bytes ===")
+            
+            // pairs数の比較
+            XCTAssertEqual(encPairs.count, decPairs.count, "pairs count mismatch: enc=\(encPairs.count) dec=\(decPairs.count)")
+            
+            // 各pairの比較
+            var firstDiff = -1
+            for i in 0..<min(encPairs.count, decPairs.count) {
+                if encPairs[i].run != decPairs[i].run || encPairs[i].val != decPairs[i].val {
+                    if firstDiff < 0 {
+                        firstDiff = i
+                        print("First pair diff at [\(i)]: enc=(\(encPairs[i].run), \(encPairs[i].val)) dec=(\(decPairs[i].run), \(decPairs[i].val))")
+                    }
                 }
             }
+            
+            XCTAssertEqual(firstDiff, -1, "Pairs differ starting at index \(firstDiff)")
         }
-        
-        XCTAssertEqual(firstDiff, -1, "Pairs differ starting at index \(firstDiff)")
         
         // bypassのデコード比較（blockDecode16内のdecodeBypass呼び出しを再現）
-        var decoder2 = try EntropyDecoder(data: entropyData)
         let decBlocks = (0..<blocks.count).map { _ in BlockView.allocate(width: 32, height: 32) }
-        
-        for (i, task) in tasks {
-            let view = decBlocks[i]
-            let subs = getSubbands32(view: view)
-            switch task {
-            case .encode16:
-                let hlView = BlockView(base: subs.hl.base, width: 16, height: 16, stride: 32)
-                try blockDecode16(decoder: &decoder2, block: hlView, parentBlock: nil)
-                let lhView = BlockView(base: subs.lh.base, width: 16, height: 16, stride: 32)
-                try blockDecode16(decoder: &decoder2, block: lhView, parentBlock: nil)
-                let hhView = BlockView(base: subs.hh.base, width: 16, height: 16, stride: 32)
-                try blockDecode16(decoder: &decoder2, block: hhView, parentBlock: nil)
-            case .split8(let tl, let tr, let bl, let br):
-                if tl {
-                    let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
-                }
-                if tr {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
-                }
-                if bl {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
-                }
-                if br {
-                    let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
-                    try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+        try entropyData.withUnsafeBufferPointer { ptr in
+            var decoder2 = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            
+            for (i, task) in tasks {
+                let view = decBlocks[i]
+                let subs = getSubbands32(view: view)
+                switch task {
+                case .encode16:
+                    let hlView = BlockView(base: subs.hl.base, width: 16, height: 16, stride: 32)
+                    try blockDecode16(decoder: &decoder2, block: hlView, parentBlock: nil)
+                    let lhView = BlockView(base: subs.lh.base, width: 16, height: 16, stride: 32)
+                    try blockDecode16(decoder: &decoder2, block: lhView, parentBlock: nil)
+                    let hhView = BlockView(base: subs.hh.base, width: 16, height: 16, stride: 32)
+                    try blockDecode16(decoder: &decoder2, block: hhView, parentBlock: nil)
+                case .split8(let tl, let tr, let bl, let br):
+                    if tl {
+                        let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
+                        try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                    }
+                    if tr {
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
+                        try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                    }
+                    if bl {
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                        try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                    }
+                    if br {
+                        let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                        let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                        let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                        try blockDecode8(decoder: &decoder2, block: hl, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: lh, parentBlock: nil)
+                        try blockDecode8(decoder: &decoder2, block: hh, parentBlock: nil)
+                    }
                 }
             }
-                }
+        }
         
         // HL/LH/HH比較
         var totalDiff = 0

@@ -88,45 +88,36 @@ final class rANSTests: XCTestCase {
         print("[rANSTests] Compressed Size (rANS): \(totalRANSSize) bytes")
         
         // -------- rANS Decode --------
-        var decoder = rANSDecoder(bitstream: ransStream)
-        var bypassReader = BypassReader(data: bypassStream)
-        
         var restoredTokens = [EncodedData]()
-        restoredTokens.reserveCapacity(count)
-        
-        for _ in 0..<count {
-            let cfSig = decoder.getCumulativeFreq()
-            let isSig: Bool
-            let freqSig: UInt32
-            let cumFreqSig: UInt32
+        try! ransStream.withUnsafeBufferPointer { ransPtr in
+        try! bypassStream.withUnsafeBufferPointer { bpPtr in
+            var decoder = rANSDecoder(base: ransPtr.baseAddress!, count: ransPtr.count)
+            var bypassReader = BypassReader(base: bpPtr.baseAddress!, count: bpPtr.count)
             
-            if cfSig < model.sigFreq {
-                // true
-                isSig = true
-                freqSig = model.sigFreq
-                cumFreqSig = 0
-            } else {
-                // false
-                isSig = false
-                freqSig = RANS_SCALE - model.sigFreq
-                cumFreqSig = model.sigFreq
+            // LIFO order for decoding
+            for _ in 0..<count {
+                let cf = decoder.getCumulativeFreq()
+                if cf < model.sigFreq {
+                    let tInfo = model.findToken(cf: cf)
+                    decoder.advanceSymbol(cumFreq: tInfo.cumFreq, freq: tInfo.freq)
+                    
+                    // read backward bypass (but it was written forward, so we collect tokens first)
+                    restoredTokens.append(EncodedData(isSignificant: true, token: tInfo.token, bypassBits: 0, bypassLen: 0))
+                } else {
+                    decoder.advanceSymbol(cumFreq: model.sigFreq, freq: RANS_SCALE - model.sigFreq)
+                    restoredTokens.append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
+                }
             }
-            decoder.advanceSymbol(cumFreq: cumFreqSig, freq: freqSig)
-            
-            if isSig {
-                let cfToken = decoder.getCumulativeFreq()
-                let tInfo = model.findToken(cf: cfToken)
-                
-                decoder.advanceSymbol(cumFreq: tInfo.cumFreq, freq: tInfo.freq)
-                
-                let bypassLen = valueBypassLength(for: tInfo.token)
-                let bypassBits = bypassReader.readBits(count: bypassLen)
-                
-                restoredTokens.append(EncodedData(isSignificant: true, token: tInfo.token, bypassBits: bypassBits, bypassLen: bypassLen))
-            } else {
-                restoredTokens.append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
+            // Read Forward Bypass bits and match with reverted tokens
+            restoredTokens.reverse()
+            for i in 0..<count {
+                if restoredTokens[i].isSignificant {
+                    let bpLen = valueBypassLength(for: restoredTokens[i].token)
+                    let bpBits = bypassReader.readBits(count: bpLen)
+                    restoredTokens[i] = EncodedData(isSignificant: true, token: restoredTokens[i].token, bypassBits: bpBits, bypassLen: bpLen)
+                }
             }
-        }
+        }}
         
         // データの検証
         XCTAssertEqual(restoredTokens.count, tokens.count)

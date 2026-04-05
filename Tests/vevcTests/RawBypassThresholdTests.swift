@@ -178,18 +178,20 @@ struct RawBypassThresholdTests {
             let data = encoder.getData()
 
             // Decode
-            var decoder = try EntropyDecoder(data: data)
-            let hasNonZero = try decoder.decodeBypass()
-            #expect(hasNonZero == 1, "hasNonZero should be 1")
+            try data.withUnsafeBufferPointer { ptr in
+                var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+                let hasNonZero = try decoder.decodeBypass()
+                #expect(hasNonZero == 1, "hasNonZero should be 1")
             let _ = try decoder.decodeBypass() // lscpX
             let _ = try decoder.decodeBypass() // lscpY
 
             for (idx, original) in originalPairs.enumerated() {
                 let decoded = decoder.readPair(isParentZero: false)
                 #expect(decoded.run == Int(original.run),
-                       "Roundtrip mismatch at pair \(idx)/\(count): run expected=\(original.run) got=\(decoded.run)")
+                       "Roundtrip mismatch at pair \(idx)/\(count): run expected=\(String(original.run)) got=\(String(decoded.run))")
                 #expect(decoded.val == original.val,
-                       "Roundtrip mismatch at pair \(idx)/\(count): val expected=\(original.val) got=\(decoded.val)")
+                       "Roundtrip mismatch at pair \(idx)/\(count): val expected=\(String(original.val)) got=\(String(decoded.val))")
+            }
             }
         }
     }

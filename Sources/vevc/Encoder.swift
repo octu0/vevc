@@ -3,14 +3,25 @@ import Foundation
 @inline(__always)
 private func buildVEVCHeader(width: Int, height: Int, framerate: Int) -> [UInt8] {
     var header: [UInt8] = [0x56, 0x45, 0x56, 0x43] // Magic 'VEVC'
-    let metadataPayloadSize: UInt16 = 9
+    
+    // Size is: 9 (Profile1 original parts) + 6 models * 256 bytes = 9 + 1536 = 1545 bytes
+    let metadataPayloadSize: UInt16 = 1545
     appendUInt16BE(&header, metadataPayloadSize)
-    header.append(0x01) // Profile 1
+    header.append(0x02) // Profile 2 (supports DWT with embedded rANS models)
     appendUInt16BE(&header, UInt16(width))
     appendUInt16BE(&header, UInt16(height))
     header.append(0x01) // ColorGamut: BT.709
     appendUInt16BE(&header, UInt16(framerate))
     header.append(0x00) // Timescale: 0=1000ms
+    
+    // Append embedded rANS models
+    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel0))
+    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel0))
+    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel1))
+    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel1))
+    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmRunModel))
+    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmValModel))
+    
     return header
 }
 

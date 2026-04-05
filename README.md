@@ -47,12 +47,18 @@
 | Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
 +-------------------+------------+-----------------+-----+-------------+
 
-    Metadata (Profile 1)
+    Metadata (Profile 2)
 +---------------------------------------------+
 | Metadata Size (2B) | Profile Version(1B)    |
 +------------+-------+-----+------------------+----------+----------------+
 | Width (2B) | Height (2B) | Color Gamut (1B) | FPS (2B) | Timescale (1B) |
 +------------+-------------+------------------+----------+----------------+
+| rANS Run 0 (256B)          | rANS Val 0 (256B)                          |
++----------------------------+--------------------------------------------+
+| rANS Run 1 (256B)          | rANS Val 1 (256B)                          |
++----------------------------+--------------------------------------------+
+| rANS DPCM Run (256B)       | rANS DPCM Val (256B)                       |
++----------------------------+--------------------------------------------+
   Color Gamut: 0x01=BT.709, 0x02=BT.2020
   Timescale:   0x00=1000ms, 0x01=90000hz
 
@@ -119,10 +125,10 @@ SW: Software, HWA: Hardware Acceleration
 
 *(Crop 400x400 from Tears of Steel 1080p width)*
 
-#### 1. Frame 1632 (VEVC Min SSIM)
+#### 1. Frame 1567 (VEVC Min SSIM)
 | Original | VEVC | H.264(SW) | H.265(SW) |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/versus_vevc_min_frame1632_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1632_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1632_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1632_hevc.png" width="200" /> |
+| <img src="docs/versus_vevc_min_frame1567_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1567_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1567_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1567_hevc.png" width="200" /> |
 
 (CC) Blender Foundation | [mango.blender.org](https://mango.blender.org)
 

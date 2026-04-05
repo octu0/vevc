@@ -17,7 +17,7 @@ let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 
 /// Build static rANS model from predetermined frequency data.
 /// Normalizes the provided raw frequency array to sum exactly to RANS_SCALE.
-private func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
+internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
     var freqs = rawFreqs
     let sum: UInt32 = freqs.reduce(0, +)
     
@@ -44,90 +44,75 @@ private func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
     return rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqs)
 }
 
-// Static tables derived from actual data:
-// runNorm0: run tokens, isParentZero=false (34M pairs)
-//   Dominated by token 0 (run=0, ~68%), exponential decay
-let staticRunModel0 = buildStaticModel(rawFreqs: [
-    11172, 2025, 1036, 793, 299, 185, 165, 181,
-      104,   62,   52,  54,  57,  36,  32,  37,
-        9,    7,    5,   4,   4,   3,   4,   4,
-        3,    2,    2,   2,   2,   1,   1,   2,
-        1,    1,    2,   4,   5,   6,   1,   1,
-        1,    1,    1,   1,   1,   1,   1,   1,
-        1,    1,    1,   1,   1,   1,   1,   1,
-        1,    1,    1,   1,   1,   1,   1,   1,
-])
+final class StaticRANSModels: @unchecked Sendable {
+    static let shared = StaticRANSModels()
 
-// valNorm0: value tokens, isParentZero=false
-//   Asymmetric: positive values 3-6x more frequent than negative
-//   Token 0(+1)=3235, token 2(+2)=2731, token 6(+4)=1134 (sharp right-decay)
-let staticValModel0 = buildStaticModel(rawFreqs: [
-    3235,  964, 2731,  425, 1173,  289, 1134,  222,
-     618,  179,  610,  151,  379,  129,  373,  111,
-     254,   97,  251,   86,  181,   76,  180,   69,
-     135,   63,  136,   56,  103,   52,  104,   47,
-     124,  123,  201,  302,  363,  337,  221,   76,
-       3,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-])
+    var runModel0 = buildStaticModel(rawFreqs: [
+        11172, 2025, 1036, 793, 299, 185, 165, 181,
+          104,   62,   52,  54,  57,  36,  32,  37,
+            9,    7,    5,   4,   4,   3,   4,   4,
+            3,    2,    2,   2,   2,   1,   1,   2,
+            1,    1,    2,   4,   5,   6,   1,   1,
+            1,    1,    1,   1,   1,   1,   1,   1,
+            1,    1,    1,   1,   1,   1,   1,   1,
+            1,    1,    1,   1,   1,   1,   1,   1,
+    ])
 
-// runNorm1: run tokens, isParentZero=true
-//   Less concentrated: token 3(run=3)=2459 is the mode (not token 0)
-let staticRunModel1 = buildStaticModel(rawFreqs: [
-    3339, 1389, 1644, 2459, 822, 668, 725, 1009,
-     417,  306,  338,  429, 512, 332, 329,  435,
-      82,   66,   61,   63,  48,  50,  46,   67,
-      56,   37,   33,   36,  26,  26,  28,   42,
-      23,   16,   32,   77, 103, 195,   1,    1,
-       1,    1,    1,    1,   1,   1,   1,    1,
-       1,    1,    1,    1,   1,   1,   1,    1,
-       1,    1,    1,    1,   1,   1,   1,    1,
-])
+    var valModel0 = buildStaticModel(rawFreqs: [
+        3235,  964, 2731,  425, 1173,  289, 1134,  222,
+         618,  179,  610,  151,  379,  129,  373,  111,
+         254,   97,  251,   86,  181,   76,  180,   69,
+         135,   63,  136,   56,  103,   52,  104,   47,
+         124,  123,  201,  302,  363,  337,  221,   76,
+           3,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+    ])
 
-// valNorm1: value tokens, isParentZero=true
-//   Almost exclusively positive values (odd tokens ≈ 0)
-//   Token 2(+2) is the mode, not token 0(+1)
-let staticValModel1 = buildStaticModel(rawFreqs: [
-    5838,    1, 6989,    1, 1004,   1, 1582,   1,
-     219,    1,  465,    1,   52,   1,  141,   1,
-      13,    1,   44,    1,    5,   1,   17,   1,
-       1,    1,    5,    1,    1,   1,    1,   1,
-       1,    1,    1,    1,    1,   1,    1,   1,
-       1,    1,    1,    1,    1,   1,    1,   1,
-       1,    1,    1,    1,    1,   1,    1,   1,
-       1,    1,    1,    1,    1,   1,    1,   1,
-])
+    var runModel1 = buildStaticModel(rawFreqs: [
+        3339, 1389, 1644, 2459, 822, 668, 725, 1009,
+         417,  306,  338,  429, 512, 332, 329,  435,
+          82,   66,   61,   63,  48,  50,  46,   67,
+          56,   37,   33,   36,  26,  26,  28,   42,
+          23,   16,   32,   77, 103, 195,   1,    1,
+           1,    1,    1,    1,   1,   1,   1,    1,
+           1,    1,    1,    1,   1,   1,   1,    1,
+           1,    1,    1,    1,   1,   1,   1,    1,
+    ])
 
-// MARK: - DPCM Static Tables
-// Measured from real 1080p video (ToS-4k-1080.y4m, 1802 frames, 44139379 pairs).
-// DPCM has no isParentZero concept, so only one run/val model pair is needed.
-// Both isParentZero=false and isParentZero=true use the same tables.
+    var valModel1 = buildStaticModel(rawFreqs: [
+        5838,    1, 6989,    1, 1004,   1, 1582,   1,
+         219,    1,  465,    1,   52,   1,  141,   1,
+          13,    1,   44,    1,    5,   1,   17,   1,
+           1,    1,    5,    1,    1,   1,    1,   1,
+           1,    1,    1,    1,    1,   1,    1,   1,
+           1,    1,    1,    1,    1,   1,    1,   1,
+           1,    1,    1,    1,    1,   1,    1,   1,
+           1,    1,    1,    1,    1,   1,    1,   1,
+    ])
 
-// DPCM run tokens: run=0 dominant (~39%), smooth exponential decay
-let staticDPCMRunModel = buildStaticModel(rawFreqs: [
-    6358, 2738, 1575, 1049,  757,  582,  490,  392,
-     298,  254,  226,  200,  192,  199,  269,  209,
-      45,   31,   25,   21,   18,   17,   19,   18,
-      15,   13,   14,   14,   15,   19,   36,   35,
-      10,    7,   11,   19,   52,   47,   34,   25,
-      17,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-])
+    var dpcmRunModel = buildStaticModel(rawFreqs: [
+        6358, 2738, 1575, 1049,  757,  582,  490,  392,
+         298,  254,  226,  200,  192,  199,  269,  209,
+          45,   31,   25,   21,   18,   17,   19,   18,
+          15,   13,   14,   14,   15,   19,   36,   35,
+          10,    7,   11,   19,   52,   47,   34,   25,
+          17,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+    ])
 
-// DPCM val tokens: token0(+1)=44.2%, token1(-1)=48.2% (ultra-concentrated)
-// DPCM residuals are almost exclusively ±1
-let staticDPCMValModel = buildStaticModel(rawFreqs: [
-    7247, 7891,  495,  516,   90,   91,   19,   20,
-       4,    4,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-       1,    1,    1,    1,    1,    1,    1,    1,
-])
+    var dpcmValModel = buildStaticModel(rawFreqs: [
+        7247, 7891,  495,  516,   90,   91,   19,   20,
+           4,    4,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+           1,    1,    1,    1,    1,    1,    1,    1,
+    ])
+}
 
 // MARK: - rANS Probability Model
 
@@ -249,6 +234,35 @@ struct rANSModel {
         let sym = Int(tokenLUT[Int(cf)])
         return (UInt8(sym), tokenFreqs[sym], tokenCumFreqs[sym])
     }
+}
+
+// MARK: - rANS Model Serialization helpers
+
+internal func serializeRANSModel(_ rANS: rANSModel) -> [UInt8] {
+    var out: [UInt8] = []
+    out.reserveCapacity(256)
+    for freq in rANS.tokenFreqs {
+        out.append(UInt8((freq >> 24) & 0xFF))
+        out.append(UInt8((freq >> 16) & 0xFF))
+        out.append(UInt8((freq >> 8) & 0xFF))
+        out.append(UInt8(freq & 0xFF))
+    }
+    return out
+}
+
+internal func deserializeRANSModel(from chunk: [UInt8], offset: inout Int) -> rANSModel {
+    var freqs = [UInt32](repeating: 0, count: 64)
+    for i in 0..<64 {
+        let b0 = UInt32(chunk[offset])
+        let b1 = UInt32(chunk[offset+1])
+        let b2 = UInt32(chunk[offset+2])
+        let b3 = UInt32(chunk[offset+3])
+        offset += 4
+        freqs[i] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+    }
+    // rANSModel's sum may not be exactly RANS_SCALE if we blindly use freqs without rebuilding
+    // Actually, freqs *were* written off a valid rANSModel, but to ensure lookup table is built:
+    return buildStaticModel(rawFreqs: freqs)
 }
 
 // MARK: - rANS Encoder

@@ -95,16 +95,26 @@ final class InterleavedrANSTests: XCTestCase {
         let bypassStreams = bypassWriters.map { $0.bytes }
         
         // ---- 4-way Decode ----
-        var decoder = InterleavedrANSDecoder(bitstream: ransStream)
-        var bypassReaders = bypassStreams.map { BypassReader(data: $0) }
-        
+        // To safely use UnsafePointers without extensions, we use withUnsafeBufferPointer on each
+        ransStream.withUnsafeBufferPointer { ransBuf in
+        bypassStreams[0].withUnsafeBufferPointer { bp0Buf in
+        bypassStreams[1].withUnsafeBufferPointer { bp1Buf in
+        bypassStreams[2].withUnsafeBufferPointer { bp2Buf in
+        bypassStreams[3].withUnsafeBufferPointer { bp3Buf in
+            
+        var bypassReaders = [
+            BypassReader(base: bp0Buf.baseAddress!, count: bp0Buf.count),
+            BypassReader(base: bp1Buf.baseAddress!, count: bp1Buf.count),
+            BypassReader(base: bp2Buf.baseAddress!, count: bp2Buf.count),
+            BypassReader(base: bp3Buf.baseAddress!, count: bp3Buf.count)
+        ]
         let sigFreqVec = SIMD4<UInt32>(repeating: model.sigFreq)
         let invSigFreqVec = SIMD4<UInt32>(repeating: RANS_SCALE - model.sigFreq)
         let zeroVec = SIMD4<UInt32>(repeating: 0)
         
         var finalDecodingResult = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
         
-        decoder = InterleavedrANSDecoder(bitstream: ransStream)
+        var decoder = InterleavedrANSDecoder(base: ransBuf.baseAddress!, count: ransBuf.count)
         var rANSDecodedByLane = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
         for i in 0..<4 {
             rANSDecodedByLane[i].reserveCapacity(chunkSize)
@@ -211,4 +221,5 @@ final class InterleavedrANSTests: XCTestCase {
             }
         }
     }
+}}}}}
 }

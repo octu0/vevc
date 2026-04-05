@@ -34,7 +34,7 @@ struct StaticEntropyModel: EntropyModelProvider {
         runTokenCounts0: inout [Int], valTokenCounts0: inout [Int],
         runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
     ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
-        return (staticRunModel0, staticValModel0, staticRunModel1, staticValModel1)
+        return (StaticRANSModels.shared.runModel0, StaticRANSModels.shared.valModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.valModel1)
     }
     
     @inline(__always)
@@ -69,7 +69,7 @@ struct DynamicEntropyModel: EntropyModelProvider {
         // Fallback to static tables when pair count is below threshold
         // to avoid frequency table header overhead exceeding compression benefit
         if totalPairs < dynamicThreshold {
-            return (staticRunModel0, staticValModel0, staticRunModel1, staticValModel1)
+            return (StaticRANSModels.shared.runModel0, StaticRANSModels.shared.valModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.valModel1)
         }
         
         var rm0 = rANSModel()
@@ -91,8 +91,8 @@ struct DynamicEntropyModel: EntropyModelProvider {
     ) {
         // Check if we fell back to static tables by comparing tokenFreqs pointers
         // If the model's tokenFreqs match the static tables, skip writing headers
-        if runModel0.tokenFreqs == staticRunModel0.tokenFreqs
-            && valModel0.tokenFreqs == staticValModel0.tokenFreqs {
+        if runModel0.tokenFreqs == StaticRANSModels.shared.runModel0.tokenFreqs
+            && valModel0.tokenFreqs == StaticRANSModels.shared.valModel0.tokenFreqs {
             return
         }
         writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
@@ -114,7 +114,7 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
         runTokenCounts1: inout [Int], valTokenCounts1: inout [Int]
     ) -> (runModel0: rANSModel, valModel0: rANSModel, runModel1: rANSModel, valModel1: rANSModel) {
         // DPCM uses the same model for both isParentZero=false and true
-        return (staticDPCMRunModel, staticDPCMValModel, staticDPCMRunModel, staticDPCMValModel)
+        return (StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.dpcmValModel)
     }
     
     @inline(__always)
@@ -532,16 +532,16 @@ struct EntropyDecoder {
         
         if isStaticTable, isDPCMTable {
             // Static DPCM mode: use DPCM-specific static tables
-            self.runModel0 = staticDPCMRunModel
-            self.valModel0 = staticDPCMValModel
-            self.runModel1 = staticDPCMRunModel
-            self.valModel1 = staticDPCMValModel
+            self.runModel0 = StaticRANSModels.shared.dpcmRunModel
+            self.valModel0 = StaticRANSModels.shared.dpcmValModel
+            self.runModel1 = StaticRANSModels.shared.dpcmRunModel
+            self.valModel1 = StaticRANSModels.shared.dpcmValModel
         } else if isStaticTable {
             // Static DWT mode: no frequency tables in bitstream
-            self.runModel0 = staticRunModel0
-            self.valModel0 = staticValModel0
-            self.runModel1 = staticRunModel1
-            self.valModel1 = staticValModel1
+            self.runModel0 = StaticRANSModels.shared.runModel0
+            self.valModel0 = StaticRANSModels.shared.valModel0
+            self.runModel1 = StaticRANSModels.shared.runModel1
+            self.valModel1 = StaticRANSModels.shared.valModel1
         } else {
             // Legacy dynamic table mode: read frequency tables from bitstream
             let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)

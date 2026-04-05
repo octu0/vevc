@@ -31,9 +31,10 @@ final class BlockRoundtripTests: XCTestCase {
         // blockDecode16
         let decBlock = BlockView.allocate(width: 16, height: 16)
         defer { decBlock.deallocate() }
-        var decoder = try EntropyDecoder(data: encoded)
-        try! blockDecode16(decoder: &decoder, block: decBlock, parentBlock: nil)
-            
+        try encoded.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            try! blockDecode16(decoder: &decoder, block: decBlock, parentBlock: nil)
+        }
         // エンコード後のデータとデコード後のデータを比較
         for i in 0..<256 {
             XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/16) x:\(i%16): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
@@ -62,9 +63,10 @@ final class BlockRoundtripTests: XCTestCase {
         
         let decBlock = BlockView.allocate(width: 8, height: 8)
         defer { decBlock.deallocate() }
-        var decoder = try EntropyDecoder(data: encoded)
-        try! blockDecode8(decoder: &decoder, block: decBlock, parentBlock: nil)
-            
+        try encoded.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            try! blockDecode8(decoder: &decoder, block: decBlock, parentBlock: nil)
+        }
         for i in 0..<64 {
             XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/8) x:\(i%8): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
         }
@@ -141,9 +143,11 @@ final class BlockRoundtripTests: XCTestCase {
         // デコード (stride=32)  
         let decBlock32 = BlockView.allocate(width: 32, height: 32)
         defer { decBlock32.deallocate() }
-        var decoder = try EntropyDecoder(data: encoded)
-        hlView = BlockView(base: decBlock32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-        try! blockDecode16(decoder: &decoder, block: hlView, parentBlock: nil)
+        try encoded.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            hlView = BlockView(base: decBlock32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
+            try! blockDecode16(decoder: &decoder, block: hlView, parentBlock: nil)
+        }
             
         // デコード後のHLデータ
         var decHL = [Int16](repeating: 0, count: 256)

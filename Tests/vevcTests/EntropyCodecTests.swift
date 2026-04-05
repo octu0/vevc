@@ -20,12 +20,14 @@ final class EntropyCodecTests: XCTestCase {
         
         let data = encoder.getData()
         
-        var decoder = try EntropyDecoder(data: data)
-        
-        for (i, expected) in expectedPairs.enumerated() {
-            let pair = decoder.readPair(isParentZero: false)
-            XCTAssertEqual(pair.run, Int(expected.run), "Pair[\(i)] run: expected=\(expected.run) got=\(pair.run)")
-            XCTAssertEqual(pair.val, expected.val, "Pair[\(i)] val: expected=\(expected.val) got=\(pair.val)")
+        try data.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            
+            for (i, expected) in expectedPairs.enumerated() {
+                let pair = decoder.readPair(isParentZero: false)
+                XCTAssertEqual(pair.run, Int(expected.run), "Pair[\(i)] run: expected=\(expected.run) got=\(pair.run)")
+                XCTAssertEqual(pair.val, expected.val, "Pair[\(i)] val: expected=\(expected.val) got=\(pair.val)")
+            }
         }
     }
 
@@ -55,9 +57,11 @@ final class EntropyCodecTests: XCTestCase {
         // デコード
         let decBlocks = (0..<16).map { _ in BlockView.allocate(width: 16, height: 16) }
         defer { for b in decBlocks { b.deallocate() } }
-        var decoder = try EntropyDecoder(data: data)
-        for i in 0..<16 {
-            try! blockDecode16(decoder: &decoder, block: decBlocks[i], parentBlock: nil)
+        try data.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            for i in 0..<16 {
+                try! blockDecode16(decoder: &decoder, block: decBlocks[i], parentBlock: nil)
+            }
         }
         
         // 比較 (blockEncode16後のデータ vs デコード後)

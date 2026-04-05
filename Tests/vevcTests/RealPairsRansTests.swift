@@ -65,14 +65,20 @@ final class RealPairsRansTests: XCTestCase {
         }
         
         let data = encoder.getData()
-        var decoder = try EntropyDecoder(data: data)
         var decPairs: [(run: Int, val: Int16)] = []
-        for i in 0..<encoder.pairs.count {
-            let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
-            decPairs.append(pair)
+        try data.withUnsafeBufferPointer { ptr in
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            for i in 0..<encoder.pairs.count {
+                let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+                decPairs.append(pair)
+            }
+            
+            XCTAssertEqual(encoder.pairs.count, decPairs.count, "pairs count")
+            for i in 0..<encoder.pairs.count {
+                XCTAssertEqual(encoder.pairs[i].run, UInt32(decPairs[i].run), "run at \(i)")
+                XCTAssertEqual(encoder.pairs[i].val, decPairs[i].val, "val at \(i)")
+            }
         }
-        
-        XCTAssertEqual(realPairs.count, decPairs.count, "pairs count: enc=\(realPairs.count) dec=\(decPairs.count)")
         
         var firstDiff = -1
         var diffCount = 0
