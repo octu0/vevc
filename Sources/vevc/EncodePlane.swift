@@ -1812,12 +1812,28 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
     var sads = [Int]()
     mvs.reserveCapacity(currBlocks8.count)
     sads.reserveCapacity(currBlocks8.count)
+    
+    let tmpC = pool.get(width: 8, height: 8)
+    let tmpO = pool.get(width: 8, height: 8)
+    let tmpT = pool.get(width: 8, height: 8)
+    defer {
+        pool.put(tmpC)
+        pool.put(tmpO)
+        pool.put(tmpT)
+    }
+    let cPtr = tmpC.base
+    let oPtr = tmpO.base
+    let tPtr = tmpT.base
+
     for idx in currBlocks8.indices {
         let col = idx % colCount
         let row = idx / colCount
         let bx = col * 8
         let by = row * 8
-        let (mv, sad) = MotionEstimation.searchPixels(currPlane: currSub1, prevPlane: prevSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+        let (mv, sad) = MotionEstimation.searchPixels(
+            currPlane: currSub1, prevPlane: prevSub1, 
+            cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
         mvs.append(mv)
         sads.append(sad)
     }
@@ -1859,14 +1875,32 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     sads.reserveCapacity(currBlocks8.count)
     refDirs.reserveCapacity(currBlocks8.count)
     
+    let tmpC = pool.get(width: 8, height: 8)
+    let tmpO = pool.get(width: 8, height: 8)
+    let tmpT = pool.get(width: 8, height: 8)
+    defer {
+        pool.put(tmpC)
+        pool.put(tmpO)
+        pool.put(tmpT)
+    }
+    let cPtr = tmpC.base
+    let oPtr = tmpO.base
+    let tPtr = tmpT.base
+    
     for idx in currBlocks8.indices {
         let col = idx % colCount
         let row = idx / colCount
         let bx = col * 8
         let by = row * 8
         
-        let (fwdMV, fwdSAD) = MotionEstimation.searchPixels(currPlane: currSub1, prevPlane: prevSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)        
-        let (bwdMV, bwdSAD) = MotionEstimation.searchPixels(currPlane: currSub1, prevPlane: nextSub1, width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+        let (fwdMV, fwdSAD) = MotionEstimation.searchPixels(
+            currPlane: currSub1, prevPlane: prevSub1, 
+            cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)        
+        let (bwdMV, bwdSAD) = MotionEstimation.searchPixels(
+            currPlane: currSub1, prevPlane: nextSub1, 
+            cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
         
         if bwdSAD < fwdSAD {
             mvs.append(bwdMV)

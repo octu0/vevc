@@ -12,7 +12,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         // 各ブロックのHL/LH/HHにデータをセット（LLは0のまま）
         for bi in 0..<3 {
-            let view = blocks[bi].view
+            let view = blocks[bi]
             let half = 16
             // HL (right-top quadrant)
             for y in 0..<half {
@@ -41,7 +41,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         var origHL: [[Int16]] = []
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
-            let view = blocks[bi].view
+            let view = blocks[bi]
             for y in 0..<16 {
                 let ptr = view.base.advanced(by: y * 32 + 16)
                 for x in 0..<16 {
@@ -58,7 +58,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         var encAfterHL: [[Int16]] = []
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
-            let view = blocks[bi].view
+            let view = blocks[bi]
             for y in 0..<16 {
                 let ptr = view.base.advanced(by: y * 32 + 16)
                 for x in 0..<16 {
@@ -76,7 +76,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
             var b = decBlocks[bi]
-            let view = b.view
+            let view = b
             for y in 0..<16 {
                 let ptr = view.base.advanced(by: y * 32 + 16)
                 for x in 0..<16 {
@@ -118,7 +118,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         var blocks = (0..<3).map { _ in BlockView.allocate(width: 32, height: 32) }
         
         // Block0: 全象限にデータ → splitしない
-        var view = blocks[0].view
+        var view = blocks[0]
         for y in 0..<16 {
             for x in 0..<16 {
                 view.base.advanced(by: y * 32 + 16)[x] = Int16(y * 16 + x + 1)  // HL
@@ -128,7 +128,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
             
         // Block1: TL象限のみデータ、他はゼロ → shouldSplit=true
-        view = blocks[1].view
+        view = blocks[1]
         // HL TL (8x8)
         for y in 0..<8 {
             for x in 0..<8 {
@@ -149,7 +149,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
             
         // Block2: 全象限にデータ
-        view = blocks[2].view
+        view = blocks[2]
         for y in 0..<16 {
             for x in 0..<16 {
                 view.base.advanced(by: y * 32 + 16)[x] = Int16((y * 16 + x) % 30 - 15)
@@ -170,8 +170,8 @@ final class SubbandsRoundtripTests: XCTestCase {
             var decBlk = decBlocks[bi]
             
             var diffHL = 0, diffLH = 0, diffHH = 0
-            let encView = encBlk.view
-            let decView = decBlk.view
+            let encView = encBlk
+            let decView = decBlk
             for y in 0..<16 {
                 for x in 0..<16 {
                     if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { diffHL += 1 }
@@ -233,8 +233,8 @@ final class SubbandsRoundtripTests: XCTestCase {
             var encBlk = blocks[bi]
             var decBlk = decBlocks[bi]
             
-            let encView = encBlk.view
-            let decView = decBlk.view
+            let encView = encBlk
+            let decView = decBlk
             for y in 0..<16 {
                 for x in 0..<16 {
                     // HL
@@ -288,8 +288,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         for bi in 0..<blocks.count {
             var encBlk = blocks[bi]
             var decBlk = decBlocks[bi]
-            let encView = encBlk.view
-            let decView = decBlk.view
+            let encView = encBlk
+            let decView = decBlk
             for y in 0..<16 {
                 for x in 0..<16 {
                     if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
@@ -350,8 +350,8 @@ final class SubbandsRoundtripTests: XCTestCase {
             for bi in 0..<blocks.count {
                 var encBlk = blocks[bi]
                 var decBlk = decBlocks[bi]
-                let encView = encBlk.view
-                let decView = decBlk.view
+                let encView = encBlk
+                let decView = decBlk
                 for y in 0..<16 {
                     for x in 0..<16 {
                         if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }

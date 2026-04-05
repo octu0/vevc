@@ -63,8 +63,8 @@ final class BlockDataCompareTests: XCTestCase {
             let encBlk = encYBlocks[i]
             let decBlk = decYBlocks[i]
             
-            let encView = encBlk.view
-            let decView = decBlk.view
+            let encView = encBlk
+            let decView = decBlk
             let half = 16
             // HL comparison
             for y in 0..<half {

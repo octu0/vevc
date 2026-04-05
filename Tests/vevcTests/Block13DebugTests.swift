@@ -72,8 +72,8 @@ final class Block13DebugTests: XCTestCase {
             var diffHL = 0, diffLH = 0, diffHH = 0
             var firstDiffDetail = ""
             
-            let encView = encBlk.view
-            let decView = decBlk.view
+            let encView = encBlk
+            let decView = decBlk
             // HL
             for y in 0..<16 {
                 for x in 0..<16 {
@@ -117,8 +117,8 @@ final class Block13DebugTests: XCTestCase {
             let encBlk = blocks2[bi]
             let decBlk = decBlocks[bi]
             var hasDiff = false
-            let encView = encBlk.view
-            let decView = decBlk.view
+            let encView = encBlk
+            let decView = decBlk
             for y in 0..<16 {
                 for x in 0..<16 {
                     if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { hasDiff = true }

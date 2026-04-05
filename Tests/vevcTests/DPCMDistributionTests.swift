@@ -74,7 +74,7 @@ final class DPCMDistributionTests: XCTestCase {
                     lastVal = 0
                     continue
                 }
-                let view = blocks[i].view
+                let view = blocks[i]
                 let subs = getSubbands32(view: view)
                 blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
                 blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)

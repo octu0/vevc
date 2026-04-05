@@ -47,15 +47,10 @@ struct MotionEstimation {
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
         pBase: UnsafePointer<Int16>, 
+        oPtr: UnsafeMutablePointer<Int16>,
+        tPtr: UnsafeMutablePointer<Int16>,
         width: Int, height: Int, bx: Int, by: Int
     ) -> (Int, Int, Int) {
-        let oPtr = UnsafeMutablePointer<Int16>.allocate(capacity: 64)
-        let tPtr = UnsafeMutablePointer<Int16>.allocate(capacity: 64)
-        defer {
-            oPtr.deallocate()
-            tPtr.deallocate()
-        }
-
         // 1. Evaluate (0,0) first as baseline
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
@@ -129,18 +124,22 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func searchPixels(currPlane: [Int16], prevPlane: [Int16], width: Int, height: Int, bx: Int, by: Int, range: Int = 4) -> (MotionVector, Int) {
+    static func searchPixels(
+        currPlane: [Int16], 
+        prevPlane: [Int16], 
+        cPtr: UnsafeMutablePointer<Int16>,
+        oPtr: UnsafeMutablePointer<Int16>,
+        tPtr: UnsafeMutablePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, range: Int = 4
+    ) -> (MotionVector, Int) {
         return currPlane.withUnsafeBufferPointer { cBuf in
             prevPlane.withUnsafeBufferPointer { pBuf in
                 guard let cBase = cBuf.baseAddress, let pBase = pBuf.baseAddress else {
                     return (MotionVector(dx: 0, dy: 0), 0)
                 }
 
-                let cPtr = UnsafeMutablePointer<Int16>.allocate(capacity: 64)
-                defer { cPtr.deallocate() }
-                
                 fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
-                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, width: width, height: height, bx: bx, by: by)
+                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by)
                 return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
             }
         }

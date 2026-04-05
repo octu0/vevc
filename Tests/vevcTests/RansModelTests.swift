@@ -40,7 +40,7 @@ final class RansModelTests: XCTestCase {
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
-            let view = blocks[i].view
+            let view = blocks[i]
             let subs = getSubbands32(view: view)
             blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
             blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)

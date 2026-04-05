@@ -254,13 +254,13 @@ final class ChromaBlockTests: XCTestCase {
             evaluateQuantizeBase8(block: &block, qt: qt)
 
             // 逆量子化
-            view = block.view
+            view = block
             let half = blockSize / 2
             let base = view.base
-            var llView = BlockView(base: base, width: half, height: half, stride: blockSize)
-            var hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
-            var lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
-            var hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
+            let llView = BlockView(base: base, width: half, height: half, stride: blockSize)
+            let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
+            let lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
+            let hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
             dequantizeSIMD(llView, q: qt.qLow)
             dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
             dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
@@ -269,7 +269,7 @@ final class ChromaBlockTests: XCTestCase {
         
             // MSE計算
             var mse: Double = 0
-            view = block.view
+            view = block
             for y in 0..<blockSize {
                 let ptr = view.rowPointer(y: y)
                 for x in 0..<blockSize {
