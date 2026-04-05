@@ -122,51 +122,43 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
     let rowCount = ((height + 32 - 1) / 32)
-    let chunkSize = 8
+    let colCount = ((width + 32 - 1) / 32)
+    let totalBlocks = rowCount * colCount
     
-    // Concurrent ではなく TaskGroup を用いて安全に結果をマージする
-    var resultsArray = [(Int, [(BlockView, Int, Int)])?](repeating: nil, count: rowCount)
-    await withTaskGroup(of: [(Int, [(BlockView, Int, Int)])].self) { group in
-        var startRow = 0
-        while startRow < rowCount {
-            let endRow = min(startRow + chunkSize, rowCount)
-            let sRow = startRow
-            let colCount32 = (width + 31) / 32
-            group.addTask {
-                var chunkResults: [(Int, [(BlockView, Int, Int)])] = []
-                chunkResults.reserveCapacity(endRow - sRow)
+    var tmpBlocks: [BlockView] = []
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get(width: 32, height: 32))
+    }
+    let blocks = tmpBlocks
+    
+    let chunkSize = 8
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks] in
                 for i in sRow..<endRow {
                     let h = (i * 32)
-                    var rowResults: [(BlockView, Int, Int)] = []
-                    rowResults.reserveCapacity(colCount32)
-                    for w in stride(from: 0, to: width, by: 32) {
-                        let block = pool.get(width: 32, height: 32)
-                        let view = block
+                    for j in 0..<colCount {
+                        let w = (j * 32)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
                         dwt2d_32(view)
-                                            rowResults.append((block, w, h))
                     }
-                    chunkResults.append((i, rowResults))
                 }
-                return chunkResults
-            }
-            startRow += chunkSize
-        }
-        for await chunk in group {
-            for (i, rowResults) in chunk {
-                resultsArray[i] = (i * 32, rowResults)
             }
         }
-    }    
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
+    }
+    
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
-            guard let res = resultsArray[i] else { continue }
-            for j in res.1.indices {
-                let (llBlock, w, h) = res.1[j]
-                blocks.append(llBlock)
+            let h = (i * 32)
+            for j in 0..<colCount {
+                let w = (j * 32)
+                if width <= w || height <= h { continue }
+                let llBlock = blocks[(i * colCount) + j]
                 
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
@@ -177,7 +169,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                 let srcBase = subs.ll.base
                 let limit = min(subSize, (subWidth - destStartX))
 
-                guard 0 < limit else { return }
+                guard 0 < limit else { continue }
 
                 if limit == subSize && (destStartY + subSize) <= subHeight {
                     let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
@@ -206,7 +198,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                         dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
-                        }
+            }
         }
     }
     
@@ -219,48 +211,43 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
     let rowCount = ((height + 32 - 1) / 32)
-    let chunkSize = 8
+    let colCount = ((width + 32 - 1) / 32)
+    let totalBlocks = rowCount * colCount
     
-    // Concurrent ではなく TaskGroup を用いて安全に結果をマージする
-    var resultsArray = [(Int, [(BlockView, Int, Int)])?](repeating: nil, count: rowCount)
-    await withTaskGroup(of: [(Int, [(BlockView, Int, Int)])].self) { group in
-        var startRow = 0
-        while startRow < rowCount {
-            let endRow = min(startRow + chunkSize, rowCount)
-            let sRow = startRow
-            let colCount32 = (width + 31) / 32
-            group.addTask {
-                var chunkResults: [(Int, [(BlockView, Int, Int)])] = []
-                chunkResults.reserveCapacity(endRow - sRow)
+    var tmpBlocks: [BlockView] = []
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get(width: 32, height: 32))
+    }
+    let blocks = tmpBlocks
+    
+    let chunkSize = 8
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks] in
                 for i in sRow..<endRow {
                     let h = (i * 32)
-                    var rowResults: [(BlockView, Int, Int)] = []
-                    rowResults.reserveCapacity(colCount32)
-                    for w in stride(from: 0, to: width, by: 32) {
-                        let block = pool.get(width: 32, height: 32)
-                        let view = block
+                    for j in 0..<colCount {
+                        let w = (j * 32)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
                         dwt2d_32(view)
-                                            rowResults.append((block, w, h))
                     }
-                    chunkResults.append((i, rowResults))
                 }
-                return chunkResults
-            }
-            startRow += chunkSize
-        }
-        for await chunk in group {
-            for (i, rowResults) in chunk {
-                resultsArray[i] = (i * 32, rowResults)
             }
         }
     }
+    
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
-            guard let res = resultsArray[i] else { continue }
-            for j in res.1.indices {
-                let (llBlock, w, h) = res.1[j]
+            let h = (i * 32)
+            for j in 0..<colCount {
+                let w = (j * 32)
+                if width <= w || height <= h { continue }
+                let llBlock = blocks[(i * colCount) + j]
                 
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
@@ -271,7 +258,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
                 let srcBase = subs.ll.base
                 let limit = min(subSize, (subWidth - destStartX))
 
-                guard 0 < limit else { return }
+                guard 0 < limit else { continue }
 
                 if limit == subSize && (destStartY + subSize) <= subHeight {
                     let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
@@ -300,17 +287,11 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
                         dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
                     }
                 }
-                        }
-        }
-    }
-    
-    for i in 0..<rowCount {
-        if let res = resultsArray[i] {
-            for j in res.1.indices {
-                pool.put(res.1[j].0)
             }
         }
     }
+    
+    pool.putAll(blocks)
     return subband
 }
 
@@ -320,50 +301,43 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
     let rowCount = ((height + 16 - 1) / 16)
-    let chunkSize = 8
+    let colCount = ((width + 16 - 1) / 16)
+    let totalBlocks = rowCount * colCount
     
-    var resultsArray = [(Int, [(BlockView, Int, Int)])?](repeating: nil, count: rowCount)
-    await withTaskGroup(of: [(Int, [(BlockView, Int, Int)])].self) { group in
-        var startRow = 0
-        while startRow < rowCount {
-            let endRow = min(startRow + chunkSize, rowCount)
-            let sRow = startRow
-            let colCount16 = (width + 15) / 16
-            group.addTask {
-                var chunkResults: [(Int, [(BlockView, Int, Int)])] = []
-                chunkResults.reserveCapacity(endRow - sRow)
+    var tmpBlocks: [BlockView] = []
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get(width: 16, height: 16))
+    }
+    let blocks = tmpBlocks
+    
+    let chunkSize = 8
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks] in
                 for i in sRow..<endRow {
                     let h = (i * 16)
-                    var rowResults: [(BlockView, Int, Int)] = []
-                    rowResults.reserveCapacity(colCount16)
-                    for w in stride(from: 0, to: width, by: 16) {
-                        let block = pool.get(width: 16, height: 16)
-                        let view = block
+                    for j in 0..<colCount {
+                        let w = (j * 16)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
                         dwt2d_16(view)
-                                            rowResults.append((block, w, h))
                     }
-                    chunkResults.append((i, rowResults))
                 }
-                return chunkResults
-            }
-            startRow += chunkSize
-        }
-        for await chunk in group {
-            for (i, rowResults) in chunk {
-                resultsArray[i] = (i * 16, rowResults)
             }
         }
-    }    
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity((rowCount * ((width + 16 - 1)  / 2)))
+    }
+    
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
-            guard let res = resultsArray[i] else { continue }
-            for j in res.1.indices {
-                let (llBlock, w, h) = res.1[j]
-                blocks.append(llBlock)
+            let h = (i * 16)
+            for j in 0..<colCount {
+                let w = (j * 16)
+                if width <= w || height <= h { continue }
+                let llBlock = blocks[(i * colCount) + j]
                 
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
@@ -374,7 +348,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                 let srcBase = subs.ll.base
                 let limit = min(subSize, (subWidth - destStartX))
 
-                guard 0 < limit else { return }
+                guard 0 < limit else { continue }
 
                 if limit == subSize && (destStartY + subSize) <= subHeight {
                     let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
@@ -408,47 +382,43 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
     let rowCount = ((height + 16 - 1) / 16)
-    let chunkSize = 8
+    let colCount = ((width + 16 - 1) / 16)
+    let totalBlocks = rowCount * colCount
     
-    var resultsArray = [(Int, [(BlockView, Int, Int)])?](repeating: nil, count: rowCount)
-    await withTaskGroup(of: [(Int, [(BlockView, Int, Int)])].self) { group in
-        var startRow = 0
-        while startRow < rowCount {
-            let endRow = min(startRow + chunkSize, rowCount)
-            let sRow = startRow
-            let colCount16 = (width + 15) / 16
-            group.addTask {
-                var chunkResults: [(Int, [(BlockView, Int, Int)])] = []
-                chunkResults.reserveCapacity(endRow - sRow)
+    var tmpBlocks: [BlockView] = []
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get(width: 16, height: 16))
+    }
+    let blocks = tmpBlocks
+    
+    let chunkSize = 8
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks] in
                 for i in sRow..<endRow {
                     let h = (i * 16)
-                    var rowResults: [(BlockView, Int, Int)] = []
-                    rowResults.reserveCapacity(colCount16)
-                    for w in stride(from: 0, to: width, by: 16) {
-                        let block = pool.get(width: 16, height: 16)
-                        let view = block
+                    for j in 0..<colCount {
+                        let w = (j * 16)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
                         dwt2d_16(view)
-                                            rowResults.append((block, w, h))
                     }
-                    chunkResults.append((i, rowResults))
                 }
-                return chunkResults
-            }
-            startRow += chunkSize
-        }
-        for await chunk in group {
-            for (i, rowResults) in chunk {
-                resultsArray[i] = (i * 16, rowResults)
             }
         }
     }
+    
     subband.withUnsafeMutableBufferPointer { dstBuf in
         guard let dstBase = dstBuf.baseAddress else { return }
         for i in 0..<rowCount {
-            guard let res = resultsArray[i] else { continue }
-            for j in res.1.indices {
-                let (llBlock, w, h) = res.1[j]
+            let h = (i * 16)
+            for j in 0..<colCount {
+                let w = (j * 16)
+                if width <= w || height <= h { continue }
+                let llBlock = blocks[(i * colCount) + j]
                 
                 let destStartX = (w / 2)
                 let destStartY = (h / 2)
@@ -459,7 +429,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
                 let srcBase = subs.ll.base
                 let limit = min(subSize, (subWidth - destStartX))
 
-                guard 0 < limit else { return }
+                guard 0 < limit else { continue }
 
                 if limit == subSize && (destStartY + subSize) <= subHeight {
                     let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
@@ -484,115 +454,75 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    for i in 0..<rowCount {
-        if let res = resultsArray[i] {
-            for j in res.1.indices {
-                pool.put(res.1[j].0)
-            }
-        }
-    }
+    pool.putAll(blocks)
     return subband
 }
 
 @inline(__always)
 func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [BlockView] {
     let rowCount = ((height + 8 - 1) / 8)
-    let chunkSize = 4
+    let colCount = ((width + 8 - 1) / 8)
+    let totalBlocks = rowCount * colCount
     
-    var resultsArray = [(Int, [(BlockView, Int, Int)])?](repeating: nil, count: rowCount)
-    await withTaskGroup(of: [(Int, [(BlockView, Int, Int)])].self) { group in
-        var startRow = 0
-        while startRow < rowCount {
-            let endRow = min(startRow + chunkSize, rowCount)
-            let sRow = startRow
-            let colCount8 = (width + 7) / 8
-            group.addTask {
-                var chunkResults: [(Int, [(BlockView, Int, Int)])] = []
-                chunkResults.reserveCapacity(endRow - sRow)
+    var tmpBlocks: [BlockView] = []
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get(width: 8, height: 8))
+    }
+    let blocks = tmpBlocks
+    
+    let chunkSize = 4
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks] in
                 for i in sRow..<endRow {
                     let h = (i * 8)
-                    var rowResults: [(BlockView, Int, Int)] = []
-                    rowResults.reserveCapacity(colCount8)
-                    for w in stride(from: 0, to: width, by: 8) {
-                        let block = pool.get(width: 8, height: 8)
-                        let view = block
+                    for j in 0..<colCount {
+                        let w = (j * 8)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 8, height: 8, into: view)
                         dwt2d_8(view)
-                                            rowResults.append((block, w, h))
                     }
-                    chunkResults.append((i, rowResults))
                 }
-                return chunkResults
-            }
-            startRow += chunkSize
-        }
-        for await chunk in group {
-            for (i, rowResults) in chunk {
-                resultsArray[i] = (i * 8, rowResults)
             }
         }
     }    
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity((rowCount * ((width + 8 - 1) / 8)))
-    for i in 0..<rowCount {
-        guard let res = resultsArray[i] else { continue }
-        for j in res.1.indices {
-            let (llBlock, _, _) = res.1[j]
-            blocks.append(llBlock)
-        }
-    }
-    
     return blocks
 }
 
 @inline(__always)
 func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [BlockView] {
     let rowCount = ((height + 32 - 1) / 32)
-    let chunkSize = 4
+    let colCount = ((width + 32 - 1) / 32)
+    let totalBlocks = rowCount * colCount
     
-    var resultsArray = [(Int, [(BlockView, Int, Int)])?](repeating: nil, count: rowCount)
-    await withTaskGroup(of: [(Int, [(BlockView, Int, Int)])].self) { group in
-        var startRow = 0
-        while startRow < rowCount {
-            let endRow = min(startRow + chunkSize, rowCount)
-            let sRow = startRow
-            let colCountB32 = (width + 31) / 32
-            group.addTask {
-                var chunkResults: [(Int, [(BlockView, Int, Int)])] = []
-                chunkResults.reserveCapacity(endRow - sRow)
+    var tmpBlocks: [BlockView] = []
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get(width: 32, height: 32))
+    }
+    let blocks = tmpBlocks
+    
+    let chunkSize = 4
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks] in
                 for i in sRow..<endRow {
                     let h = (i * 32)
-                    var rowResults: [(BlockView, Int, Int)] = []
-                    rowResults.reserveCapacity(colCountB32)
-                    for w in stride(from: 0, to: width, by: 32) {
-                        let block = pool.get(width: 32, height: 32)
-                        let view = block
+                    for j in 0..<colCount {
+                        let w = (j * 32)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
                         dwt2d_32(view)
-                                            rowResults.append((block, w, h))
                     }
-                    chunkResults.append((i, rowResults))
                 }
-                return chunkResults
-            }
-            startRow += chunkSize
-        }
-        for await chunk in group {
-            for (i, rowResults) in chunk {
-                resultsArray[i] = (i * 32, rowResults)
             }
         }
     }    
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity((rowCount * ((width + 32 - 1) / 32)))
-    for i in 0..<rowCount {
-        guard let res = resultsArray[i] else { continue }
-        for j in res.1.indices {
-            let (llBlock, _, _) = res.1[j]
-            blocks.append(llBlock)
-        }
-    }
-    
     return blocks
 }
 
@@ -619,7 +549,7 @@ func subtractCoeffs32(currBlocks: inout [BlockView], predBlocks: inout [BlockVie
             let res = vecC &- vecP
             UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
         }
-            }
+    }
 }
 
 @inline(__always)
@@ -645,7 +575,7 @@ func subtractCoeffs16(currBlocks: inout [BlockView], predBlocks: inout [BlockVie
             let res = vecC &- vecP
             UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
         }
-            }
+    }
 }
 
 @inline(__always)
@@ -661,7 +591,7 @@ func subtractCoeffsBase8(currBlocks: inout [BlockView], predBlocks: inout [Block
             let res = vecC &- vecP
             UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
         }
-            }
+    }
 }
 
 @inline(__always)
@@ -677,7 +607,7 @@ func subtractCoeffsBase32(currBlocks: inout [BlockView], predBlocks: inout [Bloc
             let res = vecC &- vecP
             UnsafeMutableRawPointer(ptrC.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
         }
-            }
+    }
 }
 
 @inline(__always)
