@@ -402,6 +402,41 @@ internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     }
 }
 
+@inline(__always)
+fileprivate func readUInt32BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt32 {
+    guard offset + 4 <= count else { throw DecodeError.insufficientData }
+    let b0 = UInt32(base[offset])
+    let b1 = UInt32(base[offset+1])
+    let b2 = UInt32(base[offset+2])
+    let b3 = UInt32(base[offset+3])
+    offset += 4
+    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+@inline(__always)
+fileprivate func readUInt64BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt64 {
+    guard offset + 8 <= count else { throw DecodeError.insufficientData }
+    let b0 = UInt64(base[offset])
+    let b1 = UInt64(base[offset+1])
+    let b2 = UInt64(base[offset+2])
+    let b3 = UInt64(base[offset+3])
+    let b4 = UInt64(base[offset+4])
+    let b5 = UInt64(base[offset+5])
+    let b6 = UInt64(base[offset+6])
+    let b7 = UInt64(base[offset+7])
+    offset += 8
+    return (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32) | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7
+}
+
+@inline(__always)
+fileprivate func readUInt16BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt16 {
+    guard offset + 2 <= count else { throw DecodeError.insufficientData }
+    let b0 = UInt16(base[offset])
+    let b1 = UInt16(base[offset+1])
+    offset += 2
+    return (b0 << 8) | b1
+}
+
 // MARK: - VevcDecoder
 
 struct EntropyDecoder {
@@ -421,43 +456,33 @@ struct EntropyDecoder {
     private var ransDecoder: Interleaved4rANSDecoder!
     private var currentLane: Int = 0
 
-    init(data: [UInt8]) throws {
-        try self.init(data: data, startOffset: 0)
-    }
-    
-    /// データ配列の指定オフセットからエントロピーデコーダを初期化する。
-    /// `Array(data[startOffset...])` のようなスライスコピーを回避し、
-    /// 元の配列を直接参照してメモリアロケーションを削減する。
-    init(data: [UInt8], startOffset: Int) throws {
+    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0) throws {
         var offset = startOffset
         
-        guard offset + 4 <= data.count else { throw DecodeError.insufficientData }
-        let bypassLen = try readUInt32BEFromBytes(data, offset: &offset)
+        let bypassLen = try readUInt32BEFromPtr(base, offset: &offset, count: count)
+        guard offset + Int(bypassLen) <= count else { throw DecodeError.insufficientData }
         
-        guard offset + Int(bypassLen) <= data.count else { throw DecodeError.insufficientData }
-        let bypassData = Array(data[offset..<(offset + Int(bypassLen))])
-        self.bypassReader = BypassReader(data: bypassData)
+        self.bypassReader = BypassReader(base: base.advanced(by: offset), count: Int(bypassLen))
         offset += Int(bypassLen)
         
-        let coeffCount = Int(try readUInt32BEFromBytes(data, offset: &offset))
+        let coeffCount = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
         
         guard 0 < coeffCount else {
             self.pairs = []
             return
         }
         
-        guard offset < data.count else { throw DecodeError.insufficientData }
-        let flags = data[offset]
+        guard offset < count else { throw DecodeError.insufficientData }
+        let flags = base[offset]
         offset += 1
         
         let isRawMode = (flags & 0x80) != 0
         self.isRawMode = isRawMode
         
         if isRawMode {
-            let rawDataLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard offset + rawDataLen <= data.count else { throw DecodeError.insufficientData }
-            let rawData = Array(data[offset..<(offset + rawDataLen)])
-            var rawReader = BypassReader(data: rawData)
+            let rawDataLen = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+            guard offset + rawDataLen <= count else { throw DecodeError.insufficientData }
+            var rawReader = BypassReader(base: base.advanced(by: offset), count: rawDataLen)
             
             var decodedPairs = [(run: UInt32, val: Int16)]()
             var zeroRun: UInt32 = 0
@@ -488,13 +513,13 @@ struct EntropyDecoder {
         let hasTrailingZeros = (flags & 1) != 0
         self.hasTrailingZeros = hasTrailingZeros
         
-        let totalPairEntries = Int(try readUInt32BEFromBytes(data, offset: &offset))
+        let totalPairEntries = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
         self.totalPairEntries = totalPairEntries
         
         // chunk size (4 lanes)
         var chunkSizes = [Int](repeating: 0, count: 4)
         for lane in 0..<4 {
-            chunkSizes[lane] = Int(try readUInt32BEFromBytes(data, offset: &offset))
+            chunkSizes[lane] = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
         }
         
         var starts = [Int](repeating: 0, count: 5)
@@ -519,43 +544,41 @@ struct EntropyDecoder {
             self.valModel1 = staticValModel1
         } else {
             // Legacy dynamic table mode: read frequency tables from bitstream
-            let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
             
-            let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             self.valModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs0)
             
-            let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             self.runModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs1)
             
-            let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
+            let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             self.valModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs1)
         }
         
         // 4-way bypass data
         var chunkBypassReaders = [BypassReader]()
         for _ in 0..<4 {
-            let bpLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-            guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
-            let bpData = Array(data[offset..<(offset + bpLen)])
-            chunkBypassReaders.append(BypassReader(data: bpData))
+            let bpLen = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+            guard offset + bpLen <= count else { throw DecodeError.insufficientData }
+            chunkBypassReaders.append(BypassReader(base: base.advanced(by: offset), count: bpLen))
             offset += bpLen
         }
         self.chunkBypassReaders = chunkBypassReaders
         
         // rANS stream
-        let ransData = Array(data[offset...])
-        self.ransDecoder = Interleaved4rANSDecoder(bitstream: ransData)
+        self.ransDecoder = Interleaved4rANSDecoder(base: base.advanced(by: offset), count: count - offset)
     }
     
     @inline(__always)
-    internal static func readCompressedFreqTable(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
-        let bitmap = try readUInt64BEFromBytes(data, offset: &offset)
+    internal static func readCompressedFreqTable(_ base: UnsafePointer<UInt8>, at offset: inout Int, count: Int) throws -> [UInt32] {
+        let bitmap = try readUInt64BEFromPtr(base, offset: &offset, count: count)
         
         var freqs = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
             if (bitmap & (UInt64(1) << i)) != 0 {
-                freqs[i] = UInt32(try readUInt16BEFromBytes(data, offset: &offset))
+                freqs[i] = UInt32(try readUInt16BEFromPtr(base, offset: &offset, count: count))
             }
         }
         return freqs
@@ -677,42 +700,48 @@ func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
 
 @inline(__always)
 func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
-    var offset = 0
-    let freqsDx = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-    let modelDx = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDx)
-    
-    let freqsDy = try EntropyDecoder.readCompressedFreqTable(data, at: &offset)
-    let modelDy = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDy)
-    
-    let bpLen = Int(try readUInt32BEFromBytes(data, offset: &offset))
-    guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
-    var bypassReader = BypassReader(data: Array(data[offset..<(offset + bpLen)]))
-    offset += bpLen
-    
-    guard offset < data.count else { throw DecodeError.insufficientData }
-    var dec = rANSDecoder(bitstream: Array(data[offset...]))
-    
-    var mvs = [MotionVector]()
-    mvs.reserveCapacity(count)
-    
-    for _ in 0..<count {
-        let cfDx = dec.getCumulativeFreq()
-        let txInfo = modelDx.findToken(cf: cfDx)
-        dec.advanceSymbol(cumFreq: txInfo.cumFreq, freq: txInfo.freq)
+    return try data.withUnsafeBufferPointer { buf -> [MotionVector] in
+        guard let base = buf.baseAddress else { return [] }
+        var offset = 0
+        let bufCount = buf.count
         
-        let cfDy = dec.getCumulativeFreq()
-        let tyInfo = modelDy.findToken(cf: cfDy)
-        dec.advanceSymbol(cumFreq: tyInfo.cumFreq, freq: tyInfo.freq)
+        let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+        let modelDx = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDx)
         
-        let dxBypassLen = valueBypassLength(for: txInfo.token)
-        let dxBypassBits = bypassReader.readBits(count: dxBypassLen)
-        let dx = valueDetokenize(token: txInfo.token, bypassBits: dxBypassBits)
+        let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+        let modelDy = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDy)
         
-        let dyBypassLen = valueBypassLength(for: tyInfo.token)
-        let dyBypassBits = bypassReader.readBits(count: dyBypassLen)
-        let dy = valueDetokenize(token: tyInfo.token, bypassBits: dyBypassBits)
+        let bpLen = Int(try readUInt32BEFromPtr(base, offset: &offset, count: bufCount))
+        guard offset + bpLen <= bufCount else { throw DecodeError.insufficientData }
+        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
+        offset += bpLen
         
-        mvs.append(MotionVector(dx: dx, dy: dy))
+        guard offset < bufCount else { throw DecodeError.insufficientData }
+        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
+        
+        var mvs = [MotionVector]()
+        mvs.reserveCapacity(count)
+        
+        for _ in 0..<count {
+            let txCf = dec.getCumulativeFreq()
+            let tx = modelDx.findToken(cf: txCf)
+            dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
+            
+            let tyCf = dec.getCumulativeFreq()
+            let ty = modelDy.findToken(cf: tyCf)
+            dec.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
+            
+            let dxBp = valueBypassLength(for: tx.token)
+            let dxBv = bypassReader.readBits(count: dxBp)
+            let dx = valueDetokenize(token: tx.token, bypassBits: dxBv)
+            
+            let dyBp = valueBypassLength(for: ty.token)
+            let dyBv = bypassReader.readBits(count: dyBp)
+            let dy = valueDetokenize(token: ty.token, bypassBits: dyBv)
+            
+            mvs.append(MotionVector(dx: dx, dy: dy))
+        }
+        
+        return mvs
     }
-    return mvs
 }

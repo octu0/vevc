@@ -301,19 +301,21 @@ struct rANSEncoder {
 
 struct rANSDecoder {
     private(set) var state: UInt32
-    private let stream: [UInt8]
+    private let base: UnsafePointer<UInt8>
+    private let count: Int
     private var offset: Int
     
-    init(bitstream: [UInt8]) {
-        self.stream = bitstream
+    init(base: UnsafePointer<UInt8>, count: Int) {
+        self.base = base
+        self.count = count
         self.offset = 0
         self.state = 0
         
-        if bitstream.count >= 4 {
-            let b0 = UInt32(bitstream[0])
-            let b1 = UInt32(bitstream[1])
-            let b2 = UInt32(bitstream[2])
-            let b3 = UInt32(bitstream[3])
+        if count >= 4 {
+            let b0 = UInt32(base[0])
+            let b1 = UInt32(base[1])
+            let b2 = UInt32(base[2])
+            let b3 = UInt32(base[3])
             let w1 = (b0 << 8) | b1
             let w0 = (b2 << 8) | b3
             self.state = (w1 << 16) | w0
@@ -332,9 +334,9 @@ struct rANSDecoder {
         state = freq * (state >> RANS_SCALE_BITS) + (state & mask) - cumFreq
         
         while state < RANS_L {
-            if offset + 1 < stream.count {
-                let b0 = UInt32(stream[offset])
-                let b1 = UInt32(stream[offset + 1])
+            if offset + 1 < count {
+                let b0 = UInt32(base[offset])
+                let b1 = UInt32(base[offset + 1])
                 let word = (b0 << 8) | b1
                 offset += 2
                 state = (state << 16) | word
@@ -428,23 +430,25 @@ struct Interleaved4rANSEncoder {
 
 struct Interleaved4rANSDecoder {
     private(set) var states: (UInt32, UInt32, UInt32, UInt32)
-    private let stream: [UInt8]
+    private let base: UnsafePointer<UInt8>
+    private let count: Int
     private var offset: Int
     
-    init(bitstream: [UInt8]) {
-        // Add padding to eliminate bounds checks in readWord
-        var padded = bitstream
-        padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
-        self.stream = padded
+    init(base: UnsafePointer<UInt8>, count: Int) {
+        self.base = base
+        self.count = count
         self.offset = 0
         self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
         
-        guard bitstream.count >= 16 else { return }
+        guard count >= 16 else { return }
         
         @inline(__always)
         func readState(_ off: Int) -> UInt32 {
-            var localOffset = off
-            return try! readUInt32BEFromBytes(padded, offset: &localOffset)
+            let b0 = UInt32(base[off])
+            let b1 = UInt32(base[off + 1])
+            let b2 = UInt32(base[off + 2])
+            let b3 = UInt32(base[off + 3])
+            return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
         }
         
         self.states.0 = readState(0)
@@ -468,9 +472,9 @@ struct Interleaved4rANSDecoder {
     
     @inline(__always)
     private mutating func readWord() -> UInt32 {
-        if offset + 1 < stream.count {
-            let b0 = UInt32(stream[offset])
-            let b1 = UInt32(stream[offset + 1])
+        if offset + 1 < count {
+            let b0 = UInt32(base[offset])
+            let b1 = UInt32(base[offset + 1])
             offset += 2
             return (b0 << 8) | b1
         }
@@ -575,16 +579,18 @@ struct InterleavedrANSEncoder {
 struct InterleavedrANSDecoder {
     private(set) var states: SIMD4<UInt32>
     
-    private let stream: [UInt8]
+    private let base: UnsafePointer<UInt8>
+    private let count: Int
     // 4 lanes independent offsets
     private var offsets: SIMD4<Int>
     private let limits: SIMD4<Int>
     
-    init(bitstream: [UInt8]) {
-        self.stream = bitstream
+    init(base: UnsafePointer<UInt8>, count: Int) {
+        self.base = base
+        self.count = count
         
         // Header parse
-        guard bitstream.count >= 16 else {
+        guard count >= 16 else {
             self.states = SIMD4<UInt32>(repeating: 0)
             self.offsets = SIMD4<Int>(repeating: 0)
             self.limits = SIMD4<Int>(repeating: 0)
@@ -593,8 +599,22 @@ struct InterleavedrANSDecoder {
         
         var lens = SIMD4<Int>(repeating: 0)
         var offset = 0
+        
+        @inline(__always)
+        func readUInt32() -> UInt32 {
+            if offset + 3 < count {
+                let b0 = UInt32(base[offset])
+                let b1 = UInt32(base[offset+1])
+                let b2 = UInt32(base[offset+2])
+                let b3 = UInt32(base[offset+3])
+                offset += 4
+                return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+            }
+            return 0
+        }
+        
         for i in 0..<4 {
-            lens[i] = Int(try! readUInt32BEFromBytes(bitstream, offset: &offset))
+            lens[i] = Int(readUInt32())
         }
         
         var currentOffset = 16
@@ -604,11 +624,10 @@ struct InterleavedrANSDecoder {
         
         for i in 0..<4 {
             let limit = currentOffset + lens[i]
-            if currentOffset + 4 <= limit {
+            if currentOffset + 4 <= limit && limit <= count {
                 // stream is written in reverse order (LIFO)
-                // so the last flushed state (4 bytes) is at the beginning of each stream block
-                let w1 = (UInt32(bitstream[currentOffset]) << 8) | UInt32(bitstream[currentOffset + 1])
-                let w0 = (UInt32(bitstream[currentOffset + 2]) << 8) | UInt32(bitstream[currentOffset + 3])
+                let w1 = (UInt32(base[currentOffset]) << 8) | UInt32(base[currentOffset + 1])
+                let w0 = (UInt32(base[currentOffset + 2]) << 8) | UInt32(base[currentOffset + 3])
                 initStates[i] = (w1 << 16) | w0
                 
                 // next renorm reads from the 4 bytes after this
@@ -617,7 +636,7 @@ struct InterleavedrANSDecoder {
                 initStates[i] = 0
                 initOffsets[i] = limit
             }
-            initLimits[i] = limit
+            initLimits[i] = min(limit, count)
             currentOffset = limit
         }
         
@@ -651,7 +670,7 @@ struct InterleavedrANSDecoder {
                 if renormMask[lane] {
                     let off = offsets[lane]
                     if off + 1 < limits[lane] {
-                        let word = (UInt32(stream[off]) << 8) | UInt32(stream[off + 1])
+                        let word = (UInt32(base[off]) << 8) | UInt32(base[off + 1])
                         offsets[lane] = off + 2
                         states[lane] = (states[lane] &<< 16) | word
                     } else {
@@ -668,7 +687,7 @@ struct InterleavedrANSDecoder {
                 if renormMask[lane] {
                     let off = offsets[lane]
                     if off + 1 < limits[lane] {
-                        let word = (UInt32(stream[off]) << 8) | UInt32(stream[off + 1])
+                        let word = (UInt32(base[off]) << 8) | UInt32(base[off + 1])
                         offsets[lane] = off + 2
                         states[lane] = (states[lane] &<< 16) | word
                     } else {
@@ -746,15 +765,15 @@ struct BypassWriter {
 // MARK: - Bypass Reader
 
 struct BypassReader {
-    private let bytes: [UInt8]
+    private let base: UnsafePointer<UInt8>
+    private let count: Int
     private var byteOffset: Int
     private var buffer: UInt64
     private var bitsInBuffer: Int
     
-    init(data: [UInt8]) {
-        var padded = data
-        padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
-        self.bytes = padded
+    init(base: UnsafePointer<UInt8>, count: Int) {
+        self.base = base
+        self.count = count
         self.byteOffset = 0
         self.buffer = 0
         self.bitsInBuffer = 0
@@ -763,8 +782,8 @@ struct BypassReader {
     @inline(__always)
     private mutating func ensureBits(_ needed: Int) {
         while bitsInBuffer < needed {
-            if byteOffset < bytes.count {
-                buffer = (buffer << 8) | UInt64(bytes[byteOffset])
+            if byteOffset < count {
+                buffer = (buffer << 8) | UInt64(base[byteOffset])
                 byteOffset += 1
             } else {
                 buffer = (buffer << 8) | 0

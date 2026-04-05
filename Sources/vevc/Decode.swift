@@ -457,7 +457,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let colCountCr = (cbDx + 32 - 1) / 32
     let crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
-    let chunkSize = 4
+    let chunkSize = 16
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
 
     try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
@@ -563,7 +563,7 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let colCountCr = (cbDx + 16 - 1) / 16
     let crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: parentCrBlocks)
     
-    let chunkSize = 4
+    let chunkSize = 16
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
@@ -654,7 +654,7 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
     let colCountCr = (cbDx + 8 - 1) / 8
     let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     
-    let chunkSize = 4
+    let chunkSize = 16
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
     let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
     let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
