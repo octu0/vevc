@@ -21,7 +21,7 @@ public class Y4MReader: @unchecked Sendable {
         var byte: Data
         while true {
             byte = fileHandle.readData(ofLength: 1)
-            guard !byte.isEmpty else { throw Y4MError.unexpectedEOF }
+            guard byte.isEmpty != true else { throw Y4MError.unexpectedEOF }
             headerData.append(byte)
             if byte[0] == 0x0A { break } // \n
         }
@@ -35,13 +35,17 @@ public class Y4MReader: @unchecked Sendable {
         var w = 0
         var h = 0
         var fps = "F30:1"
+        // why: parameters are distinguished by single-char prefix (W=width, H=height, F=fps)
         for p in parts {
-            if p.hasPrefix("W") { w = Int(p.dropFirst()) ?? 0 }
-            else if p.hasPrefix("H") { h = Int(p.dropFirst()) ?? 0 }
-            else if p.hasPrefix("F") { fps = p }
+            switch true {
+            case p.hasPrefix("W"): w = Int(p.dropFirst()) ?? 0
+            case p.hasPrefix("H"): h = Int(p.dropFirst()) ?? 0
+            case p.hasPrefix("F"): fps = p
+            default: break
+            }
         }
         
-        guard w > 0, h > 0 else { throw Y4MError.invalidFormat }
+        guard 0 < w, 0 < h else { throw Y4MError.invalidFormat }
         self.width = w
         self.height = h
         self.fpsHeader = fps

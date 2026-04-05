@@ -175,7 +175,7 @@ fileprivate func _fast_decodePlaneSubbands16(buf: UnsafeBufferPointer<UInt8>, po
         var tasks: [(Int, DecodeTask16)] = []
         tasks.reserveCapacity(blockCount)
         for i in 0..<blockCount {
-            if brFlags.consumedBytes > count {
+            if count < brFlags.consumedBytes {
                 throw DecodeError.outOfBits
             }
             let isZero = brFlags.readBit()
@@ -374,7 +374,7 @@ fileprivate func _fast_decodePlaneSubbands8(buf: UnsafeBufferPointer<UInt8>, poo
             if let pb2d = parentBlock2D {
                 let pb = pb2d
                 try decodeAction(pb)
-                pool.put(pb2d) // 一時ブロックをプールに返却
+                pool.put(pb2d) // return temp block to pool
             } else {
                 try decodeAction(nil)
             }
@@ -473,7 +473,7 @@ fileprivate func _fast_decodePlaneBaseSubbands32(buf: UnsafeBufferPointer<UInt8>
         var tasks: [(Int, DecodeTaskBase32)] = []
         tasks.reserveCapacity(blockCount)
         for i in 0..<blockCount {
-            if brFlags.consumedBytes > count {
+            if count < brFlags.consumedBytes {
                 throw DecodeError.outOfBits
             }
             let isZero = brFlags.readBit()
@@ -603,7 +603,7 @@ fileprivate func _fast_decodeCascadedPlaneSubbands32(buf: UnsafeBufferPointer<UI
         for i in blocks.indices {
             let isZero = bwFlags.readBit()
             if isZero {
-                // プールから取得したブロックは既にゼロ保証済み
+                // blocks from pool are guaranteed zero
                 tasks.append((i, true))
             } else {
                 tasks.append((i, false))

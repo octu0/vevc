@@ -262,7 +262,7 @@ public struct Decoder: Sendable {
                 // GOP chunk: first4Bytes is DataSize(4B)
                 let chunkStart = offset
                 let gopDataSize = Int(try readUInt32BEFromBytes(data, offset: &offset))
-                if (offset + gopDataSize) > data.count {
+                if data.count < (offset + gopDataSize) {
                     throw DecodeError.insufficientData
                 }
                 let chunkEnd = offset + gopDataSize
@@ -367,7 +367,7 @@ public struct Decoder: Sendable {
     private func readFully(fileHandle: FileHandle, count: Int) -> Data {
         var result = Data()
         var remaining = count
-        while remaining > 0 {
+        while 0 < remaining {
             let data = fileHandle.readData(ofLength: remaining)
             if data.isEmpty { break }
             result.append(data)

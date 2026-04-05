@@ -102,7 +102,7 @@ final class DPCMDistributionTests: XCTestCase {
         let runTotal = globalRunCounts.reduce(0, +)
         var runNormalized = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
-            if globalRunCounts[i] > 0 {
+            if 0 < globalRunCounts[i] {
                 let normalized = max(1, UInt32(Double(globalRunCounts[i]) / Double(runTotal) * Double(RANS_SCALE)))
                 runNormalized[i] = normalized
             }
@@ -120,7 +120,7 @@ final class DPCMDistributionTests: XCTestCase {
         let valTotal = globalValCounts.reduce(0, +)
         var valNormalized = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
-            if globalValCounts[i] > 0 {
+            if 0 < globalValCounts[i] {
                 let normalized = max(1, UInt32(Double(globalValCounts[i]) / Double(valTotal) * Double(RANS_SCALE)))
                 valNormalized[i] = normalized
             }
@@ -135,14 +135,14 @@ final class DPCMDistributionTests: XCTestCase {
         
         // Also print raw counts for debugging
         print("\nRaw run counts:")
-        for i in 0..<64 where globalRunCounts[i] > 0 {
+        for i in 0..<64 where 0 < globalRunCounts[i] {
             print("  token[\(i)] = \(globalRunCounts[i]) (\(String(format: "%.2f", Double(globalRunCounts[i]) / Double(runTotal) * 100))%)")
         }
         print("\nRaw val counts:")
-        for i in 0..<64 where globalValCounts[i] > 0 {
+        for i in 0..<64 where 0 < globalValCounts[i] {
             print("  token[\(i)] = \(globalValCounts[i]) (\(String(format: "%.2f", Double(globalValCounts[i]) / Double(valTotal) * 100))%)")
         }
         
-        XCTAssertTrue(totalPairs > 0, "Should have collected token distribution")
+        XCTAssertTrue(0 < totalPairs, "Should have collected token distribution")
     }
 }

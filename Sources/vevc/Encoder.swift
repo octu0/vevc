@@ -102,11 +102,11 @@ public class VEVCEncoder {
                     
                     var buffer: [YCbCrImage] = []
                     while let img = await iterator.next() {
-                        // シーンチェンジ判定: 既存バッファがある場合、最後のフレームと比較
+                        // Scene change detection: compare current frame with last frame in buffer
                         if let lastImg = buffer.last {
                             let sad = estimateFastSAD(a: img, b: lastImg)
                             if sceneChangeThreshold < sad {
-                                // シーンチェンジ検知：現在のGOPバッファを強制終了してエンコード
+                                // Scene change detected: force-flush current GOP buffer and encode
                                 let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
                                 continuation.yield(gopBytes)
                                 buffer.removeAll(keepingCapacity: true)
@@ -120,7 +120,7 @@ public class VEVCEncoder {
                             buffer.removeAll(keepingCapacity: true)
                         }
                     }
-                    if !buffer.isEmpty {
+                    if buffer.isEmpty != true {
                         let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
                         continuation.yield(gopBytes)
                     }
@@ -162,7 +162,7 @@ actor LayersEncodeActor {
     
     @inline(__always)
     func encodeTemporalGOPChunk(images: [YCbCrImage]) async throws -> [UInt8] {
-        guard !images.isEmpty else {
+        guard images.isEmpty != true else {
             throw NSError(domain: "vevc.Encoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "TemporalGOP4 requires at least 1 frame"])
         }
         
@@ -189,8 +189,8 @@ actor LayersEncodeActor {
         var previousInputPlane: PlaneData420? = nil
         var isFirstEncoded = true
         
-        // 双方向予測用: GOP先頭フレーム（I-frame）の復元結果を後方参照として保持
-        // デコーダ側でもI-frameの復元結果を使用するため、入力原データではなく復元結果を使用
+        // Bidirectional prediction: keep I-frame reconstruction as backward reference.
+        // Uses reconstruction (not raw input) because the decoder does the same.
         var firstReconstructed: PlaneData420? = nil
         
         for (_, img) in images.enumerated() {
@@ -270,7 +270,7 @@ actor LayersEncodeActor {
             }
             previousReconstructed = reconstructed
             
-            // I-frame（先頭フレーム）の復元結果を保存
+            // Save I-frame (first frame) reconstruction for backward reference
             if firstReconstructed == nil {
                 firstReconstructed = reconstructed
             }
@@ -496,12 +496,14 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
         let ia = Int(a), ib = Int(b), ic = Int(c)
+        // why: adaptive predictor selects based on edge direction
         let predicted: Int
-        if ia <= ic && ib <= ic {
+        switch true {
+        case ia <= ic && ib <= ic:
             predicted = min(ia, ib)
-        } else if ic <= ia && ic <= ib {
+        case ic <= ia && ic <= ib:
             predicted = max(ia, ib)
-        } else {
+        default:
             predicted = ia + ib - ic
         }
         return abs(Int(x) - predicted)

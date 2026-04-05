@@ -31,7 +31,7 @@ struct RawBypassThresholdTests {
         for pair in pairs {
             encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
         }
-        if trailingZeros > 0 {
+        if 0 < trailingZeros {
             encoder.addTrailingZeros(trailingZeros)
         }
         encoder.flush()
@@ -128,7 +128,7 @@ struct RawBypassThresholdTests {
             let currBpp = Double(results[i].size * 8) / Double(results[i].count)
             // rANS should have better bits-per-pair for larger counts
             // The crossover point is where rANS starts having lower bpp than raw bypass
-            if results[i].count > 32 && results[i-1].count <= 32 {
+            if 32 < results[i].count && results[i-1].count <= 32 {
                 // This is the boundary where mode switches from raw to rANS
                 print("  Crossover: count=\(results[i-1].count) bpp=\(String(format: "%.2f", prevBpp)) (raw) -> count=\(results[i].count) bpp=\(String(format: "%.2f", currBpp)) (rANS)")
             }

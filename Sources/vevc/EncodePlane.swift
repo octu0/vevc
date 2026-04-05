@@ -869,7 +869,7 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
                 dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
                 invDwt2d_8(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<8 {
                         let srcPtr = v.rowPointer(y: h)
@@ -935,7 +935,7 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
                 invDwt2d_32(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<32 {
                         let srcPtr = v.rowPointer(y: h)
@@ -1001,7 +1001,7 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
                 invDwt2d_32(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<32 {
                         let srcPtr = v.rowPointer(y: h)
@@ -1067,7 +1067,7 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
                 invDwt2d_32(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<32 {
                         let srcPtr = v.rowPointer(y: h)
@@ -1133,7 +1133,7 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
                 invDwt2d_16(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<16 {
                         let srcPtr = v.rowPointer(y: h)
@@ -1199,7 +1199,7 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
                 invDwt2d_16(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<16 {
                         let srcPtr = v.rowPointer(y: h)
@@ -1265,7 +1265,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
                 invDwt2d_16(view)
                             
-                if !isEdgeY && !isEdgeX {
+                if isEdgeY != true && isEdgeX != true {
                     let v = blk
                     for h in 0..<16 {
                         let srcPtr = v.rowPointer(y: h)

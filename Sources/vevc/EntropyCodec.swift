@@ -127,7 +127,7 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
 
 struct EntropyEncoder<Model: EntropyModelProvider> {
     var bypassWriter: BypassWriter
-    /// SoA (Structure of Arrays): タプル配列のパディングを排除しキャッシュ効率を改善
+    /// SoA (Structure of Arrays): eliminates tuple-array padding for better cache efficiency
     var pairRuns: [UInt32]
     var pairVals: [Int16]
     var pairParentZeros: [Bool]
@@ -146,7 +146,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         self.coeffCount = 0
     }
     
-    /// テスト互換性のための computed property（プロダクションコードでは未使用）
+    /// Computed property for test compatibility (not used in production)
     var pairs: [(run: UInt32, val: Int16, isParentZero: Bool)] {
         (0..<pairRuns.count).map { i in
             (run: pairRuns[i], val: pairVals[i], isParentZero: pairParentZeros[i])
@@ -190,9 +190,9 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         
         appendUInt32BE(&out, UInt32(coeffCount))
         
-        guard pairCount > 0 || 0 < trailingZeros else { return out }
+        guard 0 < pairCount || 0 < trailingZeros else { return out }
         
-        let hasTrailingZeros = trailingZeros > 0
+        let hasTrailingZeros = 0 < trailingZeros
         let nonZeroCount = pairCount
         
         if nonZeroCount <= 32 {
@@ -278,10 +278,10 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         }
         // Cap frequencies to 16-bit to ensure bitstream serialization perfectly matches what the decoder reads
         for i in 0..<64 {
-            if runTokenCounts0[i] > 65535 { runTokenCounts0[i] = 65535 }
-            if valTokenCounts0[i] > 65535 { valTokenCounts0[i] = 65535 }
-            if runTokenCounts1[i] > 65535 { runTokenCounts1[i] = 65535 }
-            if valTokenCounts1[i] > 65535 { valTokenCounts1[i] = 65535 }
+            if 65535 < runTokenCounts0[i] { runTokenCounts0[i] = 65535 }
+            if 65535 < valTokenCounts0[i] { valTokenCounts0[i] = 65535 }
+            if 65535 < runTokenCounts1[i] { runTokenCounts1[i] = 65535 }
+            if 65535 < valTokenCounts1[i] { valTokenCounts1[i] = 65535 }
         }
         
         let models = Model.generateModels(
@@ -313,10 +313,11 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         
         let preHeaderSize = out.count
         Model.writeHeaders(into: &out, runModel0: runModel0, valModel0: valModel0, runModel1: runModel1, valModel1: valModel1)
-        let headerWasWritten = out.count > preHeaderSize
+        let headerWasWritten = preHeaderSize < out.count
         
-        // Set the isStatic flag based on whether headers were actually written
-        let staticBit: UInt8 = (Model.isStaticMode || !headerWasWritten) ? 0x40 : 0
+        // why: when pair count is small, static tables produce better compression
+        // than writing per-stream frequency headers
+        let staticBit: UInt8 = (Model.isStaticMode || headerWasWritten != true) ? 0x40 : 0
         out[flagsOffset] = staticBit | dpcmBit | trailBit
         
         // 4-way bypass data
@@ -381,7 +382,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
 internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     var bitmap: UInt64 = 0
     for i in 0..<64 {
-        if freqs[i] > 1 {
+        if 1 < freqs[i] {
             bitmap |= UInt64(1) << i
         }
     }
@@ -530,20 +531,19 @@ struct EntropyDecoder {
         
         let isDPCMTable = (flags & 0x20) != 0
         
-        if isStaticTable, isDPCMTable {
-            // Static DPCM mode: use DPCM-specific static tables
+        // why: select probability model based on bitstream flags
+        switch (isStaticTable, isDPCMTable) {
+        case (true, true):
             self.runModel0 = StaticRANSModels.shared.dpcmRunModel
             self.valModel0 = StaticRANSModels.shared.dpcmValModel
             self.runModel1 = StaticRANSModels.shared.dpcmRunModel
             self.valModel1 = StaticRANSModels.shared.dpcmValModel
-        } else if isStaticTable {
-            // Static DWT mode: no frequency tables in bitstream
+        case (true, false):
             self.runModel0 = StaticRANSModels.shared.runModel0
             self.valModel0 = StaticRANSModels.shared.valModel0
             self.runModel1 = StaticRANSModels.shared.runModel1
             self.valModel1 = StaticRANSModels.shared.valModel1
-        } else {
-            // Legacy dynamic table mode: read frequency tables from bitstream
+        case (false, _):
             let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
             
@@ -600,7 +600,7 @@ struct EntropyDecoder {
         
         guard pairIndex < totalPairEntries else { return (0, 0) }
         
-        // pairIndex は単調増加するため、レーン境界を超えた時だけインクリメント
+        // pairIndex increases monotonically; increment chunk index only at lane boundaries
         while currentLane < 3 && pairIndex >= chunkStarts[currentLane + 1] {
             currentLane += 1
         }

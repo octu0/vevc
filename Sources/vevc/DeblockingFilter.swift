@@ -1,5 +1,7 @@
 import Foundation
 
+// Smooths block boundary discontinuities to suppress block noise.
+// tc/beta parameters use non-linear scaling based on quantization step.
 /// In-place applies deblocking filter to the reconstructed image.
 @inline(__always)
 func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockSize: Int, qStep: Int) {
@@ -12,9 +14,13 @@ func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockS
 /// Pointer-based internal loop to avoid closures during execution.
 @inline(__always)
 func applyDeblockingFilterPtr(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, blockSize: Int, qStep: Int) {
+    // why: larger qStep (lower quality) needs more aggressive filtering
     let tc = Int16(min(12, max(2, qStep / 2)))
+    // why: only apply filter when boundary step is below beta to preserve real edges
     let beta = Int32(min(45, max(12, qStep)))
     
+    // why: separate 16-row fast path from scalar remainder
+    // to eliminate inner-loop branch prediction misses
     let hBlocks16 = height / 16
     let hFast = hBlocks16 * 16
     let wBlocks16 = width / 16
@@ -22,32 +28,28 @@ func applyDeblockingFilterPtr(base: UnsafeMutablePointer<Int16>, width: Int, hei
     
     // Vertical Edges (x = blockSize, 2*blockSize, ...)
     for x in stride(from: blockSize, to: width, by: blockSize) {
-        // Fast path: hoist 16-row chunks without branching inside
         var y = 0
         while y < hFast {
             deblockFilterVerticalEdge16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
             y += 16
         }
         
-        // Edge path
         let remaining = height - y
-        if remaining > 0 {
+        if 0 < remaining {
             deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: remaining, tc: tc, beta: beta)
         }
     }
     
     // Horizontal Edges (y = blockSize, 2*blockSize, ...)
     for y in stride(from: blockSize, to: height, by: blockSize) {
-        // Fast path: hoist 16-col chunks without branching inside
         var x = 0
         while x < wFast {
             deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
             x += 16
         }
         
-        // Edge path
         let remaining = width - x
-        if remaining > 0 {
+        if 0 < remaining {
             deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: remaining, tc: tc, beta: beta)
         }
     }
@@ -56,10 +58,9 @@ func applyDeblockingFilterPtr(base: UnsafeMutablePointer<Int16>, width: Int, hei
 @inline(__always)
 private func deblockFilterVerticalEdge16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
     let betah = beta >> 1
-    var offset = y * width + x
+    var offset = (y * width) + x
     
-    // Unrolled scalar approach saves expensive SIMD scatter/gather loading
-    // We use a closure for organization which the Swift compiler effortlessly inlines.
+    // why: 16-row unrolling eliminates loop overhead and branch misprediction
     let performDeblock = { (off: Int) in
         var p1 = base[off - 2]
         var p0 = base[off - 1]
@@ -74,11 +75,13 @@ private func deblockFilterVerticalEdge16(base: UnsafeMutablePointer<Int16>, widt
             let absP = pDiff < 0 ? -pDiff : pDiff
             let absQ = qDiff < 0 ? -qDiff : qDiff
             if absP < betah && absQ < betah {
+            // why: weighted center difference suppresses ringing at block boundaries
+            // d = (9*(q0-p0) - 3*(q1-p1) + 8) >> 4
                 let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
                 var dClipped = d
                 let t = Int32(tc)
-                if dClipped > t { dClipped = t }
-                else if dClipped < -t { dClipped = -t }
+                if t < dClipped { dClipped = t }
+                if dClipped < (-1 * t) { dClipped = (-1 * t) }
                 
                 let dHalf = dClipped / 2
                 let d16 = Int16(dClipped)
@@ -98,6 +101,7 @@ private func deblockFilterVerticalEdge16(base: UnsafeMutablePointer<Int16>, widt
     }
     
     // 16 iterations unrolled
+    performDeblock(offset); offset += width
     performDeblock(offset); offset += width
     performDeblock(offset); offset += width
     performDeblock(offset); offset += width
@@ -137,8 +141,8 @@ private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, 
                 let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
                 var dClipped = d
                 let t = Int32(tc)
-                if dClipped > t { dClipped = t }
-                else if dClipped < -t { dClipped = -t }
+                if t < dClipped { dClipped = t }
+                if dClipped < (-1 * t) { dClipped = (-1 * t) }
                 
                 let dHalf = dClipped / 2
                 let d16 = Int16(dClipped)
@@ -210,8 +214,8 @@ private func deblockFilterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>
                 let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
                 var dClipped = d
                 let t = Int32(tc)
-                if dClipped > t { dClipped = t }
-                else if dClipped < -t { dClipped = -t }
+                if t < dClipped { dClipped = t }
+                if dClipped < (-1 * t) { dClipped = (-1 * t) }
                 
                 let dHalf = dClipped / 2
                 let d16 = Int16(dClipped)

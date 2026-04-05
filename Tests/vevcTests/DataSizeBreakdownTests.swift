@@ -81,7 +81,7 @@ struct DataSizeBreakdownTests {
                     run = 0
                 }
             }
-            if run > 0 {
+            if 0 < run {
                 encoder.addTrailingZeros(run)
             }
             encoder.flush()

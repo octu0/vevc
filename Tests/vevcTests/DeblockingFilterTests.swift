@@ -32,7 +32,7 @@ final class DeblockingFilterTests: XCTestCase {
         
         print("Smoothed Vertical Edge p0: \(p0), q0: \(q0)")
         
-        XCTAssertTrue(p0 > 100, "Left boundary pixel should be pulled towards right")
+        XCTAssertTrue(100 < p0, "Left boundary pixel should be pulled towards right")
         XCTAssertTrue(q0 < 110, "Right boundary pixel should be pulled towards left")
         XCTAssertTrue(abs(p0 - q0) < 10, "Edge contrast should be reduced")
     }
@@ -80,7 +80,7 @@ final class DeblockingFilterTests: XCTestCase {
         
         print("Smoothed Horizontal Edge p0: \(p0), q0: \(q0)")
         
-        XCTAssertTrue(p0 > 100, "Top boundary pixel should be pulled towards bottom")
+        XCTAssertTrue(100 < p0, "Top boundary pixel should be pulled towards bottom")
         XCTAssertTrue(q0 < 110, "Bottom boundary pixel should be pulled towards top")
         XCTAssertTrue(abs(p0 - q0) < 10, "Edge contrast should be reduced")
     }

@@ -19,7 +19,7 @@ struct SpatialAdaptiveTests {
         let rowCount = 10
         let center = spatialWeight(blockCol: 5, blockRow: 5, colCount: colCount, rowCount: rowCount)
         let corner = spatialWeight(blockCol: 0, blockRow: 0, colCount: colCount, rowCount: rowCount)
-        #expect(corner > center, "Corner weight \(corner) should be > center weight \(center)")
+        #expect(center < corner, "Corner weight \(corner) should be > center weight \(center)")
         // 1.3 * 1024 = 1331
         #expect(1331 < corner, "Corner weight \(corner) should be > 1331 (1.3 in 1024-scale)")
     }
@@ -75,7 +75,7 @@ struct SpatialAdaptiveTests {
         let rowCount = 10
         let center = spatialSADThreshold(baseSAD: baseThreshold, blockCol: 5, blockRow: 5, colCount: colCount, rowCount: rowCount)
         let edge = spatialSADThreshold(baseSAD: baseThreshold, blockCol: 0, blockRow: 0, colCount: colCount, rowCount: rowCount)
-        #expect(edge > center, "Edge threshold \(edge) should be > center \(center)")
+        #expect(center < edge, "Edge threshold \(edge) should be > center \(center)")
     }
 }
 

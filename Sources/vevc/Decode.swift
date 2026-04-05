@@ -49,17 +49,18 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     let mvCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
     let mvDataLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
     
-    if mvCount > 0 && mvDataLen > 0 {
+    if 0 < mvCount && 0 < mvDataLen {
         guard (offset + mvDataLen) <= r.count else { throw DecodeError.insufficientData }
         
         mvs = try decodeMVs(data: Array(r[offset..<(offset + mvDataLen)]), count: mvCount)
         offset += mvDataLen
     }
     
-    // 参照方向フラグの読み取り（双方向予測フレームの場合のみ存在）
-    if mvCount > 0 && nextPd != nil {
+    // why: direction flag only exists for bidirectional prediction frames
+    // indicates whether each block uses forward (prev) or backward (next) reference
+    if 0 < mvCount && nextPd != nil {
         let refDirByteCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
-        if refDirByteCount > 0 {
+        if 0 < refDirByteCount {
             guard (offset + refDirByteCount) <= r.count else { throw DecodeError.insufficientData }
             let refDirBuf = Array(r[offset..<(offset + refDirByteCount)])
             offset += refDirByteCount
@@ -113,7 +114,8 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     return current
 }
 
-// MARK: - Decode Logic
+// Adaptive predictor: selects prediction based on edge direction.
+// vertical edge -> min(a,b), horizontal edge -> max(a,b), flat -> a+b-c
 
 @inline(__always)
 func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
@@ -152,15 +154,15 @@ func decodeCoeffRun(decoder: inout EntropyDecoder, isParentZero: Bool) throws ->
 func blockDecode32(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
-        // プールから取得したブロックは既にゼロ保証済み（put時にclearAll実行済み）
+        // blocks from pool are guaranteed zero (cleared on put), no explicit zeroing needed
         return
     }
 
     let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
-    // プールから取得したブロックは既にゼロ保証済みのため clearAll() は不要
-    // run-length デコードで値を書き込まない位置は既にゼロ
+    // blocks from pool are pre-zeroed, clearAll() is unnecessary
+    // positions not written by run-length decode remain zero
 
     var currentIdx = 0
     let lscpIdx = lscpY * 32 + lscpX
@@ -728,7 +730,7 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
-            pool.put(ll) // 一時ブロックをプールに返却
+            pool.put(ll) // return temp block to pool
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)

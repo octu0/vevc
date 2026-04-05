@@ -32,8 +32,8 @@ struct ColorSpaceTests {
         for i in 0..<rawData.count {
             if i % 4 == 3 { continue } // skip Alpha
             let diff = abs(Int(rawData[i]) - Int(restoredRGBA[i]))
-            if diff > maxDiff { maxDiff = diff }
-            if diff > 50 {
+            if maxDiff < diff { maxDiff = diff }
+            if 50 < diff {
                 diffCount += 1
             }
         }

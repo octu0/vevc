@@ -11,15 +11,19 @@ struct MotionVector: Sendable {
 }
 
 struct MotionEstimation {
+
+    // small blocks benefit more from compiler auto-vectorization than manual SIMD
     @inline(__always)
     static func absDiff(_ a: Int16, _ b: Int16) -> Int {
         return abs(Int(a) - Int(b))
     }
 
+    // why: Lagrange multiplier for rate-distortion optimization:
+    // penalizes motion vectors with large magnitude to favor zero-MV
     @inline(__always)
     static func getPenalty(dx: Int, dy: Int, lambda: Int) -> Int {
-        let absX = dx < 0 ? -dx : dx
-        let absY = dy < 0 ? -dy : dy
+        let absX = dx < 0 ? (-1 * dx) : dx
+        let absY = dy < 0 ? (-1 * dy) : dy
         return (absX + absY) * lambda
     }
 
@@ -43,6 +47,11 @@ struct MotionEstimation {
         return sad
     }
 
+    // why: coarse-to-fine two-stage search reduces computation from O(N^2) to O(16)
+    // 1. evaluate SAD at zero vector (0,0) as baseline
+    // 2. coarse search: step=2 diamond, pick lowest-cost among 8 neighbors
+    // 3. fine search: step=1 around coarse best, re-evaluate 8 neighbors
+    // achieves near-optimal result at fixed O(16) cost vs full search O(N^2)
     @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
@@ -51,7 +60,8 @@ struct MotionEstimation {
         tPtr: UnsafeMutablePointer<Int16>,
         width: Int, height: Int, bx: Int, by: Int
     ) -> (Int, Int, Int) {
-        // 1. Evaluate (0,0) first as baseline
+        // why: skip search when zero-MV SAD is below threshold
+        // (static scene or very similar blocks)
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
         
@@ -59,12 +69,12 @@ struct MotionEstimation {
             return (0, 0, zeroSad)
         }
         
-        // 2. Coarse Search (step=2, range=4 implies ±2, ±4 but in EncodePlane we pass range=2. To be safe, test 8 surrounding Coarse points)
+        // why: coarse step evaluates ±2 pixel 8-neighbors
         var bestCoarseSad: Int = zeroSad
         var bestCoarseDx: Int = 0
         var bestCoarseDy: Int = 0
         
-        // Hardcoded tuple array for coarse search (±2, step=2)
+        // why: fixed 8-direction pattern (not full search) keeps cost at O(8)
         let coarseOffsets: [(Int, Int)] = [
             (-2, -2), (0, -2), (2, -2),
             (-2,  0),          (2,  0),
@@ -88,7 +98,7 @@ struct MotionEstimation {
             }
         }
         
-        // 3. Fine Search (step=1) around bestCoarse
+        // why: fine step re-evaluates ±1 pixel neighbors around the coarse best
         var bestFineSad: Int = bestCoarseSad
         var bestFineDx: Int = bestCoarseDx
         var bestFineDy: Int = bestCoarseDy
@@ -105,7 +115,8 @@ struct MotionEstimation {
             let fineDx: Int = bestCoarseDx + fx
             let fineDy: Int = bestCoarseDy + fy
             
-            if fineDx < -4 || fineDx > 4 || fineDy < -4 || fineDy > 4 { continue }
+            // why: clip to [-4, 4] to stay within reference image valid region
+            if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
             fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
             let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)

@@ -1,13 +1,14 @@
 import Foundation
 
+// why: 14-bit scale balances precision vs compression efficiency
 let RANS_SCALE_BITS: UInt32 = 14
 let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
 let RANS_L: UInt32 = 1 << 15
 let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 
 // MARK: - Static rANS Frequency Tables
-// These tables replace per-stream frequency table headers (~120B savings per encoder).
-// Each table contains raw frequency counts normalized to RANS_SCALE=16384.
+// why: static tables eliminate per-stream frequency table headers (~120B),
+// reducing compression overhead for small blocks
 //
 // Token mapping:
 //   val tokens: 0..31 = values ±1..±16 (even=positive, odd=negative)
@@ -21,21 +22,23 @@ internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
     var freqs = rawFreqs
     let sum: UInt32 = freqs.reduce(0, +)
     
-    // Adjust the largest element to make sum == RANS_SCALE
+    // why: rounding error is absorbed by the largest-frequency element
+    // to minimize impact on the rest of the distribution
     if sum != RANS_SCALE {
         var maxIdx = 0
         var maxVal: UInt32 = 0
         for i in 0..<64 {
-            if freqs[i] > maxVal {
+            if maxVal < freqs[i] {
                 maxVal = freqs[i]
                 maxIdx = i
             }
         }
         if sum < RANS_SCALE {
             freqs[maxIdx] += (RANS_SCALE - sum)
-        } else {
+        }
+        if RANS_SCALE < sum {
             let diff = sum - RANS_SCALE
-            if freqs[maxIdx] > diff {
+            if diff < freqs[maxIdx] {
                 freqs[maxIdx] -= diff
             }
         }
@@ -115,6 +118,7 @@ final class StaticRANSModels: @unchecked Sendable {
 }
 
 // MARK: - rANS Probability Model
+// why: LUT reverse-lookup reduces symbol search from O(log n) binary search to O(1)
 
 struct rANSModel {
     private(set) var sigFreq: UInt32
@@ -193,27 +197,29 @@ struct rANSModel {
             var maxIdx = 0
             var maxVal = self.tokenFreqs[0]
             for i in 1..<64 {
-                if self.tokenFreqs[i] > maxVal {
+                if maxVal < self.tokenFreqs[i] {
                     maxVal = self.tokenFreqs[i]
                     maxIdx = i
                 }
             }
             
+            // why: absorb deficit into the largest frequency to preserve distribution shape
             if sum < RANS_SCALE {
                 self.tokenFreqs[maxIdx] += (RANS_SCALE - sum)
-            } else if sum > RANS_SCALE {
+            }
+            if RANS_SCALE < sum {
                 var diff = sum - RANS_SCALE
-                while diff > 0 {
-                    // find the max frequency to subtract from
+                while 0 < diff {
                     var currentMaxIdx = 0
                     var currentMaxVal = self.tokenFreqs[0]
                     for i in 1..<64 {
-                        if self.tokenFreqs[i] > currentMaxVal {
+                        if currentMaxVal < self.tokenFreqs[i] {
                             currentMaxVal = self.tokenFreqs[i]
                             currentMaxIdx = i
                         }
                     }
-                    if currentMaxVal <= 1 { break } // cannot reduce further
+                    // why: freq <= 1 cannot be reduced further without causing division by zero during decode
+                    if currentMaxVal <= 1 { break }
                     self.tokenFreqs[currentMaxIdx] -= 1
                     diff -= 1
                 }
@@ -267,6 +273,7 @@ internal func deserializeRANSModel(from chunk: [UInt8], offset: inout Int) -> rA
 
 // MARK: - rANS Encoder
 
+
 struct rANSEncoder {
     private(set) var state: UInt32
     private(set) var stream: [UInt16]
@@ -279,13 +286,15 @@ struct rANSEncoder {
     
     @inline(__always)
     mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
+        // why: keep state in [RANS_L, RANS_L * freq) by flushing 16-bit words
         let xMax = RANS_XMAX * freq
-        while state >= xMax {
+        while xMax <= state {
             stream.append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
+        // why: core encode formula: state = (state / freq) << scale + (state % freq) + cumFreq
         let q = state / freq
-        state = (q << RANS_SCALE_BITS) + (state - q * freq) + cumFreq
+        state = (q << RANS_SCALE_BITS) + (state - (q * freq)) + cumFreq
     }
     
     @inline(__always)
@@ -377,35 +386,36 @@ struct Interleaved4rANSEncoder {
     mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         let xMax = RANS_XMAX * freq
         
+        // why: tuple-based 4-lane avoids array bounds checking overhead
         switch lane {
         case 0:
-            while states.0 >= xMax {
+            while xMax <= states.0 {
                 stream.append(UInt16(truncatingIfNeeded: states.0))
                 states.0 >>= 16
             }
             let q = states.0 / freq
-            states.0 = (q << RANS_SCALE_BITS) + (states.0 - q * freq) + cumFreq
+            states.0 = (q << RANS_SCALE_BITS) + (states.0 - (q * freq)) + cumFreq
         case 1:
-            while states.1 >= xMax {
+            while xMax <= states.1 {
                 stream.append(UInt16(truncatingIfNeeded: states.1))
                 states.1 >>= 16
             }
             let q = states.1 / freq
-            states.1 = (q << RANS_SCALE_BITS) + (states.1 - q * freq) + cumFreq
+            states.1 = (q << RANS_SCALE_BITS) + (states.1 - (q * freq)) + cumFreq
         case 2:
-            while states.2 >= xMax {
+            while xMax <= states.2 {
                 stream.append(UInt16(truncatingIfNeeded: states.2))
                 states.2 >>= 16
             }
             let q = states.2 / freq
-            states.2 = (q << RANS_SCALE_BITS) + (states.2 - q * freq) + cumFreq
+            states.2 = (q << RANS_SCALE_BITS) + (states.2 - (q * freq)) + cumFreq
         case 3:
-            while states.3 >= xMax {
+            while xMax <= states.3 {
                 stream.append(UInt16(truncatingIfNeeded: states.3))
                 states.3 >>= 16
             }
             let q = states.3 / freq
-            states.3 = (q << RANS_SCALE_BITS) + (states.3 - q * freq) + cumFreq
+            states.3 = (q << RANS_SCALE_BITS) + (states.3 - (q * freq)) + cumFreq
         default:
             break
         }
@@ -539,7 +549,7 @@ struct InterleavedrANSEncoder {
         var state = states[lane]
         let xMax = RANS_XMAX * freq
         
-        while state >= xMax {
+        while xMax <= state {
             streams[lane].append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
@@ -556,8 +566,7 @@ struct InterleavedrANSEncoder {
         }
     }
     
-    /// merge 4 streams into a single bitstream
-    /// format: [len0(4bytes)][len1(4bytes)][len2(4bytes)][len3(4bytes)][stream0][stream1][stream2][stream3]
+    /// why: per-lane length headers let the decoder deserialize each lane independently
     @inline(__always)
     func getBitstream() -> [UInt8] {
         var bytes = [UInt8]()
@@ -589,6 +598,7 @@ struct InterleavedrANSEncoder {
 }
 
 // MARK: - 4-way Interleaved rANS SIMD Decoder
+
 
 struct InterleavedrANSDecoder {
     private(set) var states: SIMD4<UInt32>
@@ -667,17 +677,19 @@ struct InterleavedrANSDecoder {
     
     @inline(__always)
     mutating func advanceSymbols(cumFreqs: SIMD4<UInt32>, freqs: SIMD4<UInt32>, activeMask: SIMD4<UInt32> = SIMD4<UInt32>(repeating: 0xFFFFFFFF)) {
-        // [SIMD] Data parallel non-dependent update
+        // why: 4-lane parallel decode with no data dependency
+        // nextState = freq * (state >> scale) + (state & mask) - cumFreq
         let mask = SIMD4<UInt32>(repeating: RANS_SCALE - 1)
         let nextStates = freqs &* (states &>> RANS_SCALE_BITS) &+ (states & mask) &- cumFreqs
         
         let boolMask = activeMask .== SIMD4<UInt32>(repeating: 0xFFFFFFFF)
         states.replace(with: nextStates, where: boolMask)
         
-        // SIMD Renormalization
+        // why: renormalize lanes where state fell below RANS_L;
+        // at most 2 passes needed to restore all lanes
         let th = SIMD4<UInt32>(repeating: RANS_L)
         
-        // first renormalization
+        // first renormalization pass (sufficient for most cases)
         var renormMask = (states .< th) .& boolMask
         if any(renormMask) {
             for lane in 0..<4 {
@@ -694,7 +706,7 @@ struct InterleavedrANSDecoder {
             }
         }
         
-        // second renormalization
+        // second renormalization pass (rare case)
         renormMask = (states .< th) .& boolMask
         if any(renormMask) {
             for lane in 0..<4 {
@@ -712,6 +724,7 @@ struct InterleavedrANSDecoder {
         }
     }
 }
+
 
 struct BypassWriter {
     private(set) var bytes: [UInt8]
@@ -831,6 +844,8 @@ struct BypassReader {
     }
 }
 
+// why: |val| <= 15 maps to token only (no bypass bits, covers most frequent range)
+// |val| >= 16 splits into token + variable-length bypass bits
 @inline(__always)
 func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
     if value == 0 { return (0, 0, 0) }
@@ -838,7 +853,8 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
     let absValue = UInt16(value.magnitude)
     
     if absValue <= 15 {
-        let token = UInt8((absValue - 1) * 2 + 1 + (sign ? 1 : 0))
+        // why: interleave sign into token: even=positive, odd=negative
+        let token = UInt8(((absValue - 1) * 2) + 1 + (sign ? 1 : 0))
         return (token, 0, 0)
     }
     

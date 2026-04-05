@@ -15,19 +15,22 @@ struct Quantizer: Sendable {
     ///     Common values: -6554 (-0.10), -3277 (-0.05), 0 (none).
     init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0) {
         self.step = Int16(step)
+        // why: reciprocal in Q16 fixed-point converts division to multiply+shift
+        // val / step ≈ (val * mul) >> 16 で高速化する
         self.mul = Int32((1 << 16) / step)
         var b: Int32 = 0
         if roundToNearest {
             b = Int32(1 << 15)
-        } else if deadZoneBias != 0 {
+        }
+        if roundToNearest != true && deadZoneBias != 0 {
             b = deadZoneBias
         }
         self.bias = b
     }
 }
 
-// Pre-computed dead zone bias constants in Q16 fixed-point
-// deadZoneRatio * 65536 = bias value
+// why: dead-zone bias in Q16 fixed-point avoids rounding small coefficients
+// up to 1, improving compression of near-zero subbands
 private let kDeadZoneBiasNeg005: Int32 = -3277  // -0.05 * 65536
 private let kDeadZoneBiasNeg010: Int32 = -6554  // -0.10 * 65536
 

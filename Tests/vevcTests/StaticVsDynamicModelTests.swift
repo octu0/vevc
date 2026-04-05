@@ -68,7 +68,7 @@ struct StaticVsDynamicModelTests {
         for pair in pairs {
             encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
         }
-        if trailingZeros > 0 {
+        if 0 < trailingZeros {
             encoder.addTrailingZeros(trailingZeros)
         }
         encoder.flush()
@@ -164,12 +164,12 @@ struct StaticVsDynamicModelTests {
             let pairs = generateHLPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
             let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
-            if dynamicSize <= staticSize && !found {
+            if dynamicSize <= staticSize && found != true {
                 print("  ★ Breakeven at pairs=\(count): static=\(staticSize)B dynamic=\(dynamicSize)B")
                 found = true
             }
         }
-        if !found {
+        if found != true {
             print("  Dynamic model never beats static in tested range (10-500)")
         }
 
@@ -179,12 +179,12 @@ struct StaticVsDynamicModelTests {
             let pairs = generateHHPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
             let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
-            if dynamicSize <= staticSize && !found {
+            if dynamicSize <= staticSize && found != true {
                 print("  ★ Breakeven at pairs=\(count): static=\(staticSize)B dynamic=\(dynamicSize)B")
                 found = true
             }
         }
-        if !found {
+        if found != true {
             print("  Dynamic model never beats static in tested range (10-500)")
         }
     }
