@@ -156,6 +156,3 @@ struct MotionEstimation {
         }
     }
 }
-
-
-

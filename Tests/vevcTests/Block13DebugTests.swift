@@ -42,7 +42,7 @@ final class Block13DebugTests: XCTestCase {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             var forceSplit = false
             if isZero != true {
-                forceSplit = shouldSplit32(data: blocks[i].base, skipLL: true)
+                forceSplit = shouldSplit32WithoutLL(data: blocks[i].base)
             }
             blockInfos.append((isZero: isZero, forceSplit: forceSplit))
         }

@@ -56,7 +56,7 @@ final class EntropyPairsCompareTests: XCTestCase {
                         } else {
                 bwFlags.writeBit(false)
                 
-                let forceSplit = shouldSplit32(data: blocks[i].base, skipLL: true)
+                let forceSplit = shouldSplit32WithoutLL(data: blocks[i].base)
                 if forceSplit {
                     bwFlags.writeBit(true)
                     bwFlags.writeBit(false); bwFlags.writeBit(false)

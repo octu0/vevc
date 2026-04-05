@@ -1314,7 +1314,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
+        let buf = isPFrame
+            ? encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+            : encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
@@ -1345,7 +1347,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
+        let buf = isPFrame
+            ? encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+            : encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1373,7 +1377,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, isPFrame: isPFrame)
+        let buf = isPFrame
+            ? encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+            : encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
