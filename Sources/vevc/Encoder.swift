@@ -149,6 +149,7 @@ actor LayersEncodeActor {
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
+    @inline(__always)
     func encodeTemporalGOPChunk(images: [YCbCrImage]) async throws -> [UInt8] {
         guard !images.isEmpty else {
             throw NSError(domain: "vevc.Encoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "TemporalGOP4 requires at least 1 frame"])
@@ -167,7 +168,6 @@ actor LayersEncodeActor {
         framesSinceKeyframe += images.count
         frameIndex += images.count
         
-        let planes = toPlaneData420(images: images)
         let baseStep = Int(baseQt.step)
         
         let localMaxbitrate = maxbitrate
@@ -182,7 +182,8 @@ actor LayersEncodeActor {
         // デコーダ側でもI-frameの復元結果を使用するため、入力原データではなく復元結果を使用
         var firstReconstructed: PlaneData420? = nil
         
-        for (_, plane) in planes.enumerated() {
+        for (_, img) in images.enumerated() {
+            let plane = toPlaneData420(image: img, pool: pool)
             // Duplicate frame detection: if current frame pixels are identical
             // to the previous frame, emit a copy frame (empty data, FrameLen=0)
             // instead of encoding the full frame. This saves significant data
@@ -191,10 +192,14 @@ actor LayersEncodeActor {
                 let isDuplicate = isPlaneIdentical(a: plane, b: prevInput)
                 if isDuplicate {
                     encodedFrames.append([]) // empty = copy frame (FrameLen=0)
-                    // previousReconstructed stays the same (reuse previous reconstruction)
-                    // previousInputPlane stays the same
+                    pool.putInt16(plane.y)
+                    pool.putInt16(plane.cb)
+                    pool.putInt16(plane.cr)
                     continue
                 }
+                pool.putInt16(prevInput.y)
+                pool.putInt16(prevInput.cb)
+                pool.putInt16(prevInput.cr)
             }
             previousInputPlane = plane
             
@@ -217,10 +222,7 @@ actor LayersEncodeActor {
                 frameQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
             }
             
-            // 双方向予測の適用判定:
-            // 【実験】全P-frameに双方向予測を適用し、効果の上限を測定する。
-            // I-frameの復元結果を後方参照として全P-frameで利用する。
-            let useBidirectional = isPFrame && firstReconstructed != nil && planes.count >= 2
+            let useBidirectional = isPFrame && firstReconstructed != nil && images.count >= 2
             
             let bytes: [UInt8]
             let reconstructed: PlaneData420
@@ -247,6 +249,14 @@ actor LayersEncodeActor {
                 let frameSAD = isPFrame ? estimateFrameSAD(current: plane, previous: previousReconstructed!) : 0
                 rateController.consumePFrame(bits: encodedBits, qStep: Int(frameQtY.step), sad: frameSAD)
             }
+            if let prev = previousReconstructed {
+                let firstVal = firstReconstructed?.y.withUnsafeBufferPointer { $0.baseAddress }
+                if firstVal == nil || prev.y.withUnsafeBufferPointer({ $0.baseAddress }) != firstVal {
+                    pool.putInt16(prev.y)
+                    pool.putInt16(prev.cb)
+                    pool.putInt16(prev.cr)
+                }
+            }
             previousReconstructed = reconstructed
             
             // I-frame（先頭フレーム）の復元結果を保存
@@ -255,6 +265,25 @@ actor LayersEncodeActor {
             }
         }
         
+        if let prevInput = previousInputPlane {
+            pool.putInt16(prevInput.y)
+            pool.putInt16(prevInput.cb)
+            pool.putInt16(prevInput.cr)
+        }
+        if let prev = previousReconstructed {
+            let firstVal = firstReconstructed?.y.withUnsafeBufferPointer { $0.baseAddress }
+            if firstVal == nil || prev.y.withUnsafeBufferPointer({ $0.baseAddress }) != firstVal {
+                pool.putInt16(prev.y)
+                pool.putInt16(prev.cb)
+                pool.putInt16(prev.cr)
+            }
+        }
+        if let first = firstReconstructed {
+            pool.putInt16(first.y)
+            pool.putInt16(first.cb)
+            pool.putInt16(first.cr)
+        }
+
         var gopBody: [UInt8] = []
         appendUInt32BE(&gopBody, UInt32(images.count)) // GOP size
         
@@ -277,9 +306,9 @@ actor LayersEncodeActor {
         return out
     }
     
-    // For handling remainder frames at the end of the stream
+    @inline(__always)
     func encodeSingleFrame(image: YCbCrImage) async throws -> [UInt8] {
-        let curr = toPlaneData420(images: [image])[0]
+        let curr = toPlaneData420(image: image, pool: pool)
         
         if keyint <= framesSinceKeyframe || frameIndex == 0 {
             let targetBits = rateController.beginGOP()
@@ -291,7 +320,13 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0)
         
-        let (bytes, _) = try await encodeSpatialLayers(pd: curr, pool: pool, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+        let (bytes, recon) = try await encodeSpatialLayers(pd: curr, pool: pool, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+        pool.putInt16(curr.y)
+        pool.putInt16(curr.cb)
+        pool.putInt16(curr.cr)
+        pool.putInt16(recon.y)
+        pool.putInt16(recon.cb)
+        pool.putInt16(recon.cr)
         
         framesSinceKeyframe += 1
         frameIndex += 1
@@ -391,21 +426,21 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     @inline(__always)
     func fetchBlockY(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: w, height: h)
-        reader.readBlockY(x: x, y: y, width: w, height: h, into: block.view)
+        reader.readBlockY(x: x, y: y, width: w, height: h, into: block)
         return block
     }
 
     @inline(__always)
     func fetchBlockCb(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: w, height: h)
-        reader.readBlockCb(x: x, y: y, width: w, height: h, into: block.view)
+        reader.readBlockCb(x: x, y: y, width: w, height: h, into: block)
         return block
     }
 
     @inline(__always)
     func fetchBlockCr(reader: ImageReader, x: Int, y: Int, w: Int, h: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: w, height: h)
-        reader.readBlockCr(x: x, y: y, width: w, height: h, into: block.view)
+        reader.readBlockCr(x: x, y: y, width: w, height: h, into: block)
         return block
     }
     
@@ -500,7 +535,7 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
 
 @inline(__always)
 private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) -> Int {
-    let view = block.view
+    let view = block
     let sub = dwt2d_8_sb(view)
     
     quantizeSIMD(sub.ll, q: qt.qLow)

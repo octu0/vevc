@@ -441,7 +441,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
-    var sub = Image16(width: dx, height: dy)
+    var sub = Image16(width: dx, height: dy, pool: pool)
     
     let rowCountY = (dy + 32 - 1) / 32
     let colCountY = (dx + 32 - 1) / 32
@@ -547,7 +547,7 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
-    var sub = Image16(width: dx, height: dy)
+    var sub = Image16(width: dx, height: dy, pool: pool)
     
     let rowCountY = (dy + 16 - 1) / 16
     let colCountY = (dx + 16 - 1) / 16
@@ -638,7 +638,7 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
     
-    var sub = Image16(width: dx, height: dy)
+    var sub = Image16(width: dx, height: dy, pool: pool)
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
@@ -721,15 +721,15 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
             let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll.view
-            let destView = block.view
+            let srcView = ll
+            let destView = block
             for yi in 0..<half {
                 let srcPtr = srcView.rowPointer(y: yi)
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
             pool.put(ll) // 一時ブロックをプールに返却
-            let view = block.view
+            let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
             let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
@@ -757,15 +757,15 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
             let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll.view
-            let destView = block.view
+            let srcView = ll
+            let destView = block
             for yi in 0..<half {
                 let srcPtr = srcView.rowPointer(y: yi)
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
             pool.put(ll)
-            let view = block.view
+            let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
             let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
@@ -793,15 +793,15 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
             let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll.view
-            let destView = block.view
+            let srcView = ll
+            let destView = block
             for yi in 0..<half {
                 let srcPtr = srcView.rowPointer(y: yi)
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
             pool.put(ll)
-            let view = block.view
+            let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
             let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
@@ -829,15 +829,15 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
             let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll.view
-            let destView = block.view
+            let srcView = ll
+            let destView = block
             for yi in 0..<half {
                 let srcPtr = srcView.rowPointer(y: yi)
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
             pool.put(ll)
-            let view = block.view
+            let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
             let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
@@ -865,15 +865,15 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
             let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll.view
-            let destView = block.view
+            let srcView = ll
+            let destView = block
             for yi in 0..<half {
                 let srcPtr = srcView.rowPointer(y: yi)
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
             pool.put(ll)
-            let view = block.view
+            let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
             let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
@@ -901,15 +901,15 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
             let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll.view
-            let destView = block.view
+            let srcView = ll
+            let destView = block
             for yi in 0..<half {
                 let srcPtr = srcView.rowPointer(y: yi)
                 let destPtr = destView.rowPointer(y: yi)
                 destPtr.update(from: srcPtr, count: half)
             }
             pool.put(ll)
-            let view = block.view
+            let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
             let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
@@ -936,7 +936,7 @@ func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowC
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 8 / 2
-            let view = block.view
+            let view = block
             let base = view.base
             let llView = BlockView(base: base, width: half, height: half, stride: 8)
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
@@ -965,7 +965,7 @@ func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 8 / 2
-            let view = block.view
+            let view = block
             let base = view.base
             let llView = BlockView(base: base, width: half, height: half, stride: 8)
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
@@ -994,7 +994,7 @@ func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 8 / 2
-            let view = block.view
+            let view = block
             let base = view.base
             let llView = BlockView(base: base, width: half, height: half, stride: 8)
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)

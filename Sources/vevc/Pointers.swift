@@ -180,3 +180,19 @@ internal func withUnsafePointers<T, R>(
     }
 }
 
+
+@inline(__always)
+internal func withUnsafePointers<T, R>(
+    _ a: [T], _ b: [T],
+    mut c: inout [T],
+    _ body: (UnsafePointer<T>, UnsafePointer<T>, UnsafeMutablePointer<T>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeBufferPointer { pA in
+        try b.withUnsafeBufferPointer { pB in
+            try c.withUnsafeMutableBufferPointer { pC in
+                try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!)
+            }
+        }
+    }
+}
+

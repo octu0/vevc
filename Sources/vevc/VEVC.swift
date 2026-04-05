@@ -81,8 +81,6 @@ struct BlockView: @unchecked Sendable {
         }
     }
 
-    /// メモリ確保してBlockViewを生成する。使用後は必ずdeallocate()を呼ぶこと。
-    /// Block2Dの代替として使用する。
     @inline(__always)
     static func allocate(width: Int, height: Int, stride strideVal: Int? = nil) -> BlockView {
         let s = strideVal ?? width
@@ -92,32 +90,23 @@ struct BlockView: @unchecked Sendable {
         return BlockView(base: ptr, width: width, height: height, stride: s)
     }
 
-    /// allocateで確保したメモリを解放する。
     @inline(__always)
     func deallocate() {
         base.deinitialize(count: stride * height)
         base.deallocate()
-    }
-
-    /// Block2D互換: .viewアクセスで自身を返す（既存コードとの互換性維持）
-    @inline(__always)
-    var view: BlockView {
-        return self
     }
 }
 
 // MARK: - BlockViewPool
 
 final class BlockViewPool: @unchecked Sendable {
-    /// サイズ別のプール。キーは width * height（8x8=64, 16x16=256, 32x32=1024）
     private var pools: [Int: [BlockView]] = [:]
+    private var int16Pools: [Int: [[Int16]]] = [:]
     
-    /// サイズ別の保持上限（超過分は即時 deallocate）
     private let maxPerSize: Int
     
-    #if arch(wasm32)
-    // Wasm は単一スレッド環境のためロック不要
-    #else
+    // no lock Wasm is single thread
+    #if !arch(wasm32)
     private let lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
     #endif
     
@@ -133,7 +122,7 @@ final class BlockViewPool: @unchecked Sendable {
         lock.deinitialize(count: 1)
         lock.deallocate()
         #endif
-        // 全プール内のブロックを解放
+
         for (_, blocks) in pools {
             for block in blocks {
                 block.deallocate()
@@ -141,8 +130,7 @@ final class BlockViewPool: @unchecked Sendable {
         }
     }
     
-    /// プールからBlockViewを取得する。プールに在庫があれば再利用し、なければ新規確保する。
-    /// 返却されたブロックはゼロクリア済みであることを保証する。
+
     @inline(__always)
     func get(width: Int, height: Int) -> BlockView {
         let key = width * height
@@ -151,7 +139,7 @@ final class BlockViewPool: @unchecked Sendable {
         if var bucket = pools[key], !bucket.isEmpty {
             let block = bucket.removeLast()
             pools[key] = bucket
-            block.clearAll() // プール再利用時にゼロ保証
+            block.clearAll()
             return block
         }
         #else
@@ -160,18 +148,15 @@ final class BlockViewPool: @unchecked Sendable {
             let block = bucket.removeLast()
             pools[key] = bucket
             os_unfair_lock_unlock(lock)
-            block.clearAll() // ロック解除後にクリア（ロック保持時間を短縮）
+            block.clearAll()
             return block
         }
         os_unfair_lock_unlock(lock)
         #endif
         
-        // プールに在庫がないため新規確保（initialize(repeating:0) でゼロ保証済み）
         return BlockView.allocate(width: width, height: height)
     }
     
-    /// BlockViewをプールに返却する。クリアは get() 時に実行するため、ここではクリアしない。
-    /// これにより並列実行時の put() のロック保持時間を最小化する。
     @inline(__always)
     func put(_ block: BlockView) {
         let key = block.width * block.height
@@ -198,11 +183,52 @@ final class BlockViewPool: @unchecked Sendable {
         #endif
     }
     
-    /// BlockView配列を一括でプールに返却する。長寿命ブロック（配列で受け渡されるもの）用。
     @inline(__always)
     func putAll(_ blocks: [BlockView]) {
         for block in blocks {
             put(block)
         }
+    }
+
+    @inline(__always)
+    func getInt16(count: Int) -> [Int16] {
+        #if arch(wasm32)
+        if var bucket = int16Pools[count], !bucket.isEmpty {
+            let arr = bucket.removeLast()
+            int16Pools[count] = bucket
+            return arr
+        }
+        #else
+        os_unfair_lock_lock(lock)
+        if var bucket = int16Pools[count], !bucket.isEmpty {
+            let arr = bucket.removeLast()
+            int16Pools[count] = bucket
+            os_unfair_lock_unlock(lock)
+            return arr
+        }
+        os_unfair_lock_unlock(lock)
+        #endif
+        return [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+    }
+    
+    @inline(__always)
+    func putInt16(_ array: [Int16]) {
+        let count = array.count
+        #if arch(wasm32)
+        var bucket = int16Pools[count] ?? []
+        // Optional limit, maybe 256
+        if bucket.count < maxPerSize {
+            bucket.append(array)
+            int16Pools[count] = bucket
+        }
+        #else
+        os_unfair_lock_lock(lock)
+        var bucket = int16Pools[count] ?? []
+        if bucket.count < maxPerSize {
+            bucket.append(array)
+            int16Pools[count] = bucket
+        }
+        os_unfair_lock_unlock(lock)
+        #endif
     }
 }

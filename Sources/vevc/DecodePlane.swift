@@ -55,7 +55,7 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int, 
     
     for (i, task) in tasks {
         let decodeAction = { (parentHL: BlockView?, parentLH: BlockView?, parentHH: BlockView?) throws in
-            let view = blocks[i].view
+            let view = blocks[i]
             let hlBase = view.base.advanced(by: half)
             let lhBase = view.base.advanced(by: half * 32)
             let hhBase = view.base.advanced(by: half * 32 + half)
@@ -122,7 +122,7 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int, 
         
         if let pBlocks = parentBlocks, i < pBlocks.count {
             let pBlock = pBlocks[i]
-            let pView = pBlock.view
+            let pView = pBlock
             let pSubs = getSubbands16(view: pView)
             try decodeAction(pSubs.hl, pSubs.lh, pSubs.hh)
         } else {
@@ -193,7 +193,7 @@ func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int, 
 
     for (i, task) in tasks {
         let decodeAction = { (parentHL: BlockView?, parentLH: BlockView?, parentHH: BlockView?) throws in
-            let view = blocks[i].view
+            let view = blocks[i]
             let hlBase = view.base.advanced(by: half)
             let lhBase = view.base.advanced(by: half * 16)
             let hhBase = view.base.advanced(by: half * 16 + half)
@@ -260,7 +260,7 @@ func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int, 
         
         if let pBlocks = parentBlocks, i < pBlocks.count {
             let pBlock = pBlocks[i]
-            let pView = pBlock.view
+            let pView = pBlock
             let pSubs = getSubbands8(view: pView)
             try decodeAction(pSubs.hl, pSubs.lh, pSubs.hh)
         } else {
@@ -314,7 +314,7 @@ func decodePlaneSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, p
         }
         
         let decodeAction = { (parentBlock: BlockView?) throws in
-            let view = blocks[i].view
+            let view = blocks[i]
             let hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 8)
             try blockDecode4(decoder: &decoder, block: hlView, parentBlock: parentBlock)
             
@@ -326,7 +326,7 @@ func decodePlaneSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, p
         }
         
         if let pb2d = parentBlock2D {
-            let pb = pb2d.view
+            let pb = pb2d
             try decodeAction(pb)
             pool.put(pb2d) // 一時ブロックをプールに返却
         } else {
@@ -369,7 +369,7 @@ func decodePlaneBaseSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: In
     for i in 0..<blockCount {
         if nzCur < nzCount && nonZeroIndices[nzCur] == i {
             nzCur += 1
-            let view = blocks[i].view
+            let view = blocks[i]
             let llView = BlockView(base: view.base, width: half, height: half, stride: 8)
             try blockDecodeDPCM4(decoder: &decoder, block: llView, lastVal: &lastVal)
             
@@ -449,7 +449,7 @@ func decodePlaneBaseSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: I
 
     var lastVal: Int16 = 0
     for (i, task) in tasks {
-        let view = blocks[i].view
+        let view = blocks[i]
         let llBase = view.base
         let hlBase = view.base.advanced(by: half)
         let lhBase = view.base.advanced(by: half * 32)
@@ -545,7 +545,7 @@ func decodeCascadedPlaneSubbands32(data: [UInt8], blocks: inout [BlockView]) thr
             continue
         }
         
-        let view = blocks[i].view
+        let view = blocks[i]
         let hl1 = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: view.stride)
         let lh1 = BlockView(base: view.base.advanced(by: 16 * view.stride), width: 16, height: 16, stride: view.stride)
         let hh1 = BlockView(base: view.base.advanced(by: 16 * view.stride + 16), width: 16, height: 16, stride: view.stride)

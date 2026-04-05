@@ -1017,7 +1017,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: blockThreshold)
         if isZero {
             bwFlags.writeBit(true)
-            let view = blocks[i].view
+            let view = blocks[i]
             let half = 32 / 2
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -1064,20 +1064,20 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         for (i, task) in tasks {
             if i < pb.count {
                 let pBlock = pb[i]
-                let pView = pBlock.view
+                let pView = pBlock
                 let pSubs = getSubbands16(view: pView)
-                let view = blocks[i].view
+                let view = blocks[i]
                 let subs = getSubbands32(view: view)
                 encodeSubbands32WithParent(task: task, encoder: &encoder, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
             } else {
-                let view = blocks[i].view
+                let view = blocks[i]
                 let subs = getSubbands32(view: view)
                 encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs)
             }
         }
     } else {
         for (i, task) in tasks {
-            let view = blocks[i].view
+            let view = blocks[i]
             let subs = getSubbands32(view: view)
             encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs)
         }
@@ -1116,7 +1116,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         let isZero = isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold)
         if isZero {
             bwFlags.writeBit(true)
-            let view = blocks[i].view
+            let view = blocks[i]
             let half = 16 / 2
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
@@ -1162,20 +1162,20 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         for (i, task) in tasks {
             if i < pb.count {
                 let pBlock = pb[i]
-                let pView = pBlock.view
+                let pView = pBlock
                 let pSubs = getSubbands8(view: pView)
-                let view = blocks[i].view
+                let view = blocks[i]
                 let subs = getSubbands16(view: view)
                 encodeSubbands16WithParent(task: task, encoder: &encoder, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
             } else {
-                let view = blocks[i].view
+                let view = blocks[i]
                 let subs = getSubbands16(view: view)
                 encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
             }
         }
     } else {
         for (i, task) in tasks {
-            let view = blocks[i].view
+            let view = blocks[i]
             let subs = getSubbands16(view: view)
             encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
         }
@@ -1212,7 +1212,7 @@ func encodePlaneSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> [UIn
     var encoder = EntropyEncoder<DynamicEntropyModel>()
     
     for i in nonZeroIndices {
-        let view = blocks[i].view
+        let view = blocks[i]
         let subs = getSubbands8(view: view)
         blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
         blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
@@ -1257,7 +1257,7 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, isP
         if nzCur < nzCount && nonZeroIndices[nzCur] == i {
             nzCur += 1
 
-            let view = blocks[i].view
+            let view = blocks[i]
             let subs = getSubbands8(view: view)
             blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
             blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil)
@@ -1332,7 +1332,7 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
             lastVal = 0
             
         case .encode16:
-            let view = blocks[i].view
+            let view = blocks[i]
             let subs = getSubbands32(view: view)
             blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
             blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
@@ -1340,7 +1340,7 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
             blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
         
         case .split8(let tl, let tr, let bl, let br):
-            let view = blocks[i].view
+            let view = blocks[i]
             let subs = getSubbands32(view: view)
             if tl {
                 let ll = BlockView(base: subs.ll.base, width: 8, height: 8, stride: 32)
@@ -1497,7 +1497,7 @@ func encodeCascadedPlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int
             continue
         }
         
-        let view = blocks[i].view
+        let view = blocks[i]
         let hl1 = BlockView(base: view.base.advanced(by: 16), width: 16, height: 16, stride: view.stride)
         let lh1 = BlockView(base: view.base.advanced(by: 16 * view.stride), width: 16, height: 16, stride: view.stride)
         let hh1 = BlockView(base: view.base.advanced(by: 16 * view.stride + 16), width: 16, height: 16, stride: view.stride)

@@ -112,9 +112,25 @@ class CoreDecoder {
             }
         }
         
-        let validPlanes = decodedPlanes.map { $0! }
+        let validPlanes = decodedPlanes.compactMap { $0 }
+        let result = validPlanes.map { $0.toYCbCr() }
         
-        return validPlanes.map { $0.toYCbCr() }
+        var seenY = Set<UnsafeMutableRawPointer>()
+        for p in validPlanes {
+            p.y.withUnsafeBufferPointer { yPtr in
+                if let yBase = yPtr.baseAddress { // Cast to avoid Array copy
+                    let ptr = UnsafeMutableRawPointer(mutating: yBase)
+                    if seenY.contains(ptr) != true {
+                        seenY.insert(ptr)
+                        pool.putInt16(p.y)
+                        pool.putInt16(p.cb)
+                        pool.putInt16(p.cr)
+                    }
+                }
+            }
+        }
+        
+        return result
     }
 }
 

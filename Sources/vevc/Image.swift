@@ -141,6 +141,40 @@ extension PlaneData420 {
 }
 
 @inline(__always)
+func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> PlaneData420 {
+    @inline(__always)
+    func convertPlane(src: UnsafeBufferPointer<UInt8>, dst: UnsafeMutableBufferPointer<Int16>) {
+        guard let srcPtr = src.baseAddress, let dstPtr = dst.baseAddress else { return }
+        let count = min(src.count, dst.count)
+        var i = 0
+        let offset128 = SIMD8<Int16>(repeating: 128)
+        while i + 8 <= count {
+            let u8 = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<UInt8>.self)
+            let i16 = SIMD8<Int16>(truncatingIfNeeded: u8) &- offset128
+            UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: i16, as: SIMD8<Int16>.self)
+            i += 8
+        }
+        while i < count {
+            dstPtr[i] = Int16(srcPtr[i]) - 128
+            i += 1
+        }
+    }
+    
+    var y = pool.getInt16(count: image.yPlane.count)
+    y.withUnsafeMutableBufferPointer { dst in
+        image.yPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
+    }
+    var cb = pool.getInt16(count: image.cbPlane.count)
+    cb.withUnsafeMutableBufferPointer { dst in
+        image.cbPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
+    }
+    var cr = pool.getInt16(count: image.crPlane.count)
+    cr.withUnsafeMutableBufferPointer { dst in
+        image.crPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
+    }
+    return PlaneData420(width: image.width, height: image.height, y: y, cb: cb, cr: cr)
+}
+
 func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
     // optimize SIMD UInt8 -> Int16 (-128 offset)
     @inline(__always)
@@ -233,101 +267,7 @@ func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {
     }
 }
 
-@inline(__always)
-func subPlanes(curr: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
-    @Sendable @inline(__always)
-    func sub(c: [Int16], p: [Int16]) -> [Int16] {
-        let count = c.count
-        if count < 1 { return [] }
 
-        return [Int16](unsafeUninitializedCapacity: count) { resBuf, initializedCount in
-            c.withUnsafeBufferPointer { cBuf in
-                p.withUnsafeBufferPointer { pBuf in
-                    guard let cPtr = cBuf.baseAddress,
-                          let pPtr = pBuf.baseAddress,
-                          let resPtr = resBuf.baseAddress else { return }
-                    
-                    var i = 0
-                    let chunk = 16
-                    while i + chunk <= count {
-                        let cSimd = UnsafeRawPointer(cPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                        let pSimd = UnsafeRawPointer(pPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                        let diffSimd = cSimd &- pSimd
-                        UnsafeMutableRawPointer(resPtr.advanced(by: i)).storeBytes(of: diffSimd, as: SIMD16<Int16>.self)
-                        i += chunk
-                    }
-                    
-                    while i < count {
-                        resPtr[i] = cPtr[i] &- pPtr[i]
-                        i += 1
-                    }
-                }
-            }
-            initializedCount = count
-        }
-    }
-    
-    async let y = sub(c: curr.y, p: predicted.y)
-    async let cb = sub(c: curr.cb, p: predicted.cb)
-    async let cr = sub(c: curr.cr, p: predicted.cr)
-    
-    return PlaneData420(width: curr.width, height: curr.height, y: await y, cb: await cb, cr: await cr)
-}
-
-@inline(__always)
-func addPlanes(residual: PlaneData420, predicted: PlaneData420) async -> PlaneData420 {
-    @Sendable @inline(__always)
-    func add(r: [Int16], p: [Int16], rW: Int, rH: Int, pW: Int) -> [Int16] {
-        let count = rW * rH
-        if count < 1 { return [] }
-
-        return [Int16](unsafeUninitializedCapacity: count) { cBuf, initializedCount in
-            r.withUnsafeBufferPointer { rBuf in
-                p.withUnsafeBufferPointer { pBuf in
-                    guard let rPtr = rBuf.baseAddress,
-                          let pPtr = pBuf.baseAddress,
-                          let cPtr = cBuf.baseAddress else { return }
-                    
-                    for y in 0..<rH {
-                        let rStart = y * rW
-                        let pStart = y * pW
-                        var x = 0
-                        #if arch(arm64) || arch(x86_64) || arch(wasm32)
-                        let chunk = 16
-                        while x + chunk <= rW {
-                            let rSimd = UnsafeRawPointer(rPtr.advanced(by: rStart + x)).loadUnaligned(as: SIMD16<Int16>.self)
-                            let pSimd = UnsafeRawPointer(pPtr.advanced(by: pStart + x)).loadUnaligned(as: SIMD16<Int16>.self)
-                            let sumSimd = rSimd &+ pSimd
-                            UnsafeMutableRawPointer(cPtr.advanced(by: rStart + x)).storeBytes(of: sumSimd, as: SIMD16<Int16>.self)
-                            x += chunk
-                        }
-                        #endif
-                        
-                        while x < rW {
-                            cPtr[rStart + x] = rPtr[rStart + x] &+ pPtr[pStart + x]
-                            x += 1
-                        }
-                    }
-                }
-            }
-            initializedCount = count
-        }
-    }
-    
-    let pCbDx = (predicted.width + 1) / 2
-    let rCbDx = (residual.width + 1) / 2
-    let rCbDy = (residual.height + 1) / 2
-    
-    async let y = add(r: residual.y, p: predicted.y, rW: residual.width, rH: residual.height, pW: predicted.width)
-    async let cb = add(r: residual.cb, p: predicted.cb, rW: rCbDx, rH: rCbDy, pW: pCbDx)
-    async let cr = add(r: residual.cr, p: predicted.cr, rW: rCbDx, rH: rCbDy, pW: pCbDx)
-    
-    return PlaneData420(width: residual.width, height: residual.height, y: await y, cb: await cb, cr: await cr)
-}
-
-// MARK: - Utilities
-
-@inline(__always)
 func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, Int) {
     var x = px
     var y = py
@@ -721,6 +661,16 @@ struct Image16: Sendable {
         self.cr = [Int16](unsafeUninitializedCapacity: cWidth * cHeight) { _, c in c = cWidth * cHeight }
     }
     
+    init(width: Int, height: Int, pool: BlockViewPool) {
+        self.width = width
+        self.height = height
+        self.y = pool.getInt16(count: width * height)
+        let cWidth = (width + 1) / 2
+        let cHeight = (height + 1) / 2
+        self.cb = pool.getInt16(count: cWidth * cHeight)
+        self.cr = pool.getInt16(count: cWidth * cHeight)
+    }
+    
     init(width: Int, height: Int, y: [Int16], cb: [Int16], cr: [Int16]) {
         self.width = width
         self.height = height
@@ -732,7 +682,7 @@ struct Image16: Sendable {
     @inline(__always)
     func getY(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: size, height: size)
-        let v = block.view
+        let v = block
         self.y.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
@@ -760,7 +710,7 @@ struct Image16: Sendable {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         let block = pool.get(width: size, height: size)
-        let v = block.view
+        let v = block
         self.cb.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
@@ -788,7 +738,7 @@ struct Image16: Sendable {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         let block = pool.get(width: size, height: size)
-        let v = block.view
+        let v = block
         self.cr.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
@@ -828,7 +778,7 @@ struct Image16: Sendable {
         
         self.y.withUnsafeMutableBufferPointer { destBuf in
             guard let destBase = destBuf.baseAddress else { return }
-            let v = data.view
+            let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * width + validStartX)
@@ -857,7 +807,7 @@ struct Image16: Sendable {
         
         self.cb.withUnsafeMutableBufferPointer { destBuf in
             guard let destBase = destBuf.baseAddress else { return }
-            let v = data.view
+            let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
@@ -886,7 +836,7 @@ struct Image16: Sendable {
         
         self.cr.withUnsafeMutableBufferPointer { destBuf in
             guard let destBase = destBuf.baseAddress else { return }
-            let v = data.view
+            let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
