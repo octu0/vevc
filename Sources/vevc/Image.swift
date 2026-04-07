@@ -164,14 +164,62 @@ func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> PlaneData420 {
     y.withUnsafeMutableBufferPointer { dst in
         image.yPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
     }
-    var cb = pool.getInt16(count: image.cbPlane.count)
-    cb.withUnsafeMutableBufferPointer { dst in
-        image.cbPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
+    
+    let cWidth = (image.width + 1) / 2
+    let cHeight = (image.height + 1) / 2
+    let cCount = cWidth * cHeight
+    
+    var cb = pool.getInt16(count: cCount)
+    var cr = pool.getInt16(count: cCount)
+    
+    if image.ratio == .ratio444 {
+        cb.withUnsafeMutableBufferPointer { dstBuf in
+            image.cbPlane.withUnsafeBufferPointer { srcBuf in
+                for cy in 0..<cHeight {
+                    let py = cy * 2
+                    let srcRowOffset = py * image.width
+                    let dstRowOffset = cy * cWidth
+                    for cx in 0..<cWidth {
+                        let px = cx * 2
+                        let srcOffset = srcRowOffset + px
+                        let dstOffset = dstRowOffset + cx
+                        if srcOffset < srcBuf.count {
+                            dstBuf[dstOffset] = Int16(srcBuf[srcOffset]) - 128
+                        } else {
+                            dstBuf[dstOffset] = 0
+                        }
+                    }
+                }
+            }
+        }
+        cr.withUnsafeMutableBufferPointer { dstBuf in
+            image.crPlane.withUnsafeBufferPointer { srcBuf in
+                for cy in 0..<cHeight {
+                    let py = cy * 2
+                    let srcRowOffset = py * image.width
+                    let dstRowOffset = cy * cWidth
+                    for cx in 0..<cWidth {
+                        let px = cx * 2
+                        let srcOffset = srcRowOffset + px
+                        let dstOffset = dstRowOffset + cx
+                        if srcOffset < srcBuf.count {
+                            dstBuf[dstOffset] = Int16(srcBuf[srcOffset]) - 128
+                        } else {
+                            dstBuf[dstOffset] = 0
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        cb.withUnsafeMutableBufferPointer { dst in
+            image.cbPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
+        }
+        cr.withUnsafeMutableBufferPointer { dst in
+            image.crPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
+        }
     }
-    var cr = pool.getInt16(count: image.crPlane.count)
-    cr.withUnsafeMutableBufferPointer { dst in
-        image.crPlane.withUnsafeBufferPointer { src in convertPlane(src: src, dst: dst) }
-    }
+    
     return PlaneData420(width: image.width, height: image.height, y: y, cb: cb, cr: cr)
 }
 

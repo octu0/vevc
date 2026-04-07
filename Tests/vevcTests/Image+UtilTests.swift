@@ -192,4 +192,76 @@ final class ImageUtilTests: XCTestCase {
         XCTAssertEqual(ycbcrBlue.cbPlane[0], 255)
         XCTAssertEqual(ycbcrBlue.crPlane[0], 107)
     }
+
+    func testYcbcrToRGBARounding() {
+        // Just verify it doesn't crash on standard edges.
+        let img = YCbCrImage(width: 8, height: 8)
+        let rgba = ycbcrToRGBA(img: img)
+        XCTAssertEqual(rgba.count, 8 * 8 * 4)
+    }
+
+    func test444to420DownsampleAndUpsample() {
+        // Create an image similar to the test case (640x360)
+        let width = 640
+        let height = 360
+        var source = YCbCrImage(width: width, height: height, ratio: .ratio444)
+        
+        // Fill some recognizable pattern
+        // (x=96 is Cyan: Y=178, Cb=254, Cr=254? actually Cyan has high Cb/Cr or something)
+        // Let's just set x=96, y=180 to specific values
+        let x = 96
+        let y = 180
+        source.yPlane[y * width + x] = 178
+        source.cbPlane[y * width + x] = 100
+        source.crPlane[y * width + x] = 200
+        
+        // Convert
+        // Assuming BlockViewPool doesn't exist, toPlaneData420 might have an overload or we use the array map list
+        let pool = BlockViewPool()
+        let pds = [toPlaneData420(image: source, pool: pool)]
+        
+        XCTAssertEqual(pds.count, 1)
+        let pd = pds[0]
+        
+        // Now convert back
+        let upsampled = pd.toYCbCr()
+        
+        // It has 420 chroma subsampling, so Cb and Cr are expected at (x/2)
+        // Let's read the values at x=96, y=180
+        let decX = 96
+        let decY = 180
+        let uY = upsampled.yPlane[decY * width + decX]
+        
+        let cx = decX / 2
+        let cy = decY / 2
+        let cWidth = (width + 1) / 2
+        let uCb = upsampled.cbPlane[cy * cWidth + cx]
+        let uCr = upsampled.crPlane[cy * cWidth + cx]
+        
+        XCTAssertEqual(uY, 178)
+        // Subsmapled from 96,180. Should be close to 100 and 200.
+        // If the stride is broken, these will assert!
+        XCTAssertEqual(uCb, 100)
+        XCTAssertEqual(uCr, 200)
+    }
+
+    func testYcbcrToRGBARoundingActual() {
+        let width = 2
+        let height = 2
+        var ycbcr = YCbCrImage(width: width, height: height, ratio: .ratio444)
+        
+        // Y = 100, Cb = 128, Cr = 127
+        for i in 0..<(width * height) {
+            ycbcr.yPlane[i] = 100
+            ycbcr.cbPlane[i] = 128
+            ycbcr.crPlane[i] = 127
+        }
+        
+        let rgba = ycbcrToRGBA(img: ycbcr)
+        
+        // R = Y + 1.402 * (Cr - 128)
+        // 100 + 1.402 * (-1) = 98.598 -> 99 (Round to nearest)
+        // Without Rounding (truncating): 100 - 1.402 = 98
+        XCTAssertEqual(rgba[0], 99, "R value should be rounded to 99, not truncated to 98") 
+    }
 }
