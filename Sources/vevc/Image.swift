@@ -729,19 +729,24 @@ struct Image16: Sendable {
     @inline(__always)
     func getY(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
         let block = pool.get(width: size, height: size)
-        let v = block
+        readY(x: x, y: yPos, size: size, into: block)
+        return block
+    }
+    
+    @inline(__always)
+    func readY(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         self.y.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
             if x >= 0 && yPos >= 0 && (x + size) <= width && (yPos + size) <= height {
                 for h in 0..<size {
-                    let dstPtr = v.rowPointer(y: h)
+                    let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
                     dstPtr.update(from: srcPtr, count: size)
                 }
             } else {
                 for h in 0..<size {
-                    let dstPtr = v.rowPointer(y: h)
+                    let dstPtr = view.rowPointer(y: h)
                     for w in 0..<size {
                         let (px, py) = boundaryRepeat(width, height, (x + w), (yPos + h))
                         dstPtr[w] = srcBase[py * width + px]
@@ -749,27 +754,31 @@ struct Image16: Sendable {
                 }
             }
         }
-        return block
     }
     
     @inline(__always)
     func getCb(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
+        let block = pool.get(width: size, height: size)
+        readCb(x: x, y: yPos, size: size, into: block)
+        return block
+    }
+    
+    @inline(__always)
+    func readCb(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        let block = pool.get(width: size, height: size)
-        let v = block
         self.cb.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
             if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
                 for h in 0..<size {
-                    let dstPtr = v.rowPointer(y: h)
+                    let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
                     dstPtr.update(from: srcPtr, count: size)
                 }
             } else {
                 for h in 0..<size {
-                    let dstPtr = v.rowPointer(y: h)
+                    let dstPtr = view.rowPointer(y: h)
                     for w in 0..<size {
                         let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
                         dstPtr[w] = srcBase[py * cWidth + px]
@@ -777,27 +786,31 @@ struct Image16: Sendable {
                 }
             }
         }
-        return block
     }
     
     @inline(__always)
     func getCr(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
+        let block = pool.get(width: size, height: size)
+        readCr(x: x, y: yPos, size: size, into: block)
+        return block
+    }
+    
+    @inline(__always)
+    func readCr(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        let block = pool.get(width: size, height: size)
-        let v = block
         self.cr.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
             if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
                 for h in 0..<size {
-                    let dstPtr = v.rowPointer(y: h)
+                    let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
                     dstPtr.update(from: srcPtr, count: size)
                 }
             } else {
                 for h in 0..<size {
-                    let dstPtr = v.rowPointer(y: h)
+                    let dstPtr = view.rowPointer(y: h)
                     for w in 0..<size {
                         let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
                         dstPtr[w] = srcBase[py * cWidth + px]
@@ -805,7 +818,6 @@ struct Image16: Sendable {
                 }
             }
         }
-        return block
     }
     
     @inline(__always)

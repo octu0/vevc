@@ -915,15 +915,7 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                let ll = prevImg.getY(x: llX, y: llY, size: 16, pool: pool)
-                
-                let srcView = ll
-                let destView = blk
-                for yi in 0..<16 {
-                    let srcPtr = srcView.rowPointer(y: yi)
-                    let destPtr = destView.rowPointer(y: yi)
-                    destPtr.update(from: srcPtr, count: 16)
-                }
+                prevImg.readY(x: llX, y: llY, size: 16, into: blk)
                                         
                 let view = blk
                 let base = view.base
@@ -981,15 +973,7 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                let ll = prevImg.getCb(x: llX, y: llY, size: 16, pool: pool)
-                
-                let srcView = ll
-                let destView = blk
-                for yi in 0..<16 {
-                    let srcPtr = srcView.rowPointer(y: yi)
-                    let destPtr = destView.rowPointer(y: yi)
-                    destPtr.update(from: srcPtr, count: 16)
-                }
+                prevImg.readCb(x: llX, y: llY, size: 16, into: blk)
                                         
                 let view = blk
                 let base = view.base
@@ -1047,15 +1031,7 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                let ll = prevImg.getCr(x: llX, y: llY, size: 16, pool: pool)
-                
-                let srcView = ll
-                let destView = blk
-                for yi in 0..<16 {
-                    let srcPtr = srcView.rowPointer(y: yi)
-                    let destPtr = destView.rowPointer(y: yi)
-                    destPtr.update(from: srcPtr, count: 16)
-                }
+                prevImg.readCr(x: llX, y: llY, size: 16, into: blk)
                                         
                 let view = blk
                 let base = view.base
@@ -1113,15 +1089,7 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                let ll = prevImg.getY(x: llX, y: llY, size: 8, pool: pool)
-                
-                let srcView = ll
-                let destView = blk
-                for yi in 0..<8 {
-                    let srcPtr = srcView.rowPointer(y: yi)
-                    let destPtr = destView.rowPointer(y: yi)
-                    destPtr.update(from: srcPtr, count: 8)
-                }
+                prevImg.readY(x: llX, y: llY, size: 8, into: blk)
                                         
                 let view = blk
                 let base = view.base
@@ -1179,15 +1147,7 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                let ll = prevImg.getCb(x: llX, y: llY, size: 8, pool: pool)
-                
-                let srcView = ll
-                let destView = blk
-                for yi in 0..<8 {
-                    let srcPtr = srcView.rowPointer(y: yi)
-                    let destPtr = destView.rowPointer(y: yi)
-                    destPtr.update(from: srcPtr, count: 8)
-                }
+                prevImg.readCb(x: llX, y: llY, size: 8, into: blk)
                                         
                 let view = blk
                 let base = view.base
@@ -1245,15 +1205,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let llX = startX / 2
                 let llY = startY / 2
-                let ll = prevImg.getCr(x: llX, y: llY, size: 8, pool: pool)
-                
-                let srcView = ll
-                let destView = blk
-                for yi in 0..<8 {
-                    let srcPtr = srcView.rowPointer(y: yi)
-                    let destPtr = destView.rowPointer(y: yi)
-                    destPtr.update(from: srcPtr, count: 8)
-                }
+                prevImg.readCr(x: llX, y: llY, size: 8, into: blk)
                                         
                 let view = blk
                 let base = view.base

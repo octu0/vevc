@@ -57,67 +57,80 @@ func applyDeblockingFilterPtr(base: UnsafeMutablePointer<Int16>, width: Int, hei
 
 @inline(__always)
 private func deblockFilterVerticalEdge16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    let betah = beta >> 1
+    let betah = Int16(beta >> 1)
+    let beta16 = Int16(beta)
+    
     var offset = (y * width) + x
     
-    // why: 16-row unrolling eliminates loop overhead and branch misprediction
-    let performDeblock = { (off: Int) in
-        var p1 = base[off - 2]
-        var p0 = base[off - 1]
-        var q0 = base[off + 0]
-        var q1 = base[off + 1]
+    let betaV = SIMD4<Int16>(repeating: beta16)
+    let betahV = SIMD4<Int16>(repeating: betah)
+    let tcV = SIMD4<Int16>(repeating: tc)
+    let ntcV = .zero &- tcV
+    let v9 = SIMD4<Int16>(repeating: 9)
+    let v3 = SIMD4<Int16>(repeating: 3)
+    let v8 = SIMD4<Int16>(repeating: 8)
+    
+    // why: 4x4 matrix transposition (AoS to SoA) enables memory-contiguous SIMD vectorization
+    // for vertical edges processing multiple rows at once without cache degradation
+    let performDeblock4x4 = { (off: Int) in
+        let off0 = off
+        let off1 = off + width
+        let off2 = off + width * 2
+        let off3 = off + width * 3
         
-        let delta = Int32(q0) - Int32(p0)
-        let absDelta = delta < 0 ? -delta : delta
-        if absDelta < beta {
-            let pDiff = Int32(p1) - Int32(p0)
-            let qDiff = Int32(q1) - Int32(q0)
-            let absP = pDiff < 0 ? -pDiff : pDiff
-            let absQ = qDiff < 0 ? -qDiff : qDiff
-            if absP < betah && absQ < betah {
-            // why: weighted center difference suppresses ringing at block boundaries
-            // d = (9*(q0-p0) - 3*(q1-p1) + 8) >> 4
-                let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
-                var dClipped = d
-                let t = Int32(tc)
-                if t < dClipped { dClipped = t }
-                if dClipped < (-1 * t) { dClipped = (-1 * t) }
-                
-                let dHalf = dClipped / 2
-                let d16 = Int16(dClipped)
-                let dh16 = Int16(dHalf)
-                
-                p0 = p0 &+ d16
-                q0 = q0 &- d16
-                p1 = p1 &+ dh16
-                q1 = q1 &- dh16
-                
-                base[off - 2] = p1
-                base[off - 1] = p0
-                base[off + 0] = q0
-                base[off + 1] = q1
-            }
-        }
+        let r0 = UnsafeRawPointer(base.advanced(by: off0 - 2)).loadUnaligned(as: SIMD4<Int16>.self)
+        let r1 = UnsafeRawPointer(base.advanced(by: off1 - 2)).loadUnaligned(as: SIMD4<Int16>.self)
+        let r2 = UnsafeRawPointer(base.advanced(by: off2 - 2)).loadUnaligned(as: SIMD4<Int16>.self)
+        let r3 = UnsafeRawPointer(base.advanced(by: off3 - 2)).loadUnaligned(as: SIMD4<Int16>.self)
+        
+        // Transpose 4x4 (AoS -> SoA)
+        var p1 = SIMD4<Int16>(r0[0], r1[0], r2[0], r3[0])
+        var p0 = SIMD4<Int16>(r0[1], r1[1], r2[1], r3[1])
+        var q0 = SIMD4<Int16>(r0[2], r1[2], r2[2], r3[2])
+        var q1 = SIMD4<Int16>(r0[3], r1[3], r2[3], r3[3])
+        
+        let delta = q0 &- p0
+        let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
+        
+        let pDiff = p1 &- p0
+        let qDiff = q1 &- q0
+        let absP = pDiff.replacing(with: .zero &- pDiff, where: pDiff .< 0)
+        let absQ = qDiff.replacing(with: .zero &- qDiff, where: qDiff .< 0)
+        
+        let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
+        
+        let t1 = q0 &- p0
+        let t2 = q1 &- p1
+        let d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
+        
+        var dClipped = d
+        dClipped.replace(with: tcV, where: dClipped .> tcV)
+        dClipped.replace(with: ntcV, where: dClipped .< ntcV)
+        
+        let dHalf = dClipped / 2
+        
+        p0.replace(with: p0 &+ dClipped, where: mask)
+        q0.replace(with: q0 &- dClipped, where: mask)
+        p1.replace(with: p1 &+ dHalf, where: mask)
+        q1.replace(with: q1 &- dHalf, where: mask)
+        
+        // Transpose 4x4 back (SoA -> AoS)
+        let out0 = SIMD4<Int16>(p1[0], p0[0], q0[0], q1[0])
+        let out1 = SIMD4<Int16>(p1[1], p0[1], q0[1], q1[1])
+        let out2 = SIMD4<Int16>(p1[2], p0[2], q0[2], q1[2])
+        let out3 = SIMD4<Int16>(p1[3], p0[3], q0[3], q1[3])
+        
+        UnsafeMutableRawPointer(base.advanced(by: off0 - 2)).storeBytes(of: out0, as: SIMD4<Int16>.self)
+        UnsafeMutableRawPointer(base.advanced(by: off1 - 2)).storeBytes(of: out1, as: SIMD4<Int16>.self)
+        UnsafeMutableRawPointer(base.advanced(by: off2 - 2)).storeBytes(of: out2, as: SIMD4<Int16>.self)
+        UnsafeMutableRawPointer(base.advanced(by: off3 - 2)).storeBytes(of: out3, as: SIMD4<Int16>.self)
     }
     
-    // 16 iterations unrolled
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset); offset += width
-    performDeblock(offset)
+    // 16 iterations unrolled into 4 block iterations
+    performDeblock4x4(offset); offset += width * 4
+    performDeblock4x4(offset); offset += width * 4
+    performDeblock4x4(offset); offset += width * 4
+    performDeblock4x4(offset)
 }
 
 @inline(__always)
@@ -309,7 +322,6 @@ func applyDeringingFilter(plane: inout [Int16], width: Int, height: Int, qStep: 
         // A large beta (e.g. 32) erases real textures (like skin pores).
         // We strictly cap beta at 6, scaling gently with qStep, to preserve sharpness.
         let beta = Int16(min(6, max(2, qStep / 6)))
-        let beta32 = Int32(beta)
         
         // Horizontal pass
         for y in 0..<height {

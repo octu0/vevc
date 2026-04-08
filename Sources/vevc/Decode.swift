@@ -719,15 +719,7 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
-            let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll
-            let destView = block
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            pool.put(ll) // return temp block to pool
+            prev.readY(x: w / 2, y: h / 2, size: half, into: block)
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -755,15 +747,7 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
-            let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll
-            let destView = block
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            pool.put(ll)
+            prev.readCb(x: w / 2, y: h / 2, size: half, into: block)
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -791,15 +775,7 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 32 / 2
-            let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll
-            let destView = block
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            pool.put(ll)
+            prev.readCr(x: w / 2, y: h / 2, size: half, into: block)
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -827,15 +803,7 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
-            let ll: BlockView = prev.getY(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll
-            let destView = block
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            pool.put(ll)
+            prev.readY(x: w / 2, y: h / 2, size: half, into: block)
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
@@ -863,15 +831,7 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
-            let ll: BlockView = prev.getCb(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll
-            let destView = block
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            pool.put(ll)
+            prev.readCb(x: w / 2, y: h / 2, size: half, into: block)
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
@@ -899,15 +859,7 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
             let half: Int = 16 / 2
-            let ll: BlockView = prev.getCr(x: w / 2, y: h / 2, size: half, pool: pool)
-            let srcView = ll
-            let destView = block
-            for yi in 0..<half {
-                let srcPtr = srcView.rowPointer(y: yi)
-                let destPtr = destView.rowPointer(y: yi)
-                destPtr.update(from: srcPtr, count: half)
-            }
-            pool.put(ll)
+            prev.readCr(x: w / 2, y: h / 2, size: half, into: block)
             let view = block
             let base = view.base
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
