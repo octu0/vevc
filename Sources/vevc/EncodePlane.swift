@@ -876,14 +876,14 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 8)
                     }
-                                } else if loopH > 0 && loopW > 0 {
+                } else if loopH > 0 && loopW > 0 {
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
-                                }
+                }
             }
         }
     }
@@ -934,14 +934,14 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 32)
                     }
-                                } else if loopH > 0 && loopW > 0 {
+                } else if loopH > 0 && loopW > 0 {
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
-                                }
+                }
             }
         }
     }
@@ -1832,46 +1832,45 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let oPtr = tmpO.base
     let tPtr = tmpT.base
 
-    mvs.withUnsafeMutableBufferPointer { mvsPtr in
-        sads.withUnsafeMutableBufferPointer { sadsPtr in
-            refDirs.withUnsafeMutableBufferPointer { refDirsPtr in
-                for idx in currBlocks8.indices {
-                    let col = idx % colCount
-                    let row = idx / colCount
-                    let bx = col * 8
-                    let by = row * 8
-                    
-                    let (mvPrev, sadPrev) = MotionEstimation.searchPixels(
-                        currPlane: currSub1, prevPlane: prevSub1,
-                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
-                    
-                    let (mvNext, sadNext) = MotionEstimation.searchPixels(
-                        currPlane: currSub1, prevPlane: nextSub1,
-                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
-                    
-                    var bestMv = mvPrev
-                    var bestSad = sadPrev
-                    var dir = false
-                    
-                    if sadNext < sadPrev {
-                        bestMv = mvNext
-                        bestSad = sadNext
-                        dir = true
-                    } else if sadNext == sadPrev && (mvNext.dy * mvNext.dy + mvNext.dx * mvNext.dx) < (mvPrev.dy * mvPrev.dy + mvPrev.dx * mvPrev.dx) {
-                        bestMv = mvNext
-                        bestSad = sadNext
-                        dir = true
-                    }
-                    
-                    mvsPtr[idx] = bestMv
-                    sadsPtr[idx] = bestSad
-                    refDirsPtr[idx] = dir
-                }
+    let body: (UnsafeMutablePointer<MotionVector>, UnsafeMutablePointer<Int>, UnsafeMutablePointer<Bool>) -> Void = { mvsPtr, sadsPtr, refDirsPtr in
+        for idx in currBlocks8.indices {
+            let col = idx % colCount
+            let row = idx / colCount
+            let bx = col * 8
+            let by = row * 8
+            
+            let (mvPrev, sadPrev) = MotionEstimation.searchPixels(
+                currPlane: currSub1, prevPlane: prevSub1,
+                cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2,
+            )
+            
+            let (mvNext, sadNext) = MotionEstimation.searchPixels(
+                currPlane: currSub1, prevPlane: nextSub1,
+                cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2,
+            )
+            
+            var bestMv = mvPrev
+            var bestSad = sadPrev
+            var dir = false
+            
+            if sadNext < sadPrev {
+                bestMv = mvNext
+                bestSad = sadNext
+                dir = true
+            } else if sadNext == sadPrev && (mvNext.dy * mvNext.dy + mvNext.dx * mvNext.dx) < (mvPrev.dy * mvPrev.dy + mvPrev.dx * mvPrev.dx) {
+                bestMv = mvNext
+                bestSad = sadNext
+                dir = true
             }
+            
+            mvsPtr[idx] = bestMv
+            sadsPtr[idx] = bestSad
+            refDirsPtr[idx] = dir
         }
     }
+    withUnsafePointers(mut: &mvs, mut: &sads, mut: &refDirs, body)
     return (mvs, sads, refDirs)
 }
 
@@ -1880,35 +1879,35 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
 func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-                for row in 0..<((height + blockSize - 1) / blockSize) {
-                    for col in 0..<colCount {
-                        let mvIndex = min(row * colCount + col, mvs.count - 1)
-                        let mv = mvs[mvIndex]
-                        let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
-                        let srcBase = isBackward ? nextBase : prevBase
-                        let blockX = col * blockSize
-                        let blockY = row * blockSize
-                        let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
-                        let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
-                        let targetX = blockX + shiftX
-                        let targetY = blockY + shiftY
-                        for y in 0..<min(blockSize, height - blockY) {
-                            let dstY = blockY + y
-                            let srcY = targetY + y
-                            let dstPtr = dstBase.advanced(by: dstY * width + blockX)
-                            let safeSrcY = max(0, min(srcY, height - 1))
-                            let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
-                            for x in 0..<min(blockSize, width - blockX) {
-                                let srcX = targetX + x
-                                let safeSrcX = max(0, min(srcX, width - 1))
-                                let predPixel = srcRowPtr[safeSrcX]
-                                dstPtr[x] = dstPtr[x] &- predPixel
-                            }
-                        }
+        for row in 0..<((height + blockSize - 1) / blockSize) {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let mv = mvs[mvIndex]
+                let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
+                let srcBase = isBackward ? nextBase : prevBase
+                let blockX = col * blockSize
+                let blockY = row * blockSize
+                let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                let targetX = blockX + shiftX
+                let targetY = blockY + shiftY
+                for y in 0..<min(blockSize, height - blockY) {
+                    let dstY = blockY + y
+                    let srcY = targetY + y
+                    let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                    let safeSrcY = max(0, min(srcY, height - 1))
+                    let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                    for x in 0..<min(blockSize, width - blockX) {
+                        let srcX = targetX + x
+                        let safeSrcX = max(0, min(srcX, width - 1))
+                        let predPixel = srcRowPtr[safeSrcX]
+                        dstPtr[x] = dstPtr[x] &- predPixel
                     }
                 }
             }
-            withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
+        }
+    }
+    withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
 }
 
 /// 参照方向フラグに基づく双方向動き補償のピクセル加算（デコーダ・再構成用）
@@ -1916,35 +1915,35 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
 func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-                for row in 0..<((height + blockSize - 1) / blockSize) {
-                    for col in 0..<colCount {
-                        let mvIndex = min(row * colCount + col, mvs.count - 1)
-                        let mv = mvs[mvIndex]
-                        let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
-                        let srcBase = isBackward ? nextBase : prevBase
-                        let blockX = col * blockSize
-                        let blockY = row * blockSize
-                        let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
-                        let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
-                        let targetX = blockX + shiftX
-                        let targetY = blockY + shiftY
-                        for y in 0..<min(blockSize, height - blockY) {
-                            let dstY = blockY + y
-                            let srcY = targetY + y
-                            let dstPtr = dstBase.advanced(by: dstY * width + blockX)
-                            let safeSrcY = max(0, min(srcY, height - 1))
-                            let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
-                            for x in 0..<min(blockSize, width - blockX) {
-                                let srcX = targetX + x
-                                let safeSrcX = max(0, min(srcX, width - 1))
-                                let predPixel = srcRowPtr[safeSrcX]
-                                dstPtr[x] = dstPtr[x] &+ predPixel
-                            }
-                        }
+        for row in 0..<((height + blockSize - 1) / blockSize) {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let mv = mvs[mvIndex]
+                let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
+                let srcBase = isBackward ? nextBase : prevBase
+                let blockX = col * blockSize
+                let blockY = row * blockSize
+                let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                let targetX = blockX + shiftX
+                let targetY = blockY + shiftY
+                for y in 0..<min(blockSize, height - blockY) {
+                    let dstY = blockY + y
+                    let srcY = targetY + y
+                    let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                    let safeSrcY = max(0, min(srcY, height - 1))
+                    let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                    for x in 0..<min(blockSize, width - blockX) {
+                        let srcX = targetX + x
+                        let safeSrcX = max(0, min(srcX, width - 1))
+                        let predPixel = srcRowPtr[safeSrcX]
+                        dstPtr[x] = dstPtr[x] &+ predPixel
                     }
                 }
             }
-            withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
+        }
+    }
+    withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
 }
 
 @inline(__always)
@@ -1954,69 +1953,69 @@ func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], 
     // OBMC border width: number of pixels from the block edge to blend the prediction of the adjacent MV
     let obmcBorder = 2
     let body: (UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { srcBase, dstBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    let mv = mvs[mvIndex]
-                    let blockX = col * blockSize
-                    let blockY = row * blockSize
-                    let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
-                    let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
-                    let bw = min(blockSize, width - blockX)
-                    let bh = min(blockSize, height - blockY)
-                    for y in 0..<bh {
-                        let dstY = blockY + y
-                        let srcY = blockY + shiftY + y
-                        let safeSrcY = max(0, min(srcY, height - 1))
-                        let dstRowPtr = dstBase.advanced(by: dstY * width + blockX)
-                        let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
-                        for x in 0..<bw {
-                            let srcX = blockX + shiftX + x
-                            let safeSrcX = max(0, min(srcX, width - 1))
-                            var predPixel = Int32(srcRowPtr[safeSrcX])
-                            
-                            // OMBC: Overlapped Motion Compensation
-                            // Top
-                            if y < obmcBorder && row > 0 {
-                                let nIdx = min((row - 1) * colCount + col, mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            } else if y >= bh - obmcBorder && row < rowCount - 1 { // Bottom
-                                let nIdx = min((row + 1) * colCount + col, mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            }
-
-                            // Left
-                            if x < obmcBorder && col > 0 {
-                                let nIdx = min(row * colCount + (col - 1), mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            } else if x >= bw - obmcBorder && col < colCount - 1 { // Right
-                                let nIdx = min(row * colCount + (col + 1), mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            }
-                            
-                            dstRowPtr[x] = dstRowPtr[x] &- Int16(truncatingIfNeeded: predPixel)
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let mv = mvs[mvIndex]
+                let blockX = col * blockSize
+                let blockY = row * blockSize
+                let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                let bw = min(blockSize, width - blockX)
+                let bh = min(blockSize, height - blockY)
+                for y in 0..<bh {
+                    let dstY = blockY + y
+                    let srcY = blockY + shiftY + y
+                    let safeSrcY = max(0, min(srcY, height - 1))
+                    let dstRowPtr = dstBase.advanced(by: dstY * width + blockX)
+                    let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                    for x in 0..<bw {
+                        let srcX = blockX + shiftX + x
+                        let safeSrcX = max(0, min(srcX, width - 1))
+                        var predPixel = Int32(srcRowPtr[safeSrcX])
+                        
+                        // OMBC: Overlapped Motion Compensation
+                        // Top
+                        if y < obmcBorder && row > 0 {
+                            let nIdx = min((row - 1) * colCount + col, mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
+                        } else if y >= bh - obmcBorder && row < rowCount - 1 { // Bottom
+                            let nIdx = min((row + 1) * colCount + col, mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
                         }
+
+                        // Left
+                        if x < obmcBorder && col > 0 {
+                            let nIdx = min(row * colCount + (col - 1), mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
+                        } else if x >= bw - obmcBorder && col < colCount - 1 { // Right
+                            let nIdx = min(row * colCount + (col + 1), mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
+                        }
+                        
+                        dstRowPtr[x] = dstRowPtr[x] &- Int16(truncatingIfNeeded: predPixel)
                     }
                 }
             }
         }
-        withUnsafePointers(prevPlane, mut: &plane, body)
+    }
+    withUnsafePointers(prevPlane, mut: &plane, body)
 }
 
 @inline(__always)
@@ -2025,67 +2024,65 @@ func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs
     let rowCount = (height + blockSize - 1) / blockSize
     let obmcBorder = 2
     let body: (UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { srcBase, dstBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    let mv = mvs[mvIndex]
-                    let blockX = col * blockSize
-                    let blockY = row * blockSize
-                    let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
-                    let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
-                    let bw = min(blockSize, width - blockX)
-                    let bh = min(blockSize, height - blockY)
-                    for y in 0..<bh {
-                        let dstY = blockY + y
-                        let srcY = blockY + shiftY + y
-                        let safeSrcY = max(0, min(srcY, height - 1))
-                        let dstRowPtr = dstBase.advanced(by: dstY * width + blockX)
-                        let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
-                        for x in 0..<bw {
-                            let srcX = blockX + shiftX + x
-                            let safeSrcX = max(0, min(srcX, width - 1))
-                            var predPixel = Int32(srcRowPtr[safeSrcX])
-                            
-                            // OBMC: ブロック境界ピクセルで隣接MVの予測を25%ブレンド
-                            if y < obmcBorder && row > 0 {
-                                let nIdx = min((row - 1) * colCount + col, mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            }
-                            else if y >= bh - obmcBorder && row < rowCount - 1 {
-                                let nIdx = min((row + 1) * colCount + col, mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            }
-                            if x < obmcBorder && col > 0 {
-                                let nIdx = min(row * colCount + (col - 1), mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            }
-                            else if x >= bw - obmcBorder && col < colCount - 1 {
-                                let nIdx = min(row * colCount + (col + 1), mvs.count - 1)
-                                let nMV = mvs[nIdx]
-                                let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
-                                let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
-                                let nPred = Int32(srcBase[nSrcY * width + nSrcX])
-                                predPixel = (predPixel * 3 + nPred + 2) >> 2
-                            }
-                            
-                            dstRowPtr[x] = dstRowPtr[x] &+ Int16(truncatingIfNeeded: predPixel)
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let mv = mvs[mvIndex]
+                let blockX = col * blockSize
+                let blockY = row * blockSize
+                let shiftX = (Int(mv.dx) * shiftMultiplierX2) / 2
+                let shiftY = (Int(mv.dy) * shiftMultiplierX2) / 2
+                let bw = min(blockSize, width - blockX)
+                let bh = min(blockSize, height - blockY)
+                for y in 0..<bh {
+                    let dstY = blockY + y
+                    let srcY = blockY + shiftY + y
+                    let safeSrcY = max(0, min(srcY, height - 1))
+                    let dstRowPtr = dstBase.advanced(by: dstY * width + blockX)
+                    let srcRowPtr = srcBase.advanced(by: safeSrcY * width)
+                    for x in 0..<bw {
+                        let srcX = blockX + shiftX + x
+                        let safeSrcX = max(0, min(srcX, width - 1))
+                        var predPixel = Int32(srcRowPtr[safeSrcX])
+                        
+                        // OBMC: ブロック境界ピクセルで隣接MVの予測を25%ブレンド
+                        if y < obmcBorder && row > 0 {
+                            let nIdx = min((row - 1) * colCount + col, mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
+                        } else if y >= bh - obmcBorder && row < rowCount - 1 {
+                            let nIdx = min((row + 1) * colCount + col, mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
                         }
+                        if x < obmcBorder && col > 0 {
+                            let nIdx = min(row * colCount + (col - 1), mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
+                        } else if x >= bw - obmcBorder && col < colCount - 1 {
+                            let nIdx = min(row * colCount + (col + 1), mvs.count - 1)
+                            let nMV = mvs[nIdx]
+                            let nSrcY = max(0, min(blockY + (Int(nMV.dy) * shiftMultiplierX2) / 2 + y, height - 1))
+                            let nSrcX = max(0, min(blockX + (Int(nMV.dx) * shiftMultiplierX2) / 2 + x, width - 1))
+                            let nPred = Int32(srcBase[nSrcY * width + nSrcX])
+                            predPixel = (predPixel * 3 + nPred + 2) >> 2
+                        }
+                        
+                        dstRowPtr[x] = dstRowPtr[x] &+ Int16(truncatingIfNeeded: predPixel)
                     }
                 }
             }
         }
-        withUnsafePointers(prevPlane, mut: &plane, body)
+    }
+    withUnsafePointers(prevPlane, mut: &plane, body)
 }
 
