@@ -29,22 +29,36 @@ struct MotionEstimation {
 
     @inline(__always)
     static func fetchPixelsBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, x: Int, y: Int, dest: UnsafeMutablePointer<Int16>) {
-        for i in 0..<64 {
-            let ry = i / 8
-            let rx = i % 8
-            let srcY = min(max(0, y + ry), height - 1)
-            let srcX = min(max(0, x + rx), width - 1)
-            dest[i] = plane[srcY * width + srcX]
+        if x >= 0 && y >= 0 && x + 8 <= width && y + 8 <= height {
+            // Fast path: block is fully within image bounds
+            for ry in 0..<8 {
+                let offset = (y + ry) * width + x
+                let srcPtr = plane.advanced(by: offset)
+                let dstPtr = dest.advanced(by: ry * 8)
+                for rx in 0..<8 {
+                    dstPtr[rx] = srcPtr[rx]
+                }
+            }
+        } else {
+            // Slow path: clamp to bounds
+            for i in 0..<64 {
+                let ry = i / 8
+                let rx = i % 8
+                let srcY = min(max(0, y + ry), height - 1)
+                let srcX = min(max(0, x + rx), width - 1)
+                dest[i] = plane[srcY * width + srcX]
+            }
         }
     }
 
     @inline(__always)
     static func compute64PointSAD_Blocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
-        var sad = 0
+        var sad: Int32 = 0
         for i in 0..<64 {
-            sad += absDiff(cBase[i], pBase[i])
+            let diff = Int32(cBase[i]) - Int32(pBase[i])
+            sad &+= diff < 0 ? -diff : diff
         }
-        return sad
+        return Int(sad)
     }
 
     // why: coarse-to-fine two-stage search reduces computation from O(N^2) to O(16)

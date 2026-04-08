@@ -1393,7 +1393,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     var mutReconY = reconY
     var mutReconCb = reconCb
     var mutReconCr = reconCr
-    
     applyDeblockingFilter(plane: &mutReconY, width: dx, height: dy, blockSize: 8, qStep: Int(qtY.step))
     applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
     applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
@@ -1606,7 +1605,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    
     applyDeblockingFilter(plane: &mutReconL1Y, width: l1dx, height: l1dy, blockSize: 16, qStep: Int(qtY1.step))
     applyDeblockingFilter(plane: &mutReconL1Cb, width: l1cbDx, height: l1cbDy, blockSize: 8, qStep: Int(qtC1.step))
     applyDeblockingFilter(plane: &mutReconL1Cr, width: l1cbDx, height: l1cbDy, blockSize: 8, qStep: Int(qtC1.step))
@@ -1633,6 +1631,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     
     // Apply deblocking filter (blockSize corresponds to Layer32 output)
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
+    applyDeringingFilter(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     
@@ -1742,6 +1741,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 4)
     
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
+    applyDeringingFilter(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC2.step))
     
