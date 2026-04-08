@@ -188,10 +188,10 @@ private func deblockFilterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>
     let q0Ptr = UnsafeRawPointer(base.advanced(by: offQ0))
     let q1Ptr = UnsafeRawPointer(base.advanced(by: offQ1))
     
-    let p1 = p1Ptr.load(as: SIMD16<Int16>.self)
-    let p0 = p0Ptr.load(as: SIMD16<Int16>.self)
-    let q0 = q0Ptr.load(as: SIMD16<Int16>.self)
-    let q1 = q1Ptr.load(as: SIMD16<Int16>.self)
+    let p1 = p1Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
+    let p0 = p0Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
+    let q0 = q0Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
+    let q1 = q1Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
     
     let (newP1, newP0, newQ0, newQ1) = deblockComputeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
     
@@ -200,10 +200,10 @@ private func deblockFilterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>
     let q0MutPtr = UnsafeMutableRawPointer(base.advanced(by: offQ0))
     let q1MutPtr = UnsafeMutableRawPointer(base.advanced(by: offQ1))
     
-    p1MutPtr.storeBytes(of: newP1, as: SIMD16<Int16>.self)
-    p0MutPtr.storeBytes(of: newP0, as: SIMD16<Int16>.self)
-    q0MutPtr.storeBytes(of: newQ0, as: SIMD16<Int16>.self)
-    q1MutPtr.storeBytes(of: newQ1, as: SIMD16<Int16>.self)
+    p1MutPtr.storeBytes(of: newP1, toByteOffset: 0, as: SIMD16<Int16>.self)
+    p0MutPtr.storeBytes(of: newP0, toByteOffset: 0, as: SIMD16<Int16>.self)
+    q0MutPtr.storeBytes(of: newQ0, toByteOffset: 0, as: SIMD16<Int16>.self)
+    q1MutPtr.storeBytes(of: newQ1, toByteOffset: 0, as: SIMD16<Int16>.self)
 }
 
 @inline(__always)
@@ -315,64 +315,49 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
 
 @inline(__always)
 func applyDeringingFilter(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
-        
-        // DWT ringing noise is generally small in amplitude. 
-        // A large beta (e.g. 32) erases real textures (like skin pores).
-        // We strictly cap beta at 6, scaling gently with qStep, to preserve sharpness.
-        let beta = Int16(min(6, max(2, qStep / 6)))
-        
-        // Horizontal pass
-        for y in 0..<height {
-            let rowStart = y * width
-            var prevOriginal = base[rowStart]
-            let rowPtr = base.advanced(by: rowStart)
-            for x in 1..<(width - 1) {
-                let curr = rowPtr[x]
-                let next = rowPtr[x + 1]
-                
-                let diffL = curr &- prevOriginal
-                let diffR = curr &- next
-                let absL = diffL < 0 ? -diffL : diffL
-                let absR = diffR < 0 ? -diffR : diffR
-                
-                prevOriginal = curr // store original for the next pixel
-                
-                // branchless smoothing
-                let mask: Int16 = (absL < beta && absR < beta) ? 1 : 0
-                let d = (diffL &+ diffR &+ 2) &>> 2
-                rowPtr[x] = curr &- (d &* mask)
-            }
-        }
-        
-        // Vertical pass
-        withUnsafeTemporaryAllocation(of: Int16.self, capacity: width) { tmpRowBuf in
-            guard let tmpRow = tmpRowBuf.baseAddress else { return }
-            for x in 0..<width {
-                tmpRow[x] = base[x]
-            }
+    let betaScalar = Int16(min(6, max(2, qStep / 6)))
+    
+    // Create a shadow buffer to completely decouple reads from writes.
+    // By separating source (read-only) from destination (write-only), 
+    // we eliminate loop-carried dependencies (RAW/WAR hazards).
+    // This allows LLVM to heavily auto-vectorize the independent inner loops (SoA approach).
+    let srcPlane = plane
+    
+    plane.withUnsafeMutableBufferPointer { dstBuf in
+        srcPlane.withUnsafeBufferPointer { srcBuf in
+            guard let dst = dstBuf.baseAddress, let src = srcBuf.baseAddress else { return }
             
             for y in 1..<(height - 1) {
-                let currPtr = base.advanced(by: y * width)
-                let dnPtr = base.advanced(by: (y + 1) * width)
+                let rowOffset = y * width
+                let srcY = src.advanced(by: rowOffset)
+                let srcU = src.advanced(by: rowOffset - width)
+                let srcD = src.advanced(by: rowOffset + width)
+                let dstY = dst.advanced(by: rowOffset)
                 
-                for x in 0..<width {
-                    let prev = tmpRow[x]
-                    let curr = currPtr[x]
-                    let next = dnPtr[x]
+                // This inner loop only accesses perfectly contiguous memory arrays (srcY, srcU, srcD, dstY).
+                // Without internal state modification, LLVM maps this directly to SIMD vectorizations.
+                for x in 1..<(width - 1) {
+                    let curr = srcY[x]
                     
-                    let diffU = curr &- prev
-                    let diffD = curr &- next
+                    let pL = srcY[x - 1]
+                    let pR = srcY[x + 1]
+                    let diffL = curr &- pL
+                    let diffR = curr &- pR
+                    let absL = diffL < 0 ? -diffL : diffL
+                    let absR = diffR < 0 ? -diffR : diffR
+                    let maskX: Int16 = (absL < betaScalar && absR < betaScalar) ? 1 : 0
+                    let dX = (diffL &+ diffR &+ 2) &>> 2
+                    
+                    let pU = srcU[x]
+                    let pD = srcD[x]
+                    let diffU = curr &- pU
+                    let diffD = curr &- pD
                     let absU = diffU < 0 ? -diffU : diffU
                     let absD = diffD < 0 ? -diffD : diffD
+                    let maskY: Int16 = (absU < betaScalar && absD < betaScalar) ? 1 : 0
+                    let dY = (diffU &+ diffD &+ 2) &>> 2
                     
-                    tmpRow[x] = curr
-                    
-                    // branchless smoothing
-                    let mask: Int16 = (absU < beta && absD < beta) ? 1 : 0
-                    let d = (diffU &+ diffD &+ 2) &>> 2
-                    currPtr[x] = curr &- (d &* mask)
+                    dstY[x] = curr &- (dX &* maskX) &- (dY &* maskY)
                 }
             }
         }
