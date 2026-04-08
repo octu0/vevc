@@ -720,6 +720,12 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
 @main
 struct CompareApp {
     static func main() async throws {
+        try await Task(priority: .userInitiated) {
+            try await _main()
+        }.value
+    }
+
+    static func _main() async throws {
     let args = CommandLine.arguments
 
     var config = Config()

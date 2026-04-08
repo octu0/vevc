@@ -73,17 +73,21 @@ do {
     let startTime = Date()
 
     let imageStream = decoder.decode(fileHandle: inFileHandle)
-    for try await image in imageStream {
-        if y4mWriter == nil {
-            // Use stream fps or fallback to 30fps
-            let fps = image.fps ?? 30
-            let fpsHeader = "F\(fps):1"
-            y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
+    frameCount = try await Task(priority: .userInitiated) {
+        var count = 0
+        for try await image in imageStream {
+            if y4mWriter == nil {
+                // Use stream fps or fallback to 30fps
+                let fps = image.fps ?? 30
+                let fpsHeader = "F\(fps):1"
+                y4mWriter = try Y4MWriter(fileHandle: outFileHandle, width: image.width, height: image.height, fpsHeader: fpsHeader)
+            }
+            
+            try y4mWriter?.writeFrame(image)
+            count += 1
         }
-        
-        try y4mWriter?.writeFrame(image)
-        frameCount += 1
-    }
+        return count
+    }.value
 
     let elapsed = Date().timeIntervalSince(startTime)
     if outPath != "-" {

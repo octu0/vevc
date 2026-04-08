@@ -112,10 +112,14 @@ do {
     }
 
     let chunkStream = encoder.encode(stream: frameStream)
-    for try await chunk in chunkStream {
-        outFileHandle.write(Data(chunk))
-        frameCount += 1
-    }
+    frameCount = try await Task(priority: .userInitiated) {
+        var count = 0
+        for try await chunk in chunkStream {
+            outFileHandle.write(Data(chunk))
+            count += 1
+        }
+        return count
+    }.value
 
     let elapsed = Date().timeIntervalSince(startTime)
     if outPath != "-" {

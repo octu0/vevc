@@ -515,10 +515,9 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     }
 
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    applyDeringingFilter(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step))
     
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC.step))
     
     return sub
 }
@@ -609,8 +608,8 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     
     applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 16, qStep: Int(qtY.step))
     
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
     
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
