@@ -16,7 +16,7 @@ struct Quantizer: Sendable {
     init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0) {
         self.step = Int16(step)
         // why: reciprocal in Q16 fixed-point converts division to multiply+shift
-        // val / step ≈ (val * mul) >> 16 で高速化する
+        // Optimize by approximating division: val / step ≈ (val * mul) >> 16
         self.mul = Int32((1 << 16) / step)
         var b: Int32 = 0
         if roundToNearest {

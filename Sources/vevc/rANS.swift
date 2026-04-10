@@ -286,13 +286,11 @@ struct rANSEncoder {
     
     @inline(__always)
     mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
-        // why: keep state in [RANS_L, RANS_L * freq) by flushing 16-bit words
         let xMax = RANS_XMAX * freq
         while xMax <= state {
             stream.append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
-        // why: core encode formula: state = (state / freq) << scale + (state % freq) + cumFreq
         let q = state / freq
         state = (q << RANS_SCALE_BITS) + (state - (q * freq)) + cumFreq
     }
@@ -386,7 +384,6 @@ struct Interleaved4rANSEncoder {
     mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         let xMax = RANS_XMAX * freq
         
-        // why: tuple-based 4-lane avoids array bounds checking overhead
         switch lane {
         case 0:
             while xMax <= states.0 {
@@ -566,7 +563,6 @@ struct InterleavedrANSEncoder {
         }
     }
     
-    /// why: per-lane length headers let the decoder deserialize each lane independently
     @inline(__always)
     func getBitstream() -> [UInt8] {
         var bytes = [UInt8]()
@@ -576,7 +572,6 @@ struct InterleavedrANSEncoder {
             lengths[i] = streams[i].count * 2
         }
         
-        // header (length of each stream)
         for len in lengths {
             let l = UInt32(len)
             bytes.append(UInt8(truncatingIfNeeded: l >> 24))
@@ -585,10 +580,9 @@ struct InterleavedrANSEncoder {
             bytes.append(UInt8(truncatingIfNeeded: l & 0xFF))
         }
         
-        // body (reverse order: LIFO)
         for lane in 0..<4 {
             for word in streams[lane].reversed() {
-                bytes.append(UInt8(truncatingIfNeeded: word >> 8)) // BE
+                bytes.append(UInt8(truncatingIfNeeded: word >> 8))
                 bytes.append(UInt8(truncatingIfNeeded: word & 0xFF))
             }
         }
@@ -605,7 +599,6 @@ struct InterleavedrANSDecoder {
     
     private let base: UnsafePointer<UInt8>
     private let count: Int
-    // 4 lanes independent offsets
     private var offsets: SIMD4<Int>
     private let limits: SIMD4<Int>
     
@@ -613,7 +606,6 @@ struct InterleavedrANSDecoder {
         self.base = base
         self.count = count
         
-        // Header parse
         guard count >= 16 else {
             self.states = SIMD4<UInt32>(repeating: 0)
             self.offsets = SIMD4<Int>(repeating: 0)
@@ -649,12 +641,10 @@ struct InterleavedrANSDecoder {
         for i in 0..<4 {
             let limit = currentOffset + lens[i]
             if currentOffset + 4 <= limit && limit <= count {
-                // stream is written in reverse order (LIFO)
                 let w1 = (UInt32(base[currentOffset]) << 8) | UInt32(base[currentOffset + 1])
                 let w0 = (UInt32(base[currentOffset + 2]) << 8) | UInt32(base[currentOffset + 3])
                 initStates[i] = (w1 << 16) | w0
                 
-                // next renorm reads from the 4 bytes after this
                 initOffsets[i] = currentOffset + 4
             } else {
                 initStates[i] = 0
@@ -677,8 +667,6 @@ struct InterleavedrANSDecoder {
     
     @inline(__always)
     mutating func advanceSymbols(cumFreqs: SIMD4<UInt32>, freqs: SIMD4<UInt32>, activeMask: SIMD4<UInt32> = SIMD4<UInt32>(repeating: 0xFFFFFFFF)) {
-        // why: 4-lane parallel decode with no data dependency
-        // nextState = freq * (state >> scale) + (state & mask) - cumFreq
         let mask = SIMD4<UInt32>(repeating: RANS_SCALE - 1)
         let nextStates = freqs &* (states &>> RANS_SCALE_BITS) &+ (states & mask) &- cumFreqs
         
@@ -853,7 +841,6 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
     let absValue = UInt16(value.magnitude)
     
     if absValue <= 15 {
-        // why: interleave sign into token: even=positive, odd=negative
         let token = UInt8(((absValue - 1) * 2) + 1 + (sign ? 1 : 0))
         return (token, 0, 0)
     }

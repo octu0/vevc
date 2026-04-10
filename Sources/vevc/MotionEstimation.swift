@@ -51,7 +51,6 @@ struct MotionEstimation {
         }
     }
 
-    // why: fetch 8x8 block at half-pixel position using bilinear interpolation
     @inline(__always)
     static func fetchHalfPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, fractX: Int, fractY: Int, dest: UnsafeMutablePointer<Int16>) {
         if fractX == 0 && fractY == 0 {
@@ -59,7 +58,6 @@ struct MotionEstimation {
             return
         }
         
-        // why: FastPath when block+1 is fully within bounds (avoids per-pixel clamp)
         if intX >= 0 && intY >= 0 && intX + 8 + fractX <= width && intY + 8 + fractY <= height {
             if fractY == 0 {
                 for ry in 0..<8 {
@@ -85,7 +83,6 @@ struct MotionEstimation {
             return
         }
         
-        // SlowPath: clamp per-pixel
         for ry in 0..<8 {
             let sy0 = max(0, min(intY + ry, height - 1))
             let sy1 = max(0, min(intY + ry + fractY, height - 1))
@@ -195,17 +192,11 @@ struct MotionEstimation {
         }
         return Int(sad)
     }
-
-    // why: subsampled SAD for sub-pixel refinement stages
-    // computes SAD on even rows only (rows 0,2,4,6) × 8 cols = 32 points
-    // result is doubled to approximate full 64-point SAD
-    // reduces sub-pixel search cost by ~50% with minimal accuracy loss
     @inline(__always)
     static func compute32PointSAD_EvenRows(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
         var sad: Int32 = 0
-        // why: unrolled even rows (0,2,4,6) for LLVM vectorization
         for row in 0..<4 {
-            let offset = row * 16  // stride 2 rows = 16 elements
+            let offset = row * 16
             let cRow = cBase.advanced(by: offset)
             let pRow = pBase.advanced(by: offset)
             for x in 0..<8 {
@@ -215,13 +206,6 @@ struct MotionEstimation {
         }
         return Int(sad) * 2
     }
-
-    // why: coarse-to-fine three-stage search
-    // 1. evaluate SAD at zero vector (0,0) as baseline
-    // 2. coarse search: step=2 diamond, pick lowest-cost among 8 neighbors
-    // 3. fine search: step=1 around coarse best, re-evaluate 8 neighbors
-    // 4. half-pixel search: evaluate 8 half-pixel neighbors around fine best
-    // MV values are returned in half-pixel units (2x precision)
     @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
@@ -230,22 +214,17 @@ struct MotionEstimation {
         tPtr: UnsafeMutablePointer<Int16>,
         width: Int, height: Int, bx: Int, by: Int
     ) -> (Int, Int, Int) {
-        // why: skip search when zero-MV SAD is below threshold
-        // (static scene or very similar blocks)
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
         
         if zeroSad < 64 {
-            // why: return 2x precision MV (0,0 in half-pixel units)
             return (0, 0, zeroSad)
         }
         
-        // why: coarse step evaluates ±2 pixel 8-neighbors
         var bestCoarseSad: Int = zeroSad
         var bestCoarseDx: Int = 0
         var bestCoarseDy: Int = 0
         
-        // why: fixed 8-direction pattern (not full search) keeps cost at O(8)
         let coarseOffsets: [(Int, Int)] = [
             (-2, -2), (0, -2), (2, -2),
             (-2,  0),          (2,  0),
@@ -269,7 +248,6 @@ struct MotionEstimation {
             }
         }
         
-        // why: fine step re-evaluates ±1 pixel neighbors around the coarse best
         var bestFineSad: Int = bestCoarseSad
         var bestFineDx: Int = bestCoarseDx
         var bestFineDy: Int = bestCoarseDy
@@ -286,7 +264,6 @@ struct MotionEstimation {
             let fineDx: Int = bestCoarseDx + fx
             let fineDy: Int = bestCoarseDy + fy
             
-            // why: clip to [-4, 4] to stay within reference image valid region
             if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
             fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
@@ -302,8 +279,6 @@ struct MotionEstimation {
             }
         }
         
-        // why: half-pixel refinement around the best integer position
-        // skip if SAD is already excellent (prediction is nearly perfect)
         var bestHpDx: Int = bestFineDx * 2
         var bestHpDy: Int = bestFineDy * 2
         var bestHpSad: Int = bestFineSad
@@ -315,7 +290,6 @@ struct MotionEstimation {
                 let hpDx: Int = bestFineDx * 2 + hx
                 let hpDy: Int = bestFineDy * 2 + hy
                 
-                // why: arithmetic right shift for floor division (Swift >> is arithmetic)
                 let intDx: Int = hpDx >> 1
                 let intDy: Int = hpDy >> 1
                 let fractX: Int = hpDx & 1
@@ -336,9 +310,6 @@ struct MotionEstimation {
             }
         }
         
-        // why: direct eighth-pixel refinement (skipping quarter-pixel stage)
-        // half-pixel(2x) → eighth-pixel(8x): scale by 4x, then search ±1 in 8th units
-        // reduces search from 24 evaluations to 16 while maintaining final 8x precision
         var bestEpDx: Int = bestHpDx * 4
         var bestEpDy: Int = bestHpDy * 4
         var bestEpSad: Int = bestHpSad
@@ -389,7 +360,6 @@ struct MotionEstimation {
                 }
 
                 fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
-                // why: evaluateSearch now returns half-pixel precision MV values (2x)
                 let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by)
                 return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
             }

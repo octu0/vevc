@@ -523,7 +523,6 @@ struct EntropyDecoder {
         
         let isDPCMTable = (flags & 0x20) != 0
         
-        // why: select probability model based on bitstream flags
         switch (isStaticTable, isDPCMTable) {
         case (true, true):
             self.runModel0 = StaticRANSModels.shared.dpcmRunModel

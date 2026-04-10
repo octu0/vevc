@@ -1786,8 +1786,9 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
     return (mvs, sads)
 }
 
-/// 双方向MV計算: 前方(prev)と後方(next)の両方でMV探索し、ブロックごとにSADが小さい方を選択する。
-/// - Returns: (mvs, sads, refDirs) refDirsはブロックごとの参照方向フラグ (false=前方, true=後方)
+/// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames, 
+/// and selects the one with smaller SAD per block.
+/// - Returns: (mvs, sads, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
 @inline(__always)
 func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool) async -> ([MotionVector], [Int], [Bool]) {
     let dx = curr.width
@@ -1797,16 +1798,16 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let l0dx = (l1dx + 1) / 2
     let l0dy = (l1dy + 1) / 2
     
-    // 現在フレームのDWT LL帯域（Base8解像度）を計算
+    // Compute DWT LL band (Base8 resolution) for current frame
     let currSub2 = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
     let currSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
     let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
 
-    // 前方参照のDWT LL帯域
+    // Forward reference DWT LL band
     let prevSub2 = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
     let prevSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
     
-    // 後方参照のDWT LL帯域
+    // Backward reference DWT LL band
     let nextSub2 = await extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
     let nextSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: nextSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
     
@@ -1922,7 +1923,7 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
     withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
 }
 
-/// 参照方向フラグに基づく双方向動き補償のピクセル加算（デコーダ・再構成用）
+/// Pixel addition for bidirectional motion compensation based on reference direction flag (for decoder/reconstruction)
 @inline(__always)
 func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
     let colCount = (width + blockSize - 1) / blockSize
@@ -1984,7 +1985,7 @@ func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], 
                 let mv = mvs[mvIndex]
                 let blockX = col * blockSize
                 let blockY = row * blockSize
-                // why: /4 with arithmetic right shift for 8x MV precision
+                
                 let rawShiftX = Int(mv.dx) * shiftMultiplierX2
                 let rawShiftY = Int(mv.dy) * shiftMultiplierX2
                 let shiftX = rawShiftX >> 2

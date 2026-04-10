@@ -496,7 +496,6 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
     @inline(__always)
     func errorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int {
         let ia = Int(a), ib = Int(b), ic = Int(c)
-        // why: adaptive predictor selects based on edge direction
         let predicted: Int
         switch true {
         case ia <= ic && ib <= ic:

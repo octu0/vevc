@@ -96,7 +96,7 @@ class CoreDecoder {
         var decodedPlanes = [PlaneData420?](repeating: nil, count: frameData.count)
         
         var previousReconstructed: PlaneData420? = nil
-        // 双方向予測: GOP先頭フレーム（I-frame）の復元結果を後方参照として保持
+        // Bidirectional prediction: keep the reconstructed result of the first frame of GOP (I-frame) as backward reference
         var firstReconstructed: PlaneData420? = nil
         
         for (idx, data) in frameData.enumerated() {
@@ -109,7 +109,7 @@ class CoreDecoder {
                 continue
             }
             
-            // 双方向予測の判定: 【実験】全P-frameに双方向予測を適用
+            // Bidirectional prediction check: [Experiment] Apply bidirectional prediction to all P-frames
             let isPFrame = (previousReconstructed != nil)
             let useBidirectional = isPFrame && firstReconstructed != nil && frameData.count >= 2
             
@@ -119,7 +119,7 @@ class CoreDecoder {
             decodedPlanes[idx] = pd
             previousReconstructed = pd
             
-            // I-frame（先頭フレーム）の復元結果を保存
+            // Save reconstructed result of first frame (I-frame)
             if firstReconstructed == nil {
                 firstReconstructed = pd
             }
