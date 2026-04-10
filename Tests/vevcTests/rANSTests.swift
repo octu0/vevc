@@ -98,10 +98,13 @@ final class rANSTests: XCTestCase {
             for _ in 0..<count {
                 let cf = decoder.getCumulativeFreq()
                 if cf < model.sigFreq {
-                    let tInfo = model.findToken(cf: cf)
+                    // why: sig を先に advance し、次に token の cf を取得する（LIFO順序）
+                    decoder.advanceSymbol(cumFreq: 0, freq: model.sigFreq)
+                    
+                    let tokenCf = decoder.getCumulativeFreq()
+                    let tInfo = model.findToken(cf: tokenCf)
                     decoder.advanceSymbol(cumFreq: tInfo.cumFreq, freq: tInfo.freq)
                     
-                    // read backward bypass (but it was written forward, so we collect tokens first)
                     restoredTokens.append(EncodedData(isSignificant: true, token: tInfo.token, bypassBits: 0, bypassLen: 0))
                 } else {
                     decoder.advanceSymbol(cumFreq: model.sigFreq, freq: RANS_SCALE - model.sigFreq)

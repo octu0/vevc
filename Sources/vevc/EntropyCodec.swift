@@ -1,13 +1,5 @@
 import Foundation
 
-// MARK: - ContextModel / Legacy CABAC Support (To be removed)
-
-struct ContextModel {
-    var pStateIdx: UInt8 = 0
-    var valMPS: UInt8 = 0
-    init() {}
-}
-
 // MARK: - VevcEncoder
 
 protocol EntropyModelProvider {
