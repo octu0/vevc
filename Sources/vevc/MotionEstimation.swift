@@ -51,6 +51,141 @@ struct MotionEstimation {
         }
     }
 
+    // why: fetch 8x8 block at half-pixel position using bilinear interpolation
+    @inline(__always)
+    static func fetchHalfPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, fractX: Int, fractY: Int, dest: UnsafeMutablePointer<Int16>) {
+        if fractX == 0 && fractY == 0 {
+            fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
+            return
+        }
+        
+        // why: FastPath when block+1 is fully within bounds (avoids per-pixel clamp)
+        if intX >= 0 && intY >= 0 && intX + 8 + fractX <= width && intY + 8 + fractY <= height {
+            if fractY == 0 {
+                for ry in 0..<8 {
+                    let row = plane.advanced(by: (intY + ry) * width + intX)
+                    let dst = dest.advanced(by: ry * 8)
+                    for rx in 0..<8 { dst[rx] = Int16((Int(row[rx]) + Int(row[rx + 1]) + 1) >> 1) }
+                }
+            } else if fractX == 0 {
+                for ry in 0..<8 {
+                    let row0 = plane.advanced(by: (intY + ry) * width + intX)
+                    let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
+                    let dst = dest.advanced(by: ry * 8)
+                    for rx in 0..<8 { dst[rx] = Int16((Int(row0[rx]) + Int(row1[rx]) + 1) >> 1) }
+                }
+            } else {
+                for ry in 0..<8 {
+                    let row0 = plane.advanced(by: (intY + ry) * width + intX)
+                    let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
+                    let dst = dest.advanced(by: ry * 8)
+                    for rx in 0..<8 { dst[rx] = Int16((Int(row0[rx]) + Int(row0[rx+1]) + Int(row1[rx]) + Int(row1[rx+1]) + 2) >> 2) }
+                }
+            }
+            return
+        }
+        
+        // SlowPath: clamp per-pixel
+        for ry in 0..<8 {
+            let sy0 = max(0, min(intY + ry, height - 1))
+            let sy1 = max(0, min(intY + ry + fractY, height - 1))
+            let row0 = plane.advanced(by: sy0 * width)
+            let row1 = plane.advanced(by: sy1 * width)
+            let dstPtr = dest.advanced(by: ry * 8)
+            for rx in 0..<8 {
+                let sx0 = max(0, min(intX + rx, width - 1))
+                let sx1 = max(0, min(intX + rx + fractX, width - 1))
+                if fractY == 0 {
+                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row0[sx1]) + 1) >> 1)
+                } else if fractX == 0 {
+                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row1[sx0]) + 1) >> 1)
+                } else {
+                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row0[sx1]) + Int(row1[sx0]) + Int(row1[sx1]) + 2) >> 2)
+                }
+            }
+        }
+    }
+
+    @inline(__always)
+    static func fetchQuarterPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>) {
+        if remX == 0 && remY == 0 {
+            fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
+            return
+        }
+        let nextX = remX == 0 ? 0 : 1
+        let nextY = remY == 0 ? 0 : 1
+        let wA = 4 - remX
+        let wB = remX
+        let wC = 4 - remY
+        let wD = remY
+        
+        if intX >= 0 && intY >= 0 && intX + 8 + nextX <= width && intY + 8 + nextY <= height {
+            for ry in 0..<8 {
+                let row0 = plane.advanced(by: (intY + ry) * width + intX)
+                let row1 = plane.advanced(by: (intY + ry + nextY) * width + intX)
+                let dst = dest.advanced(by: ry * 8)
+                for rx in 0..<8 {
+                    let v = wA * wC * Int(row0[rx]) + wB * wC * Int(row0[rx + nextX]) + wA * wD * Int(row1[rx]) + wB * wD * Int(row1[rx + nextX])
+                    dst[rx] = Int16((v + 8) >> 4)
+                }
+            }
+            return
+        }
+        for ry in 0..<8 {
+            let sy0 = max(0, min(intY + ry, height - 1))
+            let sy1 = max(0, min(intY + ry + nextY, height - 1))
+            let row0 = plane.advanced(by: sy0 * width)
+            let row1 = plane.advanced(by: sy1 * width)
+            let dst = dest.advanced(by: ry * 8)
+            for rx in 0..<8 {
+                let sx0 = max(0, min(intX + rx, width - 1))
+                let sx1 = max(0, min(intX + rx + nextX, width - 1))
+                let v = wA * wC * Int(row0[sx0]) + wB * wC * Int(row0[sx1]) + wA * wD * Int(row1[sx0]) + wB * wD * Int(row1[sx1])
+                dst[rx] = Int16((v + 8) >> 4)
+            }
+        }
+    }
+
+    @inline(__always)
+    static func fetchEighthPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>) {
+        if remX == 0 && remY == 0 {
+            fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
+            return
+        }
+        let nextX = remX == 0 ? 0 : 1
+        let nextY = remY == 0 ? 0 : 1
+        let wA = 8 - remX
+        let wB = remX
+        let wC = 8 - remY
+        let wD = remY
+        
+        if intX >= 0 && intY >= 0 && intX + 8 + nextX <= width && intY + 8 + nextY <= height {
+            for ry in 0..<8 {
+                let row0 = plane.advanced(by: (intY + ry) * width + intX)
+                let row1 = plane.advanced(by: (intY + ry + nextY) * width + intX)
+                let dst = dest.advanced(by: ry * 8)
+                for rx in 0..<8 {
+                    let v = wA * wC * Int(row0[rx]) + wB * wC * Int(row0[rx + nextX]) + wA * wD * Int(row1[rx]) + wB * wD * Int(row1[rx + nextX])
+                    dst[rx] = Int16((v + 32) >> 6)
+                }
+            }
+            return
+        }
+        for ry in 0..<8 {
+            let sy0 = max(0, min(intY + ry, height - 1))
+            let sy1 = max(0, min(intY + ry + nextY, height - 1))
+            let row0 = plane.advanced(by: sy0 * width)
+            let row1 = plane.advanced(by: sy1 * width)
+            let dst = dest.advanced(by: ry * 8)
+            for rx in 0..<8 {
+                let sx0 = max(0, min(intX + rx, width - 1))
+                let sx1 = max(0, min(intX + rx + nextX, width - 1))
+                let v = wA * wC * Int(row0[sx0]) + wB * wC * Int(row0[sx1]) + wA * wD * Int(row1[sx0]) + wB * wD * Int(row1[sx1])
+                dst[rx] = Int16((v + 32) >> 6)
+            }
+        }
+    }
+
     @inline(__always)
     static func compute64PointSAD_Blocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
         var sad: Int32 = 0
@@ -61,11 +196,12 @@ struct MotionEstimation {
         return Int(sad)
     }
 
-    // why: coarse-to-fine two-stage search reduces computation from O(N^2) to O(16)
+    // why: coarse-to-fine three-stage search
     // 1. evaluate SAD at zero vector (0,0) as baseline
     // 2. coarse search: step=2 diamond, pick lowest-cost among 8 neighbors
     // 3. fine search: step=1 around coarse best, re-evaluate 8 neighbors
-    // achieves near-optimal result at fixed O(16) cost vs full search O(N^2)
+    // 4. half-pixel search: evaluate 8 half-pixel neighbors around fine best
+    // MV values are returned in half-pixel units (2x precision)
     @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
@@ -80,6 +216,7 @@ struct MotionEstimation {
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
         
         if zeroSad < 64 {
+            // why: return 2x precision MV (0,0 in half-pixel units)
             return (0, 0, zeroSad)
         }
         
@@ -145,7 +282,107 @@ struct MotionEstimation {
             }
         }
         
-        return (bestFineDx, bestFineDy, bestFineSad)
+        // why: half-pixel refinement around the best integer position
+        // skip if SAD is already excellent (prediction is nearly perfect)
+        var bestHpDx: Int = bestFineDx * 2
+        var bestHpDy: Int = bestFineDy * 2
+        var bestHpSad: Int = bestFineSad
+        
+        if 256 < bestFineSad {
+            for oi in 0..<8 {
+                let hx = oi == 0 ? -1 : (oi == 1 ? 0 : (oi == 2 ? 1 : (oi == 3 ? -1 : (oi == 4 ? 1 : (oi == 5 ? -1 : (oi == 6 ? 0 : 1))))))
+                let hy = oi < 3 ? -1 : (oi < 5 ? 0 : 1)
+                let hpDx: Int = bestFineDx * 2 + hx
+                let hpDy: Int = bestFineDy * 2 + hy
+                
+                // why: arithmetic right shift for floor division (Swift >> is arithmetic)
+                let intDx: Int = hpDx >> 1
+                let intDy: Int = hpDy >> 1
+                let fractX: Int = hpDx & 1
+                let fractY: Int = hpDy & 1
+                
+                fetchHalfPixelBlock8(plane: pBase, width: width, height: height,
+                                     intX: bx + intDx, intY: by + intDy,
+                                     fractX: fractX, fractY: fractY, dest: tPtr)
+                let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
+                let penalty: Int = getPenalty(dx: hpDx, dy: hpDy, lambda: 20)
+                let totalSad: Int = sad + penalty
+                
+                if totalSad < bestHpSad {
+                    bestHpSad = totalSad
+                    bestHpDx = hpDx
+                    bestHpDy = hpDy
+                }
+            }
+        }
+        
+        // why: quarter-pixel refinement, skip if SAD is good enough
+        var bestQpDx: Int = bestHpDx * 2
+        var bestQpDy: Int = bestHpDy * 2
+        var bestQpSad: Int = bestHpSad
+        
+        if 128 < bestHpSad {
+            for oi in 0..<8 {
+                let hx = oi == 0 ? -1 : (oi == 1 ? 0 : (oi == 2 ? 1 : (oi == 3 ? -1 : (oi == 4 ? 1 : (oi == 5 ? -1 : (oi == 6 ? 0 : 1))))))
+                let hy = oi < 3 ? -1 : (oi < 5 ? 0 : 1)
+                let qpDx: Int = bestHpDx * 2 + hx
+                let qpDy: Int = bestHpDy * 2 + hy
+                
+                // why: arithmetic right shift by 2 for /4 floor division
+                let intDx: Int = qpDx >> 2
+                let intDy: Int = qpDy >> 2
+                let remX: Int = qpDx & 3
+                let remY: Int = qpDy & 3
+                
+                fetchQuarterPixelBlock8(plane: pBase, width: width, height: height,
+                                        intX: bx + intDx, intY: by + intDy,
+                                        remX: remX, remY: remY, dest: tPtr)
+                let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
+                let penalty: Int = getPenalty(dx: qpDx, dy: qpDy, lambda: 10)
+                let totalSad: Int = sad + penalty
+                
+                if totalSad < bestQpSad {
+                    bestQpSad = totalSad
+                    bestQpDx = qpDx
+                    bestQpDy = qpDy
+                }
+            }
+        }
+        
+        // why: eighth-pixel refinement, skip if SAD is good enough
+        var bestEpDx: Int = bestQpDx * 2
+        var bestEpDy: Int = bestQpDy * 2
+        var bestEpSad: Int = bestQpSad
+        
+        if 128 < bestQpSad {
+            for oi in 0..<8 {
+                let hx = oi == 0 ? -1 : (oi == 1 ? 0 : (oi == 2 ? 1 : (oi == 3 ? -1 : (oi == 4 ? 1 : (oi == 5 ? -1 : (oi == 6 ? 0 : 1))))))
+                let hy = oi < 3 ? -1 : (oi < 5 ? 0 : 1)
+                let epDx: Int = bestQpDx * 2 + hx
+                let epDy: Int = bestQpDy * 2 + hy
+                
+                // why: arithmetic right shift by 3 for /8 floor division
+                let intDx: Int = epDx >> 3
+                let intDy: Int = epDy >> 3
+                let remX: Int = epDx & 7
+                let remY: Int = epDy & 7
+                
+                fetchEighthPixelBlock8(plane: pBase, width: width, height: height,
+                                       intX: bx + intDx, intY: by + intDy,
+                                       remX: remX, remY: remY, dest: tPtr)
+                let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
+                let penalty: Int = getPenalty(dx: epDx, dy: epDy, lambda: 5)
+                let totalSad: Int = sad + penalty
+                
+                if totalSad < bestEpSad {
+                    bestEpSad = totalSad
+                    bestEpDx = epDx
+                    bestEpDy = epDy
+                }
+            }
+        }
+        
+        return (bestEpDx, bestEpDy, bestEpSad)
     }
 
     @inline(__always)
@@ -164,6 +401,7 @@ struct MotionEstimation {
                 }
 
                 fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
+                // why: evaluateSearch now returns half-pixel precision MV values (2x)
                 let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by)
                 return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
             }
