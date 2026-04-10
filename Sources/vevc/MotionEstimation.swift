@@ -196,6 +196,26 @@ struct MotionEstimation {
         return Int(sad)
     }
 
+    // why: subsampled SAD for sub-pixel refinement stages
+    // computes SAD on even rows only (rows 0,2,4,6) × 8 cols = 32 points
+    // result is doubled to approximate full 64-point SAD
+    // reduces sub-pixel search cost by ~50% with minimal accuracy loss
+    @inline(__always)
+    static func compute32PointSAD_EvenRows(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
+        var sad: Int32 = 0
+        // why: unrolled even rows (0,2,4,6) for LLVM vectorization
+        for row in 0..<4 {
+            let offset = row * 16  // stride 2 rows = 16 elements
+            let cRow = cBase.advanced(by: offset)
+            let pRow = pBase.advanced(by: offset)
+            for x in 0..<8 {
+                let diff = Int32(cRow[x]) - Int32(pRow[x])
+                sad &+= diff < 0 ? -diff : diff
+            }
+        }
+        return Int(sad) * 2
+    }
+
     // why: coarse-to-fine three-stage search
     // 1. evaluate SAD at zero vector (0,0) as baseline
     // 2. coarse search: step=2 diamond, pick lowest-cost among 8 neighbors
@@ -316,52 +336,20 @@ struct MotionEstimation {
             }
         }
         
-        // why: quarter-pixel refinement, skip if SAD is good enough
-        var bestQpDx: Int = bestHpDx * 2
-        var bestQpDy: Int = bestHpDy * 2
-        var bestQpSad: Int = bestHpSad
+        // why: direct eighth-pixel refinement (skipping quarter-pixel stage)
+        // half-pixel(2x) → eighth-pixel(8x): scale by 4x, then search ±1 in 8th units
+        // reduces search from 24 evaluations to 16 while maintaining final 8x precision
+        var bestEpDx: Int = bestHpDx * 4
+        var bestEpDy: Int = bestHpDy * 4
+        var bestEpSad: Int = bestHpSad
         
         if 128 < bestHpSad {
             for oi in 0..<8 {
                 let hx = oi == 0 ? -1 : (oi == 1 ? 0 : (oi == 2 ? 1 : (oi == 3 ? -1 : (oi == 4 ? 1 : (oi == 5 ? -1 : (oi == 6 ? 0 : 1))))))
                 let hy = oi < 3 ? -1 : (oi < 5 ? 0 : 1)
-                let qpDx: Int = bestHpDx * 2 + hx
-                let qpDy: Int = bestHpDy * 2 + hy
+                let epDx: Int = bestHpDx * 4 + hx
+                let epDy: Int = bestHpDy * 4 + hy
                 
-                // why: arithmetic right shift by 2 for /4 floor division
-                let intDx: Int = qpDx >> 2
-                let intDy: Int = qpDy >> 2
-                let remX: Int = qpDx & 3
-                let remY: Int = qpDy & 3
-                
-                fetchQuarterPixelBlock8(plane: pBase, width: width, height: height,
-                                        intX: bx + intDx, intY: by + intDy,
-                                        remX: remX, remY: remY, dest: tPtr)
-                let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
-                let penalty: Int = getPenalty(dx: qpDx, dy: qpDy, lambda: 10)
-                let totalSad: Int = sad + penalty
-                
-                if totalSad < bestQpSad {
-                    bestQpSad = totalSad
-                    bestQpDx = qpDx
-                    bestQpDy = qpDy
-                }
-            }
-        }
-        
-        // why: eighth-pixel refinement, skip if SAD is good enough
-        var bestEpDx: Int = bestQpDx * 2
-        var bestEpDy: Int = bestQpDy * 2
-        var bestEpSad: Int = bestQpSad
-        
-        if 128 < bestQpSad {
-            for oi in 0..<8 {
-                let hx = oi == 0 ? -1 : (oi == 1 ? 0 : (oi == 2 ? 1 : (oi == 3 ? -1 : (oi == 4 ? 1 : (oi == 5 ? -1 : (oi == 6 ? 0 : 1))))))
-                let hy = oi < 3 ? -1 : (oi < 5 ? 0 : 1)
-                let epDx: Int = bestQpDx * 2 + hx
-                let epDy: Int = bestQpDy * 2 + hy
-                
-                // why: arithmetic right shift by 3 for /8 floor division
                 let intDx: Int = epDx >> 3
                 let intDy: Int = epDy >> 3
                 let remX: Int = epDx & 7
