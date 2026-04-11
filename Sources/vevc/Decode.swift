@@ -151,7 +151,7 @@ func decodeCoeffRun(decoder: inout EntropyDecoder, isParentZero: Bool) throws ->
 }
 
 @inline(__always)
-func blockDecode32(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
+func blockDecode32(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         // blocks from pool are guaranteed zero (cleared on put), no explicit zeroing needed
@@ -165,25 +165,55 @@ func blockDecode32(decoder: inout EntropyDecoder, block: BlockView, parentBlock:
     // positions not written by run-length decode remain zero
 
     var currentIdx = 0
-    let lscpIdx = lscpY * 32 + lscpX
+    if isVertical {
+        let lscpIdx = lscpX * 32 + lscpY
+        while currentIdx <= lscpIdx {
+            let startX = currentIdx / 32
+            let startY = currentIdx % 32
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
-    while currentIdx <= lscpIdx {
-        let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let y = currentIdx / 32
-            let x = currentIdx % 32
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let x = currentIdx / 32
+                let y = currentIdx % 32
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
         }
-        currentIdx += 1
+    } else {
+        let lscpIdx = lscpY * 32 + lscpX
+        while currentIdx <= lscpIdx {
+            let startY = currentIdx / 32
+            let startX = currentIdx % 32
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let y = currentIdx / 32
+                let x = currentIdx % 32
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
+        }
     }
 }
 
 @inline(__always)
-func blockDecode16(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
+func blockDecode16(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -193,27 +223,56 @@ func blockDecode16(decoder: inout EntropyDecoder, block: BlockView, parentBlock:
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
-
     var currentIdx = 0
-    let lscpIdx = lscpY * 16 + lscpX
+    if isVertical {
+        let lscpIdx = lscpX * 16 + lscpY
+        while currentIdx <= lscpIdx {
+            let startX = currentIdx / 16
+            let startY = currentIdx % 16
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
-    while currentIdx <= lscpIdx {
-        let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let y = currentIdx / 16
-            let x = currentIdx % 16
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let x = currentIdx / 16
+                let y = currentIdx % 16
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
         }
-        currentIdx += 1
+    } else {
+        let lscpIdx = lscpY * 16 + lscpX
+        while currentIdx <= lscpIdx {
+            let startY = currentIdx / 16
+            let startX = currentIdx % 16
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let y = currentIdx / 16
+                let x = currentIdx % 16
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
+        }
     }
 }
 
 @inline(__always)
-func blockDecode8(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
+func blockDecode8(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -223,25 +282,55 @@ func blockDecode8(decoder: inout EntropyDecoder, block: BlockView, parentBlock: 
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
-    let lscpIdx = lscpY * 8 + lscpX
+    if isVertical {
+        let lscpIdx = lscpX * 8 + lscpY
+        while currentIdx <= lscpIdx {
+            let startX = currentIdx / 8
+            let startY = currentIdx % 8
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
-    while currentIdx <= lscpIdx {
-        let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let y = currentIdx / 8
-            let x = currentIdx % 8
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let x = currentIdx / 8
+                let y = currentIdx % 8
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
         }
-        currentIdx += 1
+    } else {
+        let lscpIdx = lscpY * 8 + lscpX
+        while currentIdx <= lscpIdx {
+            let startY = currentIdx / 8
+            let startX = currentIdx % 8
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let y = currentIdx / 8
+                let x = currentIdx % 8
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
+        }
     }
 }
 
 @inline(__always)
-func blockDecode4(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
+func blockDecode4(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -252,20 +341,50 @@ func blockDecode4(decoder: inout EntropyDecoder, block: BlockView, parentBlock: 
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
-    let lscpIdx = lscpY * 4 + lscpX
+    if isVertical {
+        let lscpIdx = lscpX * 4 + lscpY
+        while currentIdx <= lscpIdx {
+            let startX = currentIdx / 4
+            let startY = currentIdx % 4
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
 
-    while currentIdx <= lscpIdx {
-        let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let y = currentIdx / 4
-            let x = currentIdx % 4
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let x = currentIdx / 4
+                let y = currentIdx % 4
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
         }
-        currentIdx += 1
+    } else {
+        let lscpIdx = lscpY * 4 + lscpX
+        while currentIdx <= lscpIdx {
+            let startY = currentIdx / 4
+            let startX = currentIdx % 4
+            let isParentZero: Bool
+            if let pb = parentBlock {
+                isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+            } else {
+                isParentZero = false
+            }
+            let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+
+            currentIdx += run
+            if currentIdx <= lscpIdx {
+                let y = currentIdx / 4
+                let x = currentIdx % 4
+                let ptr = block.rowPointer(y: y)
+                ptr[x] = val
+            }
+            currentIdx += 1
+        }
     }
 }
 
@@ -606,10 +725,7 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         }
     }
     
-    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 16, qStep: Int(qtY.step))
-    
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 16, qStep: Int(qtC.step))
+    // 削除: Layer16中間層のデブロッキングフィルタ
     
     return (sub, yBlocks, cbBlocks, crBlocks)
 }
@@ -639,17 +755,17 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
+    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, pool: pool, blockCount: rowCountY * colCountY, isIFrame: isIFrame)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb)
+    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, isIFrame: isIFrame)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
+    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, isIFrame: isIFrame)
     
     let chunkSize = 16
     let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
@@ -698,10 +814,7 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
         }
     }
     
-    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 8, qStep: Int(qtY.step))
-    
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
+    // 削除: Base8中間層のデブロッキングフィルタ
     
     return (sub, yBlocks, cbBlocks, crBlocks)
 }

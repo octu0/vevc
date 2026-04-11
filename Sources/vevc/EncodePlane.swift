@@ -1346,9 +1346,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     var mutReconY = reconY
     var mutReconCb = reconCb
     var mutReconCr = reconCr
-    applyDeblockingFilter(plane: &mutReconY, width: dx, height: dy, blockSize: 8, qStep: Int(qtY.step))
-    applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 8, qStep: Int(qtC.step))
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
@@ -1558,14 +1555,11 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    applyDeblockingFilter(plane: &mutReconL1Y, width: l1dx, height: l1dy, blockSize: 16, qStep: Int(qtY1.step))
-    applyDeblockingFilter(plane: &mutReconL1Cb, width: l1cbDx, height: l1cbDy, blockSize: 16, qStep: Int(qtC1.step))
-    applyDeblockingFilter(plane: &mutReconL1Cr, width: l1cbDx, height: l1cbDy, blockSize: 16, qStep: Int(qtC1.step))
     
     // Build Image16 from Layer16 reconstruction
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
     
     // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
     let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
@@ -1671,13 +1665,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     
-    applyDeblockingFilter(plane: &mutReconL1Y, width: l1dx, height: l1dy, blockSize: 16, qStep: Int(qtY1.step))
-    applyDeblockingFilter(plane: &mutReconL1Cb, width: l1cbDx, height: l1cbDy, blockSize: 16, qStep: Int(qtC1.step))
-    applyDeblockingFilter(plane: &mutReconL1Cr, width: l1cbDx, height: l1cbDy, blockSize: 16, qStep: Int(qtC1.step))
-    
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
     
     let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     let reconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
