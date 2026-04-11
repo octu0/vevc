@@ -18,6 +18,7 @@ let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 
 /// Build static rANS model from predetermined frequency data.
 /// Normalizes the provided raw frequency array to sum exactly to RANS_SCALE.
+@inline(__always)
 internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
     var freqs = rawFreqs
     let sum: UInt32 = freqs.reduce(0, +)
@@ -244,6 +245,7 @@ struct rANSModel {
 
 // MARK: - rANS Model Serialization helpers
 
+@inline(__always)
 internal func serializeRANSModel(_ rANS: rANSModel) -> [UInt8] {
     var out: [UInt8] = []
     out.reserveCapacity(256)
@@ -256,6 +258,7 @@ internal func serializeRANSModel(_ rANS: rANSModel) -> [UInt8] {
     return out
 }
 
+@inline(__always)
 internal func deserializeRANSModel(from chunk: [UInt8], offset: inout Int) -> rANSModel {
     var freqs = [UInt32](repeating: 0, count: 64)
     for i in 0..<64 {
