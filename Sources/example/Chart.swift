@@ -8,8 +8,7 @@ struct CodecBenchmarkResult {
     let encTimeMs: Double
     let decTimeMs: Double
     let sizeKB: Double
-    let avgPSNR: Double?
-    let avgSSIM: Double?
+    let stats: QualityStats?
 }
 
 @available(macOS 13.0, *)
@@ -100,7 +99,7 @@ struct PsnrChart: View {
     let results: [CodecBenchmarkResult]
     
     var body: some View {
-        let validResults = results.filter { $0.avgPSNR != nil }
+        let validResults = results.filter { $0.stats != nil }
         
         VStack(alignment: .leading) {
             Text("PSNR Benchmark (Higher is better)")
@@ -109,15 +108,31 @@ struct PsnrChart: View {
             
             Chart(validResults, id: \.name) { res in
                 let isVEVC = res.name.contains("VEVC")
+                let stats = res.stats!
+                let color = isVEVC ? Color.orange : Color.blue.opacity(0.8)
+                
+                RuleMark(
+                    x: .value("Codec", res.name),
+                    yStart: .value("Min", stats.minPSNR),
+                    yEnd: .value("Max", stats.maxPSNR)
+                )
+                .lineStyle(StrokeStyle(lineWidth: 2))
+                .foregroundStyle(color)
+                
                 BarMark(
                     x: .value("Codec", res.name),
-                    y: .value("PSNR (dB)", res.avgPSNR!)
+                    yStart: .value("Avg-SD", stats.avgPSNR - stats.stddevPSNR),
+                    yEnd: .value("Avg+SD", stats.avgPSNR + stats.stddevPSNR),
+                    width: .fixed(20)
                 )
-                .foregroundStyle(isVEVC ? Color.orange : Color.blue.opacity(0.4))
-                .annotation(position: .top) {
-                    Text(String(format: "%.2f", res.avgPSNR!))
-                        .font(.caption)
-                }
+                .foregroundStyle(color.opacity(0.5))
+                
+                PointMark(
+                    x: .value("Codec", res.name),
+                    y: .value("Median", stats.p50PSNR)
+                )
+                .symbol(.circle)
+                .foregroundStyle(color)
             }
             .chartYScale(domain: .automatic(includesZero: false))
             .frame(width: 800, height: 500)
@@ -132,7 +147,7 @@ struct SsimChart: View {
     let results: [CodecBenchmarkResult]
     
     var body: some View {
-        let validResults = results.filter { $0.avgSSIM != nil }
+        let validResults = results.filter { $0.stats != nil }
         
         VStack(alignment: .leading) {
             Text("SSIM Benchmark (Closer to 1.0 is better)")
@@ -141,15 +156,31 @@ struct SsimChart: View {
             
             Chart(validResults, id: \.name) { res in
                 let isVEVC = res.name.contains("VEVC")
+                let stats = res.stats!
+                let color = isVEVC ? Color.orange : Color.green.opacity(0.8)
+                
+                RuleMark(
+                    x: .value("Codec", res.name),
+                    yStart: .value("Min", stats.minSSIM),
+                    yEnd: .value("Max", stats.maxSSIM)
+                )
+                .lineStyle(StrokeStyle(lineWidth: 2))
+                .foregroundStyle(color)
+                
                 BarMark(
                     x: .value("Codec", res.name),
-                    y: .value("SSIM", res.avgSSIM!)
+                    yStart: .value("Avg-SD", stats.avgSSIM - stats.stddevSSIM),
+                    yEnd: .value("Avg+SD", stats.avgSSIM + stats.stddevSSIM),
+                    width: .fixed(20)
                 )
-                .foregroundStyle(isVEVC ? Color.orange : Color.green.opacity(0.4))
-                .annotation(position: .top) {
-                    Text(String(format: "%.4f", res.avgSSIM!))
-                        .font(.caption)
-                }
+                .foregroundStyle(color.opacity(0.5))
+                
+                PointMark(
+                    x: .value("Codec", res.name),
+                    y: .value("Median", stats.p50SSIM)
+                )
+                .symbol(.circle)
+                .foregroundStyle(color)
             }
             .chartYScale(domain: .automatic(includesZero: false))
             .frame(width: 800, height: 500)
@@ -176,7 +207,7 @@ func generateAndSaveCharts(results: [CodecBenchmarkResult], outDir: String = "do
     }
     
     // PSNR Chart
-    if results.contains(where: { $0.avgPSNR != nil }) {
+    if results.contains(where: { $0.stats != nil }) {
         let psnrView = PsnrChart(results: results)
         let psnrRenderer = ImageRenderer(content: psnrView)
         psnrRenderer.scale = 2.0
@@ -191,7 +222,7 @@ func generateAndSaveCharts(results: [CodecBenchmarkResult], outDir: String = "do
     }
 
     // SSIM Chart
-    if results.contains(where: { $0.avgSSIM != nil }) {
+    if results.contains(where: { $0.stats != nil }) {
         let ssimView = SsimChart(results: results)
         let ssimRenderer = ImageRenderer(content: ssimView)
         ssimRenderer.scale = 2.0

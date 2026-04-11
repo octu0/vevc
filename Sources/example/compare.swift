@@ -14,6 +14,7 @@ struct Config {
     var quality: Bool = false
     var outputGraph: Bool = false
     var outputVersus: Bool = false
+    var vevcOnly: Bool = false
 }
 
 struct ImageInput {
@@ -772,6 +773,8 @@ struct CompareApp {
             config.outputGraph = true
         case "-output-versus":
             config.outputVersus = true
+        case "-vevc-only":
+            config.vevcOnly = true
         case "-y4m":
             if (i + 1) < args.count {
                 y4mPath = args[i + 1]
@@ -784,7 +787,7 @@ struct CompareApp {
     }
 
     if positionalArgs.isEmpty && y4mPath == nil {
-        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [<input1.png> input2.png ...]")
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [-vevc-only] [<input1.png> input2.png ...]")
         exit(1)
     }
 
@@ -833,30 +836,41 @@ struct CompareApp {
             let warmupImages = Array(localImages[0..<warmupCount])
             print("Warming up (\(warmupCount) frames)...")
             let _ = try await runVEVC(images: warmupImages, config: localConfig)
-            let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-            let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-            let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-            let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-            let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+            if !localConfig.vevcOnly {
+                let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+                let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+                let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+                let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+                let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+            }
             print("Warmup complete.\n")
 
             print("Running vevc (layers)...")
             let vevcResult = try await runVEVC(images: localImages, config: localConfig)
             
-            print("Running H.264 (VideoToolbox HWA)...")
-            let h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+            typealias CodecResult = (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [CMSampleBuffer])
+            var h264Result: CodecResult? = nil
+            var h264SwResult: CodecResult? = nil
+            var hevcResult: CodecResult? = nil
+            var hevcSwResult: CodecResult? = nil
+            var mjpegResult: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?)? = nil
             
-            print("Running H.264 (VideoToolbox SW)...")
-            let h264SwResult = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-            
-            print("Running HEVC (VideoToolbox HWA)...")
-            let hevcResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight)
-            
-            print("Running HEVC (VideoToolbox SW)...")
-            let hevcSwResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-            
-            print("Running MJPEG (VideoToolbox)...")
-            let mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+            if !localConfig.vevcOnly {
+                print("Running H.264 (VideoToolbox HWA)...")
+                h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+                
+                print("Running H.264 (VideoToolbox SW)...")
+                h264SwResult = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+                
+                print("Running HEVC (VideoToolbox HWA)...")
+                hevcResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+                
+                print("Running HEVC (VideoToolbox SW)...")
+                hevcSwResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+                
+                print("Running MJPEG (VideoToolbox)...")
+                mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
+            }
             
             func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
                 let encMs = encTime * 1000
@@ -870,31 +884,39 @@ struct CompareApp {
                 print(String(format: "  Decode : %7.2f ms (%.2f fps) - %.2f ms / frame", decMs, decFps, decMs / Double(count)))
                 print(String(format: "  Size   : %7.2f KB (%.2f%% of raw %.2f KB)", sizeKB, (sizeKB / rawSizeKB) * 100.0, rawSizeKB))
                 
-                var avgPsnr: Double? = nil
-                var avgSsim: Double? = nil
+                var statsOut: QualityStats? = nil
                 if let stats = calculateQualityStats(metrics: metrics ?? []) {
-                    avgPsnr = stats.avgPSNR
-                    avgSsim = stats.avgSSIM
+                    statsOut = stats
                     print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f | 50%%: %5.2f | 90%%: %5.2f | SD: %5.2f", 
                                 stats.avgPSNR, stats.minPSNR, stats.maxPSNR, stats.p50PSNR, stats.p90PSNR, stats.stddevPSNR))
                     print(String(format: "  SSIM   : Avg: %5.4f | Min: %5.4f | Max: %5.4f | 50%%: %5.4f | 90%%: %5.4f | SD: %5.4f", 
                                 stats.avgSSIM, stats.minSSIM, stats.maxSSIM, stats.p50SSIM, stats.p90SSIM, stats.stddevSSIM))
                 }
                 
-                return CodecBenchmarkResult(name: name, encTimeMs: encMs / Double(count), decTimeMs: decMs / Double(count), sizeKB: sizeKB, avgPSNR: avgPsnr, avgSSIM: avgSsim)
+                return CodecBenchmarkResult(name: name, encTimeMs: encMs / Double(count), decTimeMs: decMs / Double(count), sizeKB: sizeKB, stats: statsOut)
             }
             
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
             chartResults.append(printStats(name: "VEVC (Layers)", encTime: vevcResult.encTime, decTime: vevcResult.decTime, compSize: vevcResult.compSize, metrics: vevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
-            chartResults.append(printStats(name: "H.264 (SW)", encTime: h264SwResult.encTime, decTime: h264SwResult.decTime, compSize: h264SwResult.compSize, metrics: h264SwResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "HEVC (SW)", encTime: hevcSwResult.encTime, decTime: hevcSwResult.decTime, compSize: hevcSwResult.compSize, metrics: hevcSwResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            
-            chartResults.append(printStats(name: "H.264 (HWA)", encTime: h264Result.encTime, decTime: h264Result.decTime, compSize: h264Result.compSize, metrics: h264Result.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "HEVC (HWA)", encTime: hevcResult.encTime, decTime: hevcResult.decTime, compSize: hevcResult.compSize, metrics: hevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            
-            chartResults.append(printStats(name: "MJPEG", encTime: mjpegResult.encTime, decTime: mjpegResult.decTime, compSize: mjpegResult.compSize, metrics: mjpegResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            if !localConfig.vevcOnly {
+                if let h264Sw = h264SwResult {
+                    chartResults.append(printStats(name: "H.264 (SW)", encTime: h264Sw.encTime, decTime: h264Sw.decTime, compSize: h264Sw.compSize, metrics: h264Sw.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+                if let hevcSw = hevcSwResult {
+                    chartResults.append(printStats(name: "HEVC (SW)", encTime: hevcSw.encTime, decTime: hevcSw.decTime, compSize: hevcSw.compSize, metrics: hevcSw.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+                if let h264 = h264Result {
+                    chartResults.append(printStats(name: "H.264 (HWA)", encTime: h264.encTime, decTime: h264.decTime, compSize: h264.compSize, metrics: h264.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+                if let hevc = hevcResult {
+                    chartResults.append(printStats(name: "HEVC (HWA)", encTime: hevc.encTime, decTime: hevc.decTime, compSize: hevc.compSize, metrics: hevc.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+                if let mjpeg = mjpegResult {
+                    chartResults.append(printStats(name: "MJPEG", encTime: mjpeg.encTime, decTime: mjpeg.decTime, compSize: mjpeg.compSize, metrics: mjpeg.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+            }
             print("---------------")
             
             if localConfig.outputGraph {
@@ -907,8 +929,8 @@ struct CompareApp {
                 print("\n--- Output Versus Images ---")
                 
                 let vevcMinIdx = vevcResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
-                let h264MinIdx = h264SwResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
-                let hevcMinIdx = hevcSwResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let h264MinIdx = h264SwResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let hevcMinIdx = hevcSwResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let sec14Idx = min(14 * localConfig.framerate, localImages.count - 1)
                 
                 let targetIndices: Set<Int> = [vevcMinIdx, h264MinIdx, hevcMinIdx, sec14Idx]
@@ -917,11 +939,17 @@ struct CompareApp {
                 print("Extracting VEVC frames...")
                 let vevcExtracted = try await extractVEVCFrames(bitstream: vevcResult.bitstream, config: localConfig, indices: targetIndices)
                 
-                print("Extracting H.264 frames...")
-                let h264Extracted = try extractVTFrames(bitstream: h264SwResult.bitstream, disableHWA: false, indices: targetIndices)
+                var h264Extracted: [Int: YCbCrImage] = [:]
+                if let res = h264SwResult {
+                    print("Extracting H.264 frames...")
+                    h264Extracted = try extractVTFrames(bitstream: res.bitstream, disableHWA: false, indices: targetIndices)
+                }
                 
-                print("Extracting HEVC frames...")
-                let hevcExtracted = try extractVTFrames(bitstream: hevcSwResult.bitstream, disableHWA: false, indices: targetIndices)
+                var hevcExtracted: [Int: YCbCrImage] = [:]
+                if let res = hevcSwResult {
+                    print("Extracting HEVC frames...")
+                    hevcExtracted = try extractVTFrames(bitstream: res.bitstream, disableHWA: false, indices: targetIndices)
+                }
                 
                 let pairs: [(name: String, idx: Int)] = [
                     ("vevc_min", vevcMinIdx),

@@ -3,12 +3,12 @@ import CoreMedia
 import VideoToolbox
 import vevc
 
-public struct QualityMetrics {
+public struct QualityMetrics: Sendable {
     public let psnr: Double
     public let ssim: Double
 }
 
-public struct QualityStats {
+public struct QualityStats: Sendable {
     public let avgPSNR: Double
     public let minPSNR: Double
     public let maxPSNR: Double
