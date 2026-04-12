@@ -1893,11 +1893,13 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
 }
 
 /// bidirectional motion compensation pixel subtraction
+/// fractHalf branch is hoisted to block level to eliminate per-pixel branch prediction misses
 @inline(__always)
 func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
+    let rowCount = (height + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-        for row in 0..<((height + blockSize - 1) / blockSize) {
+        for row in 0..<rowCount {
             for col in 0..<colCount {
                 let mvIndex = min(row * colCount + col, mvs.count - 1)
                 let mv = mvs[mvIndex]
@@ -1911,29 +1913,68 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
                 let fractHalfX = (rawShiftX & 2) >> 1
                 let shiftY = rawShiftY >> 2
                 let fractHalfY = (rawShiftY & 2) >> 1
-                for y in 0..<min(blockSize, height - blockY) {
-                    let dstY = blockY + y
-                    let srcY = blockY + shiftY + y
-                    let safeSrcY0 = max(0, min(srcY, height - 1))
-                    let safeSrcY1 = max(0, min(srcY + fractHalfY, height - 1))
-                    let dstPtr = dstBase.advanced(by: dstY * width + blockX)
-                    let srcRow0 = srcBase.advanced(by: safeSrcY0 * width)
-                    let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
-                    for x in 0..<min(blockSize, width - blockX) {
-                        let srcX = blockX + shiftX + x
-                        let sx0 = max(0, min(srcX, width - 1))
-                        let sx1 = max(0, min(srcX + fractHalfX, width - 1))
-                        let predPixel: Int16
-                        if fractHalfX == 0 && fractHalfY == 0 {
-                            predPixel = srcRow0[sx0]
-                        } else if fractHalfY == 0 {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + 1) >> 1)
-                        } else if fractHalfX == 0 {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + 1) >> 1)
-                        } else {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 2) >> 2)
+                let bw = min(blockSize, width - blockX)
+                let bh = min(blockSize, height - blockY)
+
+                if fractHalfX == 0 && fractHalfY == 0 {
+                    // integer pixel path: no interpolation needed
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY = max(0, min(srcY, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow = srcBase.advanced(by: safeSrcY * width)
+                        for x in 0..<bw {
+                            let sx = max(0, min(blockX + shiftX + x, width - 1))
+                            dstPtr[x] = dstPtr[x] &- srcRow[sx]
                         }
-                        dstPtr[x] = dstPtr[x] &- predPixel
+                    }
+                } else if fractHalfY == 0 {
+                    // horizontal half-pel only
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY = max(0, min(srcY, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow0 = srcBase.advanced(by: safeSrcY * width)
+                        for x in 0..<bw {
+                            let srcX = blockX + shiftX + x
+                            let sx0 = max(0, min(srcX, width - 1))
+                            let sx1 = max(0, min(srcX + 1, width - 1))
+                            dstPtr[x] = dstPtr[x] &- Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + 1) >> 1)
+                        }
+                    }
+                } else if fractHalfX == 0 {
+                    // vertical half-pel only
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY0 = max(0, min(srcY, height - 1))
+                        let safeSrcY1 = max(0, min(srcY + 1, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow0 = srcBase.advanced(by: safeSrcY0 * width)
+                        let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
+                        for x in 0..<bw {
+                            let sx = max(0, min(blockX + shiftX + x, width - 1))
+                            dstPtr[x] = dstPtr[x] &- Int16((Int(srcRow0[sx]) + Int(srcRow1[sx]) + 1) >> 1)
+                        }
+                    }
+                } else {
+                    // bilinear (both half-pel)
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY0 = max(0, min(srcY, height - 1))
+                        let safeSrcY1 = max(0, min(srcY + 1, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow0 = srcBase.advanced(by: safeSrcY0 * width)
+                        let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
+                        for x in 0..<bw {
+                            let srcX = blockX + shiftX + x
+                            let sx0 = max(0, min(srcX, width - 1))
+                            let sx1 = max(0, min(srcX + 1, width - 1))
+                            dstPtr[x] = dstPtr[x] &- Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 2) >> 2)
+                        }
                     }
                 }
             }
@@ -1943,11 +1984,13 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
 }
 
 /// Pixel addition for bidirectional motion compensation based on reference direction flag (for decoder/reconstruction)
+/// fractHalf branch is hoisted to block level to eliminate per-pixel branch prediction misses
 @inline(__always)
 func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
+    let rowCount = (height + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-        for row in 0..<((height + blockSize - 1) / blockSize) {
+        for row in 0..<rowCount {
             for col in 0..<colCount {
                 let mvIndex = min(row * colCount + col, mvs.count - 1)
                 let mv = mvs[mvIndex]
@@ -1961,29 +2004,68 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                 let fractHalfX = (rawShiftX & 2) >> 1
                 let shiftY = rawShiftY >> 2
                 let fractHalfY = (rawShiftY & 2) >> 1
-                for y in 0..<min(blockSize, height - blockY) {
-                    let dstY = blockY + y
-                    let srcY = blockY + shiftY + y
-                    let safeSrcY0 = max(0, min(srcY, height - 1))
-                    let safeSrcY1 = max(0, min(srcY + fractHalfY, height - 1))
-                    let dstPtr = dstBase.advanced(by: dstY * width + blockX)
-                    let srcRow0 = srcBase.advanced(by: safeSrcY0 * width)
-                    let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
-                    for x in 0..<min(blockSize, width - blockX) {
-                        let srcX = blockX + shiftX + x
-                        let sx0 = max(0, min(srcX, width - 1))
-                        let sx1 = max(0, min(srcX + fractHalfX, width - 1))
-                        let predPixel: Int16
-                        if fractHalfX == 0 && fractHalfY == 0 {
-                            predPixel = srcRow0[sx0]
-                        } else if fractHalfY == 0 {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + roundOffset) >> 1)
-                        } else if fractHalfX == 0 {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + roundOffset) >> 1)
-                        } else {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 1 + roundOffset) >> 2)
+                let bw = min(blockSize, width - blockX)
+                let bh = min(blockSize, height - blockY)
+
+                if fractHalfX == 0 && fractHalfY == 0 {
+                    // integer pixel path: no interpolation needed
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY = max(0, min(srcY, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow = srcBase.advanced(by: safeSrcY * width)
+                        for x in 0..<bw {
+                            let sx = max(0, min(blockX + shiftX + x, width - 1))
+                            dstPtr[x] = dstPtr[x] &+ srcRow[sx]
                         }
-                        dstPtr[x] = dstPtr[x] &+ predPixel
+                    }
+                } else if fractHalfY == 0 {
+                    // horizontal half-pel only
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY = max(0, min(srcY, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow0 = srcBase.advanced(by: safeSrcY * width)
+                        for x in 0..<bw {
+                            let srcX = blockX + shiftX + x
+                            let sx0 = max(0, min(srcX, width - 1))
+                            let sx1 = max(0, min(srcX + 1, width - 1))
+                            dstPtr[x] = dstPtr[x] &+ Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + roundOffset) >> 1)
+                        }
+                    }
+                } else if fractHalfX == 0 {
+                    // vertical half-pel only
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY0 = max(0, min(srcY, height - 1))
+                        let safeSrcY1 = max(0, min(srcY + 1, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow0 = srcBase.advanced(by: safeSrcY0 * width)
+                        let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
+                        for x in 0..<bw {
+                            let sx = max(0, min(blockX + shiftX + x, width - 1))
+                            dstPtr[x] = dstPtr[x] &+ Int16((Int(srcRow0[sx]) + Int(srcRow1[sx]) + roundOffset) >> 1)
+                        }
+                    }
+                } else {
+                    // bilinear (both half-pel)
+                    for y in 0..<bh {
+                        let dstY = blockY + y
+                        let srcY = blockY + shiftY + y
+                        let safeSrcY0 = max(0, min(srcY, height - 1))
+                        let safeSrcY1 = max(0, min(srcY + 1, height - 1))
+                        let dstPtr = dstBase.advanced(by: dstY * width + blockX)
+                        let srcRow0 = srcBase.advanced(by: safeSrcY0 * width)
+                        let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
+                        for x in 0..<bw {
+                            let srcX = blockX + shiftX + x
+                            let sx0 = max(0, min(srcX, width - 1))
+                            let sx1 = max(0, min(srcX + 1, width - 1))
+                            dstPtr[x] = dstPtr[x] &+ Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 1 + roundOffset) >> 2)
+                        }
                     }
                 }
             }

@@ -260,24 +260,9 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     let diffP = p1x &- p0x
     let diffQ = q1x &- q0x
     
-    let absDelta = SIMD16<Int32>(
-        abs(delta[0]), abs(delta[1]), abs(delta[2]), abs(delta[3]),
-        abs(delta[4]), abs(delta[5]), abs(delta[6]), abs(delta[7]),
-        abs(delta[8]), abs(delta[9]), abs(delta[10]), abs(delta[11]),
-        abs(delta[12]), abs(delta[13]), abs(delta[14]), abs(delta[15])
-    )
-    let absP = SIMD16<Int32>(
-        abs(diffP[0]), abs(diffP[1]), abs(diffP[2]), abs(diffP[3]),
-        abs(diffP[4]), abs(diffP[5]), abs(diffP[6]), abs(diffP[7]),
-        abs(diffP[8]), abs(diffP[9]), abs(diffP[10]), abs(diffP[11]),
-        abs(diffP[12]), abs(diffP[13]), abs(diffP[14]), abs(diffP[15])
-    )
-    let absQ = SIMD16<Int32>(
-        abs(diffQ[0]), abs(diffQ[1]), abs(diffQ[2]), abs(diffQ[3]),
-        abs(diffQ[4]), abs(diffQ[5]), abs(diffQ[6]), abs(diffQ[7]),
-        abs(diffQ[8]), abs(diffQ[9]), abs(diffQ[10]), abs(diffQ[11]),
-        abs(diffQ[12]), abs(diffQ[13]), abs(diffQ[14]), abs(diffQ[15])
-    )
+    let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
+    let absP = diffP.replacing(with: .zero &- diffP, where: diffP .< 0)
+    let absQ = diffQ.replacing(with: .zero &- diffQ, where: diffQ .< 0)
     
     let betah = beta >> 1
     let maskDelta = absDelta .< beta

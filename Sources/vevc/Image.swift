@@ -109,12 +109,22 @@ extension PlaneData420 {
                 dst.withUnsafeMutableBufferPointer { dstBuf in
                     guard let srcPtr = srcBuf.baseAddress, let dstPtr = dstBuf.baseAddress else { return }
                     var i = 0
-                    let offset128 = SIMD8<Int16>(repeating: 128)
+                    let offset128_16 = SIMD16<Int16>(repeating: 128)
+                    let zero16 = SIMD16<Int16>.zero
+                    let max255_16 = SIMD16<Int16>(repeating: 255)
+                    while i + 16 <= count {
+                        let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                        let clamped = (vals &+ offset128_16).clamped(lowerBound: zero16, upperBound: max255_16)
+                        let narrowed = SIMD16<UInt8>(truncatingIfNeeded: clamped)
+                        UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD16<UInt8>.self)
+                        i += 16
+                    }
+                    let offset128_8 = SIMD8<Int16>(repeating: 128)
                     let zero8 = SIMD8<Int16>.zero
-                    let max255 = SIMD8<Int16>(repeating: 255)
+                    let max255_8 = SIMD8<Int16>(repeating: 255)
                     while i + 8 <= count {
                         let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<Int16>.self)
-                        let clamped = (vals &+ offset128).clamped(lowerBound: zero8, upperBound: max255)
+                        let clamped = (vals &+ offset128_8).clamped(lowerBound: zero8, upperBound: max255_8)
                         let narrowed = SIMD8<UInt8>(truncatingIfNeeded: clamped)
                         UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
                         i += 8
