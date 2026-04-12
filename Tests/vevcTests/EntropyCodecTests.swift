@@ -49,7 +49,7 @@ final class EntropyCodecTests: XCTestCase {
         // 全ブロックをエンコード
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in 0..<16 {
-            blockEncode16(encoder: &encoder, block: blocks[i], parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: blocks[i], parentBlock: nil)
         }
         
         let data = encoder.getData()
@@ -60,7 +60,7 @@ final class EntropyCodecTests: XCTestCase {
         try data.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             for i in 0..<16 {
-                try! blockDecode16(decoder: &decoder, block: decBlocks[i], parentBlock: nil)
+                try! blockDecode16V(decoder: &decoder, block: decBlocks[i], parentBlock: nil)
             }
         }
         

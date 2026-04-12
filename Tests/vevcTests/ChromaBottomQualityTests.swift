@@ -137,7 +137,6 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// I-Frameのみで下部クロマの品質が上部と同等であることを確認。
     /// 失敗する場合: エンコーダの境界ブロック処理に問題がある。
     func testIFrameChromaBottomQuality() async throws {
-        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let cWidth = (width + 1) / 2
@@ -172,7 +171,6 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// 複数フレームでP-Frame品質推移を確認。
     /// 特定フレーム以降で下部クロマが急激に劣化していないか確認。
     func testPFrameChromaBottomProgression() async throws {
-        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let cWidth = (width + 1) / 2
@@ -248,36 +246,44 @@ final class ChromaBottomQualityTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
         
         // I-Frame: encode → reconstruct
-        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, pool: pool, predictedPd: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
         
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
         let iDecodedPd = PlaneData420(img16: iDecoded)
         
         // I-Frameのクロマ差分
         let iCbDiff = calculatePlaneMAE(a: iRecon.cb, b: iDecodedPd.cb)
         let iCrDiff = calculatePlaneMAE(a: iRecon.cr, b: iDecodedPd.cr)
         
-        XCTAssertLessThan(iCbDiff, 1.0,
-            "I-Frame エンコーダ再構築とデコーダ出力のCb差異(MAE=\(String(format: "%.2f", iCbDiff)))が大きい → enc/dec非対称性")
-        XCTAssertLessThan(iCrDiff, 1.0,
-            "I-Frame エンコーダ再構築とデコーダ出力のCr差異(MAE=\(String(format: "%.2f", iCrDiff)))が大きい → enc/dec非対称性")
+        XCTAssertLessThan(
+            iCbDiff, 1.0,
+            "I-Frame エンコーダ再構築とデコーダ出力のCb差異(MAE=\(String(format: "%.2f", iCbDiff)))が大きい → enc/dec非対称性"
+        )
+        XCTAssertLessThan(
+            iCrDiff, 1.0,
+            "I-Frame エンコーダ再構築とデコーダ出力のCr差異(MAE=\(String(format: "%.2f", iCrDiff)))が大きい → enc/dec非対称性"
+        )
         
         // P-Frame: encode (without motion compensation since it's removed)
-        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0)
+        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
         
         // P-Frame: decode
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon, roundOffset: 0)
         let pDecodedPd = PlaneData420(img16: pDecoded)
         
         // P-Frameの残差のクロマ差分
         let pCbDiff = calculatePlaneMAE(a: pRecon.cb, b: pDecodedPd.cb)
         let pCrDiff = calculatePlaneMAE(a: pRecon.cr, b: pDecodedPd.cr)
         
-        XCTAssertLessThan(pCbDiff, 1.0,
-            "P-Frame エンコーダ再構築とデコーダ出力のCb差異(MAE=\(String(format: "%.2f", pCbDiff)))が大きい → enc/dec非対称性")
-        XCTAssertLessThan(pCrDiff, 1.0,
-            "P-Frame エンコーダ再構築とデコーダ出力のCr差異(MAE=\(String(format: "%.2f", pCrDiff)))が大きい → enc/dec非対称性")
+        XCTAssertLessThan(
+            pCbDiff, 1.0,
+            "P-Frame エンコーダ再構築とデコーダ出力のCb差異(MAE=\(String(format: "%.2f", pCbDiff)))が大きい → enc/dec非対称性"
+        )
+        XCTAssertLessThan(
+            pCrDiff, 1.0,
+            "P-Frame エンコーダ再構築とデコーダ出力のCr差異(MAE=\(String(format: "%.2f", pCrDiff)))が大きい → enc/dec非対称性"
+        )
         
         // 下半分限定のMAEも確認
         let halfCount = (cWidth * cHeight) / 2
@@ -290,10 +296,14 @@ final class ChromaBottomQualityTests: XCTestCase {
             b: Array(pDecodedPd.cr[halfCount...])
         )
         
-        XCTAssertLessThan(pCbBottomDiff, 1.0,
-            "P-Frame Cb下半分のenc/dec差異(MAE=\(String(format: "%.2f", pCbBottomDiff)))が大きい → 下部でのみ非対称性")
-        XCTAssertLessThan(pCrBottomDiff, 1.0,
-            "P-Frame Cr下半分のenc/dec差異(MAE=\(String(format: "%.2f", pCrBottomDiff)))が大きい → 下部でのみ非対称性")
+        XCTAssertLessThan(
+            pCbBottomDiff, 1.0,
+            "P-Frame Cb下半分のenc/dec差異(MAE=\(String(format: "%.2f", pCbBottomDiff)))が大きい → 下部でのみ非対称性"
+        )
+        XCTAssertLessThan(
+            pCrBottomDiff, 1.0,
+            "P-Frame Cr下半分のenc/dec差異(MAE=\(String(format: "%.2f", pCrBottomDiff)))が大きい → 下部でのみ非対称性"
+        )
     }
     
     // MARK: - テスト4: Y4MReaderのcSize計算確認（潜在的バグ）
@@ -327,7 +337,6 @@ final class ChromaBottomQualityTests: XCTestCase {
     /// 画像の最下部8行分（最後のブロック行）のクロマPSNRと、それ以外の部分のクロマPSNRを比較。
     /// 最下行ブロックに集中的な劣化があるかを確認する。
     func testLastBlockRowChromaQuality() async throws {
-        let pool = BlockViewPool()
         let width = 1920
         let height = 1080
         let cWidth = (width + 1) / 2
@@ -371,16 +380,24 @@ final class ChromaBottomQualityTests: XCTestCase {
         let cbDiff = cbUpper - cbLastBlock
         let crDiff = crUpper - crLastBlock
         
-        XCTAssertGreaterThan(cbLastBlock, 10.0,
-            "Cb最下ブロック行PSNR(\(String(format: "%.1f", cbLastBlock))dB)が非常に低い (上部=\(String(format: "%.1f", cbUpper))dB, 差=\(String(format: "%.1f", cbDiff))dB)")
-        XCTAssertGreaterThan(crLastBlock, 10.0,
-            "Cr最下ブロック行PSNR(\(String(format: "%.1f", crLastBlock))dB)が非常に低い (上部=\(String(format: "%.1f", crUpper))dB, 差=\(String(format: "%.1f", crDiff))dB)")
+        XCTAssertGreaterThan(
+            cbLastBlock, 10.0,
+            "Cb最下ブロック行PSNR(\(String(format: "%.1f", cbLastBlock))dB)が非常に低い (上部=\(String(format: "%.1f", cbUpper))dB, 差=\(String(format: "%.1f", cbDiff))dB)"
+        )
+        XCTAssertGreaterThan(
+            crLastBlock, 10.0,
+            "Cr最下ブロック行PSNR(\(String(format: "%.1f", crLastBlock))dB)が非常に低い (上部=\(String(format: "%.1f", crUpper))dB, 差=\(String(format: "%.1f", crDiff))dB)"
+        )
         
         // 上部との差が大きすぎないか
-        XCTAssertLessThan(cbDiff, 15.0,
-            "Cb最下ブロック行と上部のPSNR差(\(String(format: "%.1f", cbDiff))dB)が大きい → 最下行に集中的な問題")
-        XCTAssertLessThan(crDiff, 15.0,
-            "Cr最下ブロック行と上部のPSNR差(\(String(format: "%.1f", crDiff))dB)が大きい → 最下行に集中的な問題")
+        XCTAssertLessThan(
+            cbDiff, 15.0,
+            "Cb最下ブロック行と上部のPSNR差(\(String(format: "%.1f", cbDiff))dB)が大きい → 最下行に集中的な問題"
+        )
+        XCTAssertLessThan(
+            crDiff, 15.0,
+            "Cr最下ブロック行と上部のPSNR差(\(String(format: "%.1f", crDiff))dB)が大きい → 最下行に集中的な問題"
+        )
     }
     
     // MARK: - Int16配列のMAEヘルパー

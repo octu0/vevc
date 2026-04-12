@@ -190,7 +190,7 @@ final class QualityDropTests: XCTestCase {
         let recon32 = PlaneData420(width: pd.width, height: pd.height, y: r32Y, cb: r32Cb, cr: r32Cr)
         let img32 = planeDataToImage(pd: recon32)
         
-        let decL32 = try await decodeLayer32(r: bytesL32, pool: pool, layer: 2, dx: pd.width, dy: pd.height, prev: decL16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+        let decL32 = try await decodeLayer32(r: bytesL32, pool: pool, layer: 2, dx: pd.width, dy: pd.height, prev: decL16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil, roundOffset: 0)
         let decL32Pd = PlaneData420(width: pd.width, height: pd.height, y: decL32.y, cb: decL32.cb, cr: decL32.cr)
         let decImg32Final = planeDataToImage(pd: decL32Pd)
         

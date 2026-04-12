@@ -43,10 +43,10 @@ final class RealPairsRansTests: XCTestCase {
             
             let view = blocks[i]
             let subs = getSubbands32(view: view)
-            blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
-                }
+            blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+        }
         
         encoder.bypassWriter.flush()
         return (pairs: encoder.pairs, bypass: encoder.bypassWriter.bytes)

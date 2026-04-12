@@ -49,9 +49,9 @@ final class ReconstructionDriftTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
         
-        let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, pool: pool, predictedPd: nil, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, pool: pool, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3, roundOffset: 0)
         
-        let decImg16 = try await decodeSpatialLayers(r: bytes, pool: pool, maxLayer: 2, dx: width, dy: height)
+        let decImg16 = try await decodeSpatialLayers(r: bytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
         let decRecon = PlaneData420(img16: decImg16)
         
         let encStats = stats(encRecon.y)
@@ -106,7 +106,6 @@ final class ReconstructionDriftTests: XCTestCase {
     }
     
     func testPFrameReconstructionMatch() async throws {
-        let pool = BlockViewPool()
         let width = 640
         let height = 480
         

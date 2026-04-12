@@ -42,9 +42,9 @@ final class RansModelTests: XCTestCase {
             if isZero { continue }
             let view = blocks[i]
             let subs = getSubbands32(view: view)
-            blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
                 }
         
         // pairs からrunTokenCountsとvalTokenCountsを計算

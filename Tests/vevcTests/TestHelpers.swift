@@ -57,16 +57,16 @@ func invDwt2dScalar(_ block: BlockView, size: Int) {
 
 func blockEncode(encoder: inout EntropyEncoder<DynamicEntropyModel>, block: BlockView, size: Int) {
     switch size {
-    case 16: blockEncode16(encoder: &encoder, block: block, parentBlock: nil)
-    case 8: blockEncode8(encoder: &encoder, block: block, parentBlock: nil)
+    case 16: blockEncode16V(encoder: &encoder, block: block, parentBlock: nil)
+    case 8: blockEncode8V(encoder: &encoder, block: block, parentBlock: nil)
     default: fatalError()
     }
 }
 
 func blockDecode(decoder: inout EntropyDecoder, block: BlockView, size: Int) throws {
     switch size {
-    case 16: try blockDecode16(decoder: &decoder, block: block, parentBlock: nil)
-    case 8: try blockDecode8(decoder: &decoder, block: block, parentBlock: nil)
+    case 16: try blockDecode16V(decoder: &decoder, block: block, parentBlock: nil)
+    case 8: try blockDecode8V(decoder: &decoder, block: block, parentBlock: nil)
     default: fatalError()
     }
 }

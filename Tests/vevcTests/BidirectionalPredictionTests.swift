@@ -70,8 +70,8 @@ final class BidirectionalPredictionTests: XCTestCase {
         
         let pool = BlockViewPool()
         // 前方MV（pd0 → pd1）と後方MV（pd2 → pd1）を計算
-        let (_, fwdSADs) = await computeMotionVectors(curr: pd1, prev: pd0, pool: pool)
-        let (_, bwdSADs) = await computeMotionVectors(curr: pd1, prev: pd2, pool: pool)
+        let (_, fwdSADs) = await computeMotionVectors(curr: pd1, prev: pd0, pool: pool, roundOffset: 0)
+        let (_, bwdSADs) = await computeMotionVectors(curr: pd1, prev: pd2, pool: pool, roundOffset: 0)
         
         // ブロックごとに、前方/後方のSADを比較して選択する
         var fwdBetterCount = 0
