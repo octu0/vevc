@@ -114,7 +114,7 @@ class CoreDecoder {
             let useBidirectional = isPFrame && firstReconstructed != nil && frameData.count >= 2
             
             let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
-            let img16 = try await decodeSpatialLayers(r: data, pool: pool, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd)
+            let img16 = try await decodeSpatialLayers(r: data, pool: pool, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: idx % 2)
             let pd = PlaneData420(img16: img16)
             decodedPlanes[idx] = pd
             previousReconstructed = pd

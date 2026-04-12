@@ -29,7 +29,7 @@ public enum DecodeError: Error, CustomStringConvertible {
 }
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int) async throws -> Image16 {
     var offset = 0
 
     // Compute per-layer dimensions matching encoder DWT subband sizes:
@@ -108,7 +108,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let layer2Data = Array(r[offset..<(offset + Int(len2))])
         offset += Int(len2)
         
-        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs)
+        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset)
     }
     
     return current
@@ -534,7 +534,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: [MotionVector]? = nil, refDirs: [Bool]? = nil) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: [MotionVector]? = nil, refDirs: [Bool]? = nil, roundOffset: Int) async throws -> Image16 {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -622,14 +622,14 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     if let tPrev = predictedPd, let mvs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
             // bidirectional prediction: use refDirs to select forward/backward prediction for each block
-            applyBidirectionalMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2)
-            applyBidirectionalMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-            applyBidirectionalMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
+            applyBidirectionalMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
+            applyBidirectionalMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+            applyBidirectionalMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
         } else {
             // forward prediction only
-            applyMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2)
-            applyMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-            applyMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
+            applyMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
+            applyMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+            applyMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
         }
     }
 

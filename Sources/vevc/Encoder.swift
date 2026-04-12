@@ -180,120 +180,91 @@ actor LayersEncodeActor {
         frameIndex += images.count
         
         let baseStep = Int(baseQt.step)
-        
         let localMaxbitrate = maxbitrate
         let localZeroThreshold = zeroThreshold
         
         var encodedFrames = [[UInt8]]()
-        var previousReconstructed: PlaneData420? = nil
-        var previousInputPlane: PlaneData420? = nil
-        var isFirstEncoded = true
+        encodedFrames.reserveCapacity(images.count)
         
-        // Bidirectional prediction: keep I-frame reconstruction as backward reference.
-        // Uses reconstruction (not raw input) because the decoder does the same.
-        var firstReconstructed: PlaneData420? = nil
+        // --- 1. Process First Frame (I-Frame) ---
+        let firstImg = images[0]
+        var previousInputPlane = toPlaneData420(image: firstImg, pool: pool)
         
-        for (_, img) in images.enumerated() {
+        let firstQtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
+        let firstQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
+        
+        let (firstBytes, firstReconstructed) = try await encodeSpatialLayers(
+            pd: previousInputPlane, pool: pool, maxbitrate: localMaxbitrate,
+            qtY: firstQtY, qtC: firstQtC, zeroThreshold: localZeroThreshold, roundOffset: 0
+        )
+        encodedFrames.append(firstBytes)
+        rateController.consumeIFrame(bits: firstBytes.count * 8, qStep: Int(firstQtY.step))
+        
+        // --- 2. Process Remaining Frames (P/B-Frames) ---
+        var previousReconstructed = firstReconstructed
+        
+        for idx in 1..<images.count {
+            let img = images[idx]
             let plane = toPlaneData420(image: img, pool: pool)
-            // Duplicate frame detection: if current frame pixels are identical
-            // to the previous frame, emit a copy frame (empty data, FrameLen=0)
-            // instead of encoding the full frame. This saves significant data
-            // for videos with duplicate frames (e.g. 24fps→60fps upconversion).
-            if let prevInput = previousInputPlane {
-                let isDuplicate = isPlaneIdentical(a: plane, b: prevInput)
-                if isDuplicate {
-                    encodedFrames.append([]) // empty = copy frame (FrameLen=0)
-                    pool.putInt16(plane.y)
-                    pool.putInt16(plane.cb)
-                    pool.putInt16(plane.cr)
-                    continue
-                }
-                pool.putInt16(prevInput.y)
-                pool.putInt16(prevInput.cb)
-                pool.putInt16(prevInput.cr)
+            
+            // Duplicate frame detection
+            let isDuplicate = isPlaneIdentical(a: plane, b: previousInputPlane)
+            if isDuplicate {
+                encodedFrames.append([]) // empty = copy frame (FrameLen=0)
+                pool.putInt16(plane.y)
+                pool.putInt16(plane.cb)
+                pool.putInt16(plane.cr)
+                continue
             }
+            
+            pool.putInt16(previousInputPlane.y)
+            pool.putInt16(previousInputPlane.cb)
+            pool.putInt16(previousInputPlane.cr)
             previousInputPlane = plane
             
-            // Per-frame rate control:
-            // - I-frame (first non-copy encoded frame): uses baseQt from GOP-level rate control
-            // - P-frames: dynamically adjust qStep based on frame-level SAD activity
-            //   using the existing RateController.calculatePFrameQStep() method.
-            let frameQtY: QuantizationTable
-            let frameQtC: QuantizationTable
-            let isPFrame = previousReconstructed != nil
+            // P-frame Rate Control
+            let frameSAD = estimateFrameSAD(current: plane, previous: previousReconstructed)
+            let adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
+            let qtY = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: false, layerIndex: 0)
+            let qtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
             
-            if isPFrame {
-                // Compute frame-level SAD by sampling Y plane differences
-                let frameSAD = estimateFrameSAD(current: plane, previous: previousReconstructed!)
-                let adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
-                frameQtY = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: false, layerIndex: 0)
-                frameQtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
-            } else {
-                frameQtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
-                frameQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
-            }
+            // Always encode bidirectionally after the first frame
+            let (bytes, reconstructed) = try await encodeSpatialLayers(
+                pd: plane, pool: pool, predictedPd: previousReconstructed, nextPd: firstReconstructed,
+                maxbitrate: localMaxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold,
+                roundOffset: idx % 2,
+            )
             
-            let useBidirectional = isPFrame && firstReconstructed != nil && images.count >= 2
-            
-            let bytes: [UInt8]
-            let reconstructed: PlaneData420
-            
-            if useBidirectional {
-                (bytes, reconstructed) = try await encodeSpatialLayers(
-                    pd: plane, pool: pool, predictedPd: previousReconstructed, nextPd: firstReconstructed,
-                    maxbitrate: localMaxbitrate, qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
-                )
-            } else {
-                (bytes, reconstructed) = try await encodeSpatialLayers(
-                    pd: plane, pool: pool, predictedPd: previousReconstructed, maxbitrate: localMaxbitrate,
-                    qtY: frameQtY, qtC: frameQtC, zeroThreshold: localZeroThreshold
-                )
-            }
             encodedFrames.append(bytes)
+            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD)
             
-            // Feed back to rate controller for next frame's qStep prediction
-            let encodedBits = bytes.count * 8
-            if isFirstEncoded {
-                rateController.consumeIFrame(bits: encodedBits, qStep: Int(frameQtY.step))
-                isFirstEncoded = false
-            } else {
-                let frameSAD = isPFrame ? estimateFrameSAD(current: plane, previous: previousReconstructed!) : 0
-                rateController.consumePFrame(bits: encodedBits, qStep: Int(frameQtY.step), sad: frameSAD)
+            let isPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
+                firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
             }
-            if let prev = previousReconstructed {
-                let firstVal = firstReconstructed?.y.withUnsafeBufferPointer { $0.baseAddress }
-                if firstVal == nil || prev.y.withUnsafeBufferPointer({ $0.baseAddress }) != firstVal {
-                    pool.putInt16(prev.y)
-                    pool.putInt16(prev.cb)
-                    pool.putInt16(prev.cr)
-                }
+            if !isPrevFirst {
+                pool.putInt16(previousReconstructed.y)
+                pool.putInt16(previousReconstructed.cb)
+                pool.putInt16(previousReconstructed.cr)
             }
             previousReconstructed = reconstructed
-            
-            // Save I-frame (first frame) reconstruction for backward reference
-            if firstReconstructed == nil {
-                firstReconstructed = reconstructed
-            }
         }
         
-        if let prevInput = previousInputPlane {
-            pool.putInt16(prevInput.y)
-            pool.putInt16(prevInput.cb)
-            pool.putInt16(prevInput.cr)
+        // --- 3. Cleanup ---
+        pool.putInt16(previousInputPlane.y)
+        pool.putInt16(previousInputPlane.cb)
+        pool.putInt16(previousInputPlane.cr)
+        
+        let isFinalPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
+            firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
         }
-        if let prev = previousReconstructed {
-            let firstVal = firstReconstructed?.y.withUnsafeBufferPointer { $0.baseAddress }
-            if firstVal == nil || prev.y.withUnsafeBufferPointer({ $0.baseAddress }) != firstVal {
-                pool.putInt16(prev.y)
-                pool.putInt16(prev.cb)
-                pool.putInt16(prev.cr)
-            }
+        if !isFinalPrevFirst {
+            pool.putInt16(previousReconstructed.y)
+            pool.putInt16(previousReconstructed.cb)
+            pool.putInt16(previousReconstructed.cr)
         }
-        if let first = firstReconstructed {
-            pool.putInt16(first.y)
-            pool.putInt16(first.cb)
-            pool.putInt16(first.cr)
-        }
+        pool.putInt16(firstReconstructed.y)
+        pool.putInt16(firstReconstructed.cb)
+        pool.putInt16(firstReconstructed.cr)
 
         var gopBody: [UInt8] = []
         appendUInt32BE(&gopBody, UInt32(images.count)) // GOP size
@@ -331,7 +302,7 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0)
         
-        let (bytes, recon) = try await encodeSpatialLayers(pd: curr, pool: pool, predictedPd: nil, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+        let (bytes, recon) = try await encodeSpatialLayers(pd: curr, pool: pool, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: frameIndex % 2)
         pool.putInt16(curr.y)
         pool.putInt16(curr.cb)
         pool.putInt16(curr.cr)

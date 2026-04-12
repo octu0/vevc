@@ -20,11 +20,8 @@ struct MotionEstimation {
 
     // why: Lagrange multiplier for rate-distortion optimization:
     // penalizes motion vectors with large magnitude to favor zero-MV
-    @inline(__always)
-    static func getPenalty(dx: Int, dy: Int, lambda: Int) -> Int {
-        let absX = dx < 0 ? (-1 * dx) : dx
-        let absY = dy < 0 ? (-1 * dy) : dy
-        return (absX + absY) * lambda
+    static func getPenalty(dx: Int, dy: Int, pmv: MotionVector, lambda: Int) -> Int {
+        return (abs(dx) + abs(dy)) * lambda
     }
 
     @inline(__always)
@@ -52,7 +49,7 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func fetchHalfPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, fractX: Int, fractY: Int, dest: UnsafeMutablePointer<Int16>) {
+    static func fetchHalfPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, fractX: Int, fractY: Int, dest: UnsafeMutablePointer<Int16>, roundOffset: Int) {
         if fractX == 0 && fractY == 0 {
             fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
             return
@@ -63,21 +60,21 @@ struct MotionEstimation {
                 for ry in 0..<8 {
                     let row = plane.advanced(by: (intY + ry) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 { dst[rx] = Int16((Int(row[rx]) + Int(row[rx + 1]) + 1) >> 1) }
+                    for rx in 0..<8 { dst[rx] = Int16((Int(row[rx]) + Int(row[rx + 1]) + roundOffset) >> 1) }
                 }
             } else if fractX == 0 {
                 for ry in 0..<8 {
                     let row0 = plane.advanced(by: (intY + ry) * width + intX)
                     let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 { dst[rx] = Int16((Int(row0[rx]) + Int(row1[rx]) + 1) >> 1) }
+                    for rx in 0..<8 { dst[rx] = Int16((Int(row0[rx]) + Int(row1[rx]) + roundOffset) >> 1) }
                 }
             } else {
                 for ry in 0..<8 {
                     let row0 = plane.advanced(by: (intY + ry) * width + intX)
                     let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 { dst[rx] = Int16((Int(row0[rx]) + Int(row0[rx+1]) + Int(row1[rx]) + Int(row1[rx+1]) + 2) >> 2) }
+                    for rx in 0..<8 { dst[rx] = Int16((Int(row0[rx]) + Int(row0[rx+1]) + Int(row1[rx]) + Int(row1[rx+1]) + 1 + roundOffset) >> 2) }
                 }
             }
             return
@@ -93,18 +90,18 @@ struct MotionEstimation {
                 let sx0 = max(0, min(intX + rx, width - 1))
                 let sx1 = max(0, min(intX + rx + fractX, width - 1))
                 if fractY == 0 {
-                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row0[sx1]) + 1) >> 1)
+                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row0[sx1]) + roundOffset) >> 1)
                 } else if fractX == 0 {
-                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row1[sx0]) + 1) >> 1)
+                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row1[sx0]) + roundOffset) >> 1)
                 } else {
-                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row0[sx1]) + Int(row1[sx0]) + Int(row1[sx1]) + 2) >> 2)
+                    dstPtr[rx] = Int16((Int(row0[sx0]) + Int(row0[sx1]) + Int(row1[sx0]) + Int(row1[sx1]) + 1 + roundOffset) >> 2)
                 }
             }
         }
     }
 
     @inline(__always)
-    static func fetchQuarterPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>) {
+    static func fetchQuarterPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>, roundOffset: Int) {
         if remX == 0 && remY == 0 {
             fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
             return
@@ -123,7 +120,7 @@ struct MotionEstimation {
                 let dst = dest.advanced(by: ry * 8)
                 for rx in 0..<8 {
                     let v = wA * wC * Int(row0[rx]) + wB * wC * Int(row0[rx + nextX]) + wA * wD * Int(row1[rx]) + wB * wD * Int(row1[rx + nextX])
-                    dst[rx] = Int16((v + 8) >> 4)
+                    dst[rx] = Int16((v + 7 + roundOffset) >> 4)
                 }
             }
             return
@@ -138,13 +135,13 @@ struct MotionEstimation {
                 let sx0 = max(0, min(intX + rx, width - 1))
                 let sx1 = max(0, min(intX + rx + nextX, width - 1))
                 let v = wA * wC * Int(row0[sx0]) + wB * wC * Int(row0[sx1]) + wA * wD * Int(row1[sx0]) + wB * wD * Int(row1[sx1])
-                dst[rx] = Int16((v + 8) >> 4)
+                dst[rx] = Int16((v + 7 + roundOffset) >> 4)
             }
         }
     }
 
     @inline(__always)
-    static func fetchEighthPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>) {
+    static func fetchEighthPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>, roundOffset: Int) {
         if remX == 0 && remY == 0 {
             fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
             return
@@ -163,7 +160,7 @@ struct MotionEstimation {
                 let dst = dest.advanced(by: ry * 8)
                 for rx in 0..<8 {
                     let v = wA * wC * Int(row0[rx]) + wB * wC * Int(row0[rx + nextX]) + wA * wD * Int(row1[rx]) + wB * wD * Int(row1[rx + nextX])
-                    dst[rx] = Int16((v + 32) >> 6)
+                    dst[rx] = Int16((v + 31 + roundOffset) >> 6)
                 }
             }
             return
@@ -178,7 +175,7 @@ struct MotionEstimation {
                 let sx0 = max(0, min(intX + rx, width - 1))
                 let sx1 = max(0, min(intX + rx + nextX, width - 1))
                 let v = wA * wC * Int(row0[sx0]) + wB * wC * Int(row0[sx1]) + wA * wD * Int(row1[sx0]) + wB * wD * Int(row1[sx1])
-                dst[rx] = Int16((v + 32) >> 6)
+                dst[rx] = Int16((v + 31 + roundOffset) >> 6)
             }
         }
     }
@@ -212,7 +209,7 @@ struct MotionEstimation {
         pBase: UnsafePointer<Int16>, 
         oPtr: UnsafeMutablePointer<Int16>,
         tPtr: UnsafeMutablePointer<Int16>,
-        width: Int, height: Int, bx: Int, by: Int
+        width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector, roundOffset: Int
     ) -> (Int, Int, Int) {
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
@@ -235,7 +232,7 @@ struct MotionEstimation {
             let dx: Int = offset.0
             let dy: Int = offset.1
             
-            let penalty: Int = getPenalty(dx: dx, dy: dy, lambda: 40)
+            let penalty: Int = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
             let maxSad = bestCoarseSad - penalty
             if maxSad < 0 { continue }
             
@@ -268,7 +265,7 @@ struct MotionEstimation {
             
             if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
-            let penalty: Int = getPenalty(dx: fineDx, dy: fineDy, lambda: 40)
+            let penalty: Int = getPenalty(dx: fineDx, dy: fineDy, pmv: pmv, lambda: 8)
             let maxSad = bestFineSad - penalty
             if maxSad < 0 { continue }
             
@@ -299,13 +296,13 @@ struct MotionEstimation {
                 let fractX: Int = hpDx & 1
                 let fractY: Int = hpDy & 1
                 
-                let penalty: Int = getPenalty(dx: hpDx, dy: hpDy, lambda: 20)
+                let penalty: Int = getPenalty(dx: hpDx, dy: hpDy, pmv: pmv, lambda: 4)
                 let maxSad = bestHpSad - penalty
                 if maxSad < 0 { continue }
                 
                 fetchHalfPixelBlock8(plane: pBase, width: width, height: height,
                                      intX: bx + intDx, intY: by + intDy,
-                                     fractX: fractX, fractY: fractY, dest: tPtr)
+                                     fractX: fractX, fractY: fractY, dest: tPtr, roundOffset: roundOffset)
                 let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
                 
                 let totalSad: Int = sad + penalty
@@ -333,13 +330,13 @@ struct MotionEstimation {
                 let remX: Int = epDx & 7
                 let remY: Int = epDy & 7
                 
-                let penalty: Int = getPenalty(dx: epDx, dy: epDy, lambda: 5)
+                let penalty: Int = getPenalty(dx: epDx, dy: epDy, pmv: pmv, lambda: 2)
                 let maxSad = bestEpSad - penalty
                 if maxSad < 0 { continue }
                 
                 fetchEighthPixelBlock8(plane: pBase, width: width, height: height,
                                        intX: bx + intDx, intY: by + intDy,
-                                       remX: remX, remY: remY, dest: tPtr)
+                                       remX: remX, remY: remY, dest: tPtr, roundOffset: roundOffset)
                 let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
                 
                 let totalSad: Int = sad + penalty
@@ -361,7 +358,7 @@ struct MotionEstimation {
         cPtr: UnsafeMutablePointer<Int16>,
         oPtr: UnsafeMutablePointer<Int16>,
         tPtr: UnsafeMutablePointer<Int16>,
-        width: Int, height: Int, bx: Int, by: Int, range: Int = 4
+        width: Int, height: Int, bx: Int, by: Int, range: Int = 4, pmv: MotionVector, roundOffset: Int
     ) -> (MotionVector, Int) {
         return currPlane.withUnsafeBufferPointer { cBuf in
             prevPlane.withUnsafeBufferPointer { pBuf in
@@ -370,7 +367,7 @@ struct MotionEstimation {
                 }
 
                 fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
-                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by)
+                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by, pmv: pmv, roundOffset: roundOffset)
                 return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
             }
         }

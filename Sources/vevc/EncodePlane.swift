@@ -1343,11 +1343,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     let (bufCb, reconCb, base8CbBlocks) = await taskBufCb
     let (bufCr, reconCr, base8CrBlocks) = await taskBufCr
     
-    var mutReconY = reconY
-    var mutReconCb = reconCb
-    var mutReconCr = reconCr
-    
-    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
+    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
     
     debugLog("  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes")
     
@@ -1400,7 +1396,7 @@ func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: Qu
             let loopH = validEndY - startY
             let loopW = validEndX - startX
             
-            if loopH > 0 && loopW > 0 {
+            if 0 < loopH && 0 < loopW {
                 let v = blk
                 for h in 0..<loopH {
                     let srcPtr = v.rowPointer(y: h)
@@ -1497,8 +1493,9 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     return (out, reconstructed)
 }
 
+
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1511,72 +1508,113 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
-    let (mvs, sads) = predictedPd != nil ? await computeMotionVectors(curr: pd, prev: predictedPd!, pool: pool) : (nil, nil)
+    let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
+    let isPFrame = false
     
-    var mutPdY: [Int16]
-    var mutPdCb: [Int16]
-    var mutPdCr: [Int16]
-    if let pPd = predictedPd, let mvs = mvs {
-        mutPdY = pool.getInt16(count: pd.y.count)
-        mutPdCb = pool.getInt16(count: pd.cb.count)
-        mutPdCr = pool.getInt16(count: pd.cr.count)
-        mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-        mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-        mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-        subtractMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2)
-        subtractMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-        subtractMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-    } else {
-        mutPdY = pd.y
-        mutPdCb = pd.cb
-        mutPdCr = pd.cr
-    }
-    let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
-
-    // P-frame flag: passed downstream so entropy encode layers can apply
-    // more aggressive zero-block thresholds on P-frame residuals.
-    let isPFrame = predictedPd != nil
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
     
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
-    
-    // Layer chain reconstruction: Base8 → Layer16 → Layer32
-    // Build Image16 from base reconstruction for boundaryRepeat support
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
     
-    // Layer16: LL = base reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
     let l1dx = sub2.width
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    var mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     
-    // Build Image16 from Layer16 reconstruction
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
     
-    // Layer32: LL = layer16 reconstruction (via Image16.getY/Cb/Cr with boundaryRepeat)
-    let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
-    let reconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    let reconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
+    var mutReconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     
-    var mutReconL2Y = reconL2Y
-    var mutReconL2Cb = reconL2Cb
-    var mutReconL2Cr = reconL2Cr
+    applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
+    applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
+    applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
     
-    if let tPrev = predictedPd, let mvs = mvs {
-        applyMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2)
-        applyMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-        applyMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-    }
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
-    // Apply deblocking filter (blockSize corresponds to Layer32 output)
+    debugLog("  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes")
+    
+    var out: [UInt8] = []
+    appendUInt32BE(&out, 0)
+    appendUInt32BE(&out, 0)
+    appendUInt32BE(&out, UInt32(layer0.count))
+    out.append(contentsOf: layer0)
+    appendUInt32BE(&out, UInt32(layer1.count))
+    out.append(contentsOf: layer1)
+    appendUInt32BE(&out, UInt32(layer2.count))
+    out.append(contentsOf: layer2)
+    
+    return (out, reconstructed)
+}
+
+
+@inline(__always)
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420) {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+    
+    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
+    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2)
+    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1)
+    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1)
+    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
+    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
+    
+    let (mvs, sads) = await computeMotionVectors(curr: pd, prev: predictedPd, pool: pool, roundOffset: roundOffset)
+    
+    var mutPdY = pool.getInt16(count: pd.y.count)
+    var mutPdCb = pool.getInt16(count: pd.cb.count)
+    var mutPdCr = pool.getInt16(count: pd.cr.count)
+    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
+    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
+    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
+    
+    subtractMotionCompensationPixels(plane: &mutPdY, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
+    subtractMotionCompensationPixels(plane: &mutPdCb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    subtractMotionCompensationPixels(plane: &mutPdCr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    
+    let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
+    let isPFrame = true
+    
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
+    
+    let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+    
+    let l1dx = sub2.width
+    let l1dy = sub2.height
+    let l1cbDx = ((l1dx + 1) / 2)
+    let l1cbDy = ((l1dy + 1) / 2)
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    
+    let mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    
+    let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
+    
+    var mutReconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
+    var mutReconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    
+    applyMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
+    applyMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    applyMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
     applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
@@ -1587,38 +1625,26 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     
     var out: [UInt8] = []
     
-    let mvCount = mvs?.count ?? 0
+    let mvCount = mvs.count
     appendUInt32BE(&out, UInt32(mvCount))
-    
-    if mvCount > 0, let mvs = mvs {
-        let mvData = encodeMVs(mvs: mvs)
-        appendUInt32BE(&out, UInt32(mvData.count))
-        out.append(contentsOf: mvData)
-    } else {
-        appendUInt32BE(&out, 0) // mvDataLen = 0
-    }
+    let mvData = encodeMVs(mvs: mvs)
+    appendUInt32BE(&out, UInt32(mvData.count))
+    out.append(contentsOf: mvData)
 
     appendUInt32BE(&out, UInt32(layer0.count))
     out.append(contentsOf: layer0)
-    
     appendUInt32BE(&out, UInt32(layer1.count))
     out.append(contentsOf: layer1)
-    
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
     return (out, reconstructed)
 }
 
-/// bidirectional prediction
-/// if nextPd is not nil, search MVs for both forward(predictedPd) and backward(nextPd) and select the one with the smaller SAD for each block.
-/// add reference direction flag to bitstream
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420?, nextPd: PlaneData420?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
-    // if no backward reference, fallback to existing forward-only path
-    guard let pPd = predictedPd, let nPd = nextPd else {
-        return try await encodeSpatialLayers(pd: pd, pool: pool, predictedPd: predictedPd, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
-    }
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420) {
+    let pPd = predictedPd
+    let nPd = nextPd
     
     let dx = pd.width
     let dy = pd.height
@@ -1633,7 +1659,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
     // bidirectional MV calculation: search MVs for both forward and backward and select the one with the smaller SAD for each block
-    let (mvs, sads, refDirs) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, pool: pool)
+    let (mvs, sads, refDirs) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, pool: pool, roundOffset: roundOffset)
     
     // pixel level residual calculation based on reference direction
     var mutPdY = pool.getInt16(count: pd.y.count)
@@ -1642,9 +1668,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
     mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
     mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-    subtractBidirectionalMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2)
-    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
 
     let isPFrame = true
@@ -1661,9 +1687,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    var mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    var mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    var mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     
@@ -1678,9 +1704,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutReconL2Cr = reconL2Cr
     
     // bidirectional motion compensation addition (reconstruction)
-    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2)
-    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
-    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
     
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
@@ -1724,7 +1750,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 }
 
 @inline(__always)
-func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockViewPool) async -> ([MotionVector], [Int]) {
+func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockViewPool, roundOffset: Int) async -> ([MotionVector], [Int]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1765,10 +1791,13 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
                 let row = idx / colCount
                 let bx = col * 8
                 let by = row * 8
+                let pmv = (col > 0) ? mvsPtr[idx - 1] : MotionVector(dx: 0, dy: 0)
                 let (mv, sad) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: prevSub1, 
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2)
+                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv,
+                    roundOffset: roundOffset,
+                )
                 mvsPtr[idx] = mv
                 sadsPtr[idx] = sad
             }
@@ -1781,7 +1810,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
 /// and selects the one with smaller SAD per block.
 /// - Returns: (mvs, sads, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool) async -> ([MotionVector], [Int], [Bool]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool, roundOffset: Int) async -> ([MotionVector], [Int], [Bool]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1829,16 +1858,18 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let bx = col * 8
             let by = row * 8
             
+            let pmv = (col > 0) ? mvsPtr[idx - 1] : MotionVector(dx: 0, dy: 0)
+            
             let (mvPrev, sadPrev) = MotionEstimation.searchPixels(
                 currPlane: currSub1, prevPlane: prevSub1,
                 cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2,
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv, roundOffset: roundOffset
             )
             
             let (mvNext, sadNext) = MotionEstimation.searchPixels(
                 currPlane: currSub1, prevPlane: nextSub1,
                 cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2,
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv, roundOffset: roundOffset
             )
             
             var bestMv = mvPrev
@@ -1866,7 +1897,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
 
 /// bidirectional motion compensation pixel subtraction
 @inline(__always)
-func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
         for row in 0..<((height + blockSize - 1) / blockSize) {
@@ -1916,7 +1947,7 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
 
 /// Pixel addition for bidirectional motion compensation based on reference direction flag (for decoder/reconstruction)
 @inline(__always)
-func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
         for row in 0..<((height + blockSize - 1) / blockSize) {
@@ -1949,11 +1980,11 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                         if fractHalfX == 0 && fractHalfY == 0 {
                             predPixel = srcRow0[sx0]
                         } else if fractHalfY == 0 {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + 1) >> 1)
+                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + roundOffset) >> 1)
                         } else if fractHalfX == 0 {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + 1) >> 1)
+                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + roundOffset) >> 1)
                         } else {
-                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 2) >> 2)
+                            predPixel = Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 1 + roundOffset) >> 2)
                         }
                         dstPtr[x] = dstPtr[x] &+ predPixel
                     }
@@ -1965,7 +1996,7 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
 }
 
 @inline(__always)
-func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let rowCount = (height + blockSize - 1) / blockSize
     let obmcBorder = 2
@@ -2043,11 +2074,11 @@ func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], 
                             let sx1 = max(0, min(srcX + fractHalfX, width - 1))
                             var predPixel: Int32
                             if fractHalfY == 0 {
-                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + 1) >> 1)
+                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + roundOffset) >> 1)
                             } else if fractHalfX == 0 {
-                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + 1) >> 1)
+                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + roundOffset) >> 1)
                             } else {
-                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 2) >> 2)
+                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 1 + roundOffset) >> 2)
                             }
                             // OBMC
                             if y < obmcBorder && 0 < row {
@@ -2087,7 +2118,7 @@ func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], 
 }
 
 @inline(__always)
-func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int) {
+func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let rowCount = (height + blockSize - 1) / blockSize
     let obmcBorder = 2
@@ -2160,11 +2191,11 @@ func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs
                             let sx1 = max(0, min(srcX + fractHalfX, width - 1))
                             var predPixel: Int32
                             if fractHalfY == 0 {
-                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + 1) >> 1)
+                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + roundOffset) >> 1)
                             } else if fractHalfX == 0 {
-                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + 1) >> 1)
+                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow1[sx0]) + roundOffset) >> 1)
                             } else {
-                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 2) >> 2)
+                                predPixel = Int32((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 1 + roundOffset) >> 2)
                             }
                             if y < obmcBorder && 0 < row {
                                 let nIdx = min((row - 1) * colCount + col, mvs.count - 1)
