@@ -10,7 +10,7 @@ public enum EncodeError: Error {
 func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout EntropyEncoder<M>) {
     var q = val
     var bits = 0
-    while q > 0 {
+    while 0 < q {
         bits += 1
         q >>= 1
     }
@@ -29,49 +29,19 @@ func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyE
 }
 
 @inline(__always)
-func blockEncode32<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) {
+func blockEncode32V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
-    let zero16 = SIMD16<Int16>(repeating: 0)
 
-    if isVertical {
-        for x in stride(from: 32 - 1, through: 0, by: -1) {
-            for y in stride(from: 32 - 1, through: 0, by: -1) {
-                if block.rowPointer(y: y)[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
-            if lscpX != -1 { break }
-        }
-    } else {
+    for x in stride(from: 32 - 1, through: 0, by: -1) {
         for y in stride(from: 32 - 1, through: 0, by: -1) {
-            let ptr = block.rowPointer(y: y)
-            let v1 = UnsafeRawPointer(ptr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-            if any(v1 .!= zero16) {
-                for x in stride(from: 31, through: 16, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
+            if block.rowPointer(y: y)[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
             }
-            if lscpX != -1 { break }
-            
-            let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-            if any(v0 .!= zero16) {
-                for x in stride(from: 15, through: 0, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
-            }
-            if lscpX != -1 { break }
         }
+        if lscpX != -1 { break }
     }
 
     if lscpX == -1 {
@@ -91,106 +61,125 @@ func blockEncode32<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     var currentIdx = 0
     var startIdx = 0
     
-    if isVertical {
-        for x in 0...lscpX {
-            let endY = (x == lscpX) ? lscpY : (32 - 1)
-            for y in 0...endY {
-                let val = block.rowPointer(y: y)[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startX = startIdx / 32
-                    let startY = startIdx % 32
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
+    for x in 0...lscpX {
+        let endY = (x == lscpX) ? lscpY : (32 - 1)
+        for y in 0...endY {
+            let val = block.rowPointer(y: y)[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startX = startIdx / 32
+                let startY = startIdx % 32
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
             }
+            currentIdx += 1
         }
-        for y in (lscpY + 1)..<32 { block.rowPointer(y: y)[lscpX] = 0 }
-        for x in (lscpX + 1)..<32 {
-            for y in 0..<32 { block.rowPointer(y: y)[x] = 0 }
-        }
-    } else {
-        for y in 0...lscpY {
-            let ptr = block.rowPointer(y: y)
-            let endX = (y == lscpY) ? lscpX : (32 - 1)
-            for x in 0...endX {
-                let val = ptr[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startY = startIdx / 32
-                    let startX = startIdx % 32
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
-            }
-        }
-        let lscpPtr = block.rowPointer(y: lscpY)
-        for x in (lscpX + 1)..<32 { lscpPtr[x] = 0 }
-        for y in (lscpY + 1)..<32 {
-            let ptr = block.rowPointer(y: y)
-            for x in 0..<32 { ptr[x] = 0 }
-        }
+    }
+    for y in (lscpY + 1)..<32 { block.rowPointer(y: y)[lscpX] = 0 }
+    for x in (lscpX + 1)..<32 {
+        for y in 0..<32 { block.rowPointer(y: y)[x] = 0 }
     }
 }
 
 @inline(__always)
-func blockEncode16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) {
+func blockEncode32H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
-    let zero8 = SIMD8<Int16>(repeating: 0)
-
-    if isVertical {
-        for x in stride(from: 16 - 1, through: 0, by: -1) {
-            for y in stride(from: 16 - 1, through: 0, by: -1) {
-                if block.rowPointer(y: y)[x] != 0 {
+    let zero16 = SIMD16<Int16>(repeating: 0)
+    
+    for y in stride(from: 32 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        if any(v1 .!= zero16) {
+            for x in stride(from: 31, through: 16, by: -1) {
+                if ptr[x] != 0 {
                     lscpX = x
                     lscpY = y
                     break
                 }
             }
-            if lscpX != -1 { break }
         }
-    } else {
-        for y in stride(from: 16 - 1, through: 0, by: -1) {
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        if any(v0 .!= zero16) {
+            for x in stride(from: 15, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+    }
+    
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        for y in 0..<32 {
             let ptr = block.rowPointer(y: y)
-            let v1 = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
-            if any(v1 .!= zero8) {
-                for x in stride(from: 15, through: 8, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
-            }
-            if lscpX != -1 { break }
-            
-            let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-            if any(v0 .!= zero8) {
-                for x in stride(from: 7, through: 0, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
-            }
-            if lscpX != -1 { break }
+            for x in 0..<32 { ptr[x] = 0 }
         }
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    var startIdx = 0
+    
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (32 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = startIdx / 32
+                let startX = startIdx % 32
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
+            }
+            currentIdx += 1
+        }
+    }
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<32 { lscpPtr[x] = 0 }
+    for y in (lscpY + 1)..<32 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<32 { ptr[x] = 0 }
+    }
+}
+
+@inline(__always)
+func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
+    var lscpX = -1
+    var lscpY = -1
+    
+    for x in stride(from: 16 - 1, through: 0, by: -1) {
+        for y in stride(from: 16 - 1, through: 0, by: -1) {
+            if block.rowPointer(y: y)[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
+            }
+        }
+        if lscpX != -1 { break }
     }
 
     if lscpX == -1 {
@@ -210,106 +199,203 @@ func blockEncode16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     var currentIdx = 0
     var startIdx = 0
     
-    if isVertical {
-        for x in 0...lscpX {
-            let endY = (x == lscpX) ? lscpY : (16 - 1)
-            for y in 0...endY {
-                let val = block.rowPointer(y: y)[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startX = startIdx / 16
-                    let startY = startIdx % 16
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
+    for x in 0...lscpX {
+        let endY = (x == lscpX) ? lscpY : (16 - 1)
+        for y in 0...endY {
+            let val = block.rowPointer(y: y)[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startX = startIdx / 16
+                let startY = startIdx % 16
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
             }
+            currentIdx += 1
         }
-        for y in (lscpY + 1)..<16 { block.rowPointer(y: y)[lscpX] = 0 }
-        for x in (lscpX + 1)..<16 {
-            for y in 0..<16 { block.rowPointer(y: y)[x] = 0 }
-        }
-    } else {
-        for y in 0...lscpY {
-            let ptr = block.rowPointer(y: y)
-            let endX = (y == lscpY) ? lscpX : (16 - 1)
-            for x in 0...endX {
-                let val = ptr[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startY = startIdx / 16
-                    let startX = startIdx % 16
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
-            }
-        }
-        let lscpPtr = block.rowPointer(y: lscpY)
-        for x in (lscpX + 1)..<16 { lscpPtr[x] = 0 }
-        for y in (lscpY + 1)..<16 {
-            let ptr = block.rowPointer(y: y)
-            for x in 0..<16 { ptr[x] = 0 }
-        }
+    }
+    for y in (lscpY + 1)..<16 { block.rowPointer(y: y)[lscpX] = 0 }
+    for x in (lscpX + 1)..<16 {
+        for y in 0..<16 { block.rowPointer(y: y)[x] = 0 }
     }
 }
 
 @inline(__always)
-func blockEncode8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) {
+func blockEncode16H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
-    let zero4 = SIMD4<Int16>(repeating: 0)
-
-    if isVertical {
-        for x in stride(from: 8 - 1, through: 0, by: -1) {
-            for y in stride(from: 8 - 1, through: 0, by: -1) {
-                if block.rowPointer(y: y)[x] != 0 {
+    let zero8 = SIMD8<Int16>(repeating: 0)
+    
+    for y in stride(from: 16 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
+        if any(v1 .!= zero8) {
+            for x in stride(from: 15, through: 8, by: -1) {
+                if ptr[x] != 0 {
                     lscpX = x
                     lscpY = y
                     break
                 }
             }
-            if lscpX != -1 { break }
         }
-    } else {
-        for y in stride(from: 8 - 1, through: 0, by: -1) {
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        if any(v0 .!= zero8) {
+            for x in stride(from: 7, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        for y in 0..<16 {
             let ptr = block.rowPointer(y: y)
-            let v1 = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v1 .!= zero4) {
-                for x in stride(from: 7, through: 4, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
-            }
-            if lscpX != -1 { break }
-            
-            let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v0 .!= zero4) {
-                for x in stride(from: 3, through: 0, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
-            }
-            if lscpX != -1 { break }
+            for x in 0..<16 { ptr[x] = 0 }
         }
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    var startIdx = 0
+    
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (16 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = startIdx / 16
+                let startX = startIdx % 16
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
+            }
+            currentIdx += 1
+        }
+    }
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<16 { lscpPtr[x] = 0 }
+    for y in (lscpY + 1)..<16 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<16 { ptr[x] = 0 }
+    }
+}
+
+@inline(__always)
+func blockEncode8V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
+    var lscpX = -1
+    var lscpY = -1
+    
+    for x in stride(from: 8 - 1, through: 0, by: -1) {
+        for y in stride(from: 8 - 1, through: 0, by: -1) {
+            if block.rowPointer(y: y)[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
+            }
+        }
+        if lscpX != -1 { break }
+    }
+    
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        for y in 0..<8 {
+            let ptr = block.rowPointer(y: y)
+            for x in 0..<8 { ptr[x] = 0 }
+        }
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    var startIdx = 0
+    
+    
+    for x in 0...lscpX {
+        let endY = (x == lscpX) ? lscpY : (8 - 1)
+        for y in 0...endY {
+            let val = block.rowPointer(y: y)[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startX = startIdx / 8
+                let startY = startIdx % 8
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
+            }
+            currentIdx += 1
+        }
+    }
+    for y in (lscpY + 1)..<8 { block.rowPointer(y: y)[lscpX] = 0 }
+    for x in (lscpX + 1)..<8 {
+        for y in 0..<8 { block.rowPointer(y: y)[x] = 0 }
+    }
+}
+
+@inline(__always)
+func blockEncode8H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
+    var lscpX = -1
+    var lscpY = -1
+    let zero4 = SIMD4<Int16>(repeating: 0)
+    
+    for y in stride(from: 8 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v1 = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
+        if any(v1 .!= zero4) {
+            for x in stride(from: 7, through: 4, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
+        
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        if any(v0 .!= zero4) {
+            for x in stride(from: 3, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
+                }
+            }
+        }
+        if lscpX != -1 { break }
     }
 
     if lscpX == -1 {
@@ -329,94 +415,49 @@ func blockEncode8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, blo
     var currentIdx = 0
     var startIdx = 0
     
-    if isVertical {
-        for x in 0...lscpX {
-            let endY = (x == lscpX) ? lscpY : (8 - 1)
-            for y in 0...endY {
-                let val = block.rowPointer(y: y)[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startX = startIdx / 8
-                    let startY = startIdx % 8
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (8 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = startIdx / 8
+                let startX = startIdx % 8
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
             }
+            currentIdx += 1
         }
-        for y in (lscpY + 1)..<8 { block.rowPointer(y: y)[lscpX] = 0 }
-        for x in (lscpX + 1)..<8 {
-            for y in 0..<8 { block.rowPointer(y: y)[x] = 0 }
-        }
-    } else {
-        for y in 0...lscpY {
-            let ptr = block.rowPointer(y: y)
-            let endX = (y == lscpY) ? lscpX : (8 - 1)
-            for x in 0...endX {
-                let val = ptr[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startY = startIdx / 8
-                    let startX = startIdx % 8
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
-            }
-        }
-        let lscpPtr = block.rowPointer(y: lscpY)
-        for x in (lscpX + 1)..<8 { lscpPtr[x] = 0 }
-        for y in (lscpY + 1)..<8 {
-            let ptr = block.rowPointer(y: y)
-            for x in 0..<8 { ptr[x] = 0 }
-        }
+    }
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<8 { lscpPtr[x] = 0 }
+    for y in (lscpY + 1)..<8 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<8 { ptr[x] = 0 }
     }
 }
 
 @inline(__always)
-func blockEncode4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?, isVertical: Bool = false) {
+func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
     var lscpX = -1
     var lscpY = -1
-    let zero4 = SIMD4<Int16>(repeating: 0)
     
-    if isVertical {
-        for x in stride(from: 4 - 1, through: 0, by: -1) {
-            for y in stride(from: 4 - 1, through: 0, by: -1) {
-                if block.rowPointer(y: y)[x] != 0 {
-                    lscpX = x
-                    lscpY = y
-                    break
-                }
-            }
-            if lscpX != -1 { break }
-        }
-    } else {
+    for x in stride(from: 4 - 1, through: 0, by: -1) {
         for y in stride(from: 4 - 1, through: 0, by: -1) {
-            let ptr = block.rowPointer(y: y)
-            let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v0 .!= zero4) {
-                for x in stride(from: 3, through: 0, by: -1) {
-                    if ptr[x] != 0 {
-                        lscpX = x
-                        lscpY = y
-                        break
-                    }
-                }
+            if block.rowPointer(y: y)[x] != 0 {
+                lscpX = x
+                lscpY = y
+                break
             }
-            if lscpX != -1 { break }
         }
+        if lscpX != -1 { break }
     }
 
     if lscpX == -1 {
@@ -436,59 +477,96 @@ func blockEncode4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, blo
     var currentIdx = 0
     var startIdx = 0
     
-    if isVertical {
-        for x in 0...lscpX {
-            let endY = (x == lscpX) ? lscpY : (4 - 1)
-            for y in 0...endY {
-                let val = block.rowPointer(y: y)[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startX = startIdx / 4
-                    let startY = startIdx % 4
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
+    for x in 0...lscpX {
+        let endY = (x == lscpX) ? lscpY : (4 - 1)
+        for y in 0...endY {
+            let val = block.rowPointer(y: y)[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startX = startIdx / 4
+                let startY = startIdx % 4
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
+            }
+            currentIdx += 1
+        }
+    }
+    for y in (lscpY + 1)..<4 { block.rowPointer(y: y)[lscpX] = 0 }
+    for x in (lscpX + 1)..<4 {
+        for y in 0..<4 { block.rowPointer(y: y)[x] = 0 }
+    }
+}
+
+@inline(__always)
+func blockEncode4H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView?) {
+    var lscpX = -1
+    var lscpY = -1
+    let zero4 = SIMD4<Int16>(repeating: 0)
+    
+    for y in stride(from: 4 - 1, through: 0, by: -1) {
+        let ptr = block.rowPointer(y: y)
+        let v0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        if any(v0 .!= zero4) {
+            for x in stride(from: 3, through: 0, by: -1) {
+                if ptr[x] != 0 {
+                    lscpX = x
+                    lscpY = y
+                    break
                 }
-                currentIdx += 1
             }
         }
-        for y in (lscpY + 1)..<4 { block.rowPointer(y: y)[lscpX] = 0 }
-        for x in (lscpX + 1)..<4 {
-            for y in 0..<4 { block.rowPointer(y: y)[x] = 0 }
-        }
-    } else {
-        for y in 0...lscpY {
-            let ptr = block.rowPointer(y: y)
-            let endX = (y == lscpY) ? lscpX : (4 - 1)
-            for x in 0...endX {
-                let val = ptr[x]
-                if run == 0 { startIdx = currentIdx }
-                if val == 0 {
-                    run += 1
-                } else {
-                    let startY = startIdx / 4
-                    let startX = startIdx % 4
-                    let isParentZ: Bool
-                    if let pb = parentBlock {
-                        isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                    } else { isParentZ = false }
-                    encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
-                    run = 0
-                }
-                currentIdx += 1
-            }
-        }
-        let lscpPtr = block.rowPointer(y: lscpY)
-        for x in (lscpX + 1)..<4 { lscpPtr[x] = 0 }
-        for y in (lscpY + 1)..<4 {
+        if lscpX != -1 { break }
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        for y in 0..<4 {
             let ptr = block.rowPointer(y: y)
             for x in 0..<4 { ptr[x] = 0 }
         }
+        return
+    }
+    encoder.encodeBypass(binVal: 1)
+
+    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
+    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+
+    var run = 0
+    var currentIdx = 0
+    var startIdx = 0
+    
+    for y in 0...lscpY {
+        let ptr = block.rowPointer(y: y)
+        let endX = (y == lscpY) ? lscpX : (4 - 1)
+        for x in 0...endX {
+            let val = ptr[x]
+            if run == 0 { startIdx = currentIdx }
+            if val == 0 {
+                run += 1
+            } else {
+                let startY = startIdx / 4
+                let startX = startIdx % 4
+                let isParentZ: Bool
+                if let pb = parentBlock {
+                    isParentZ = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
+                } else { isParentZ = false }
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                run = 0
+            }
+            currentIdx += 1
+        }
+    }
+    let lscpPtr = block.rowPointer(y: lscpY)
+    for x in (lscpX + 1)..<4 { lscpPtr[x] = 0 }
+    for y in (lscpY + 1)..<4 {
+        let ptr = block.rowPointer(y: y)
+        for x in 0..<4 { ptr[x] = 0 }
     }
 }
 
@@ -1443,9 +1521,9 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
             let view = blocks[i]
             let subs = getSubbands8(view: view)
             blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-            blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil, isVertical: true)
-            blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode4V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: subs.hh, parentBlock: nil)
         } else {
             lastVal = 0
         }
@@ -1490,10 +1568,10 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
 
             let view = blocks[i]
             let subs = getSubbands8(view: view)
-            blockEncode4(encoder: &encoder, block: subs.ll, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: subs.hl, parentBlock: nil, isVertical: true)
-            blockEncode4(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: subs.ll, parentBlock: nil)
+            blockEncode4V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: subs.hh, parentBlock: nil)
         }
     }
     
@@ -1564,9 +1642,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
             let view = blocks[i]
             let subs = getSubbands32(view: view)
             blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-            blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil, isVertical: true)
-            blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+            blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+            blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
         
         case .split8(let tl, let tr, let bl, let br):
             let view = blocks[i]
@@ -1577,9 +1655,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
             }
             if tr {
                 let ll = BlockView(base: subs.ll.base.advanced(by: 8), width: 8, height: 8, stride: 32)
@@ -1587,9 +1665,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
             }
             if bl {
                 let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
@@ -1597,9 +1675,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
             }
             if br {
                 let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
@@ -1607,9 +1685,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
             }
         }
     }
@@ -1633,9 +1711,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode16:
-        blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: parentHL, isVertical: true)
-        blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
-        blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
+        blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: parentHL)
+        blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
+        blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
     case .split8(let tl, let tr, let bl, let br):
         if tl {
             let pbHL = BlockView(base: parentHL.base, width: 4, height: 4, stride: parentHL.stride)
@@ -1644,9 +1722,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32).clearAll()
@@ -1659,9 +1737,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
@@ -1674,9 +1752,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
@@ -1689,9 +1767,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
@@ -1708,17 +1786,17 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode16:
-        blockEncode16(encoder: &encoder, block: subs.hl, parentBlock: nil, isVertical: true)
-        blockEncode16(encoder: &encoder, block: subs.lh, parentBlock: nil)
-        blockEncode16(encoder: &encoder, block: subs.hh, parentBlock: nil)
+        blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+        blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+        blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
     case .split8(let tl, let tr, let bl, let br):
         if tl {
             let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
         } else {
             BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32).clearAll()
@@ -1728,9 +1806,9 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
@@ -1740,9 +1818,9 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
@@ -1752,9 +1830,9 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-            blockEncode8(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
@@ -1774,9 +1852,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode8:
-        blockEncode8(encoder: &encoder, block: subs.hl, parentBlock: parentHL, isVertical: true)
-        blockEncode8(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
-        blockEncode8(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
+        blockEncode8V(encoder: &encoder, block: subs.hl, parentBlock: parentHL)
+        blockEncode8H(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
+        blockEncode8H(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
     case .split4(let tl, let tr, let bl, let br):
         if tl {
             let pbHL = BlockView(base: parentHL.base, width: 2, height: 2, stride: parentHL.stride)
@@ -1785,9 +1863,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
         if tr {
             let pbHL = BlockView(base: parentHL.base.advanced(by: 2), width: 2, height: 2, stride: parentHL.stride)
@@ -1796,9 +1874,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
         if bl {
             let pbHL = BlockView(base: parentHL.base.advanced(by: 2 * parentHL.stride), width: 2, height: 2, stride: parentHL.stride)
@@ -1807,9 +1885,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
         if br {
             let pbHL = BlockView(base: parentHL.base.advanced(by: 2 * parentHL.stride + 2), width: 2, height: 2, stride: parentHL.stride)
@@ -1818,9 +1896,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
     }
 }
@@ -1833,41 +1911,41 @@ func encodeSubbands16WithoutParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode8:
-        blockEncode8(encoder: &encoder, block: subs.hl, parentBlock: nil, isVertical: true)
-        blockEncode8(encoder: &encoder, block: subs.lh, parentBlock: nil)
-        blockEncode8(encoder: &encoder, block: subs.hh, parentBlock: nil)
+        blockEncode8V(encoder: &encoder, block: subs.hl, parentBlock: nil)
+        blockEncode8H(encoder: &encoder, block: subs.lh, parentBlock: nil)
+        blockEncode8H(encoder: &encoder, block: subs.hh, parentBlock: nil)
     case .split4(let tl, let tr, let bl, let br):
         if tl {
             let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
         }
         if tr {
             let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
         }
         if bl {
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
         }
         if br {
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-            blockEncode4(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
         }
     }
 }
