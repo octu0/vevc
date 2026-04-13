@@ -934,6 +934,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
             last = ptrY[15]
         }
     }
+    lastVal = last
 }
 
 // MARK: - Transform Functions
