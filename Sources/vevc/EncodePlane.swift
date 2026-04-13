@@ -65,6 +65,12 @@ func spatialSADThreshold(baseSAD: Int, blockCol: Int, blockRow: Int, colCount: I
     return (baseSAD * weight) / 1024
 }
 
+@inline(__always)
+func scaledSADThreshold(_ defaultSAD: Int, step: Int) -> Int {
+    if step <= 2 { return 0 }
+    return (defaultSAD * min(step, 256)) / 48
+}
+
 final class ConcurrentBox<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }
@@ -639,7 +645,7 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
             if let sList = sads, index < sList.count {
                 let col = index % yColCount32
                 let row = index / yColCount32
-                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row, colCount: yColCount32, rowCount: yRowCount32)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount32, rowCount: yRowCount32)
                 if sList[index] < threshold { view.clearAll() }
             }
             var v = view
@@ -657,7 +663,7 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
                 let lumaIdx = (row * 2) * yColCount32 + (col * 2)
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
 
-                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row, colCount: cbColCount32, rowCount: cbRowCount32)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount32, rowCount: cbRowCount32)
                 if sadVal < threshold { view.clearAll() }
             }
             var v = view
@@ -675,7 +681,7 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
                 let lumaIdx = (row * 2) * yColCount32 + (col * 2)
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
 
-                let threshold = spatialSADThreshold(baseSAD: 75, blockCol: col, blockRow: row, colCount: cbColCount32, rowCount: cbRowCount32)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(75, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount32, rowCount: cbRowCount32)
                 if sadVal < threshold { view.clearAll() }
             }
             var v = view
@@ -709,7 +715,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
             if let sList = sads, index < sList.count {
                 let col = index % yColCount16
                 let row = index / yColCount16
-                let threshold = spatialSADThreshold(baseSAD: 75, blockCol: col, blockRow: row, colCount: yColCount16, rowCount: yRowCount16)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(75, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount16, rowCount: yRowCount16)
                 if sList[index] < threshold { view.clearAll() }
             }
             var v = view
@@ -727,7 +733,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
                 let lumaIdx = (row * 2) * yColCount16 + (col * 2)
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
 
-                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row, colCount: cbColCount16, rowCount: cbRowCount16)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount16, rowCount: cbRowCount16)
                 if sadVal < threshold { view.clearAll() }
             }
             var v = view
@@ -745,7 +751,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
                 let lumaIdx = (row * 2) * yColCount16 + (col * 2)
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
 
-                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row, colCount: cbColCount16, rowCount: cbRowCount16)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount16, rowCount: cbRowCount16)
                 if sadVal < threshold { view.clearAll() }
             }
             var v = view
@@ -1256,7 +1262,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
             if let sList = sads, i < sList.count {
                 let col = i % yColCount8
                 let row = i / yColCount8
-                let threshold = spatialSADThreshold(baseSAD: 150, blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
                 if sList[i] < threshold { blocks[i].clearAll() }
             }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtY)
@@ -1292,7 +1298,8 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
                 let lumaIdx: Int = r2 * lumaColCount + c2
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
             }
-            if sadVal < 75 { blocks[i].clearAll() }
+            let threshold = scaledSADThreshold(75, step: Int(qtC.step))
+            if sadVal < threshold { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         
@@ -1322,7 +1329,8 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
                 let lumaIdx: Int = r2 * lumaColCount + c2
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
             }
-            if sadVal < 75 { blocks[i].clearAll() }
+            let threshold = scaledSADThreshold(75, step: Int(qtC.step))
+            if sadVal < threshold { blocks[i].clearAll() }
             evaluateQuantizeBase8(block: &blocks[i], qt: qtC)
         }
         

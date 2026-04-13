@@ -68,7 +68,7 @@ struct RateController {
         let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
         
         // SSIM Min 0.71, Max 0.99
-        let maxStep = max(baseStep, 48)
+        let maxStep = max(baseStep * 4, 512)
         
         var newStepInt = baseStep
         if 0 < lastPFrameBits && 0 < lastPFrameQStep {

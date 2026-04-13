@@ -67,13 +67,17 @@ struct QuantizationTable: Sendable {
         case 2:
             qMidNum = 6; qMidDen = 5          // 1.2
             qHighNum = 6; qHighDen = 4        // 1.5
-            deadZoneBiasMid = kDeadZoneBiasNeg005
-            deadZoneBiasHigh = kDeadZoneBiasNeg010
+            if 2 < baseStep {
+                deadZoneBiasMid = kDeadZoneBiasNeg005
+                deadZoneBiasHigh = kDeadZoneBiasNeg010
+            }
         case 1:
             qMidNum = 2; qMidDen = 4          // 0.5
             qHighNum = 4; qHighDen = 4        // 1.0
-            deadZoneBiasMid = 0
-            deadZoneBiasHigh = kDeadZoneBiasNeg005
+            if 2 < baseStep {
+                deadZoneBiasMid = 0
+                deadZoneBiasHigh = kDeadZoneBiasNeg005
+            }
         default: // layerIndex == 0
             qMidNum = 1; qMidDen = 4          // 0.25
             qHighNum = 2; qHighDen = 4        // 0.5
