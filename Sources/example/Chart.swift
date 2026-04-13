@@ -11,6 +11,12 @@ struct CodecBenchmarkResult {
     let stats: QualityStats?
 }
 
+struct BitrateSsimPoint: Hashable {
+    let codec: String
+    let bitrate: Int
+    let ssim: Double
+}
+
 @available(macOS 13.0, *)
 struct SpeedSizeChart: View {
     let results: [CodecBenchmarkResult]
@@ -234,5 +240,66 @@ func generateAndSaveCharts(results: [CodecBenchmarkResult], outDir: String = "do
             try? pngData.write(to: path)
             print("Saved \(path.path)")
         }
+    }
+}
+
+@available(macOS 13.0, *)
+struct BitrateSsimChart: View {
+    let points: [BitrateSsimPoint]
+    
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text("SSIM vs Bitrate (Higher is better)")
+                .font(.title)
+                .padding()
+            
+            Chart(points, id: \.self) { pt in
+                LineMark(
+                    x: .value("Bitrate", pt.bitrate),
+                    y: .value("SSIM Avg", pt.ssim)
+                )
+                .foregroundStyle(by: .value("Codec", pt.codec))
+                
+                PointMark(
+                    x: .value("Bitrate", pt.bitrate),
+                    y: .value("SSIM Avg", pt.ssim)
+                )
+                .foregroundStyle(by: .value("Codec", pt.codec))
+                .symbol(.circle)
+            }
+            .chartForegroundStyleScale([
+                "VEVC (Layers)": Color.orange,
+                "HEVC (SW)": Color.blue.opacity(0.3),
+                "H.264 (SW)": Color.green.opacity(0.3)
+            ])
+            .chartXScale(domain: 100...1500)
+            .chartYScale(domain: .automatic(includesZero: false))
+            .chartXAxis {
+                AxisMarks(values: Array(stride(from: 100, through: 1500, by: 100))) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel()
+                }
+            }
+            .frame(width: 800, height: 500)
+            .padding()
+        }
+        .background(Color.white)
+    }
+}
+
+@available(macOS 13.0, *)
+@MainActor
+func generateAndSaveBitrateCharts(points: [BitrateSsimPoint], outDir: String = "docs") {
+    let chartView = BitrateSsimChart(points: points)
+    let renderer = ImageRenderer(content: chartView)
+    renderer.scale = 2.0
+    if let nsImage = renderer.nsImage,
+       let tiffData = nsImage.tiffRepresentation,
+       let bitmapImage = NSBitmapImageRep(data: tiffData),
+       let pngData = bitmapImage.representation(using: .png, properties: [:]) {
+        let path = URL(fileURLWithPath: "\(outDir)/bitrate_ssim.png")
+        try? pngData.write(to: path)
+        print("Saved \(path.path)")
     }
 }

@@ -14,6 +14,7 @@ struct Config {
     var quality: Bool = false
     var outputGraph: Bool = false
     var outputVersus: Bool = false
+    var outputBitrates: Bool = false
     var vevcOnly: Bool = false
 }
 
@@ -769,11 +770,14 @@ struct CompareApp {
             }
         case "-quality":
             config.quality = true
-        case "-output-graph":
+        case "-output-graph", "--output-graph":
             config.outputGraph = true
-        case "-output-versus":
+        case "-output-versus", "--output-versus":
             config.outputVersus = true
-        case "-vevc-only":
+        case "-output-bitrates", "--output-bitrates":
+            config.outputBitrates = true
+            config.quality = true
+        case "-vevc-only", "--vevc-only":
             config.vevcOnly = true
         case "-y4m":
             if (i + 1) < args.count {
@@ -922,6 +926,39 @@ struct CompareApp {
             if localConfig.outputGraph {
                 await MainActor.run {
                     generateAndSaveCharts(results: chartResults)
+                }
+            }
+            
+            if localConfig.outputBitrates {
+                print("\n--- Running Bitrate Sweep (100 - 1500) ---")
+                var chartPoints: [BitrateSsimPoint] = []
+                let bitrates = Array(stride(from: 100, through: 1500, by: 100))
+                
+                for br in bitrates {
+                    var sweepConfig = localConfig
+                    sweepConfig.bitrate = br
+                    print(">> Bitrate: \(br) kbps")
+                    
+                    let vevcRes = try await runVEVC(images: localImages, config: sweepConfig)
+                    if let stats = calculateQualityStats(metrics: vevcRes.metrics ?? []) {
+                        chartPoints.append(.init(codec: "VEVC (Layers)", bitrate: br, ssim: stats.avgSSIM))
+                    }
+                    
+                    if !localConfig.vevcOnly {
+                        let h264SwRes = try await runH264(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
+                        if let stats = calculateQualityStats(metrics: h264SwRes.metrics ?? []) {
+                            chartPoints.append(.init(codec: "H.264 (SW)", bitrate: br, ssim: stats.avgSSIM))
+                        }
+                        
+                        let hevcSwRes = try await runHEVC(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
+                        if let stats = calculateQualityStats(metrics: hevcSwRes.metrics ?? []) {
+                            chartPoints.append(.init(codec: "HEVC (SW)", bitrate: br, ssim: stats.avgSSIM))
+                        }
+                    }
+                }
+                
+                await MainActor.run {
+                    generateAndSaveBitrateCharts(points: chartPoints)
                 }
             }
             

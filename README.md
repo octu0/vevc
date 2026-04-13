@@ -121,6 +121,10 @@ SW: Software, HWA: Hardware Acceleration
 
 ![ssim](docs/ssim.png)
 
+### Bitrate vs SSIM
+
+![bitrate_ssim](docs/bitrate_ssim.png)
+
 ### Visual Quality Comparison
 
 *(Crop 400x400 from Tears of Steel 1080p width)*
