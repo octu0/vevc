@@ -29,10 +29,7 @@ struct Quantizer: Sendable {
     }
 }
 
-// why: dead-zone bias in Q16 fixed-point avoids rounding small coefficients
-// up to 1, improving compression of near-zero subbands
-private let kDeadZoneBiasNeg005: Int32 = -3277  // -0.05 * 65536
-private let kDeadZoneBiasNeg010: Int32 = -6554  // -0.10 * 65536
+// why: dead-zone bias is skipped in favor of roundToNearest for better SSIM scaling at high bitrates
 
 struct QuantizationTable: Sendable {
     let step: Int16
@@ -60,26 +57,18 @@ struct QuantizationTable: Sendable {
         var qHighNum = 6      // HH scale numerator      (6/4 = 1.5)
         var qHighDen = 4      // HH scale denominator
         var qLowDivisor = 6
-        var deadZoneBiasMid: Int32 = 0   // HL/LH dead zone bias (Q16)
-        var deadZoneBiasHigh: Int32 = 0  // HH dead zone bias (Q16)
 
         switch layerIndex {
         case 2:
             qMidNum = 6; qMidDen = 5          // 1.2
             qHighNum = 6; qHighDen = 4        // 1.5
-            deadZoneBiasMid = kDeadZoneBiasNeg005
-            deadZoneBiasHigh = kDeadZoneBiasNeg010
         case 1:
             qMidNum = 2; qMidDen = 4          // 0.5
             qHighNum = 4; qHighDen = 4        // 1.0
-            deadZoneBiasMid = 0
-            deadZoneBiasHigh = kDeadZoneBiasNeg005
         default: // layerIndex == 0
             qMidNum = 1; qMidDen = 4          // 0.25
             qHighNum = 2; qHighDen = 4        // 0.5
             qLowDivisor = 12
-            deadZoneBiasMid = 0
-            deadZoneBiasHigh = 0
         }
 
         if isChroma {
@@ -88,8 +77,8 @@ struct QuantizationTable: Sendable {
             self.qHigh = Quantizer(step: Int(min(8192, max(1, (baseStep * qHighNum) / qHighDen))))
         } else {
             self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(min(8192, max(1, (baseStep * qMidNum) / qMidDen))), deadZoneBias: deadZoneBiasMid)
-            self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), deadZoneBias: deadZoneBiasHigh)
+            self.qMid = Quantizer(step: Int(min(8192, max(1, (baseStep * qMidNum) / qMidDen))), roundToNearest: true)
+            self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: true)
         }
     }
 }
