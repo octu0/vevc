@@ -71,6 +71,7 @@ struct RateController {
         let maxStep = max(baseStep * 4, 512)
         
         var newStepInt = baseStep
+        let minStep = max(8, baseStep / 2)
         if 0 < lastPFrameBits && 0 < lastPFrameQStep {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
             // predictedCurrentBits = lastPFrameBits * multiplier
@@ -80,10 +81,10 @@ struct RateController {
             // val = lastPFrameQStep * ratio
             let val = (Int64(lastPFrameQStep) * predictedBits64) / Int64(safeTarget)
             
-            newStepInt = Int(max(1, min(Int64(maxStep), val)))
+            newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), val)))
         }
         
-        let finalStep = max(1, min(maxStep, newStepInt))
+        let finalStep = max(minStep, min(maxStep, newStepInt))
         return finalStep
     }
     

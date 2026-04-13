@@ -451,7 +451,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // I-frame quality bias: 0.85 = 85/100
     let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 85) / (Int64(targetBits) * 100)
 
-    let q = min(256, Int(max(1, predictedStep64)))
+    let q = min(256, Int(max(8, predictedStep64)))
     
     return QuantizationTable(baseStep: q)
 }

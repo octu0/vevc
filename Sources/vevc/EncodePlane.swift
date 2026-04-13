@@ -67,7 +67,6 @@ func spatialSADThreshold(baseSAD: Int, blockCol: Int, blockRow: Int, colCount: I
 
 @inline(__always)
 func scaledSADThreshold(_ defaultSAD: Int, step: Int) -> Int {
-    if step <= 2 { return 0 }
     return (defaultSAD * min(step, 256)) / 48
 }
 
