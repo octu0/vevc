@@ -1862,32 +1862,74 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let bx = col * 8
             let by = row * 8
             
-            let pmv = (col > 0) ? mvsPtr[idx - 1] : MotionVector(dx: 0, dy: 0)
+            let mvA = (col > 0) ? mvsPtr[idx - 1] : MotionVector(dx: 0, dy: 0)
+            let mvB = (row > 0) ? mvsPtr[idx - colCount] : MotionVector(dx: 0, dy: 0)
+            let mvC = (row > 0 && col < colCount - 1) ? mvsPtr[idx - colCount + 1] : MotionVector(dx: 0, dy: 0)
             
-            let (mvPrev, sadPrev) = MotionEstimation.searchPixels(
+            let pmvDx = MotionEstimation.median(Int(mvA.dx), Int(mvB.dx), Int(mvC.dx))
+            let pmvDy = MotionEstimation.median(Int(mvA.dy), Int(mvB.dy), Int(mvC.dy))
+            let pmv = MotionVector(dx: Int16(pmvDx), dy: Int16(pmvDy))
+            
+            let (mvPrev, mutSadPrev) = MotionEstimation.searchPixels(
                 currPlane: currSub1, prevPlane: prevSub1,
                 cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv, roundOffset: roundOffset
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: pmv, roundOffset: roundOffset
             )
             
-            let (mvNext, sadNext) = MotionEstimation.searchPixels(
-                currPlane: currSub1, prevPlane: nextSub1,
-                cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv, roundOffset: roundOffset
-            )
+            let prevChromaPenalty: Int
+            if mutSadPrev <= 512 {
+                let intPrevDx = Int(mvPrev.dx) >> 3
+                let intPrevDy = Int(mvPrev.dy) >> 3
+                let prevChromaSad = MotionEstimation.computeChromaSAD(curr: curr, ref: prev, bx: bx, by: by, refDx: intPrevDx, refDy: intPrevDy)
+                prevChromaPenalty = prevChromaSad / 4
+            } else {
+                prevChromaPenalty = 0
+            }
+            let sadPrev = mutSadPrev + prevChromaPenalty
             
             var bestMv = mvPrev
             var bestSad = sadPrev
             var dir = false
             
-            if sadNext < sadPrev {
-                bestMv = mvNext
-                bestSad = sadNext
-                dir = true
-            } else if sadNext == sadPrev && (mvNext.dy * mvNext.dy + mvNext.dx * mvNext.dx) < (mvPrev.dy * mvPrev.dy + mvPrev.dx * mvPrev.dx) {
-                bestMv = mvNext
-                bestSad = sadNext
-                dir = true
+            // Early Exit: If the forward prediction is extremely good, skip backward prediction.
+            // A SAD of 256 means an average error of 4 per pixel in an 8x8 block.
+            // This completely eliminates "ghosting" artifacts on solid backgrounds
+            // where SAD might randomly be lower in the I-frame due to noise.
+            if 256 <= sadPrev {
+                let (mvNext, sadNext) = MotionEstimation.searchPixels(
+                    currPlane: currSub1, prevPlane: nextSub1,
+                    cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: pmv, roundOffset: roundOffset
+                )
+                
+                let mvEnergyNext = abs(Int(mvNext.dx)) + abs(Int(mvNext.dy))
+                let baselinePenalty = (mvEnergyNext * 8) + 32
+                
+                if sadNext + baselinePenalty < sadPrev {
+                    // Structural Validation
+                    let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
+                    let intNextDx = Int(mvNext.dx) >> 3
+                    let intNextDy = Int(mvNext.dy) >> 3
+                    let nextContrast = MotionEstimation.extractContrast8x8(plane: nextSub1, width: targetWidth, height: targetHeight, bx: bx + intNextDx, by: by + intNextDy)
+                    
+                    let contrastDiff = abs(currContrast - nextContrast)
+                    let structurePenalty = contrastDiff * contrastDiff
+                    
+                    // Chroma SAD penalty to completely block mismatching colors (e.g. blue background vs red hair)
+                    let chromaSAD = MotionEstimation.computeChromaSAD(curr: curr, ref: next, bx: bx, by: by, refDx: intNextDx, refDy: intNextDy)
+                    
+                    let chromaPenalty = chromaSAD / 4
+                    
+                    if sadNext + baselinePenalty + structurePenalty + chromaPenalty < sadPrev {
+                        bestMv = mvNext
+                        bestSad = sadNext
+                        dir = true
+                    } else if sadNext + baselinePenalty + structurePenalty + chromaPenalty == sadPrev && (mvNext.dy * mvNext.dy + mvNext.dx * mvNext.dx) < (mvPrev.dy * mvPrev.dy + mvPrev.dx * mvPrev.dx) {
+                        bestMv = mvNext
+                        bestSad = sadNext
+                        dir = true
+                    }
+                }
             }
             
             mvsPtr[idx] = bestMv

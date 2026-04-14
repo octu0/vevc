@@ -203,13 +203,18 @@ struct MotionEstimation {
         }
         return Int(sad) * 2
     }
+    
+    @inline(__always)
+    static func median(_ a: Int, _ b: Int, _ c: Int) -> Int {
+        return max(min(a, b), min(max(a, b), c))
+    }
     @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
         pBase: UnsafePointer<Int16>, 
         oPtr: UnsafeMutablePointer<Int16>,
         tPtr: UnsafeMutablePointer<Int16>,
-        width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector, roundOffset: Int
+        width: Int, height: Int, bx: Int, by: Int, range: Int, pmv: MotionVector, roundOffset: Int
     ) -> (Int, Int, Int) {
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: oPtr)
@@ -222,28 +227,30 @@ struct MotionEstimation {
         var bestCoarseDx: Int = 0
         var bestCoarseDy: Int = 0
         
-        let coarseOffsets: [(Int, Int)] = [
-            (-2, -2), (0, -2), (2, -2),
-            (-2,  0),          (2,  0),
-            (-2,  2), (0,  2), (2,  2)
-        ]
+        let minDy = max(-range, -by)
+        let maxDy = min(range, height - by - 8)
+        let minDx = max(-range, -bx)
+        let maxDx = min(range, width - bx - 8)
         
-        for offset in coarseOffsets {
-            let dx: Int = offset.0
-            let dy: Int = offset.1
-            
-            let penalty: Int = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
-            let maxSad = bestCoarseSad - penalty
-            if maxSad < 0 { continue }
-            
-            fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + dx, y: by + dy, dest: tPtr)
-            let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
-            
-            let totalSad: Int = sad + penalty
-            if totalSad < bestCoarseSad {
-                bestCoarseSad = totalSad
-                bestCoarseDx = dx
-                bestCoarseDy = dy
+        if minDy <= maxDy && minDx <= maxDx {
+            for dy in minDy...maxDy {
+                for dx in minDx...maxDx {
+                    if dx == 0 && dy == 0 { continue }
+                    
+                    let penalty: Int = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
+                    let maxSad = bestCoarseSad - penalty
+                    if maxSad < 0 { continue }
+                    
+                    fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + dx, y: by + dy, dest: tPtr)
+                    let sad: Int = compute64PointSAD_Blocks(cBase: cPtr, pBase: tPtr)
+                    
+                    let totalSad: Int = sad + penalty
+                    if totalSad < bestCoarseSad {
+                        bestCoarseSad = totalSad
+                        bestCoarseDx = dx
+                        bestCoarseDy = dy
+                    }
+                }
             }
         }
         
@@ -367,9 +374,87 @@ struct MotionEstimation {
                 }
 
                 fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
-                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by, pmv: pmv, roundOffset: roundOffset)
+                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by, range: range, pmv: pmv, roundOffset: roundOffset)
                 return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
             }
         }
+    }
+
+    /// Extract approximate structure contrast (max - min) from 8x8 block
+    /// Zero-cost feature extraction without additional SIMD loop overheads.
+    @inline(__always)
+    static func extractContrast8x8(plane: [Int16], width: Int, height: Int, bx: Int, by: Int) -> Int {
+        var minVal: Int32 = 32767
+        var maxVal: Int32 = -32768
+        
+        plane.withUnsafeBufferPointer { buf in
+            guard let base = buf.baseAddress else { return }
+            
+            if bx >= 0 && by >= 0 && bx + 8 <= width && by + 8 <= height {
+                for y in 0..<8 {
+                    let row = base.advanced(by: (by + y) * width + bx)
+                    for x in 0..<8 {
+                        let val = Int32(row[x])
+                        if val < minVal { minVal = val }
+                        if maxVal < val { maxVal = val }
+                    }
+                }
+            } else {
+                for y in 0..<8 {
+                    let sy = max(0, min(by + y, height - 1))
+                    let row = base.advanced(by: sy * width)
+                    for x in 0..<8 {
+                        let sx = max(0, min(bx + x, width - 1))
+                        let val = Int32(row[sx])
+                        if val < minVal { minVal = val }
+                        if maxVal < val { maxVal = val }
+                    }
+                }
+            }
+        }
+        
+        return Int(maxVal - minVal)
+    }
+
+    @inline(__always)
+    static func computeChromaSAD(
+        curr: PlaneData420, ref: PlaneData420,
+        bx: Int, by: Int, refDx: Int, refDy: Int
+    ) -> Int {
+        let cbw = (curr.width + 1) / 2
+        let cbh = (curr.height + 1) / 2
+        let bx2 = bx * 2
+        let by2 = by * 2
+        let refX2 = bx2 + (refDx * 2)
+        let refY2 = by2 + (refDy * 2)
+        
+        var chromaSAD = 1000
+        if bx2 >= 0 && by2 >= 0 && bx2 + 16 <= cbw && by2 + 16 <= cbh &&
+           refX2 >= 0 && refY2 >= 0 && refX2 + 16 <= cbw && refY2 + 16 <= cbh {
+            curr.cb.withUnsafeBufferPointer { cbCurrBuf in
+            curr.cr.withUnsafeBufferPointer { crCurrBuf in
+            ref.cb.withUnsafeBufferPointer { cbRefBuf in
+            ref.cr.withUnsafeBufferPointer { crRefBuf in
+                let cCb = cbCurrBuf.baseAddress!
+                let cCr = crCurrBuf.baseAddress!
+                let rCb = cbRefBuf.baseAddress!
+                let rCr = crRefBuf.baseAddress!
+                
+                var sad: Int32 = 0
+                for cy in stride(from: 0, to: 16, by: 2) {
+                    let currOffset = (by2 + cy) * cbw + bx2
+                    let refOffset = (refY2 + cy) * cbw + refX2
+                    for cx in stride(from: 0, to: 16, by: 2) {
+                        let diffCb = Int32(cCb[currOffset + cx]) - Int32(rCb[refOffset + cx])
+                        sad &+= diffCb < 0 ? -diffCb : diffCb
+                        let diffCr = Int32(cCr[currOffset + cx]) - Int32(rCr[refOffset + cx])
+                        sad &+= diffCr < 0 ? -diffCr : diffCr
+                    }
+                    if 2000 < sad { break } // Early Termination
+                }
+                chromaSAD = Int(sad) * 4 // 間引いた分をスケールアップ
+            }}}}
+        }
+        return chromaSAD
     }
 }
