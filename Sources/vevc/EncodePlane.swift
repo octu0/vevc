@@ -1672,16 +1672,19 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
     mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
     mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-    subtractBidirectionalMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
-    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
-    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    
+    // Y represents full Luma, scaleDen = 1 means 1 mv unit = 1/4 Luma pixel (as provided by QuarterRefinement)
+    // Cb/Cr are half size, so 1 mv unit in Luma = 1/8 pixel in Chroma -> scaleDen = 2 converts to 1/4 Chroma pixel
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, scaleDen: 1, roundOffset: roundOffset)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, scaleDen: 2, roundOffset: roundOffset)
+    subtractBidirectionalMotionCompensationPixels(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, scaleDen: 2, roundOffset: roundOffset)
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
 
     let isPFrame = true
     
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 10)
     
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
     
@@ -1708,9 +1711,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutReconL2Cr = reconL2Cr
     
     // bidirectional motion compensation addition (reconstruction)
-    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, shiftMultiplierX2: 2, roundOffset: roundOffset)
-    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
-    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, shiftMultiplierX2: 1, roundOffset: roundOffset)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, blockSize: 32, scaleDen: 1, roundOffset: roundOffset)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, scaleDen: 2, roundOffset: roundOffset)
+    applyBidirectionalMotionCompensationPixels(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, blockSize: 16, scaleDen: 2, roundOffset: roundOffset)
     
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
@@ -1888,7 +1891,6 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let sadPrev = mutSadPrev + prevChromaPenalty
             
             var bestMv = mvPrev
-            var bestSad = sadPrev
             var dir = false
             
             // Early Exit: If the forward prediction is extremely good, skip backward prediction.
@@ -1922,18 +1924,24 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     
                     if sadNext + baselinePenalty + structurePenalty + chromaPenalty < sadPrev {
                         bestMv = mvNext
-                        bestSad = sadNext
                         dir = true
                     } else if sadNext + baselinePenalty + structurePenalty + chromaPenalty == sadPrev && (mvNext.dy * mvNext.dy + mvNext.dx * mvNext.dx) < (mvPrev.dy * mvPrev.dy + mvPrev.dx * mvPrev.dx) {
                         bestMv = mvNext
-                        bestSad = sadNext
                         dir = true
                     }
                 }
             }
             
-            mvsPtr[idx] = bestMv
-            sadsPtr[idx] = bestSad
+            // Refine ME on full resolution Luma (1/4 pixel precision)
+            let actPrev = dir ? next : prev
+            let (rv, rsad) = MotionEstimation.searchPixelsQuarterRefinement32(
+                currPlane: curr.y, prevPlane: actPrev.y,
+                width: curr.width, height: curr.height,
+                bx: bx * 4, by: by * 4, pmv: bestMv
+            )
+            
+            mvsPtr[idx] = rv
+            sadsPtr[idx] = rsad
             refDirsPtr[idx] = dir
         }
     }
@@ -1942,9 +1950,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
 }
 
 /// bidirectional motion compensation pixel subtraction
-/// fractHalf branch is hoisted to block level to eliminate per-pixel branch prediction misses
 @inline(__always)
-func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
+func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, scaleDen: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let rowCount = (height + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
@@ -1956,16 +1963,29 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
                 let srcBase = isBackward ? nextBase : prevBase
                 let blockX = col * blockSize
                 let blockY = row * blockSize
-                let rawShiftX = Int(mv.dx) * shiftMultiplierX2
-                let rawShiftY = Int(mv.dy) * shiftMultiplierX2
+                let rawShiftX = Int(mv.dx) / scaleDen
+                let rawShiftY = Int(mv.dy) / scaleDen
                 let shiftX = rawShiftX >> 2
-                let fractHalfX = (rawShiftX & 2) >> 1
+                let fractX = rawShiftX & 3
                 let shiftY = rawShiftY >> 2
-                let fractHalfY = (rawShiftY & 2) >> 1
+                let fractY = rawShiftY & 3
+                
+                let wA = 4 - fractX
+                let wB = fractX
+                let wC = 4 - fractY
+                let wD = fractY
+                
+                let wAwC = wA * wC
+                let wBwC = wB * wC
+                let wAwD = wA * wD
+                let wBwD = wB * wD
+                
+                let nextX = fractX > 0 ? 1 : 0
+                
                 let bw = min(blockSize, width - blockX)
                 let bh = min(blockSize, height - blockY)
 
-                if fractHalfX == 0 && fractHalfY == 0 {
+                if fractX == 0 && fractY == 0 {
                     // integer pixel path: no interpolation needed
                     for y in 0..<bh {
                         let dstY = blockY + y
@@ -1978,8 +1998,8 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
                             dstPtr[x] = dstPtr[x] &- srcRow[sx]
                         }
                     }
-                } else if fractHalfY == 0 {
-                    // horizontal half-pel only
+                } else if fractY == 0 {
+                    // horizontal sub-pel only
                     for y in 0..<bh {
                         let dstY = blockY + y
                         let srcY = blockY + shiftY + y
@@ -1989,12 +2009,13 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
                         for x in 0..<bw {
                             let srcX = blockX + shiftX + x
                             let sx0 = max(0, min(srcX, width - 1))
-                            let sx1 = max(0, min(srcX + 1, width - 1))
-                            dstPtr[x] = dstPtr[x] &- Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + 1) >> 1)
+                            let sx1 = max(0, min(srcX + nextX, width - 1))
+                            let v = wAwC * Int(srcRow0[sx0]) + wBwC * Int(srcRow0[sx1])
+                            dstPtr[x] = dstPtr[x] &- Int16((v + 7 + roundOffset) >> 4)
                         }
                     }
-                } else if fractHalfX == 0 {
-                    // vertical half-pel only
+                } else if fractX == 0 {
+                    // vertical sub-pel only
                     for y in 0..<bh {
                         let dstY = blockY + y
                         let srcY = blockY + shiftY + y
@@ -2005,11 +2026,12 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
                         let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
                         for x in 0..<bw {
                             let sx = max(0, min(blockX + shiftX + x, width - 1))
-                            dstPtr[x] = dstPtr[x] &- Int16((Int(srcRow0[sx]) + Int(srcRow1[sx]) + 1) >> 1)
+                            let v = wAwC * Int(srcRow0[sx]) + wAwD * Int(srcRow1[sx])
+                            dstPtr[x] = dstPtr[x] &- Int16((v + 7 + roundOffset) >> 4)
                         }
                     }
                 } else {
-                    // bilinear (both half-pel)
+                    // bilinear (quarter-pel limits)
                     for y in 0..<bh {
                         let dstY = blockY + y
                         let srcY = blockY + shiftY + y
@@ -2021,8 +2043,9 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
                         for x in 0..<bw {
                             let srcX = blockX + shiftX + x
                             let sx0 = max(0, min(srcX, width - 1))
-                            let sx1 = max(0, min(srcX + 1, width - 1))
-                            dstPtr[x] = dstPtr[x] &- Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 2) >> 2)
+                            let sx1 = max(0, min(srcX + nextX, width - 1))
+                            let v = wAwC * Int(srcRow0[sx0]) + wBwC * Int(srcRow0[sx1]) + wAwD * Int(srcRow1[sx0]) + wBwD * Int(srcRow1[sx1])
+                            dstPtr[x] = dstPtr[x] &- Int16((v + 7 + roundOffset) >> 4)
                         }
                     }
                 }
@@ -2033,9 +2056,8 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
 }
 
 /// Pixel addition for bidirectional motion compensation based on reference direction flag (for decoder/reconstruction)
-/// fractHalf branch is hoisted to block level to eliminate per-pixel branch prediction misses
 @inline(__always)
-func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, shiftMultiplierX2: Int, roundOffset: Int) {
+func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, blockSize: Int, scaleDen: Int, roundOffset: Int) {
     let colCount = (width + blockSize - 1) / blockSize
     let rowCount = (height + blockSize - 1) / blockSize
     let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
@@ -2047,16 +2069,29 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                 let srcBase = isBackward ? nextBase : prevBase
                 let blockX = col * blockSize
                 let blockY = row * blockSize
-                let rawShiftX = Int(mv.dx) * shiftMultiplierX2
-                let rawShiftY = Int(mv.dy) * shiftMultiplierX2
+                let rawShiftX = Int(mv.dx) / scaleDen
+                let rawShiftY = Int(mv.dy) / scaleDen
                 let shiftX = rawShiftX >> 2
-                let fractHalfX = (rawShiftX & 2) >> 1
+                let fractX = rawShiftX & 3
                 let shiftY = rawShiftY >> 2
-                let fractHalfY = (rawShiftY & 2) >> 1
+                let fractY = rawShiftY & 3
+                
+                let wA = 4 - fractX
+                let wB = fractX
+                let wC = 4 - fractY
+                let wD = fractY
+                
+                let wAwC = wA * wC
+                let wBwC = wB * wC
+                let wAwD = wA * wD
+                let wBwD = wB * wD
+                
+                let nextX = fractX > 0 ? 1 : 0
+                
                 let bw = min(blockSize, width - blockX)
                 let bh = min(blockSize, height - blockY)
 
-                if fractHalfX == 0 && fractHalfY == 0 {
+                if fractX == 0 && fractY == 0 {
                     // integer pixel path: no interpolation needed
                     for y in 0..<bh {
                         let dstY = blockY + y
@@ -2069,8 +2104,8 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                             dstPtr[x] = dstPtr[x] &+ srcRow[sx]
                         }
                     }
-                } else if fractHalfY == 0 {
-                    // horizontal half-pel only
+                } else if fractY == 0 {
+                    // horizontal sub-pel only
                     for y in 0..<bh {
                         let dstY = blockY + y
                         let srcY = blockY + shiftY + y
@@ -2080,12 +2115,13 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                         for x in 0..<bw {
                             let srcX = blockX + shiftX + x
                             let sx0 = max(0, min(srcX, width - 1))
-                            let sx1 = max(0, min(srcX + 1, width - 1))
-                            dstPtr[x] = dstPtr[x] &+ Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + roundOffset) >> 1)
+                            let sx1 = max(0, min(srcX + nextX, width - 1))
+                            let v = wAwC * Int(srcRow0[sx0]) + wBwC * Int(srcRow0[sx1])
+                            dstPtr[x] = dstPtr[x] &+ Int16((v + 7 + roundOffset) >> 4)
                         }
                     }
-                } else if fractHalfX == 0 {
-                    // vertical half-pel only
+                } else if fractX == 0 {
+                    // vertical sub-pel only
                     for y in 0..<bh {
                         let dstY = blockY + y
                         let srcY = blockY + shiftY + y
@@ -2096,11 +2132,12 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                         let srcRow1 = srcBase.advanced(by: safeSrcY1 * width)
                         for x in 0..<bw {
                             let sx = max(0, min(blockX + shiftX + x, width - 1))
-                            dstPtr[x] = dstPtr[x] &+ Int16((Int(srcRow0[sx]) + Int(srcRow1[sx]) + roundOffset) >> 1)
+                            let v = wAwC * Int(srcRow0[sx]) + wAwD * Int(srcRow1[sx])
+                            dstPtr[x] = dstPtr[x] &+ Int16((v + 7 + roundOffset) >> 4)
                         }
                     }
                 } else {
-                    // bilinear (both half-pel)
+                    // bilinear (quarter-pel limits)
                     for y in 0..<bh {
                         let dstY = blockY + y
                         let srcY = blockY + shiftY + y
@@ -2112,8 +2149,9 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
                         for x in 0..<bw {
                             let srcX = blockX + shiftX + x
                             let sx0 = max(0, min(srcX, width - 1))
-                            let sx1 = max(0, min(srcX + 1, width - 1))
-                            dstPtr[x] = dstPtr[x] &+ Int16((Int(srcRow0[sx0]) + Int(srcRow0[sx1]) + Int(srcRow1[sx0]) + Int(srcRow1[sx1]) + 1 + roundOffset) >> 2)
+                            let sx1 = max(0, min(srcX + nextX, width - 1))
+                            let v = wAwC * Int(srcRow0[sx0]) + wBwC * Int(srcRow0[sx1]) + wAwD * Int(srcRow1[sx0]) + wBwD * Int(srcRow1[sx1])
+                            dstPtr[x] = dstPtr[x] &+ Int16((v + 7 + roundOffset) >> 4)
                         }
                     }
                 }

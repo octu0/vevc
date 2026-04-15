@@ -457,4 +457,125 @@ struct MotionEstimation {
         }
         return chromaSAD
     }
+
+    @inline(__always)
+    static func computeQuarterPixelSAD_Subsampled32(
+        curr: UnsafePointer<Int16>, 
+        prev: UnsafePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int,
+        qDx: Int, qDy: Int
+    ) -> Int {
+        // qDx, qDy are in 1/4 Luma pixel units
+        let intDx = qDx >> 2
+        let intDy = qDy >> 2
+        let fractX = qDx & 3
+        let fractY = qDy & 3
+        
+        let wA = 4 - fractX
+        let wB = fractX
+        let wC = 4 - fractY
+        let wD = fractY
+        
+        let nextX = fractX > 0 ? 1 : 0
+        let nextY = fractY > 0 ? 1 : 0
+        
+        var sad: Int32 = 0
+        
+        if bx + intDx >= 0 && by + intDy >= 0 && bx + intDx + 32 + nextX < width && by + intDy + 32 + nextY < height {
+            for ry in stride(from: 0, to: 32, by: 4) {
+                let cy = by + ry
+                let rowC = curr.advanced(by: cy * width + bx)
+                
+                let py0 = by + intDy + ry
+                let py1 = py0 + nextY
+                let rowP0 = prev.advanced(by: py0 * width + bx + intDx)
+                let rowP1 = prev.advanced(by: py1 * width + bx + intDx)
+                
+                for rx in stride(from: 0, to: 32, by: 2) {
+                    let refVal = wA * wC * Int(rowP0[rx]) + wB * wC * Int(rowP0[rx + nextX]) + wA * wD * Int(rowP1[rx]) + wB * wD * Int(rowP1[rx + nextX])
+                    let pVal = (refVal + 7) >> 4
+                    let diff = Int32(rowC[rx]) - Int32(pVal)
+                    sad &+= diff < 0 ? -diff : diff
+                }
+            }
+            return Int(sad)
+        }
+        
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let sy0 = max(0, min(by + intDy + ry, height - 1))
+            let sy1 = max(0, min(by + intDy + ry + nextY, height - 1))
+            let cy = min(by + ry, height - 1)
+            let rowC = curr.advanced(by: cy * width)
+            let rowP0 = prev.advanced(by: sy0 * width)
+            let rowP1 = prev.advanced(by: sy1 * width)
+            for rx in stride(from: 0, to: 32, by: 2) {
+                let sx0 = max(0, min(bx + intDx + rx, width - 1))
+                let sx1 = max(0, min(bx + intDx + rx + nextX, width - 1))
+                let cx = min(bx + rx, width - 1)
+                
+                let refVal = wA * wC * Int(rowP0[sx0]) + wB * wC * Int(rowP0[sx1]) + wA * wD * Int(rowP1[sx0]) + wB * wD * Int(rowP1[sx1])
+                let pVal = (refVal + 7) >> 4
+                let diff = Int32(rowC[cx]) - Int32(pVal)
+                sad &+= diff < 0 ? -diff : diff
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
+    static func searchPixelsQuarterRefinement32(
+        currPlane: [Int16],
+        prevPlane: [Int16],
+        width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
+    ) -> (MotionVector, Int) {
+        return currPlane.withUnsafeBufferPointer { cBuf in
+            prevPlane.withUnsafeBufferPointer { pBuf in
+                guard let cBase = cBuf.baseAddress, let pBase = pBuf.baseAddress else {
+                    return (MotionVector(dx: 0, dy: 0), 0)
+                }
+                
+                // pmv is in 1/8 units of dx/4 == 1/2 units of Luma dx
+                // We convert it to 1/4 units of Luma dx by multiplying by 2
+                let baseQx = Int(pmv.dx) * 2
+                let baseQy = Int(pmv.dy) * 2
+                
+                var bestQx = baseQx
+                var bestQy = baseQy
+                
+                var bestSad = computeQuarterPixelSAD_Subsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: bestQx, qDy: bestQy)
+                
+                if bestSad < 128 { return (MotionVector(dx: Int16(bestQx), dy: Int16(bestQy)), bestSad) }
+                
+                let offsets: [(Int, Int)] = [
+                    (-1, -1), (0, -1), (1, -1),
+                    (-1,  0),          (1,  0),
+                    (-1,  1), (0,  1), (1,  1)
+                ]
+                
+                for (ox, oy) in offsets {
+                    let qx = baseQx + ox
+                    let qy = baseQy + oy
+                    
+                    let intDx = qx >> 2
+                    let intDy = qy >> 2
+                    if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
+                    if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
+                    
+                    let penalty = (abs(ox) + abs(oy)) * 6
+                    let maxSad = bestSad - penalty
+                    if maxSad <= 0 { continue }
+                    
+                    let sad = computeQuarterPixelSAD_Subsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+                    let totalSad = sad + penalty
+                    if totalSad < bestSad {
+                        bestSad = totalSad
+                        bestQx = qx
+                        bestQy = qy
+                    }
+                }
+                
+                return (MotionVector(dx: Int16(bestQx), dy: Int16(bestQy)), bestSad)
+            }
+        }
+    }
 }

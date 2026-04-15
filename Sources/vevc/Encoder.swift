@@ -37,7 +37,7 @@ public class VEVCEncoder {
     public let sceneChangeThreshold: Int
     public let maxConcurrency: Int
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 15, maxConcurrency: Int = 4) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
