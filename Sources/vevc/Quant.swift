@@ -58,14 +58,16 @@ struct QuantizationTable: Sendable {
         var qHighDen = 4      // HH scale denominator
         var qLowDivisor = 6
 
-        switch layerIndex {
-        case 2:
-            qMidNum = 6; qMidDen = 5          // 1.2
-            qHighNum = 6; qHighDen = 4        // 1.5
-        case 1:
+        if layerIndex == 2 {
+            qLowDivisor = 1
+            // 以前は Layer2 の高周波帯を 1.5倍 で粗く量子化していたため、サブピクセル予測でボヤケた輪郭の残差が削られてモヤモヤ（ゴースト）になっていた。
+            // これを 1.0x (Num=4, Den=4) に変更し、高周波成分を正確に残す。
+            qMidNum = 4; qMidDen = 4          // 1.0 (old: 1.2)
+            qHighNum = 4; qHighDen = 4        // 1.0 (old: 1.5)
+        } else if layerIndex == 1 {
             qMidNum = 2; qMidDen = 4          // 0.5
             qHighNum = 4; qHighDen = 4        // 1.0
-        default: // layerIndex == 0
+        } else { // layerIndex == 0
             qMidNum = 1; qMidDen = 4          // 0.25
             qHighNum = 2; qHighDen = 4        // 0.5
             qLowDivisor = 12

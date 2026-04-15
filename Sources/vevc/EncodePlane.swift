@@ -642,10 +642,7 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
     async let taskBufY = { () -> ([Int16], [BlockView]) in
         let (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool) { index, view in
             if let sList = sads, index < sList.count {
-                let col = index % yColCount32
-                let row = index / yColCount32
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount32, rowCount: yRowCount32)
-                if sList[index] < threshold { view.clearAll() }
+                // SAD based skip removed for Layer 32 to preserve high frequency edges
             }
             var v = view
             evaluateQuantizeLayer32(block: &v, qt: qtY)
@@ -655,15 +652,8 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
     
     async let taskBufCb = { () -> ([Int16], [BlockView]) in
         let (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool) { index, view in
-            var sadVal = Int.max
             if let sList = sads {
-                let col = index % cbColCount32
-                let row = index / cbColCount32
-                let lumaIdx = (row * 2) * yColCount32 + (col * 2)
-                if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
-
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount32, rowCount: cbRowCount32)
-                if sadVal < threshold { view.clearAll() }
+                // SAD based skip removed for Layer 32 Chroma to preserve high frequency edges
             }
             var v = view
             evaluateQuantizeLayer32(block: &v, qt: qtC)
@@ -673,15 +663,8 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
     
     async let taskBufCr = { () -> ([Int16], [BlockView]) in
         let (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool) { index, view in
-            var sadVal = Int.max
             if let sList = sads {
-                let col = index % cbColCount32
-                let row = index / cbColCount32
-                let lumaIdx = (row * 2) * yColCount32 + (col * 2)
-                if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
-
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(75, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount32, rowCount: cbRowCount32)
-                if sadVal < threshold { view.clearAll() }
+                // SAD based skip removed for Layer 32 Chroma to preserve high frequency edges
             }
             var v = view
             evaluateQuantizeLayer32(block: &v, qt: qtC)
@@ -712,10 +695,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
     async let taskBufY = { () -> ([Int16], [BlockView]) in
         let (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool) { index, view in
             if let sList = sads, index < sList.count {
-                let col = index % yColCount16
-                let row = index / yColCount16
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(75, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount16, rowCount: yRowCount16)
-                if sList[index] < threshold { view.clearAll() }
+                // SAD based skip removed for Layer 16 to preserve mid frequency edges
             }
             var v = view
             evaluateQuantizeLayer16(block: &v, qt: qtY)
@@ -732,8 +712,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
                 let lumaIdx = (row * 2) * yColCount16 + (col * 2)
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
 
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount16, rowCount: cbRowCount16)
-                if sadVal < threshold { view.clearAll() }
+                // SAD based skip removed for Layer 16 Cb to preserve mid frequency edges
             }
             var v = view
             evaluateQuantizeLayer16(block: &v, qt: qtC)
@@ -750,8 +729,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
                 let lumaIdx = (row * 2) * yColCount16 + (col * 2)
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
 
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtC.step)), blockCol: col, blockRow: row, colCount: cbColCount16, rowCount: cbRowCount16)
-                if sadVal < threshold { view.clearAll() }
+                // SAD based skip removed for Layer 16 Cr to preserve mid frequency edges
             }
             var v = view
             evaluateQuantizeLayer16(block: &v, qt: qtC)
@@ -1684,7 +1662,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: 10)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
     
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
     
