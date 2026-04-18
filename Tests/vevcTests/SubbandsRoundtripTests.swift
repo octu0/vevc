@@ -212,7 +212,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
         var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
         }
         
         // encodePlaneSubbands32
@@ -276,7 +276,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let reader = Int16Reader(data: rY, width: width, height: height)
         var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
         }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
@@ -338,7 +338,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             
             var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool)
             for i in blocks.indices {
-                evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
+                evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
             }
             
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))

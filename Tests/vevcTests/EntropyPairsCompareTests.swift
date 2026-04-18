@@ -31,7 +31,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         
         var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
         }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))

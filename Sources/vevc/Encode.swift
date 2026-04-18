@@ -738,7 +738,6 @@ func blockEncodeDPCMErrorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> 
 
 @inline(__always)
 func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
-
     withUnsafeTemporaryAllocation(of: Int16.self, capacity: 64) { ptrErr in
         guard let baseErr = ptrErr.baseAddress else { return }
         
@@ -826,7 +825,6 @@ func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
 
 @inline(__always)
 func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
-
     let originalLastVal = lastVal
     var lscpIdx = -1
     var last: Int16 = originalLastVal

@@ -61,7 +61,7 @@ final class DPCMDistributionTests: XCTestCase {
             // extract blocks and quantize
             var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
             for i in blocks.indices {
-                evaluateQuantizeBase32(block: &blocks[i], qt: qtY)
+                evaluateQuantizeBase32(block: blocks[i], qt: qtY)
             }
             
             // encode with DynamicEntropyModel to get actual pairs

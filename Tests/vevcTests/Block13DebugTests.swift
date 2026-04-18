@@ -31,7 +31,7 @@ final class Block13DebugTests: XCTestCase {
         
         var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: &blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
         }
         
         // エンコード前の各ブロックのisZero/split判定を確認
