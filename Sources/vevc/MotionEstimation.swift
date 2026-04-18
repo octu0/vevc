@@ -8,6 +8,13 @@ struct MotionVector: Sendable {
         self.dx = dx
         self.dy = dy
     }
+    
+    @inline(__always)
+    var isIntra: Bool {
+        return dx == 32767 && dy == 32767
+    }
+    
+    static let intraBlock = MotionVector(dx: 32767, dy: 32767)
 }
 
 struct MotionEstimation {

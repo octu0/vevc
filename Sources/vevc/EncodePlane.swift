@@ -1624,7 +1624,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0) async throws -> ([UInt8], PlaneData420) {
     let pPd = predictedPd
     let nPd = nextPd
     
@@ -1641,7 +1641,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
     // bidirectional MV calculation: search MVs for both forward and backward and select the one with the smaller SAD for each block
-    let (mvs, sads, refDirs) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, pool: pool, roundOffset: roundOffset)
+    let (mvs, sads, refDirs) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition)
     
     // pixel level residual calculation based on reference direction
     var mutPdY = pool.getInt16(count: pd.y.count)
@@ -1783,8 +1783,14 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
                     width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv,
                     roundOffset: roundOffset,
                 )
-                mvsPtr[idx] = mv
-                sadsPtr[idx] = sad
+                
+                if sad > 1024 {
+                    mvsPtr[idx] = MotionVector.intraBlock
+                    sadsPtr[idx] = sad
+                } else {
+                    mvsPtr[idx] = mv
+                    sadsPtr[idx] = sad
+                }
             }
         }
     }
@@ -1795,7 +1801,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
 /// and selects the one with smaller SAD per block.
 /// - Returns: (mvs, sads, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool, roundOffset: Int) async -> ([MotionVector], [Int], [Bool]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool, roundOffset: Int, gopPosition: Int) async -> ([MotionVector], [Int], [Bool]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1875,7 +1881,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             // A SAD of 256 means an average error of 4 per pixel in an 8x8 block.
             // This completely eliminates "ghosting" artifacts on solid backgrounds
             // where SAD might randomly be lower in the I-frame due to noise.
-            if 256 <= sadPrev {
+            let gopPenalty = gopPosition * 64
+            if 256 + gopPenalty <= sadPrev {
                 let (mvNext, sadNext) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: nextSub1,
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
@@ -1883,7 +1890,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 )
                 
                 let mvEnergyNext = abs(Int(mvNext.dx)) + abs(Int(mvNext.dy))
-                let baselinePenalty = (mvEnergyNext * 8) + 32
+                let baselinePenalty = (mvEnergyNext * 8) + 32 + gopPenalty
                 
                 if sadNext + baselinePenalty < sadPrev {
                     // Structural Validation
@@ -1918,9 +1925,15 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 bx: bx * 4, by: by * 4, pmv: bestMv
             )
             
-            mvsPtr[idx] = rv
-            sadsPtr[idx] = rsad
-            refDirsPtr[idx] = dir
+            if rsad > 8192 {
+                mvsPtr[idx] = MotionVector.intraBlock
+                sadsPtr[idx] = rsad
+                refDirsPtr[idx] = false
+            } else {
+                mvsPtr[idx] = rv
+                sadsPtr[idx] = rsad
+                refDirsPtr[idx] = dir
+            }
         }
     }
     withUnsafePointers(mut: &mvs, mut: &sads, mut: &refDirs, body)
@@ -1937,6 +1950,7 @@ func subtractBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPla
             for col in 0..<colCount {
                 let mvIndex = min(row * colCount + col, mvs.count - 1)
                 let mv = mvs[mvIndex]
+                if mv.isIntra { continue }
                 let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
                 let srcBase = isBackward ? nextBase : prevBase
                 let blockX = col * blockSize
@@ -2043,6 +2057,7 @@ func applyBidirectionalMotionCompensationPixels(plane: inout [Int16], prevPlane:
             for col in 0..<colCount {
                 let mvIndex = min(row * colCount + col, mvs.count - 1)
                 let mv = mvs[mvIndex]
+                if mv.isIntra { continue }
                 let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
                 let srcBase = isBackward ? nextBase : prevBase
                 let blockX = col * blockSize
@@ -2196,6 +2211,7 @@ func subtractMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], 
             for col in 0..<colCount {
                 let mvIndex = min(row * colCount + col, mvs.count - 1)
                 let mv = mvs[mvIndex]
+                if mv.isIntra { continue }
                 let blockX = col * blockSize
                 let blockY = row * blockSize
                 
@@ -2387,6 +2403,7 @@ func applyMotionCompensationPixels(plane: inout [Int16], prevPlane: [Int16], mvs
             for col in 0..<colCount {
                 let mvIndex = min(row * colCount + col, mvs.count - 1)
                 let mv = mvs[mvIndex]
+                if mv.isIntra { continue }
                 let blockX = col * blockSize
                 let blockY = row * blockSize
                 

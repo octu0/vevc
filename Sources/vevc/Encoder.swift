@@ -232,7 +232,7 @@ actor LayersEncodeActor {
             let (bytes, reconstructed) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, predictedPd: previousReconstructed, nextPd: firstReconstructed,
                 maxbitrate: localMaxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold,
-                roundOffset: idx % 2,
+                roundOffset: idx % 2, gopPosition: idx
             )
             
             encodedFrames.append(bytes)

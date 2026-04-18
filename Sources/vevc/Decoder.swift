@@ -14,7 +14,7 @@ private func parseVEVCHeaderChunk(_ chunk: [UInt8]) -> (Int, Int, Int)? {
     offset += 2
     guard metadataSize >= 9 else { return nil }
     let profile = chunk[offset]
-    guard profile == 0x01 else { return nil }
+    guard profile == 0x01 || profile == 0x02 else { return nil }
     offset += 1
     let w = (Int(chunk[offset]) << 8) | Int(chunk[offset + 1])
     offset += 2
