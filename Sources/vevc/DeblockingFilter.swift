@@ -15,9 +15,10 @@ func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockS
 @inline(__always)
 func applyDeblockingFilterPtr(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, blockSize: Int, qStep: Int) {
     // why: larger qStep (lower quality) needs more aggressive filtering
-    let tc = Int16(min(12, max(2, qStep / 2)))
+    // 高レート時（小さなqStep）でも微細なブロック境界ノイズを消すため、最低保証値を引き上げる
+    let tc = Int16(min(12, max(4, (qStep / 2) + 2)))
     // why: only apply filter when boundary step is below beta to preserve real edges
-    let beta = Int32(min(45, max(12, qStep)))
+    let beta = Int32(min(45, max(16, qStep + 4)))
     
     // why: separate 16-row fast path from scalar remainder
     // to eliminate inner-loop branch prediction misses
