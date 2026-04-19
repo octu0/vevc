@@ -1291,7 +1291,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1304,7 +1304,11 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
     var zeroCount = 0
     for i in blocks.indices {
         let blockThreshold: Int
-        if useSpatialWeight {
+        if let sads = sads, i < sads.count, sads[i] >= 500 {
+            // Adaptive AC Preservation: if the prediction error is significant,
+            // never zero out the AC block aggressively to ensure ghosts are cleanly suppressed.
+            blockThreshold = 0
+        } else if useSpatialWeight {
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
@@ -1393,7 +1397,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -1402,10 +1406,17 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
     
     var zeroCount = 0
     for i in blocks.indices {
+        let col = i % (colCount > 0 ? colCount : 1)
+        let row = i / (colCount > 0 ? colCount : 1)
+        let colCount32 = (colCount + 1) / 2
+        let sadIdx = (row / 2) * colCount32 + (col / 2)
+        
         let blockThreshold: Int
-        if useSpatialWeight {
-            let col = i % colCount
-            let row = i / colCount
+        if let sads = sads, sadIdx < sads.count, sads[sadIdx] >= 500 {
+            // Adaptive AC Preservation: if the prediction error is significant,
+            // never zero out the AC block aggressively to ensure ghosts are cleanly suppressed.
+            blockThreshold = 0
+        } else if useSpatialWeight {
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
             blockThreshold = (max(1, zeroThreshold) * weight) / 1024
         } else {
