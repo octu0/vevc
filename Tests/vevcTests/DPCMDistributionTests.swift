@@ -59,9 +59,9 @@ final class DPCMDistributionTests: XCTestCase {
             let qtY = QuantizationTable(baseStep: 24, isChroma: false, layerIndex: 0)
             
             // extract blocks and quantize
-            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
+            let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
             for i in blocks.indices {
-                evaluateQuantizeBase32(block: blocks[i], qt: qtY)
+                evaluateQuantizeBase32(view: blocks[i], qt: qtY)
             }
             
             // encode with DynamicEntropyModel to get actual pairs

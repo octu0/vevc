@@ -668,14 +668,14 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     if let tPrev = predictedPd, let mvs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
             // bidirectional prediction: use refDirs to select forward/backward prediction for each block
-            applyBidirectionalMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, blockSize: 32, isLuma: true, roundOffset: roundOffset)
-            applyBidirectionalMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, isLuma: false, roundOffset: roundOffset)
-            applyBidirectionalMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, blockSize: 16, isLuma: false, roundOffset: roundOffset)
+            applyBidirectionalMotionCompensationPixelsLuma32(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, roundOffset: roundOffset)
+            applyBidirectionalMotionCompensationPixelsChroma16(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
+            applyBidirectionalMotionCompensationPixelsChroma16(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
         } else {
             // forward prediction only
-            applyMotionCompensationPixels(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, blockSize: 32, isLuma: true, roundOffset: roundOffset)
-            applyMotionCompensationPixels(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, isLuma: false, roundOffset: roundOffset)
-            applyMotionCompensationPixels(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, blockSize: 16, isLuma: false, roundOffset: roundOffset)
+            applyMotionCompensationPixelsLuma32(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, roundOffset: roundOffset)
+            applyMotionCompensationPixelsChroma16(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
+            applyMotionCompensationPixelsChroma16(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
         }
     }
 

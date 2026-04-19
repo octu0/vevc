@@ -251,7 +251,7 @@ final class ChromaBlockTests: XCTestCase {
             dwt2d_8(view)
         
             // 量子化
-            evaluateQuantizeBase8(block: &block, qt: qt)
+            evaluateQuantizeBase8(view: block, qt: qt)
 
             // 逆量子化
             view = block

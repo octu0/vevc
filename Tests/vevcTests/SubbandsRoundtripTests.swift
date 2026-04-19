@@ -75,7 +75,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         var decHL: [[Int16]] = []
         for bi in 0..<3 {
             var hl = [Int16](repeating: 0, count: 256)
-            var b = decBlocks[bi]
+            let b = decBlocks[bi]
             let view = b
             for y in 0..<16 {
                 let ptr = view.base.advanced(by: y * 32 + 16)
@@ -166,8 +166,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         // 各ブロックのHL/LH/HH比較
         for bi in 0..<3 {
-            var encBlk = blocks[bi]
-            var decBlk = decBlocks[bi]
+            let encBlk = blocks[bi]
+            let decBlk = decBlocks[bi]
             
             var diffHL = 0, diffLH = 0, diffHH = 0
             let encView = encBlk
@@ -210,9 +210,9 @@ final class SubbandsRoundtripTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
         
         // encodePlaneSubbands32
@@ -230,8 +230,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         var firstDiffBlock = -1
         
         for bi in 0..<blocks.count {
-            var encBlk = blocks[bi]
-            var decBlk = decBlocks[bi]
+            let encBlk = blocks[bi]
+            let decBlk = decBlocks[bi]
             
             let encView = encBlk
             let decView = decBlk
@@ -274,9 +274,9 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         let qtY = QuantizationTable(baseStep: 2)
         let reader = Int16Reader(data: rY, width: width, height: height)
-        var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool)
+        var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool, qt: qtY)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
@@ -286,8 +286,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         var totalDiff = 0
         var firstDiffBlock = -1
         for bi in 0..<blocks.count {
-            var encBlk = blocks[bi]
-            var decBlk = decBlocks[bi]
+            let encBlk = blocks[bi]
+            let decBlk = decBlocks[bi]
             let encView = encBlk
             let decView = decBlk
             for y in 0..<16 {
@@ -336,9 +336,9 @@ final class SubbandsRoundtripTests: XCTestCase {
             let pd = toPlaneData420(images: [img])[0]
             let qtY = QuantizationTable(baseStep: 2)
             
-            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool)
+            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool, qt: qtY)
             for i in blocks.indices {
-                evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
+                evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
             }
             
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
@@ -348,8 +348,8 @@ final class SubbandsRoundtripTests: XCTestCase {
             var totalDiff = 0
             var firstDiffBlock = -1
             for bi in 0..<blocks.count {
-                var encBlk = blocks[bi]
-                var decBlk = decBlocks[bi]
+                let encBlk = blocks[bi]
+                let decBlk = decBlocks[bi]
                 let encView = encBlk
                 let decView = decBlk
                 for y in 0..<16 {

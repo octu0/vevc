@@ -29,9 +29,9 @@ final class Block13DebugTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
         
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
+        let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
         
         // エンコード前の各ブロックのisZero/split判定を確認
@@ -53,9 +53,9 @@ final class Block13DebugTests: XCTestCase {
         }
         
         // isEffectivelyZeroチェックがblockのデータを変更するため、元のブロックを再作成
-        var (blocks2, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
+        var (blocks2, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         for i in blocks2.indices {
-            evaluateQuantizeLayer32(block: &blocks2[i], qt: qtY)
+            evaluateQuantizeLayer32(view: blocks2[i], qt: qtY)
         }
         
         // encodePlaneSubbands32

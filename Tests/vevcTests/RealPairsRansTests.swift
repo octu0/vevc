@@ -29,9 +29,9 @@ final class RealPairsRansTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
         
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool)
+        let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         for i in blocks.indices {
-            evaluateQuantizeLayer32(block: blocks[i], qt: qtY)
+            evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
