@@ -1748,10 +1748,16 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
                     currPlane: currSub1, prevPlane: prevSub1, 
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
                     width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv,
-                    roundOffset: roundOffset,
+                    roundOffset: roundOffset
                 )
                 
-                if sad > 1024 {
+                let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
+                
+                // 動的閾値: 平坦なブロックなら2048(寛容)、コントラストが高い(< 1000)なら低くしてIntraを促進
+                // ゴーストが出るのはコントラストの高いエッジ部分が誤った方向に引きずられるため。
+                let dynamicThreshold = max(256, 2048 - (currContrast * 2))
+                
+                if sad > dynamicThreshold {
                     mvsPtr[idx] = MotionVector.intraBlock
                     sadsPtr[idx] = sad
                 } else {
@@ -1895,7 +1901,15 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 bx: bx * 4, by: by * 4, pmv: bestMv
             )
             
-            if rsad > 8192 {
+            // Full res 32x32 block (1024 pixels).
+            // Average allowed pixel error.
+            let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
+            // 強いコントラスト(エッジ)がある場合、SADの許容を激しく下げる
+            // 8192 は平均誤差 8 で全体的に白くぼやけてゴーストになる。
+            // コントラストに応じて SAD 許容値を下げる (最大 8192、最小 1024 程度)
+            let dynamicThreshold = max(1024, 8192 - (currContrast * 8))
+            
+            if rsad > dynamicThreshold {
                 mvsPtr[idx] = MotionVector.intraBlock
                 sadsPtr[idx] = rsad
                 refDirsPtr[idx] = false
