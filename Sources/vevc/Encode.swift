@@ -1304,11 +1304,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
     var zeroCount = 0
     for i in blocks.indices {
         let blockThreshold: Int
-        if let sads = sads, i < sads.count, sads[i] >= 500 {
-            // Adaptive AC Preservation: if the prediction error is significant,
-            // never zero out the AC block aggressively to ensure ghosts are cleanly suppressed.
-            blockThreshold = 0
-        } else if useSpatialWeight {
+        if useSpatialWeight {
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
@@ -1412,10 +1408,11 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         let sadIdx = (row / 2) * colCount32 + (col / 2)
         
         let blockThreshold: Int
-        if let sads = sads, sadIdx < sads.count, sads[sadIdx] >= 500 {
-            // Adaptive AC Preservation: if the prediction error is significant,
-            // never zero out the AC block aggressively to ensure ghosts are cleanly suppressed.
-            blockThreshold = 0
+        if let sads = sads, sadIdx < sads.count, sads[sadIdx] >= 1500 {
+            // Adaptive AC Preservation (緩和版): if the prediction error is significant,
+            // half the zero thresholds to preserve edge details and suppress ghosts,
+            // while still discarding the ±1 mosquito noise.
+            blockThreshold = max(1, zeroThreshold / 2)
         } else if useSpatialWeight {
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
             blockThreshold = (max(1, zeroThreshold) * weight) / 1024
