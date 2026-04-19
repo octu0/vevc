@@ -1352,9 +1352,11 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         }
     }
     bwFlags.flush()
-    let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
-    let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
-    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
     
     var encoder = EntropyEncoder<DynamicEntropyModel>()
     
@@ -1458,9 +1460,11 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         }
     }
     bwFlags.flush()
-    let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
-    let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
-    debugLog("    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
     
     var encoder = EntropyEncoder<DynamicEntropyModel>()
     
@@ -1512,9 +1516,11 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
     }
     bwFlags.flush()
     let zeroCount = blocks.count - nonZeroIndices.count
-    let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
-    let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
-    debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
     
     var encoder = EntropyEncoder<DynamicEntropyModel>()
     var lastVal: Int16 = 0
@@ -1561,9 +1567,11 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
     }
     bwFlags.flush()
     let zeroCount = blocks.count - nonZeroIndices.count
-    let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
-    let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
-    debugLog("    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%")
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
     
     var encoder = EntropyEncoder<DynamicEntropyModel>()
     
@@ -1634,8 +1642,10 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
         }
     }
     bwFlags.flush()
-    let zeroPermyriad32 = (zeroCount * 10000) / max(1, blocks.count)
-    debugLog("    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(zeroPermyriad32 / 100).\(zeroPermyriad32 / 10 % 10)%")
+    debugLog({
+        let zeroPermyriad32 = (zeroCount * 10000) / max(1, blocks.count)
+        return "    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(zeroPermyriad32 / 100).\(zeroPermyriad32 / 10 % 10)%"
+    }())
     
     var encoder = EntropyEncoder<StaticDPCMEntropyModel>()
     var lastVal: Int16 = 0
