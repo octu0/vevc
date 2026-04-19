@@ -1846,10 +1846,9 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             
             // Early Exit: If the forward prediction is extremely good, skip backward prediction.
             // A SAD of 256 means an average error of 4 per pixel in an 8x8 block.
-            // This completely eliminates "ghosting" artifacts on solid backgrounds
-            // where SAD might randomly be lower in the I-frame due to noise.
+            // Always check backward prediction if sadPrev >= 256, so trailing ghosts can be erased.
             let gopPenalty = gopPosition * 64
-            if 256 + gopPenalty <= sadPrev {
+            if 256 <= sadPrev {
                 let (mvNext, sadNext) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: nextSub1,
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
@@ -1857,7 +1856,11 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 )
                 
                 let mvEnergyNext = abs(Int(mvNext.dx)) + abs(Int(mvNext.dy))
-                let baselinePenalty = (mvEnergyNext * 8) + 32 + gopPenalty
+                
+                // If I-frame (next) predicts the block extremely well, it's overwhelmingly likely
+                // a static background. Waive the GOP penalty to allow instantaneous ghost erasure.
+                let effectiveGopPenalty = (sadNext < 256) ? 0 : gopPenalty
+                let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
                 
                 if sadNext + baselinePenalty < sadPrev {
                     // Structural Validation
