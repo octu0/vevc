@@ -14,13 +14,13 @@ func applyDeblockingFilter(plane: inout [Int16], width: Int, height: Int, blockS
 /// Pointer-based internal loop to avoid closures during execution.
 @inline(__always)
 func applyDeblockingFilterPtr(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, blockSize: Int, qStep: Int) {
-    // why: larger qStep (lower quality) needs more aggressive filtering
-    // 高レート時（小さなqStep）でも微細なブロック境界ノイズを消すため、最低保証値を引き上げる
+    // larger qStep (lower quality) needs more aggressive filtering
+    // increase the minimum guaranteed value to eliminate fine block boundary noise even at high rates (small qStep)
     let tc = Int16(min(12, max(4, (qStep / 2) + 2)))
-    // why: only apply filter when boundary step is below beta to preserve real edges
+    // only apply filter when boundary step is below beta to preserve real edges
     let beta = Int32(min(45, max(16, qStep + 4)))
     
-    // why: separate 16-row fast path from scalar remainder
+    // separate 16-row fast path from scalar remainder
     // to eliminate inner-loop branch prediction misses
     let hBlocks16 = height / 16
     let hFast = hBlocks16 * 16
@@ -93,25 +93,24 @@ private func deblockFilterVerticalEdge16(base: UnsafeMutablePointer<Int16>, widt
         let delta = q0 &- p0
         let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
         
-        let pDiff = p1 &- p0
-        let qDiff = q1 &- q0
-        let absP = pDiff.replacing(with: .zero &- pDiff, where: pDiff .< 0)
-        let absQ = qDiff.replacing(with: .zero &- qDiff, where: qDiff .< 0)
+        let deltaP = p1 &- p0
+        let deltaQ = q1 &- q0
+        let absP = deltaP.replacing(with: .zero &- deltaP, where: deltaP .< 0)
+        let absQ = deltaQ.replacing(with: .zero &- deltaQ, where: deltaQ .< 0)
         
         let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
         
         let t1 = q0 &- p0
         let t2 = q1 &- p1
-        let d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
+        var d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
         
-        var dClipped = d
-        dClipped.replace(with: tcV, where: dClipped .> tcV)
-        dClipped.replace(with: ntcV, where: dClipped .< ntcV)
+        d.replace(with: tcV, where: tcV .< d)
+        d.replace(with: ntcV, where: d .< ntcV)
         
-        let dHalf = dClipped / 2
+        let dHalf = d / 2
         
-        p0.replace(with: p0 &+ dClipped, where: mask)
-        q0.replace(with: q0 &- dClipped, where: mask)
+        p0.replace(with: p0 &+ d, where: mask)
+        q0.replace(with: q0 &- d, where: mask)
         p1.replace(with: p1 &+ dHalf, where: mask)
         q1.replace(with: q1 &- dHalf, where: mask)
         
@@ -145,21 +144,20 @@ private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, 
         var q1 = base[offset + 1]
         
         let delta = Int32(q0) - Int32(p0)
-        let absDelta = delta < 0 ? -delta : delta
+        let absDelta = if delta < 0 { -delta } else { delta }
         if absDelta < beta {
-            let pDiff = Int32(p1) - Int32(p0)
-            let qDiff = Int32(q1) - Int32(q0)
-            let absP = pDiff < 0 ? -pDiff : pDiff
-            let absQ = qDiff < 0 ? -qDiff : qDiff
+            let deltaP = Int32(p1) - Int32(p0)
+            let deltaQ = Int32(q1) - Int32(q0)
+            let absP = if deltaP < 0 { -deltaP } else { deltaP }
+            let absQ = if deltaQ < 0 { -deltaQ } else { deltaQ }
             if absP < betah && absQ < betah {
-                let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
-                var dClipped = d
+                var d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
                 let t = Int32(tc)
-                if t < dClipped { dClipped = t }
-                if dClipped < (-1 * t) { dClipped = (-1 * t) }
+                if t < d { d = t }
+                if d < (-1 * t) { d = (-1 * t) }
                 
-                let dHalf = dClipped / 2
-                let d16 = Int16(dClipped)
+                let dHalf = d / 2
+                let d16 = Int16(d)
                 let dh16 = Int16(dHalf)
                 
                 p0 = p0 &+ d16
@@ -218,21 +216,20 @@ private func deblockFilterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>
         var q1 = base[offset + 1 * width]
         
         let delta = Int32(q0) - Int32(p0)
-        let absDelta = delta < 0 ? -delta : delta
+        let absDelta = if delta < 0 { -1 * delta } else { delta }
         if absDelta < beta {
-            let pDiff = Int32(p1) - Int32(p0)
-            let qDiff = Int32(q1) - Int32(q0)
-            let absP = pDiff < 0 ? -pDiff : pDiff
-            let absQ = qDiff < 0 ? -qDiff : qDiff
+            let deltaP = Int32(p1) - Int32(p0)
+            let deltaQ = Int32(q1) - Int32(q0)
+            let absP = if deltaP < 0 { -1 * deltaP } else { deltaP }
+            let absQ = if deltaQ < 0 { -1 * deltaQ } else { deltaQ }
             if absP < betah && absQ < betah {
-                let d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
-                var dClipped = d
+                var d = (((9 * (Int32(q0) - Int32(p0))) - (3 * (Int32(q1) - Int32(p1)))) + 8) >> 4
                 let t = Int32(tc)
-                if t < dClipped { dClipped = t }
-                if dClipped < (-1 * t) { dClipped = (-1 * t) }
+                if t < d { d = t }
+                if d < (-1 * t) { d = (-1 * t) }
                 
-                let dHalf = dClipped / 2
-                let d16 = Int16(dClipped)
+                let dHalf = d / 2
+                let d16 = Int16(d)
                 let dh16 = Int16(dHalf)
                 
                 p0 = p0 &+ d16
@@ -269,30 +266,29 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     let delta = q0 &- p0
     let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
     
-    let pDiff = p1 &- p0
-    let qDiff = q1 &- q0
-    let absP = pDiff.replacing(with: .zero &- pDiff, where: pDiff .< 0)
-    let absQ = qDiff.replacing(with: .zero &- qDiff, where: qDiff .< 0)
+    let deltaP = p1 &- p0
+    let deltaQ = q1 &- q0
+    let absP = deltaP.replacing(with: .zero &- deltaP, where: deltaP .< 0)
+    let absQ = deltaQ.replacing(with: .zero &- deltaQ, where: deltaQ .< 0)
     
     let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
     
     let t1 = q0 &- p0
     let t2 = q1 &- p1
-    let d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
+    var d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
     
-    var dClipped = d
-    dClipped.replace(with: tcV, where: tcV .< dClipped)
-    dClipped.replace(with: ntcV, where: dClipped .< ntcV)
+    d.replace(with: tcV, where: tcV .< d)
+    d.replace(with: ntcV, where: d .< ntcV)
     
-    let dHalf = dClipped / 2
+    let dHalf = d / 2
     
     var newP0 = p0
     var newQ0 = q0
     var newP1 = p1
     var newQ1 = q1
     
-    newP0.replace(with: p0 &+ dClipped, where: mask)
-    newQ0.replace(with: q0 &- dClipped, where: mask)
+    newP0.replace(with: p0 &+ d, where: mask)
+    newQ0.replace(with: q0 &- d, where: mask)
     newP1.replace(with: p1 &+ dHalf, where: mask)
     newQ1.replace(with: q1 &- dHalf, where: mask)
     

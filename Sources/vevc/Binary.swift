@@ -55,3 +55,38 @@ func readUInt64BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt64 {
     let low = try readUInt32BEFromBytes(r, offset: &offset)
     return (UInt64(high) << 32) | UInt64(low)
 }
+
+@inline(__always)
+internal func readUInt16BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt16 {
+    guard offset + 2 <= count else { throw BinaryError.insufficientData(message: "readUInt16BEFromPtr") }
+    let b0 = UInt16(base[offset + 0])
+    let b1 = UInt16(base[offset + 1])
+    offset += 2
+    return (b0 << 8) | b1
+}
+
+@inline(__always)
+internal func readUInt32BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt32 {
+    guard offset + 4 <= count else { throw BinaryError.insufficientData(message: "readUInt32BEFromPtr") }
+    let b0 = UInt32(base[offset + 0])
+    let b1 = UInt32(base[offset + 1])
+    let b2 = UInt32(base[offset + 2])
+    let b3 = UInt32(base[offset + 3])
+    offset += 4
+    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
+}
+
+@inline(__always)
+internal func readUInt64BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt64 {
+    guard offset + 8 <= count else { throw BinaryError.insufficientData(message: "readUInt64BEFromPtr") }
+    let b0 = UInt64(base[offset + 0])
+    let b1 = UInt64(base[offset + 1])
+    let b2 = UInt64(base[offset + 2])
+    let b3 = UInt64(base[offset + 3])
+    let b4 = UInt64(base[offset + 4])
+    let b5 = UInt64(base[offset + 5])
+    let b6 = UInt64(base[offset + 6])
+    let b7 = UInt64(base[offset + 7])
+    offset += 8
+    return (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32) | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7
+}

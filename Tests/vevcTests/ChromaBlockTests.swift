@@ -248,7 +248,7 @@ final class ChromaBlockTests: XCTestCase {
                     ptr[x] = originalValues[y * blockSize + x]
                 }
             }
-            dwt2d_8(view)
+            dwt2DBlock8(view)
         
             // 量子化
             evaluateQuantizeBase8(view: block, qt: qt)
@@ -265,7 +265,7 @@ final class ChromaBlockTests: XCTestCase {
             dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
             dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
             dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
-            invDwt2d_8(view)
+            inverseDWT2DBlock8(view)
         
             // MSE計算
             var mse: Double = 0

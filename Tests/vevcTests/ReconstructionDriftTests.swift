@@ -49,7 +49,8 @@ final class ReconstructionDriftTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
         
-        let (bytes, encRecon) = try await encodeSpatialLayers(pd: pd, pool: pool, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3, roundOffset: 0)
+        let (bytes, encRecon, releaseFn) = try await encodeSpatialLayers(pd: pd, pool: pool, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3, roundOffset: 0)
+        defer { releaseFn() }
         
         let decImg16 = try await decodeSpatialLayers(r: bytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
         let decRecon = PlaneData420(img16: decImg16)

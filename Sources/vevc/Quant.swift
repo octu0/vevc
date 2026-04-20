@@ -58,16 +58,17 @@ struct QuantizationTable: Sendable {
         var qHighDen = 4      // HH scale denominator
         var qLowDivisor = 6
 
-        if layerIndex == 2 {
+        switch layerIndex {
+        case 2:
             qLowDivisor = 1
             // 以前は Layer2 の高周波帯を 1.5倍 で粗く量子化していたため、サブピクセル予測でボヤケた輪郭の残差が削られてモヤモヤ（ゴースト）になっていた。
             // これを 1.0x (Num=4, Den=4) に変更し、高周波成分を正確に残す。
             qMidNum = 4; qMidDen = 4          // 1.0 (old: 1.2)
             qHighNum = 4; qHighDen = 4        // 1.0 (old: 1.5)
-        } else if layerIndex == 1 {
+        case 1:
             qMidNum = 2; qMidDen = 4          // 0.5
             qHighNum = 4; qHighDen = 4        // 1.0
-        } else { // layerIndex == 0
+        default: // layerIndex == 0
             qMidNum = 1; qMidDen = 4          // 0.25
             qHighNum = 2; qHighDen = 4        // 0.5
             qLowDivisor = 12
@@ -496,7 +497,7 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
         while i < block.width {
             let val = Int32(ptr[i])
             let res = val &* step
-            let offset: Int32 = (val > 0) ? (step / 2) : (val < 0 ? (-step / 2) : 0)
+            let offset: Int32 = if 0 < val { step / 2 } else if val < 0 { -step / 2 } else { 0 }
             ptr[i] = Int16(clamping: res + offset)
             i += 1
         }
@@ -621,7 +622,7 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
             let decoded = Int16(bitPattern: decodedUInt)
             let val = Int32(decoded)
             let res = val &* step
-            let offset: Int32 = (val > 0) ? (step / 2) : (val < 0 ? (-step / 2) : 0)
+            let offset: Int32 = if 0 < val { step / 2 } else if val < 0 { -step / 2 } else { 0 }
             ptr[i] = Int16(clamping: res + offset)
             i += 1
         }

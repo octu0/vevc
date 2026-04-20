@@ -60,7 +60,7 @@ final class EntropyCodecTests: XCTestCase {
         try data.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             for i in 0..<16 {
-                try! blockDecode16V(decoder: &decoder, block: decBlocks[i], parentBlock: nil)
+                try! blockDecode16V(decoder: &decoder, block: decBlocks[i])
             }
         }
         

@@ -62,7 +62,7 @@ final class Block13DebugTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks2, zeroThreshold: safeThreshold, parentBlocks: nil)
         
         // decodePlaneSubbands32  
-        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks2.count, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks2.count)
         
         // block 13 の詳細比較
         for bi in [12, 13, 14] {

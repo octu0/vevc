@@ -136,7 +136,7 @@ final class BlockViewPool: @unchecked Sendable {
         let key = width * height
         
         #if arch(wasm32)
-        if var bucket = pools[key], !bucket.isEmpty {
+        if var bucket = pools[key], bucket.isEmpty != true {
             let block = bucket.removeLast()
             pools[key] = bucket
             block.clearAll()
@@ -144,7 +144,7 @@ final class BlockViewPool: @unchecked Sendable {
         }
         #else
         os_unfair_lock_lock(lock)
-        if var bucket = pools[key], !bucket.isEmpty {
+        if var bucket = pools[key], bucket.isEmpty != true {
             let block = bucket.removeLast()
             pools[key] = bucket
             os_unfair_lock_unlock(lock)
@@ -193,14 +193,14 @@ final class BlockViewPool: @unchecked Sendable {
     @inline(__always)
     func getInt16(count: Int) -> [Int16] {
         #if arch(wasm32)
-        if var bucket = int16Pools[count], !bucket.isEmpty {
+        if var bucket = int16Pools[count], bucket.isEmpty != true {
             let arr = bucket.removeLast()
             int16Pools[count] = bucket
             return arr
         }
         #else
         os_unfair_lock_lock(lock)
-        if var bucket = int16Pools[count], !bucket.isEmpty {
+        if var bucket = int16Pools[count], bucket.isEmpty != true {
             let arr = bucket.removeLast()
             int16Pools[count] = bucket
             os_unfair_lock_unlock(lock)

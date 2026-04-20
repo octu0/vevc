@@ -2,73 +2,13 @@
 
 import Foundation
 
-@usableFromInline
-struct __VevcSendableInt16Ptr: @unchecked Sendable {
-    @usableFromInline let ptr: UnsafeMutablePointer<Int16>
-    @usableFromInline init(_ ptr: UnsafeMutablePointer<Int16>) { self.ptr = ptr }
+fileprivate struct SendableInt16Ptr: @unchecked Sendable {
+    let ptr: UnsafeMutablePointer<Int16>
+    init(_ ptr: UnsafeMutablePointer<Int16>) { self.ptr = ptr }
 }
 
 // MARK: - Spatial Adaptive Weight
 
-/// Integer square root (floor).
-/// Returns the largest integer n such that n*n <= value.
-@inline(__always)
-private func isqrt(_ value: Int) -> Int {
-    guard 0 < value else { return 0 }
-    var x = value
-    var y = (x + 1) / 2
-    while y < x {
-        x = y
-        y = (x + (value / x)) / 2
-    }
-    return x
-}
-
-/// sqrt(2) in 1024-scale fixed-point: 1.41421356... * 1024 ≈ 1448
-private let kSqrt2Scaled: Int = 1448
-
-/// Compute a spatial weight for a block at (blockCol, blockRow) in a grid of (colCount x rowCount).
-/// Returns 1024 at the center of the image and increases toward edges/corners (1024-scale fixed-point).
-/// 1024 corresponds to weight 1.0.
-/// Used to apply more aggressive compression on peripheral blocks where
-/// human visual attention is naturally lower.
-///
-/// - Parameters:
-///   - blockCol, blockRow: Block position (0-indexed).
-///   - colCount, rowCount: Total grid dimensions.
-///   - edgeScale: Maximum weight at corners in 1024-scale (default 1536 = 1.5x).
-/// - Returns: Weight in [1024, edgeScale] (1024-scale fixed-point).
-@inline(__always)
-func spatialWeight(blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int, edgeScale: Int = 1536) -> Int {
-    guard 1 < colCount && 1 < rowCount else { return 1024 }
-    
-    // Normalize block position to [-1024, 1024] centered coordinates (1024-scale)
-    let cx = ((blockCol * 2048) / (colCount - 1)) - 1024
-    let cy = ((blockRow * 2048) / (rowCount - 1)) - 1024
-    
-    // Euclidean distance from center in 1024-scale, normalized by sqrt(2)
-    // dist = sqrt(cx*cx + cy*cy) / sqrt(2), all in 1024-scale
-    let distSquared = ((cx * cx) + (cy * cy))
-    let dist1024 = isqrt(distSquared)
-    // Divide by SQRT2_SCALED and clamp to [0, 1024]
-    let distNorm = min(1024, (dist1024 * 1024) / kSqrt2Scaled)
-    
-    // Linear interpolation: center → 1024, corner → edgeScale
-    return 1024 + (((edgeScale - 1024) * distNorm) / 1024)
-}
-
-/// Compute spatially-adaptive SAD threshold for zero-block skip decisions.
-/// Edge blocks get higher thresholds → more likely to be fully skipped.
-@inline(__always)
-func spatialSADThreshold(baseSAD: Int, blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int) -> Int {
-    let weight = spatialWeight(blockCol: blockCol, blockRow: blockRow, colCount: colCount, rowCount: rowCount)
-    return (baseSAD * weight) / 1024
-}
-
-@inline(__always)
-func scaledSADThreshold(_ defaultSAD: Int, step: Int) -> Int {
-    return (defaultSAD * min(step, 256)) / 48
-}
 
 final class ConcurrentBox<T>: @unchecked Sendable {
     var value: T
@@ -133,7 +73,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
         dstBaseAlloc.deinitialize(count: subWidth * subHeight)
         dstBaseAlloc.deallocate() 
     }
-    let safeDst = __VevcSendableInt16Ptr(dstBaseAlloc)
+    let safeDst = SendableInt16Ptr(dstBaseAlloc)
     
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
@@ -159,7 +99,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        dwt2d_32(view)
+                        dwt2DBlock32(view)
                         
                         let destStartX = (w / 2)
                         let destStartY = (h / 2)
@@ -190,7 +130,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                             } else {
                                 for blockY in 0..<subSize {
                                     let dstY = (destStartY + blockY)
-                                    if subHeight > dstY {
+                                    if dstY < subHeight {
                                         let srcPtr = srcBase.advanced(by: (blockY * 32))
                                         let dstIdx = ((dstY * subWidth) + destStartX)
                                         dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
@@ -208,9 +148,8 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     
     var subband = pool.getInt16(count: subWidth * subHeight)
     subband.withUnsafeMutableBufferPointer { buf in
-        if let base = buf.baseAddress {
-            base.update(from: dstBaseAlloc, count: subWidth * subHeight)
-        }
+        let base = buf.baseAddress!
+        base.update(from: dstBaseAlloc, count: subWidth * subHeight)
     }
     return (blocks, subband)
 }
@@ -243,7 +182,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        dwt2d_32(view)
+                        dwt2DBlock32(view)
                     }
                 }
             }
@@ -315,7 +254,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
         dstBaseAlloc.deinitialize(count: subWidth * subHeight)
         dstBaseAlloc.deallocate() 
     }
-    let safeDst = __VevcSendableInt16Ptr(dstBaseAlloc)
+    let safeDst = SendableInt16Ptr(dstBaseAlloc)
     
     let rowCount = ((height + 16 - 1) / 16)
     let colCount = ((width + 16 - 1) / 16)
@@ -341,7 +280,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
-                        dwt2d_16(view)
+                        dwt2DBlock16(view)
                         
                         let destStartX = (w / 2)
                         let destStartY = (h / 2)
@@ -364,7 +303,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                             } else {
                                 for blockY in 0..<subSize {
                                     let dstY = (destStartY + blockY)
-                                    if subHeight > dstY {
+                                    if dstY < subHeight {
                                         let srcPtr = srcBase.advanced(by: (blockY * 16))
                                         let dstIdx = ((dstY * subWidth) + destStartX)
                                         dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
@@ -382,20 +321,18 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     
     var subband = pool.getInt16(count: subWidth * subHeight)
     subband.withUnsafeMutableBufferPointer { buf in
-        if let base = buf.baseAddress {
-            base.update(from: dstBaseAlloc, count: subWidth * subHeight)
-        }
+        buf.baseAddress!.update(from: dstBaseAlloc, count: subWidth * subHeight)
     }
     return (blocks, subband)
 }
 
 @inline(__always)
 func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [Int16] {
-    let subWidth = ((width + 1) / 2)
-    let subHeight = ((height + 1) / 2)
+    let subWidth = (width + 1) / 2
+    let subHeight = (height + 1) / 2
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let rowCount = ((height + 16 - 1) / 16)
-    let colCount = ((width + 16 - 1) / 16)
+    let rowCount = (height + (16 - 1)) / 16
+    let colCount = (width + (16 - 1)) / 16
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks: [BlockView] = []
@@ -417,7 +354,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
-                        dwt2d_16(view)
+                        dwt2DBlock16(view)
                     }
                 }
             }
@@ -496,7 +433,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 8, height: 8, into: view)
-                        dwt2d_8(view)
+                        dwt2DBlock8(view)
                     }
                 }
             }
@@ -530,7 +467,7 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int,
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        dwt2d_32(view)
+                        dwt2DBlock32(view)
                     }
                 }
             }
@@ -795,22 +732,25 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
                 dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
-                invDwt2d_8(view)
+                inverseDWT2DBlock8(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<8 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 8)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -853,22 +793,25 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                invDwt2d_32(view)
+                inverseDWT2DBlock32(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<32 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 32)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -911,22 +854,25 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                invDwt2d_32(view)
+                inverseDWT2DBlock32(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<32 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 32)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -969,22 +915,25 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                invDwt2d_32(view)
+                inverseDWT2DBlock32(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<32 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 32)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -1027,22 +976,25 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                invDwt2d_16(view)
+                inverseDWT2DBlock16(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<16 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 16)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -1085,22 +1037,25 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                invDwt2d_16(view)
+                inverseDWT2DBlock16(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<16 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 16)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -1143,22 +1098,25 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                invDwt2d_16(view)
+                inverseDWT2DBlock16(view)
                             
-                if isEdgeY != true && isEdgeX != true {
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
                     let v = blk
                     for h in 0..<16 {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: 16)
                     }
-                } else if loopH > 0 && loopW > 0 {
+                case 0 < loopH && 0 < loopW:
                     let v = blk
                     for h in 0..<loopH {
                         let srcPtr = v.rowPointer(y: h)
                         let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
                         destPtr.update(from: srcPtr, count: loopW)
                     }
+                default:
+                    break
                 }
             }
         }
@@ -1179,7 +1137,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     async let taskBufY = { () -> ([UInt8], [Int16], [BlockView]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
         let isIFrame = (sads == nil)
-        let isPFrame = !isIFrame
+        let isPFrame = isIFrame != true
         for i in blocks.indices {
             if let sList = sads, i < sList.count {
                 let col = i % yColCount8
@@ -1194,9 +1152,11 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
-        let buf = isPFrame
-            ? encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
-            : encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        let buf = if isPFrame {
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+        } else {
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        }
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
@@ -1209,7 +1169,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     async let taskBufCb = { () -> ([UInt8], [Int16], [BlockView]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
         let isIFrame = (sads == nil)
-        let isPFrame = !isIFrame
+        let isPFrame = isIFrame != true
         for i in blocks.indices {
             var sadVal: Int = Int.max
             if let sList = sads {
@@ -1226,11 +1186,13 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         }
         
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
-        
+
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
-        let buf = isPFrame
-            ? encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
-            : encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        let buf = if isPFrame {
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+        } else {
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        }
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1240,7 +1202,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     async let taskBufCr = { () -> ([UInt8], [Int16], [BlockView]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
         let isIFrame = (sads == nil)
-        let isPFrame = !isIFrame
+        let isPFrame = isIFrame != true
         for i in blocks.indices {
             var sadVal: Int = Int.max
             if let sList = sads {
@@ -1259,9 +1221,11 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step) / 2))
-        let buf = isPFrame
-            ? encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
-            : encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        let buf = if isPFrame {
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+        } else {
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+        }
         
         let quantizedBlocks = blocks
         let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1320,7 +1284,7 @@ func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: Qu
             dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
             dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
             dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
-            invDwt2d_32(view)
+            inverseDWT2DBlock32(view)
                     
             let validEndY = min(height, startY + 32)
             let validEndX = min(width, startX + 32)
@@ -1341,7 +1305,7 @@ func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: Qu
 }
 
 @inline(__always)
-func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420) {
+func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1423,11 +1387,15 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return (out, reconstructed)
+    return (out, reconstructed, { [reconstructed] in
+        pool.putInt16(reconstructed.y)
+        pool.putInt16(reconstructed.cb)
+        pool.putInt16(reconstructed.cr)
+    })
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420, @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1487,11 +1455,15 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed)
+    return (out, reconstructed, { [reconstructed] in
+        pool.putInt16(reconstructed.y)
+        pool.putInt16(reconstructed.cb)
+        pool.putInt16(reconstructed.cr)
+    })
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420, @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1509,9 +1481,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutPdY = pool.getInt16(count: pd.y.count)
     var mutPdCb = pool.getInt16(count: pd.cb.count)
     var mutPdCr = pool.getInt16(count: pd.cr.count)
-    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
+    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
+    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
+    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     
     subtractMotionCompensationPixelsLuma32(plane: &mutPdY, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, roundOffset: roundOffset)
     subtractMotionCompensationPixelsChroma16(plane: &mutPdCb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
@@ -1573,11 +1545,15 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed)
+    return (out, reconstructed, { [reconstructed] in
+        pool.putInt16(reconstructed.y)
+        pool.putInt16(reconstructed.cb)
+        pool.putInt16(reconstructed.cr)
+    })
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0) async throws -> ([UInt8], PlaneData420) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0) async throws -> ([UInt8], PlaneData420, @Sendable () -> Void) {
     let pPd = predictedPd
     let nPd = nextPd
     
@@ -1600,9 +1576,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutPdY = pool.getInt16(count: pd.y.count)
     var mutPdCb = pool.getInt16(count: pd.cb.count)
     var mutPdCr = pool.getInt16(count: pd.cr.count)
-    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
-    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ _ = dst.update(from: $0) }) }
+    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
+    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
+    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     
     // Y represents full Luma, scaleDen = 1 means 1 mv unit = 1/4 Luma pixel (as provided by QuarterRefinement)
     // Cb/Cr are half size, so 1 mv unit in Luma = 1/8 pixel in Chroma -> scaleDen = 2 converts to 1/4 Chroma pixel
@@ -1686,961 +1662,12 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed)
+    return (out, reconstructed, { [reconstructed] in
+        pool.putInt16(reconstructed.y)
+        pool.putInt16(reconstructed.cb)
+        pool.putInt16(reconstructed.cr)
+    })
 }
 
-@inline(__always)
-func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockViewPool, roundOffset: Int) async -> ([MotionVector], [Int]) {
-    let dx = curr.width
-    let dy = curr.height
-    let l1dx = (dx + 1) / 2
-    let l1dy = (dy + 1) / 2
-    let l0dx = (l1dx + 1) / 2
-    let l0dy = (l1dy + 1) / 2
-    
-    let currSub2 = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
-    let currSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
 
-    let prevSub2 = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
-    let prevSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    
-    let targetWidth = l0dx
-    let targetHeight = l0dy
-    let colCount = (targetWidth + 7) / 8
-    
-    var mvs = [MotionVector](repeating: MotionVector(dx: 0, dy: 0), count: currBlocks8.count)
-    var sads = [Int](repeating: 0, count: currBlocks8.count)
-    
-    let tmpC = pool.get(width: 8, height: 8)
-    let tmpO = pool.get(width: 8, height: 8)
-    let tmpT = pool.get(width: 8, height: 8)
-    defer {
-        pool.put(tmpC)
-        pool.put(tmpO)
-        pool.put(tmpT)
-    }
-    let cPtr = tmpC.base
-    let oPtr = tmpO.base
-    let tPtr = tmpT.base
-
-    mvs.withUnsafeMutableBufferPointer { mvsPtr in
-        sads.withUnsafeMutableBufferPointer { sadsPtr in
-            for idx in currBlocks8.indices {
-                let col = idx % colCount
-                let row = idx / colCount
-                let bx = col * 8
-                let by = row * 8
-                let pmv = (col > 0) ? mvsPtr[idx - 1] : MotionVector(dx: 0, dy: 0)
-                let (mv, sad) = MotionEstimation.searchPixels(
-                    currPlane: currSub1, prevPlane: prevSub1, 
-                    cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv,
-                    roundOffset: roundOffset
-                )
-                
-                let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
-                
-                // 動的閾値: 平坦なブロックなら2048(寛容)、コントラストが高い(< 1000)なら低くしてIntraを促進
-                // ゴーストが出るのはコントラストの高いエッジ部分が誤った方向に引きずられるため。
-                let dynamicThreshold = max(256, 2048 - (currContrast * 2))
-                
-                if sad > dynamicThreshold {
-                    mvsPtr[idx] = MotionVector.intraBlock
-                    sadsPtr[idx] = sad
-                } else {
-                    mvsPtr[idx] = mv
-                    sadsPtr[idx] = sad
-                }
-            }
-        }
-    }
-    return (mvs, sads)
-}
-
-/// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames, 
-/// and selects the one with smaller SAD per block.
-/// - Returns: (mvs, sads, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
-@inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool, roundOffset: Int, gopPosition: Int) async -> ([MotionVector], [Int], [Bool]) {
-    let dx = curr.width
-    let dy = curr.height
-    let l1dx = (dx + 1) / 2
-    let l1dy = (dy + 1) / 2
-    let l0dx = (l1dx + 1) / 2
-    let l0dy = (l1dy + 1) / 2
-    
-    // Compute DWT LL band (Base8 resolution) for current frame
-    let currSub2 = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
-    let currSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
-
-    // Forward reference DWT LL band
-    let prevSub2 = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
-    let prevSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    
-    // Backward reference DWT LL band
-    let nextSub2 = await extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
-    let nextSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: nextSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    
-    let targetWidth = l0dx
-    let targetHeight = l0dy
-    let colCount = (targetWidth + 7) / 8
-    
-    var mvs = [MotionVector](repeating: MotionVector(dx: 0, dy: 0), count: currBlocks8.count)
-    var sads = [Int](repeating: 0, count: currBlocks8.count)
-    var refDirs = [Bool](repeating: false, count: currBlocks8.count)
-    
-    let tmpC = pool.get(width: 8, height: 8)
-    let tmpO = pool.get(width: 8, height: 8)
-    let tmpT = pool.get(width: 8, height: 8)
-    defer {
-        pool.put(tmpC)
-        pool.put(tmpO)
-        pool.put(tmpT)
-    }
-    let cPtr = tmpC.base
-    let oPtr = tmpO.base
-    let tPtr = tmpT.base
-
-    let body: (UnsafeMutablePointer<MotionVector>, UnsafeMutablePointer<Int>, UnsafeMutablePointer<Bool>) -> Void = { mvsPtr, sadsPtr, refDirsPtr in
-        for idx in currBlocks8.indices {
-            let col = idx % colCount
-            let row = idx / colCount
-            let bx = col * 8
-            let by = row * 8
-            
-            let mvA = (col > 0) ? mvsPtr[idx - 1] : MotionVector(dx: 0, dy: 0)
-            let mvB = (row > 0) ? mvsPtr[idx - colCount] : MotionVector(dx: 0, dy: 0)
-            let mvC = (row > 0 && col < colCount - 1) ? mvsPtr[idx - colCount + 1] : MotionVector(dx: 0, dy: 0)
-            
-            let pmvDx = MotionEstimation.median(Int(mvA.dx), Int(mvB.dx), Int(mvC.dx))
-            let pmvDy = MotionEstimation.median(Int(mvA.dy), Int(mvB.dy), Int(mvC.dy))
-            let pmv = MotionVector(dx: Int16(pmvDx), dy: Int16(pmvDy))
-            
-            let (mvPrev, mutSadPrev) = MotionEstimation.searchPixels(
-                currPlane: currSub1, prevPlane: prevSub1,
-                cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: pmv, roundOffset: roundOffset
-            )
-            
-            let prevChromaPenalty: Int
-            if mutSadPrev <= 512 {
-                let intPrevDx = Int(mvPrev.dx) >> 3
-                let intPrevDy = Int(mvPrev.dy) >> 3
-                let prevChromaSad = MotionEstimation.computeChromaSAD(curr: curr, ref: prev, bx: bx, by: by, refDx: intPrevDx, refDy: intPrevDy)
-                prevChromaPenalty = prevChromaSad / 4
-            } else {
-                prevChromaPenalty = 0
-            }
-            let sadPrev = mutSadPrev + prevChromaPenalty
-            
-            var bestMv = mvPrev
-            var dir = false
-            
-            // Early Exit: If the forward prediction is extremely good, skip backward prediction.
-            // A SAD of 256 means an average error of 4 per pixel in an 8x8 block.
-            // Always check backward prediction if sadPrev >= 256, so trailing ghosts can be erased.
-            let gopPenalty = gopPosition * 64
-            if 256 <= sadPrev {
-                let (mvNext, sadNext) = MotionEstimation.searchPixels(
-                    currPlane: currSub1, prevPlane: nextSub1,
-                    cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: pmv, roundOffset: roundOffset
-                )
-                
-                let mvEnergyNext = abs(Int(mvNext.dx)) + abs(Int(mvNext.dy))
-                
-                // If I-frame (next) predicts the block extremely well, it's overwhelmingly likely
-                // a static background. Waive the GOP penalty to allow instantaneous ghost erasure.
-                let effectiveGopPenalty = (sadNext < 256) ? 0 : gopPenalty
-                let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
-                
-                if sadNext + baselinePenalty < sadPrev {
-                    // Structural Validation
-                    let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
-                    let intNextDx = Int(mvNext.dx) >> 3
-                    let intNextDy = Int(mvNext.dy) >> 3
-                    let nextContrast = MotionEstimation.extractContrast8x8(plane: nextSub1, width: targetWidth, height: targetHeight, bx: bx + intNextDx, by: by + intNextDy)
-                    
-                    let contrastDiff = abs(currContrast - nextContrast)
-                    let structurePenalty = contrastDiff * contrastDiff
-                    
-                    // Chroma SAD penalty to completely block mismatching colors (e.g. blue background vs red hair)
-                    let chromaSAD = MotionEstimation.computeChromaSAD(curr: curr, ref: next, bx: bx, by: by, refDx: intNextDx, refDy: intNextDy)
-                    
-                    let chromaPenalty = chromaSAD / 4
-                    
-                    if sadNext + baselinePenalty + structurePenalty + chromaPenalty < sadPrev {
-                        bestMv = mvNext
-                        dir = true
-                    } else if sadNext + baselinePenalty + structurePenalty + chromaPenalty == sadPrev && (mvNext.dy * mvNext.dy + mvNext.dx * mvNext.dx) < (mvPrev.dy * mvPrev.dy + mvPrev.dx * mvPrev.dx) {
-                        bestMv = mvNext
-                        dir = true
-                    }
-                }
-            }
-            
-            // Refine ME on full resolution Luma (1/4 pixel precision)
-            let actPrev = dir ? next : prev
-            let (rv, rsad) = MotionEstimation.searchPixelsQuarterRefinement32(
-                currPlane: curr.y, prevPlane: actPrev.y,
-                width: curr.width, height: curr.height,
-                bx: bx * 4, by: by * 4, pmv: bestMv
-            )
-            
-            // Full res 32x32 block (1024 pixels).
-            // Average allowed pixel error.
-            let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
-            // 強いコントラスト(エッジ)がある場合、SADの許容を激しく下げる
-            // 8192 は平均誤差 8 で全体的に白くぼやけてゴーストになる。
-            // コントラストに応じて SAD 許容値を下げる (最大 8192、最小 1024 程度)
-            let dynamicThreshold = max(1024, 8192 - (currContrast * 8))
-            
-            if rsad > dynamicThreshold {
-                mvsPtr[idx] = MotionVector.intraBlock
-                sadsPtr[idx] = rsad
-                refDirsPtr[idx] = false
-            } else {
-                mvsPtr[idx] = rv
-                sadsPtr[idx] = rsad
-                refDirsPtr[idx] = dir
-            }
-        }
-    }
-    withUnsafePointers(mut: &mvs, mut: &sads, mut: &refDirs, body)
-    return (mvs, sads, refDirs)
-}
-
-@usableFromInline
-let FIRLUMACoeffs: [[Int]] = [
-    [0, 8, 0, 0],
-    [-1, 7, 2, 0],
-    [-1, 5, 5, -1],
-    [0, 2, 7, -1]
-]
-
-// why: SIMD8<Int32> horizontal FIR helper for Luma 4-tap filter
-// Loads 4 shifted SIMD8<Int16> vectors from row pointer, widens to Int32, multiplies by coefficients and sums
-@inline(__always)
-private func horizontalFIRLuma8(
-    _ row: UnsafePointer<Int16>, _ offset: Int,
-    _ vcX0: SIMD8<Int32>, _ vcX1: SIMD8<Int32>, _ vcX2: SIMD8<Int32>, _ vcX3: SIMD8<Int32>
-) -> SIMD8<Int32> {
-    let s0 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(row.advanced(by: offset - 1)).loadUnaligned(as: SIMD8<Int16>.self))
-    let s1 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(row.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self))
-    let s2 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(row.advanced(by: offset + 1)).loadUnaligned(as: SIMD8<Int16>.self))
-    let s3 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(row.advanced(by: offset + 2)).loadUnaligned(as: SIMD8<Int16>.self))
-    return vcX0 &* s0 &+ vcX1 &* s1 &+ vcX2 &* s2 &+ vcX3 &* s3
-}
-
-fileprivate func addMCBlockLuma32(
-    dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
-    width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
-) {
-    if mv.isIntra { return }
-    
-    let mvDx = Int(mv.dx)
-    let mvDy = Int(mv.dy)
-    let shiftX = (mvDx >> 2)
-    let shiftY = (mvDy >> 2)
-    let fractX = (mvDx & 3)
-    let fractY = (mvDy & 3)
-    
-    let bw = min(32, width - blockX)
-    let bh = min(32, height - blockY)
-    if bw <= 0 || bh <= 0 { return }
-    
-    let fX = FIRLUMACoeffs[fractX]
-    let fY = FIRLUMACoeffs[fractY]
-    let safe = (blockX + shiftX - 1 >= 0) && (blockY + shiftY - 1 >= 0) && (blockX + shiftX + bw + 2 < width) && (blockY + shiftY + bh + 2 < height)
-    let cX0 = Int32(fX[0]), cX1 = Int32(fX[1]), cX2 = Int32(fX[2]), cX3 = Int32(fX[3])
-    let cY0 = Int32(fY[0]), cY1 = Int32(fY[1]), cY2 = Int32(fY[2]), cY3 = Int32(fY[3])
-    let useFIR = (fractX != 0 || fractY != 0)
-    
-    if safe {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 15 {
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let s = UnsafeRawPointer(r.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ s, as: SIMD16<Int16>.self)
-                    x &+= 16
-                }
-                while x < bw { dstPtr[x] = dstPtr[x] &+ r[x]; x &+= 1 }
-            }
-        } else if fractY == 0 {
-            // why: fractY==0 means vertical FIR coefficients are [0,8,0,0], so vertical FIR = 8*h0
-            // Skip 3 out of 4 row loads (rM1, rP1, rP2) and vertical multiply-add
-            let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
-            let vcX2 = SIMD8<Int32>(repeating: cX2), vcX3 = SIMD8<Int32>(repeating: cX3)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            let v8 = SIMD8<Int32>(repeating: 8)
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let h0 = horizontalFIRLuma8(r0, x, vcX0, vcX1, vcX2, vcX3)
-                    let v = v8 &* h0
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let v0 = cX0 &* Int32(r0[x - 1]) &+ cX1 &* Int32(r0[x]) &+ cX2 &* Int32(r0[x + 1]) &+ cX3 &* Int32(r0[x + 2])
-                    let v = Int32(8) &* v0
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                    x &+= 1
-                }
-            }
-        } else if fractX == 0 {
-            // why: fractX==0 means horizontal FIR coefficients are [0,8,0,0], so horizontal FIR = 8*pixel
-            // Skip horizontalFIRLuma8 calls, load pixels directly and apply vertical FIR
-            let vcY0 = SIMD8<Int32>(repeating: cY0), vcY1 = SIMD8<Int32>(repeating: cY1)
-            let vcY2 = SIMD8<Int32>(repeating: cY2), vcY3 = SIMD8<Int32>(repeating: cY3)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            let v8 = SIMD8<Int32>(repeating: 8)
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let rM1 = srcBase.advanced(by: (sy - 1) * width + blockX + shiftX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let rP1 = srcBase.advanced(by: (sy + 1) * width + blockX + shiftX)
-                let rP2 = srcBase.advanced(by: (sy + 2) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let pM1 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let p0  = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let pP1 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let pP2 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let vertFIR = vcY0 &* pM1 &+ vcY1 &* p0 &+ vcY2 &* pP1 &+ vcY3 &* pP2
-                    let v = v8 &* vertFIR
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let vM1 = Int32(8) &* Int32(rM1[x])
-                    let v0  = Int32(8) &* Int32(r0[x])
-                    let vP1 = Int32(8) &* Int32(rP1[x])
-                    let vP2 = Int32(8) &* Int32(rP2[x])
-                    let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                    x &+= 1
-                }
-            }
-        } else {
-            // Full 2D FIR: both fractX != 0 and fractY != 0
-            let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
-            let vcX2 = SIMD8<Int32>(repeating: cX2), vcX3 = SIMD8<Int32>(repeating: cX3)
-            let vcY0 = SIMD8<Int32>(repeating: cY0), vcY1 = SIMD8<Int32>(repeating: cY1)
-            let vcY2 = SIMD8<Int32>(repeating: cY2), vcY3 = SIMD8<Int32>(repeating: cY3)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let rM1 = srcBase.advanced(by: (sy - 1) * width + blockX + shiftX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let rP1 = srcBase.advanced(by: (sy + 1) * width + blockX + shiftX)
-                let rP2 = srcBase.advanced(by: (sy + 2) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let hM1 = horizontalFIRLuma8(rM1, x, vcX0, vcX1, vcX2, vcX3)
-                    let h0  = horizontalFIRLuma8(r0,  x, vcX0, vcX1, vcX2, vcX3)
-                    let hP1 = horizontalFIRLuma8(rP1, x, vcX0, vcX1, vcX2, vcX3)
-                    let hP2 = horizontalFIRLuma8(rP2, x, vcX0, vcX1, vcX2, vcX3)
-                    let v = vcY0 &* hM1 &+ vcY1 &* h0 &+ vcY2 &* hP1 &+ vcY3 &* hP2
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let vM1 = cX0 &* Int32(rM1[x - 1]) &+ cX1 &* Int32(rM1[x]) &+ cX2 &* Int32(rM1[x + 1]) &+ cX3 &* Int32(rM1[x + 2])
-                    let v0  = cX0 &* Int32(r0[x - 1])  &+ cX1 &* Int32(r0[x])  &+ cX2 &* Int32(r0[x + 1])  &+ cX3 &* Int32(r0[x + 2])
-                    let vP1 = cX0 &* Int32(rP1[x - 1]) &+ cX1 &* Int32(rP1[x]) &+ cX2 &* Int32(rP1[x + 1]) &+ cX3 &* Int32(rP1[x + 2])
-                    let vP2 = cX0 &* Int32(rP2[x - 1]) &+ cX1 &* Int32(rP2[x]) &+ cX2 &* Int32(rP2[x + 1]) &+ cX3 &* Int32(rP2[x + 2])
-                    let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                    x &+= 1
-                }
-            }
-        }
-    } else {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let safeSy = max(0, min(sy, height - 1))
-                let r = srcBase.advanced(by: safeSy * width)
-                for x in 0..<bw {
-                    let sx = max(0, min(blockX + shiftX + x, width - 1))
-                    dstPtr[x] = dstPtr[x] &+ r[sx]
-                }
-            }
-        } else {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let syM1 = max(0, min(sy - 1, height - 1))
-                let sy0  = max(0, min(sy, height - 1))
-                let syP1 = max(0, min(sy + 1, height - 1))
-                let syP2 = max(0, min(sy + 2, height - 1))
-                let rM1 = srcBase.advanced(by: syM1 * width)
-                let r0  = srcBase.advanced(by: sy0 * width)
-                let rP1 = srcBase.advanced(by: syP1 * width)
-                let rP2 = srcBase.advanced(by: syP2 * width)
-                for x in 0..<bw {
-                    let cx = blockX + shiftX + x
-                    let sxM1 = max(0, min(cx - 1, width - 1))
-                    let sx0  = max(0, min(cx, width - 1))
-                    let sxP1 = max(0, min(cx + 1, width - 1))
-                    let sxP2 = max(0, min(cx + 2, width - 1))
-                    let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
-                    let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
-                    let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
-                    let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
-                    let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                }
-            }
-        }
-    }
-}
-
-fileprivate func subMCBlockLuma32(
-    dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
-    width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
-) {
-    if mv.isIntra { return }
-    
-    let mvDx = Int(mv.dx)
-    let mvDy = Int(mv.dy)
-    let shiftX = (mvDx >> 2)
-    let shiftY = (mvDy >> 2)
-    let fractX = (mvDx & 3)
-    let fractY = (mvDy & 3)
-    
-    let bw = min(32, width - blockX)
-    let bh = min(32, height - blockY)
-    if bw <= 0 || bh <= 0 { return }
-    
-    let fX = FIRLUMACoeffs[fractX]
-    let fY = FIRLUMACoeffs[fractY]
-    let safe = (blockX + shiftX - 1 >= 0) && (blockY + shiftY - 1 >= 0) && (blockX + shiftX + bw + 2 < width) && (blockY + shiftY + bh + 2 < height)
-    let cX0 = Int32(fX[0]), cX1 = Int32(fX[1]), cX2 = Int32(fX[2]), cX3 = Int32(fX[3])
-    let cY0 = Int32(fY[0]), cY1 = Int32(fY[1]), cY2 = Int32(fY[2]), cY3 = Int32(fY[3])
-    let useFIR = (fractX != 0 || fractY != 0)
-    
-    if safe {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 15 {
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let s = UnsafeRawPointer(r.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &- s, as: SIMD16<Int16>.self)
-                    x &+= 16
-                }
-                while x < bw { dstPtr[x] = dstPtr[x] &- r[x]; x &+= 1 }
-            }
-        } else if fractY == 0 {
-            // why: fractY==0 means vertical FIR = 8*h0, skip 3 row loads
-            let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
-            let vcX2 = SIMD8<Int32>(repeating: cX2), vcX3 = SIMD8<Int32>(repeating: cX3)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            let v8 = SIMD8<Int32>(repeating: 8)
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let h0 = horizontalFIRLuma8(r0, x, vcX0, vcX1, vcX2, vcX3)
-                    let v = v8 &* h0
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &- res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let v0 = cX0 &* Int32(r0[x - 1]) &+ cX1 &* Int32(r0[x]) &+ cX2 &* Int32(r0[x + 1]) &+ cX3 &* Int32(r0[x + 2])
-                    let v = Int32(8) &* v0
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &- res
-                    x &+= 1
-                }
-            }
-        } else if fractX == 0 {
-            // why: fractX==0 means horizontal FIR = 8*pixel, skip horizontalFIRLuma8
-            let vcY0 = SIMD8<Int32>(repeating: cY0), vcY1 = SIMD8<Int32>(repeating: cY1)
-            let vcY2 = SIMD8<Int32>(repeating: cY2), vcY3 = SIMD8<Int32>(repeating: cY3)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            let v8 = SIMD8<Int32>(repeating: 8)
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let rM1 = srcBase.advanced(by: (sy - 1) * width + blockX + shiftX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let rP1 = srcBase.advanced(by: (sy + 1) * width + blockX + shiftX)
-                let rP2 = srcBase.advanced(by: (sy + 2) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let pM1 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let p0  = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let pP1 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let pP2 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let vertFIR = vcY0 &* pM1 &+ vcY1 &* p0 &+ vcY2 &* pP1 &+ vcY3 &* pP2
-                    let v = v8 &* vertFIR
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &- res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let vM1 = Int32(8) &* Int32(rM1[x])
-                    let v0  = Int32(8) &* Int32(r0[x])
-                    let vP1 = Int32(8) &* Int32(rP1[x])
-                    let vP2 = Int32(8) &* Int32(rP2[x])
-                    let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &- res
-                    x &+= 1
-                }
-            }
-        } else {
-            // Full 2D FIR: both fractX != 0 and fractY != 0
-            let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
-            let vcX2 = SIMD8<Int32>(repeating: cX2), vcX3 = SIMD8<Int32>(repeating: cX3)
-            let vcY0 = SIMD8<Int32>(repeating: cY0), vcY1 = SIMD8<Int32>(repeating: cY1)
-            let vcY2 = SIMD8<Int32>(repeating: cY2), vcY3 = SIMD8<Int32>(repeating: cY3)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let rM1 = srcBase.advanced(by: (sy - 1) * width + blockX + shiftX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let rP1 = srcBase.advanced(by: (sy + 1) * width + blockX + shiftX)
-                let rP2 = srcBase.advanced(by: (sy + 2) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let hM1 = horizontalFIRLuma8(rM1, x, vcX0, vcX1, vcX2, vcX3)
-                    let h0  = horizontalFIRLuma8(r0,  x, vcX0, vcX1, vcX2, vcX3)
-                    let hP1 = horizontalFIRLuma8(rP1, x, vcX0, vcX1, vcX2, vcX3)
-                    let hP2 = horizontalFIRLuma8(rP2, x, vcX0, vcX1, vcX2, vcX3)
-                    let v = vcY0 &* hM1 &+ vcY1 &* h0 &+ vcY2 &* hP1 &+ vcY3 &* hP2
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &- res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let vM1 = cX0 &* Int32(rM1[x - 1]) &+ cX1 &* Int32(rM1[x]) &+ cX2 &* Int32(rM1[x + 1]) &+ cX3 &* Int32(rM1[x + 2])
-                    let v0  = cX0 &* Int32(r0[x - 1])  &+ cX1 &* Int32(r0[x])  &+ cX2 &* Int32(r0[x + 1])  &+ cX3 &* Int32(r0[x + 2])
-                    let vP1 = cX0 &* Int32(rP1[x - 1]) &+ cX1 &* Int32(rP1[x]) &+ cX2 &* Int32(rP1[x + 1]) &+ cX3 &* Int32(rP1[x + 2])
-                    let vP2 = cX0 &* Int32(rP2[x - 1]) &+ cX1 &* Int32(rP2[x]) &+ cX2 &* Int32(rP2[x + 1]) &+ cX3 &* Int32(rP2[x + 2])
-                    let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &- res
-                    x &+= 1
-                }
-            }
-        }
-    } else {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let safeSy = max(0, min(sy, height - 1))
-                let r = srcBase.advanced(by: safeSy * width)
-                for x in 0..<bw {
-                    let sx = max(0, min(blockX + shiftX + x, width - 1))
-                    dstPtr[x] = dstPtr[x] &- r[sx]
-                }
-            }
-        } else {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let syM1 = max(0, min(sy - 1, height - 1))
-                let sy0  = max(0, min(sy, height - 1))
-                let syP1 = max(0, min(sy + 1, height - 1))
-                let syP2 = max(0, min(sy + 2, height - 1))
-                let rM1 = srcBase.advanced(by: syM1 * width)
-                let r0  = srcBase.advanced(by: sy0 * width)
-                let rP1 = srcBase.advanced(by: syP1 * width)
-                let rP2 = srcBase.advanced(by: syP2 * width)
-                for x in 0..<bw {
-                    let cx = blockX + shiftX + x
-                    let sxM1 = max(0, min(cx - 1, width - 1))
-                    let sx0  = max(0, min(cx, width - 1))
-                    let sxP1 = max(0, min(cx + 1, width - 1))
-                    let sxP2 = max(0, min(cx + 2, width - 1))
-                    let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
-                    let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
-                    let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
-                    let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
-                    let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &- res
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-fileprivate func addMCBlockChroma16(
-    dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
-    width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
-) {
-    if mv.isIntra { return }
-    
-    let mvDx = Int(mv.dx)
-    let mvDy = Int(mv.dy)
-    let shiftX = (mvDx >> 3)
-    let shiftY = (mvDy >> 3)
-    let fractX = (mvDx & 7)
-    let fractY = (mvDy & 7)
-    
-    let bw = min(16, width - blockX)
-    let bh = min(16, height - blockY)
-    if bw <= 0 || bh <= 0 { return }
-    
-    let wB = Int32(fractX), wA = Int32(8 - fractX)
-    let wD = Int32(fractY), wC = Int32(8 - fractY)
-    let wAwC = wA * wC, wBwC = wB * wC
-    let wAwD = wA * wD, wBwD = wB * wD
-    let nx = fractX > 0 ? 1 : 0
-    let ny = fractY > 0 ? 1 : 0
-    let safe = (blockX + shiftX >= 0) && (blockY + shiftY >= 0) && (blockX + shiftX + bw + nx < width) && (blockY + shiftY + bh + ny < height)
-    let useFIR = (fractX != 0 || fractY != 0)
-    
-    if safe {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 15 {
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let s = UnsafeRawPointer(r.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ s, as: SIMD16<Int16>.self)
-                    x &+= 16
-                }
-                while x < bw { dstPtr[x] = dstPtr[x] &+ r[x]; x &+= 1 }
-            }
-        } else {
-            let vwAwC = SIMD8<Int32>(repeating: wAwC), vwBwC = SIMD8<Int32>(repeating: wBwC)
-            let vwAwD = SIMD8<Int32>(repeating: wAwD), vwBwD = SIMD8<Int32>(repeating: wBwD)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let r1 = srcBase.advanced(by: (sy + ny) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let s00 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s01 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s10 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s11 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let v = vwAwC &* s00 &+ vwBwC &* s01 &+ vwAwD &* s10 &+ vwBwD &* s11
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let v = wAwC &* Int32(r0[x]) &+ wBwC &* Int32(r0[x + nx]) &+ wAwD &* Int32(r1[x]) &+ wBwD &* Int32(r1[x + nx])
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                    x &+= 1
-                }
-            }
-        }
-    } else {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let safeSy = max(0, min(sy, height - 1))
-                let r = srcBase.advanced(by: safeSy * width)
-                for x in 0..<bw {
-                    let sx = max(0, min(blockX + shiftX + x, width - 1))
-                    dstPtr[x] = dstPtr[x] &+ r[sx]
-                }
-            }
-        } else {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let sy0 = max(0, min(sy, height - 1))
-                let sy1 = max(0, min(sy + ny, height - 1))
-                let r0 = srcBase.advanced(by: sy0 * width)
-                let r1 = srcBase.advanced(by: sy1 * width)
-                for x in 0..<bw {
-                    let cx = blockX + shiftX + x
-                    let sx0 = max(0, min(cx, width - 1))
-                    let sx1 = max(0, min(cx + nx, width - 1))
-                    let v = wAwC &* Int32(r0[sx0]) &+ wBwC &* Int32(r0[sx1]) &+ wAwD &* Int32(r1[sx0]) &+ wBwD &* Int32(r1[sx1])
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-fileprivate func subMCBlockChroma16(
-    dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
-    width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
-) {
-    if mv.isIntra { return }
-    
-    let mvDx = Int(mv.dx)
-    let mvDy = Int(mv.dy)
-    let shiftX = (mvDx >> 3)
-    let shiftY = (mvDy >> 3)
-    let fractX = (mvDx & 7)
-    let fractY = (mvDy & 7)
-    
-    let bw = min(16, width - blockX)
-    let bh = min(16, height - blockY)
-    if bw <= 0 || bh <= 0 { return }
-    
-    let wB = Int32(fractX), wA = Int32(8 - fractX)
-    let wD = Int32(fractY), wC = Int32(8 - fractY)
-    let wAwC = wA * wC, wBwC = wB * wC
-    let wAwD = wA * wD, wBwD = wB * wD
-    let nx = fractX > 0 ? 1 : 0
-    let ny = fractY > 0 ? 1 : 0
-    let safe = (blockX + shiftX >= 0) && (blockY + shiftY >= 0) && (blockX + shiftX + bw + nx < width) && (blockY + shiftY + bh + ny < height)
-    let useFIR = (fractX != 0 || fractY != 0)
-    
-    if safe {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 15 {
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let s = UnsafeRawPointer(r.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &- s, as: SIMD16<Int16>.self)
-                    x &+= 16
-                }
-                while x < bw { dstPtr[x] = dstPtr[x] &- r[x]; x &+= 1 }
-            }
-        } else {
-            let vwAwC = SIMD8<Int32>(repeating: wAwC), vwBwC = SIMD8<Int32>(repeating: wBwC)
-            let vwAwD = SIMD8<Int32>(repeating: wAwD), vwBwD = SIMD8<Int32>(repeating: wBwD)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let r1 = srcBase.advanced(by: (sy + ny) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let s00 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s01 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s10 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s11 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let v = vwAwC &* s00 &+ vwBwC &* s01 &+ vwAwD &* s10 &+ vwBwD &* s11
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &- res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let v = wAwC &* Int32(r0[x]) &+ wBwC &* Int32(r0[x + nx]) &+ wAwD &* Int32(r1[x]) &+ wBwD &* Int32(r1[x + nx])
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &- res
-                    x &+= 1
-                }
-            }
-        }
-    } else {
-        if !useFIR {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let safeSy = max(0, min(sy, height - 1))
-                let r = srcBase.advanced(by: safeSy * width)
-                for x in 0..<bw {
-                    let sx = max(0, min(blockX + shiftX + x, width - 1))
-                    dstPtr[x] = dstPtr[x] &- r[sx]
-                }
-            }
-        } else {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let sy0 = max(0, min(sy, height - 1))
-                let sy1 = max(0, min(sy + ny, height - 1))
-                let r0 = srcBase.advanced(by: sy0 * width)
-                let r1 = srcBase.advanced(by: sy1 * width)
-                for x in 0..<bw {
-                    let cx = blockX + shiftX + x
-                    let sx0 = max(0, min(cx, width - 1))
-                    let sx1 = max(0, min(cx + nx, width - 1))
-                    let v = wAwC &* Int32(r0[sx0]) &+ wBwC &* Int32(r0[sx1]) &+ wAwD &* Int32(r1[sx0]) &+ wBwD &* Int32(r1[sx1])
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &- res
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func applyMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    let body: (UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    prevPlane.withUnsafeBufferPointer { pBuf in plane.withUnsafeMutableBufferPointer { dBuf in body(pBuf.baseAddress!, dBuf.baseAddress!) } }
-}
-
-@inline(__always)
-func applyMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    let body: (UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    prevPlane.withUnsafeBufferPointer { pBuf in plane.withUnsafeMutableBufferPointer { dBuf in body(pBuf.baseAddress!, dBuf.baseAddress!) } }
-}
-
-@inline(__always)
-func subtractMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    let body: (UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                subMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    prevPlane.withUnsafeBufferPointer { pBuf in plane.withUnsafeMutableBufferPointer { dBuf in body(pBuf.baseAddress!, dBuf.baseAddress!) } }
-}
-
-@inline(__always)
-func subtractMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    let body: (UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                subMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    prevPlane.withUnsafeBufferPointer { pBuf in plane.withUnsafeMutableBufferPointer { dBuf in body(pBuf.baseAddress!, dBuf.baseAddress!) } }
-}
-
-@inline(__always)
-func applyBidirectionalMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
-                let srcBase = isBackward ? nextBase : prevBase
-                addMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
-}
-
-@inline(__always)
-func applyBidirectionalMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
-                let srcBase = isBackward ? nextBase : prevBase
-                addMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
-}
-
-@inline(__always)
-func subtractBidirectionalMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
-                let srcBase = isBackward ? nextBase : prevBase
-                subMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
-}
-
-@inline(__always)
-func subtractBidirectionalMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    let body: (UnsafePointer<Int16>, UnsafePointer<Int16>, UnsafeMutablePointer<Int16>) -> Void = { prevBase, nextBase, dstBase in
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let mvIndex = min(row * colCount + col, mvs.count - 1)
-                let isBackward = (mvIndex < refDirs.count) ? refDirs[mvIndex] : false
-                let srcBase = isBackward ? nextBase : prevBase
-                subMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-            }
-        }
-    }
-    withUnsafePointers(prevPlane, nextPlane, mut: &plane, body)
-}
 

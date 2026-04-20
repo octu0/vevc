@@ -186,22 +186,22 @@ actor LayersEncodeActor {
         var encodedFrames = [[UInt8]]()
         encodedFrames.reserveCapacity(images.count)
         
-        // --- 1. Process First Frame (I-Frame) ---
         let firstImg = images[0]
         var previousInputPlane = toPlaneData420(image: firstImg, pool: pool)
         
         let firstQtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
         let firstQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
         
-        let (firstBytes, firstReconstructed) = try await encodeSpatialLayers(
+        let (firstBytes, firstReconstructed, releaseFirstRecon) = try await encodeSpatialLayers(
             pd: previousInputPlane, pool: pool, maxbitrate: localMaxbitrate,
             qtY: firstQtY, qtC: firstQtC, zeroThreshold: localZeroThreshold, roundOffset: 0
         )
+        defer { releaseFirstRecon() }
         encodedFrames.append(firstBytes)
         rateController.consumeIFrame(bits: firstBytes.count * 8, qStep: Int(firstQtY.step))
         
-        // --- 2. Process Remaining Frames (P/B-Frames) ---
         var previousReconstructed = firstReconstructed
+        var previousRelease = releaseFirstRecon
         
         for idx in 1..<images.count {
             let img = images[idx]
@@ -229,7 +229,7 @@ actor LayersEncodeActor {
             let qtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
             
             // Always encode bidirectionally after the first frame
-            let (bytes, reconstructed) = try await encodeSpatialLayers(
+            let (bytes, reconstructed, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, predictedPd: previousReconstructed, nextPd: firstReconstructed,
                 maxbitrate: localMaxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold,
                 roundOffset: idx % 2, gopPosition: idx
@@ -238,18 +238,18 @@ actor LayersEncodeActor {
             encodedFrames.append(bytes)
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD)
             
+            let releaseOldRecon = previousRelease
+            previousRelease = releaseRecon
+            
             let isPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
                 firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
             }
-            if !isPrevFirst {
-                pool.putInt16(previousReconstructed.y)
-                pool.putInt16(previousReconstructed.cb)
-                pool.putInt16(previousReconstructed.cr)
+            if isPrevFirst != true {
+                releaseOldRecon()
             }
             previousReconstructed = reconstructed
         }
         
-        // --- 3. Cleanup ---
         pool.putInt16(previousInputPlane.y)
         pool.putInt16(previousInputPlane.cb)
         pool.putInt16(previousInputPlane.cr)
@@ -257,7 +257,7 @@ actor LayersEncodeActor {
         let isFinalPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
             firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
         }
-        if !isFinalPrevFirst {
+        if isFinalPrevFirst != true {
             pool.putInt16(previousReconstructed.y)
             pool.putInt16(previousReconstructed.cb)
             pool.putInt16(previousReconstructed.cr)
@@ -302,13 +302,13 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0)
         
-        let (bytes, recon) = try await encodeSpatialLayers(pd: curr, pool: pool, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: frameIndex % 2)
-        pool.putInt16(curr.y)
-        pool.putInt16(curr.cb)
-        pool.putInt16(curr.cr)
-        pool.putInt16(recon.y)
-        pool.putInt16(recon.cb)
-        pool.putInt16(recon.cr)
+        let (bytes, recon, releaseRecon) = try await encodeSpatialLayers(pd: curr, pool: pool, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: frameIndex % 2)
+        defer { releaseRecon() }
+        defer {
+            pool.putInt16(curr.y)
+            pool.putInt16(curr.cb)
+            pool.putInt16(curr.cr)
+        }
         
         framesSinceKeyframe += 1
         frameIndex += 1
@@ -381,7 +381,10 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
         totalPixels += bw * bh
     }
     
-    return 0 < totalPixels ? totalSAD / totalPixels : 0
+    if 0 < totalPixels {
+        return totalSAD / totalPixels
+    }
+    return 0
 }
 
 @inline(__always)
@@ -519,7 +522,7 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
 @inline(__always)
 private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) -> Int {
     let view = block
-    let sub = dwt2d_8_sb(view)
+    let sub = dwt2DBlock8Subbands(view)
     
     quantizeSIMD(sub.ll, q: qt.qLow)
     quantizeSIMD(sub.hl, q: qt.qMid)

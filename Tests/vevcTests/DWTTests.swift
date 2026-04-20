@@ -25,14 +25,14 @@ final class DWTTests: XCTestCase {
 
         switch size {
         case 8:
-            dwt2d_8(block)
-            invDwt2d_8(block)
+            dwt2DBlock8(block)
+            inverseDWT2DBlock8(block)
         case 16:
-            dwt2d_16(block)
-            invDwt2d_16(block)
+            dwt2DBlock16(block)
+            inverseDWT2DBlock16(block)
         case 32:
-            dwt2d_32(block)
-            invDwt2d_32(block)
+            dwt2DBlock32(block)
+            inverseDWT2DBlock32(block)
         default:
             XCTFail("Unsupported size: \(size)")
         }
@@ -126,22 +126,22 @@ final class DWTTests: XCTestCase {
 
         switch size {
         case 8:
-            dwt2d_8(block)
+            dwt2DBlock8(block)
         case 16:
-            dwt2d_16(block)
+            dwt2DBlock16(block)
         case 32:
-            dwt2d_32(block)
+            dwt2DBlock32(block)
         default:
             XCTFail("Unsupported size: \(size)")
         }
     
         switch size {
         case 8:
-            invDwt2d_8(block)
+            inverseDWT2DBlock8(block)
         case 16:
-            invDwt2d_16(block)
+            inverseDWT2DBlock16(block)
         case 32:
-            invDwt2d_32(block)
+            inverseDWT2DBlock32(block)
         default:
             XCTFail("Unsupported size: \(size)")
         }
@@ -163,14 +163,14 @@ final class DWTTests: XCTestCase {
             data.withUnsafeMutableBufferPointer { ptr in
                 switch size {
                 case 8:
-                    lift53_8(ptr, stride: 1)
-                    invLift53_8(ptr, stride: 1)
+                    lift53Block8(ptr, stride: 1)
+                    inverseLift53Block8(ptr, stride: 1)
                 case 16:
-                    lift53_16(ptr, stride: 1)
-                    invLift53_16(ptr, stride: 1)
+                    lift53Block16(ptr, stride: 1)
+                    inverseLift53Block16(ptr, stride: 1)
                 case 32:
-                    lift53_32(ptr, stride: 1)
-                    invLift53_32(ptr, stride: 1)
+                    lift53Block32(ptr, stride: 1)
+                    inverseLift53Block32(ptr, stride: 1)
                 default:
                     XCTFail("Unsupported size: \(size)")
                 }
@@ -196,14 +196,14 @@ final class DWTTests: XCTestCase {
 
             switch size {
             case 8:
-                dwt2d_8(block)
-                invDwt2d_8(block)
+                dwt2DBlock8(block)
+                inverseDWT2DBlock8(block)
             case 16:
-                dwt2d_16(block)
-                invDwt2d_16(block)
+                dwt2DBlock16(block)
+                inverseDWT2DBlock16(block)
             case 32:
-                dwt2d_32(block)
-                invDwt2d_32(block)
+                dwt2DBlock32(block)
+                inverseDWT2DBlock32(block)
             default:
                 XCTFail("Unsupported size: \(size)")
             }
@@ -227,14 +227,14 @@ final class DWTTests: XCTestCase {
             data.withUnsafeMutableBufferPointer { ptr in
                 switch size {
                 case 8:
-                    lift53_8(ptr, stride: 1)
-                    invLift53_8(ptr, stride: 1)
+                    lift53Block8(ptr, stride: 1)
+                    inverseLift53Block8(ptr, stride: 1)
                 case 16:
-                    lift53_16(ptr, stride: 1)
-                    invLift53_16(ptr, stride: 1)
+                    lift53Block16(ptr, stride: 1)
+                    inverseLift53Block16(ptr, stride: 1)
                 case 32:
-                    lift53_32(ptr, stride: 1)
-                    invLift53_32(ptr, stride: 1)
+                    lift53Block32(ptr, stride: 1)
+                    inverseLift53Block32(ptr, stride: 1)
                 default:
                     XCTFail("Unsupported size: \(size)")
                 }

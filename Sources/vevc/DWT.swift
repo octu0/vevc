@@ -24,12 +24,12 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 
 // MARK: - LeGall 5/3 Lifting
 //
-// All lift53/invLift53 functions are optimized for stride=1 (contiguous memory).
+// All lift53/inverseLift53 functions are optimized for stride=1 (contiguous memory).
 // Column processing uses transpose->row_lift->transpose_back pattern in dwt2d functions,
 // so stride is always 1 when these functions are called.
 
 @inline(__always)
-func lift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func lift53Block4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD2<Int16>(buffer[0 * stride], buffer[2 * stride])
     var high = SIMD2<Int16>(buffer[1 * stride], buffer[3 * stride])
 
@@ -44,7 +44,7 @@ func lift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func inverseLift53Block4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var low = SIMD2<Int16>(buffer[0 * stride], buffer[1 * stride])
     var high = SIMD2<Int16>(buffer[2 * stride], buffer[3 * stride])
 
@@ -61,7 +61,7 @@ func invLift53_4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 // stride=1 optimized: contiguous SIMD load/store
 
 @inline(__always)
-func lift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func lift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     guard let base = buffer.baseAddress else { return }
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var low = SIMD4<Int16>(raw[0], raw[2], raw[4], raw[6])
@@ -78,7 +78,7 @@ func lift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func lift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func lift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     guard let base = buffer.baseAddress else { return }
     let raw0 = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     let raw1 = UnsafeRawPointer(base + 8).loadUnaligned(as: SIMD8<Int16>.self)
@@ -96,7 +96,7 @@ func lift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func lift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func lift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     guard let base = buffer.baseAddress else { return }
     let raw0 = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     let raw1 = UnsafeRawPointer(base + 8).loadUnaligned(as: SIMD8<Int16>.self)
@@ -128,7 +128,7 @@ func lift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func inverseLift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     guard let base = buffer.baseAddress else { return }
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var low = SIMD4<Int16>(raw[0], raw[1], raw[2], raw[3])
@@ -145,7 +145,7 @@ func invLift53_8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func inverseLift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     guard let base = buffer.baseAddress else { return }
     var low = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var high = UnsafeRawPointer(base + 8).loadUnaligned(as: SIMD8<Int16>.self)
@@ -163,7 +163,7 @@ func invLift53_16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func invLift53_32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
+func inverseLift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     guard let base = buffer.baseAddress else { return }
     var low = UnsafeRawPointer(base).loadUnaligned(as: SIMD16<Int16>.self)
     var high = UnsafeRawPointer(base + 16).loadUnaligned(as: SIMD16<Int16>.self)
@@ -320,127 +320,127 @@ private func transpose32x32InPlace(_ base: UnsafeMutablePointer<Int16>, stride s
 // converting all SIMD operations to contiguous memory access.
 
 @inline(__always)
-func dwt2d_8(_ block: BlockView) {
+func dwt2DBlock8(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Row lifting (stride=1, contiguous)
     for y in 0..<8 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 8)
-        lift53_8(rowBuffer, stride: 1)
+        lift53Block8(rowBuffer, stride: 1)
     }
     // Transpose -> row lifting (was column) -> transpose back
     transpose8x8InPlace(base, stride: width)
     for y in 0..<8 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 8)
-        lift53_8(rowBuffer, stride: 1)
+        lift53Block8(rowBuffer, stride: 1)
     }
     transpose8x8InPlace(base, stride: width)
 }
 
 @inline(__always)
-func dwt2d_8_sb(_ block: BlockView) -> Subbands {
-    dwt2d_8(block)
+func dwt2DBlock8Subbands(_ block: BlockView) -> Subbands {
+    dwt2DBlock8(block)
     return makeSubbands(base: block.base, size: 8, stride: block.stride)
 }
 
 @inline(__always)
-func dwt2d_16(_ block: BlockView) {
+func dwt2DBlock16(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Row lifting (stride=1, contiguous)
     for y in 0..<16 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 16)
-        lift53_16(rowBuffer, stride: 1)
+        lift53Block16(rowBuffer, stride: 1)
     }
     // Transpose -> row lifting (was column) -> transpose back
     transpose16x16InPlace(base, stride: width)
     for y in 0..<16 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 16)
-        lift53_16(rowBuffer, stride: 1)
+        lift53Block16(rowBuffer, stride: 1)
     }
     transpose16x16InPlace(base, stride: width)
 }
 
 @inline(__always)
-func dwt2d_16_sb(_ block: BlockView) -> Subbands {
-    dwt2d_16(block)
+func dwt2DBlock16Subbands(_ block: BlockView) -> Subbands {
+    dwt2DBlock16(block)
     return makeSubbands(base: block.base, size: 16, stride: block.stride)
 }
 
 @inline(__always)
-func dwt2d_32(_ block: BlockView) {
+func dwt2DBlock32(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Row lifting (stride=1, contiguous)
     for y in 0..<32 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 32)
-        lift53_32(rowBuffer, stride: 1)
+        lift53Block32(rowBuffer, stride: 1)
     }
     // Transpose -> row lifting (was column) -> transpose back
     transpose32x32InPlace(base, stride: width)
     for y in 0..<32 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 32)
-        lift53_32(rowBuffer, stride: 1)
+        lift53Block32(rowBuffer, stride: 1)
     }
     transpose32x32InPlace(base, stride: width)
 }
 
 @inline(__always)
-func dwt2d_32_sb(_ block: BlockView) -> Subbands {
-    dwt2d_32(block)
+func dwt2DBlock32Subbands(_ block: BlockView) -> Subbands {
+    dwt2DBlock32(block)
     return makeSubbands(base: block.base, size: 32, stride: block.stride)
 }
 
 @inline(__always)
-func invDwt2d_8(_ block: BlockView) {
+func inverseDWT2DBlock8(_ block: BlockView) {
     let base = block.base
     let width = block.stride
-    // Inverse column lifting via transpose: transpose -> invLift rows -> transpose back
+    // Inverse column lifting via transpose: transpose -> inverseLift rows -> transpose back
     transpose8x8InPlace(base, stride: width)
     for y in 0..<8 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 8)
-        invLift53_8(rowBuffer, stride: 1)
+        inverseLift53Block8(rowBuffer, stride: 1)
     }
     transpose8x8InPlace(base, stride: width)
     // Inverse row lifting (stride=1, contiguous)
     for y in 0..<8 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 8)
-        invLift53_8(rowBuffer, stride: 1)
+        inverseLift53Block8(rowBuffer, stride: 1)
     }
 }
 
 @inline(__always)
-func invDwt2d_16(_ block: BlockView) {
+func inverseDWT2DBlock16(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Inverse column lifting via transpose
     transpose16x16InPlace(base, stride: width)
     for y in 0..<16 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 16)
-        invLift53_16(rowBuffer, stride: 1)
+        inverseLift53Block16(rowBuffer, stride: 1)
     }
     transpose16x16InPlace(base, stride: width)
     // Inverse row lifting (stride=1, contiguous)
     for y in 0..<16 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 16)
-        invLift53_16(rowBuffer, stride: 1)
+        inverseLift53Block16(rowBuffer, stride: 1)
     }
 }
 
 @inline(__always)
-func invDwt2d_32(_ block: BlockView) {
+func inverseDWT2DBlock32(_ block: BlockView) {
     let base = block.base
     let width = block.stride
     // Inverse column lifting via transpose
     transpose32x32InPlace(base, stride: width)
     for y in 0..<32 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 32)
-        invLift53_32(rowBuffer, stride: 1)
+        inverseLift53Block32(rowBuffer, stride: 1)
     }
     transpose32x32InPlace(base, stride: width)
     // Inverse row lifting (stride=1, contiguous)
     for y in 0..<32 {
         let rowBuffer = UnsafeMutableBufferPointer(start: base + (y * width), count: 32)
-        invLift53_32(rowBuffer, stride: 1)
+        inverseLift53Block32(rowBuffer, stride: 1)
     }
 }

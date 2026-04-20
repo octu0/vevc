@@ -58,7 +58,7 @@ class CoreDecoder {
     /// Mode=0x01 (Direct): outputs frames directly.
     @inline(__always)
     func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
-        guard chunk.count >= 11 else {
+        guard 11 <= chunk.count else {
             throw DecodeError.insufficientDataContext("decodeGOP: chunk.count=\(chunk.count) < 11")
         }
         var offset = 0
@@ -113,7 +113,7 @@ class CoreDecoder {
             let isPFrame = (previousReconstructed != nil)
             let useBidirectional = isPFrame && firstReconstructed != nil && frameData.count >= 2
             
-            let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
+            let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
             let img16 = try await decodeSpatialLayers(r: data, pool: pool, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: idx % 2)
             let pd = PlaneData420(img16: img16)
             decodedPlanes[idx] = pd
@@ -156,10 +156,9 @@ private func submitGOPChunk(
     height: Int,
     group: inout ThrowingTaskGroup<(Int, [YCbCrImage]), Error>
 ) {
-    let idx = index
     group.addTask {
         let decoder = CoreDecoder(maxLayer: maxLayer, width: width, height: height)
-        return (idx, try await decoder.decodeGOP(chunk: chunk))
+        return (index, try await decoder.decodeGOP(chunk: chunk))
     }
 }
 

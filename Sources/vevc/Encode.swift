@@ -62,7 +62,7 @@ func blockEncode32V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
     var startIdx = 0
     
     for x in 0...lscpX {
-        let endY = (x == lscpX) ? lscpY : (32 - 1)
+        let endY = if x == lscpX { lscpY } else { 32 - 1 }
         for y in 0...endY {
             let val = block.rowPointer(y: y)[x]
             if run == 0 { startIdx = currentIdx }
@@ -139,7 +139,7 @@ func blockEncode32H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
     
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (32 - 1)
+        let endX = if y == lscpY { lscpX } else { 32 - 1 }
         for x in 0...endX {
             let val = ptr[x]
             if run == 0 { startIdx = currentIdx }
@@ -200,7 +200,7 @@ func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
     var startIdx = 0
     
     for x in 0...lscpX {
-        let endY = (x == lscpX) ? lscpY : (16 - 1)
+        let endY = if x == lscpX { lscpY } else { 16 - 1 }
         for y in 0...endY {
             let val = block.rowPointer(y: y)[x]
             if run == 0 { startIdx = currentIdx }
@@ -277,7 +277,7 @@ func blockEncode16H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
     
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (16 - 1)
+        let endX = if y == lscpY { lscpX } else { 16 - 1 }
         for x in 0...endX {
             let val = ptr[x]
             if run == 0 { startIdx = currentIdx }
@@ -340,7 +340,7 @@ func blockEncode8V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     
     
     for x in 0...lscpX {
-        let endY = (x == lscpX) ? lscpY : (8 - 1)
+        let endY = if x == lscpX { lscpY } else { 8 - 1 }
         for y in 0...endY {
             let val = block.rowPointer(y: y)[x]
             if run == 0 { startIdx = currentIdx }
@@ -417,7 +417,7 @@ func blockEncode8H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (8 - 1)
+        let endX = if y == lscpY { lscpX } else { 8 - 1 }
         for x in 0...endX {
             let val = ptr[x]
             if run == 0 { startIdx = currentIdx }
@@ -478,7 +478,7 @@ func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     var startIdx = 0
     
     for x in 0...lscpX {
-        let endY = (x == lscpX) ? lscpY : (4 - 1)
+        let endY = if x == lscpX { lscpY } else { 4 - 1 }
         for y in 0...endY {
             let val = block.rowPointer(y: y)[x]
             if run == 0 { startIdx = currentIdx }
@@ -543,7 +543,7 @@ func blockEncode4H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
-        let endX = (y == lscpY) ? lscpX : (4 - 1)
+        let endX = if y == lscpY { lscpX } else { 4 - 1 }
         for x in 0...endX {
             let val = ptr[x]
             if run == 0 { startIdx = currentIdx }
@@ -661,14 +661,24 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
     
     var lscpIdx = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
-    if any(errSIMD3 .!= zero4) {
-        lscpIdx = errSIMD3[3] != 0 ? 15 : (errSIMD3[2] != 0 ? 14 : (errSIMD3[1] != 0 ? 13 : 12))
-    } else if any(errSIMD2 .!= zero4) {
-        lscpIdx = errSIMD2[3] != 0 ? 11 : (errSIMD2[2] != 0 ? 10 : (errSIMD2[1] != 0 ? 9 : 8))
-    } else if any(errSIMD1 .!= zero4) {
-        lscpIdx = errSIMD1[3] != 0 ? 7 : (errSIMD1[2] != 0 ? 6 : (errSIMD1[1] != 0 ? 5 : 4))
-    } else if any(errSIMD0 .!= zero4) {
-        lscpIdx = errSIMD0[3] != 0 ? 3 : (errSIMD0[2] != 0 ? 2 : (errSIMD0[1] != 0 ? 1 : (errSIMD0[0] != 0 ? 0 : -1)))
+    switch true {
+    case errSIMD3[3] != 0: lscpIdx = 15
+    case errSIMD3[2] != 0: lscpIdx = 14
+    case errSIMD3[1] != 0: lscpIdx = 13
+    case errSIMD3[0] != 0: lscpIdx = 12
+    case errSIMD2[3] != 0: lscpIdx = 11
+    case errSIMD2[2] != 0: lscpIdx = 10
+    case errSIMD2[1] != 0: lscpIdx = 9
+    case errSIMD2[0] != 0: lscpIdx = 8
+    case errSIMD1[3] != 0: lscpIdx = 7
+    case errSIMD1[2] != 0: lscpIdx = 6
+    case errSIMD1[1] != 0: lscpIdx = 5
+    case errSIMD1[0] != 0: lscpIdx = 4
+    case errSIMD0[3] != 0: lscpIdx = 3
+    case errSIMD0[2] != 0: lscpIdx = 2
+    case errSIMD0[1] != 0: lscpIdx = 1
+    case errSIMD0[0] != 0: lscpIdx = 0
+    default: lscpIdx = -1
     }
 
     if lscpIdx == -1 {
@@ -694,7 +704,7 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         for i in 0..<16 {
             let y = i / 4
             let x = i % 4
-            let val = (i <= lscpIdx) ? errors[i] : 0
+            let val: Int16 = if i <= lscpIdx { errors[i] } else { 0 }
             block.rowPointer(y: y)[x] = val
         }
         
@@ -726,11 +736,12 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
 func blockEncodeDPCMErrorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
     let ia = Int(a), ib = Int(b), ic = Int(c)
     let predicted: Int16
-    if ia <= ic && ib <= ic {
+    switch true {
+    case ia <= ic && ib <= ic:
         predicted = Int16(truncatingIfNeeded: min(ia, ib))
-    } else if ic <= ia && ic <= ib {
+    case ic <= ia && ic <= ib:
         predicted = Int16(truncatingIfNeeded: max(ia, ib))
-    } else {
+    default:
         predicted = Int16(truncatingIfNeeded: ia + ib - ic)
     }
     return x &- predicted
@@ -799,7 +810,7 @@ func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         for i in 0..<64 {
             let y = i / 8
             let x = i % 8
-            let val = (i <= lscpIdx) ? baseErr[i] : 0
+            let val: Int16 = if i <= lscpIdx { baseErr[i] } else { 0 }
             block.rowPointer(y: y)[x] = val
         }
         
@@ -898,7 +909,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
                 run = 0
             }
             currentIdx += 1
-            if currentIdx > lscpIdx { break }
+            if lscpIdx < currentIdx { break }
         }
     }
     last = ptrY0_run[15]
@@ -916,7 +927,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
                 run = 0
             }
             currentIdx += 1
-            if currentIdx > lscpIdx { break outerLoop }
+            if lscpIdx < currentIdx { break outerLoop }
             
             for x in 1..<16 {
                 let diff = blockEncodeDPCMErrorMED(ptrY[x], ptrY[x - 1], ptrPrevY[x], ptrPrevY[x - 1])
@@ -927,7 +938,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
                     run = 0
                 }
                 currentIdx += 1
-                if currentIdx > lscpIdx { break outerLoop }
+                if lscpIdx < currentIdx { break outerLoop }
             }
             last = ptrY[15]
         }
@@ -1221,7 +1232,7 @@ func isEffectivelyZeroBase4PFrame(data base: UnsafeMutablePointer<Int16>, thresh
         if any(mask) { return false }
     }
     for y in 0..<2 {
-        let ptr = base + y * 4 + 2
+        let ptr = base + (y * 4) + 2
         let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
         let overPos = vec .> thPos
         let underNeg = vec .< thNeg
@@ -1299,7 +1310,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
     // Spatial adaptive threshold: when colCount/rowCount are provided,
     // apply higher zero-thresholds to peripheral blocks where human
     // visual attention is lower, increasing zero-block rate at edges.
-    let useSpatialWeight = colCount > 1 && rowCount > 1
+    let useSpatialWeight = 1 < colCount && 1 < rowCount
     
     var zeroCount = 0
     for i in blocks.indices {
@@ -1400,29 +1411,31 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
     
-    let useSpatialWeight = colCount > 1 && rowCount > 1
+    let useSpatialWeight = 1 < colCount && 1 < rowCount
     
     var zeroCount = 0
     for i in blocks.indices {
-        let col = i % (colCount > 0 ? colCount : 1)
-        let row = i / (colCount > 0 ? colCount : 1)
+        let safeCol = if 0 < colCount { colCount } else { 1 }
+        let col = i % safeCol
+        let row = i / safeCol
         let colCount32 = (colCount + 1) / 2
-        let sadIdx = (row / 2) * colCount32 + (col / 2)
+        let sadIdx = ((row / 2) * colCount32) + (col / 2)
         
+        let isHighError = if let sads = sads, sadIdx < sads.count, 1500 <= sads[sadIdx] { true } else { false }
         let blockThreshold: Int
-        if let sads = sads, sadIdx < sads.count, sads[sadIdx] >= 1500 {
+        switch true {
+        case isHighError:
             // Adaptive AC Preservation (緩和版): if the prediction error is significant,
             // half the zero thresholds to preserve edge details and suppress ghosts,
             // while still discarding the ±1 mosquito noise.
             blockThreshold = max(1, zeroThreshold / 2)
-        } else if useSpatialWeight {
+        case useSpatialWeight:
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
             blockThreshold = (max(1, zeroThreshold) * weight) / 1024
-        } else {
+        default:
             blockThreshold = zeroThreshold
         }
-        let isZero = isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold)
-        if isZero {
+        if isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold) {
             bwFlags.writeBit(true)
             let view = blocks[i]
             let half = 16 / 2
@@ -1433,7 +1446,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
             hlView.clearAll()
             lhView.clearAll()
             hhView.clearAll()
-                    zeroCount += 1
+            zeroCount += 1
         } else {
             bwFlags.writeBit(false)
             let forceSplit = shouldSplit16(data: blocks[i].base)

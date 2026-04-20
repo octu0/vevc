@@ -673,8 +673,8 @@ struct ImageReader: Sendable {
                 let destPtr = view.rowPointer(y: h)
                 for w in 0..<blockWidth {
                     let (rPx, rPy) = boundaryRepeat(width, height, ((x + w) * 2), ((y + h) * 2))
-                    let cPx = is444 ? rPx : (rPx / 2)
-                    let cPy = is444 ? rPy : (rPy / 2)
+                    let cPx = if is444 { rPx } else { rPx / 2 }
+                    let cPy = if is444 { rPy } else { rPy / 2 }
                     let offset = img.cOffset(cPx, cPy)
                     destPtr[w] = Int16(srcBase[offset]) - 128
                 }
@@ -691,8 +691,8 @@ struct ImageReader: Sendable {
                 let destPtr = view.rowPointer(y: h)
                 for w in 0..<blockWidth {
                     let (rPx, rPy) = boundaryRepeat(width, height, ((x + w) * 2), ((y + h) * 2))
-                    let cPx = is444 ? rPx : (rPx / 2)
-                    let cPy = is444 ? rPy : (rPy / 2)
+                    let cPx = if is444 { rPx } else { rPx / 2 }
+                    let cPy = if is444 { rPy } else { rPy / 2 }
                     let offset = img.cOffset(cPx, cPy)
                     destPtr[w] = Int16(srcBase[offset]) - 128
                 }

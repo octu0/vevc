@@ -731,7 +731,8 @@ struct BypassWriter {
     
     @inline(__always)
     mutating func writeBit(_ bit: Bool) {
-        buffer = (buffer << 1) | (bit ? 1 : 0)
+        let b: UInt64 = if bit { 1 } else { 0 }
+        buffer = (buffer << 1) | b
         bitsInBuffer += 1
         if bitsInBuffer == 32 {
             bytes.append(UInt8(truncatingIfNeeded: buffer >> 24))
@@ -811,6 +812,13 @@ struct BypassReader {
     }
     
     @inline(__always)
+    mutating func skipBit() {
+        ensureBits(1)
+        bitsInBuffer -= 1
+        buffer &= (1 << bitsInBuffer) &- 1
+    }
+    
+    @inline(__always)
     mutating func readBit() -> Bool {
         ensureBits(1)
         bitsInBuffer -= 1
@@ -844,13 +852,17 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
     let absValue = UInt16(value.magnitude)
     
     if absValue <= 15 {
-        let token = UInt8(((absValue - 1) * 2) + 1 + (sign ? 1 : 0))
+        let offset: UInt16 = if sign { 1 } else { 0 }
+        let token = UInt8(((absValue - 1) * 2) + 1 + offset)
         return (token, 0, 0)
     }
     
     let v = UInt32(absValue - 16)
     if v == 0 {
-        return (32, sign ? 1 : 0, 1)
+        if sign {
+            return (32, 1, 1)
+        }
+        return (32, 0, 1)
     }
     
     let bits = UInt32.bitWidth - v.leadingZeroBitCount
@@ -859,7 +871,8 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
     let bypassLen = bits - 1
     
     let token = 32 + subToken
-    let finalBypass = (bypass << 1) | (sign ? 1 : 0)
+    let signBit: UInt32 = if sign { 1 } else { 0 }
+    let finalBypass = (bypass << 1) | signBit
     let finalBypassLen = bypassLen + 1
     
     return (token, finalBypass, finalBypassLen)
@@ -872,7 +885,10 @@ func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
         let t = token - 1
         let absValue = (UInt16(t) / 2) + 1
         let isNegative = (t % 2) == 1
-        return isNegative ? Int16(bitPattern: 0 &- absValue) : Int16(bitPattern: absValue)
+        if isNegative {
+            return Int16(bitPattern: 0 &- absValue)
+        }
+        return Int16(bitPattern: absValue)
     }
     
     let subToken = token - 32

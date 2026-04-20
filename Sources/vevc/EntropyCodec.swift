@@ -83,8 +83,7 @@ struct DynamicEntropyModel: EntropyModelProvider {
     ) {
         // Check if we fell back to static tables by comparing tokenFreqs pointers
         // If the model's tokenFreqs match the static tables, skip writing headers
-        if runModel0.tokenFreqs == StaticRANSModels.shared.runModel0.tokenFreqs
-            && valModel0.tokenFreqs == StaticRANSModels.shared.valModel0.tokenFreqs {
+        if runModel0.tokenFreqs == StaticRANSModels.shared.runModel0.tokenFreqs && valModel0.tokenFreqs == StaticRANSModels.shared.valModel0.tokenFreqs {
             return
         }
         writeCompressedFreqTable(&out, freqs: runModel0.tokenFreqs)
@@ -212,14 +211,14 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         }
         
         // pairs: 4-way rANS mode
-        let totalPairEntries = pairCount + (hasTrailingZeros ? 1 : 0)
+        let totalPairEntries = if hasTrailingZeros { pairCount + 1 } else { pairCount }
         let chunkBase = pairCount / 4
         let chunkRemainder = pairCount % 4
         
         // chunk boundary: chunk[i] is responsible for pairs[chunkStarts[i]..<chunkStarts[i+1]]
         var chunkStarts = [Int](repeating: 0, count: 5)
         for i in 0..<4 {
-            chunkStarts[i + 1] = chunkStarts[i] + chunkBase + (i < chunkRemainder ? 1 : 0)
+            chunkStarts[i + 1] = if i < chunkRemainder { chunkStarts[i] + chunkBase + 1 } else { chunkStarts[i] + chunkBase }
         }
         
         // tokenization + bypass writing for each chunk
@@ -288,8 +287,12 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         // Flags byte: bit6=isStatic, bit5=isDPCM, bit0=hasTrailingZeros
         // Determine isStatic dynamically: if writeHeaders writes nothing,
         // the model fell back to static tables (hybrid mode).
-        let trailBit: UInt8  = hasTrailingZeros    ? 0x01 : 0
-        let dpcmBit: UInt8   = Model.isDPCMMode   ? 0x20 : 0
+        let FLAG_TRAILING_ZEROS: UInt8 = 0x01
+        let FLAG_DPCM: UInt8           = 0x20
+        let FLAG_STATIC: UInt8         = 0x40
+        
+        let trailBit: UInt8  = if hasTrailingZeros { FLAG_TRAILING_ZEROS } else { 0 }
+        let dpcmBit: UInt8   = if Model.isDPCMMode { FLAG_DPCM } else { 0 }
         
         // Write a placeholder for flags byte, then headers, then fix the flag
         let flagsOffset = out.count
@@ -299,7 +302,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         // chunk size (4B × 4)
         for lane in 0..<4 {
             let chunkPairCount = chunkStarts[lane + 1] - chunkStarts[lane]
-            let extraTrailing = (lane == 3 && hasTrailingZeros) ? 1 : 0
+            let extraTrailing = if lane == 3 && hasTrailingZeros { 1 } else { 0 }
             appendUInt32BE(&out, UInt32(chunkPairCount + extraTrailing))
         }
         
@@ -309,7 +312,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         
         // why: when pair count is small, static tables produce better compression
         // than writing per-stream frequency headers
-        let staticBit: UInt8 = (Model.isStaticMode || headerWasWritten != true) ? 0x40 : 0
+        let staticBit: UInt8 = if Model.isStaticMode || (headerWasWritten != true) { FLAG_STATIC } else { 0 }
         out[flagsOffset] = staticBit | dpcmBit | trailBit
         
         // 4-way bypass data
@@ -395,40 +398,6 @@ internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     }
 }
 
-@inline(__always)
-fileprivate func readUInt32BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt32 {
-    guard offset + 4 <= count else { throw DecodeError.insufficientData }
-    let b0 = UInt32(base[offset])
-    let b1 = UInt32(base[offset+1])
-    let b2 = UInt32(base[offset+2])
-    let b3 = UInt32(base[offset+3])
-    offset += 4
-    return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-}
-
-@inline(__always)
-fileprivate func readUInt64BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt64 {
-    guard offset + 8 <= count else { throw DecodeError.insufficientData }
-    let b0 = UInt64(base[offset])
-    let b1 = UInt64(base[offset+1])
-    let b2 = UInt64(base[offset+2])
-    let b3 = UInt64(base[offset+3])
-    let b4 = UInt64(base[offset+4])
-    let b5 = UInt64(base[offset+5])
-    let b6 = UInt64(base[offset+6])
-    let b7 = UInt64(base[offset+7])
-    offset += 8
-    return (b0 << 56) | (b1 << 48) | (b2 << 40) | (b3 << 32) | (b4 << 24) | (b5 << 16) | (b6 << 8) | b7
-}
-
-@inline(__always)
-fileprivate func readUInt16BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt16 {
-    guard offset + 2 <= count else { throw DecodeError.insufficientData }
-    let b0 = UInt16(base[offset])
-    let b1 = UInt16(base[offset+1])
-    offset += 2
-    return (b0 << 8) | b1
-}
 
 // MARK: - VevcDecoder
 
@@ -577,7 +546,10 @@ struct EntropyDecoder {
 
     @inline(__always)
     mutating func decodeBypass() throws -> UInt8 {
-        return bypassReader.readBit() ? 1 : 0
+        if bypassReader.readBit() {
+            return 1
+        }
+        return 0
     }
     
     @inline(__always)
@@ -612,7 +584,7 @@ struct EntropyDecoder {
             return (Int(zeroRun), 0)
         } else {
             let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-            let rtInfo = isParentZero ? runModel1.findToken(cf: cfRun) : runModel0.findToken(cf: cfRun)
+            let rtInfo = if isParentZero { runModel1.findToken(cf: cfRun) } else { runModel0.findToken(cf: cfRun) }
             ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
             
             let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
@@ -620,7 +592,7 @@ struct EntropyDecoder {
             let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
             
             let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
-            let vtInfo = isParentZero ? valModel1.findToken(cf: cfVal) : valModel0.findToken(cf: cfVal)
+            let vtInfo = if isParentZero { valModel1.findToken(cf: cfVal) } else { valModel0.findToken(cf: cfVal) }
             ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
             
             let valBypassLen = valueBypassLength(for: vtInfo.token)

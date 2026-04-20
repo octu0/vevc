@@ -69,7 +69,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: 3, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: 3)
         
         // デコード後のHL
         var decHL: [[Int16]] = []
@@ -162,7 +162,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil)
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: 3, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: 3)
         
         // 各ブロックのHL/LH/HH比較
         for bi in 0..<3 {
@@ -179,7 +179,7 @@ final class SubbandsRoundtripTests: XCTestCase {
                     if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { diffHH += 1 }
                 }
             }
-                            XCTAssertEqual(diffHL + diffLH + diffHH, 0, "Block[\(bi)] split不一致: HL=\(diffHL) LH=\(diffLH) HH=\(diffHH)")
+            XCTAssertEqual(diffHL + diffLH + diffHH, 0, "Block[\(bi)] split不一致: HL=\(diffHL) LH=\(diffLH) HH=\(diffHH)")
         }
     }
     
@@ -220,7 +220,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
         
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count)
         
         // 比較
         XCTAssertEqual(blocks.count, decBlocks.count, "blocks count mismatch")
@@ -281,7 +281,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
-        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count, parentBlocks: nil)
+        let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count)
         
         var totalDiff = 0
         var firstDiffBlock = -1
@@ -297,7 +297,7 @@ final class SubbandsRoundtripTests: XCTestCase {
                     if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
                 }
             }
-                        }
+        }
         return (totalDiff, firstDiffBlock, blocks.count)
     }
     
@@ -343,7 +343,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
             let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
-            let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count, parentBlocks: nil)
+            let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks.count)
             
             var totalDiff = 0
             var firstDiffBlock = -1
@@ -359,7 +359,7 @@ final class SubbandsRoundtripTests: XCTestCase {
                         if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
                     }
                 }
-                                    }
+            }
             if 0 < totalDiff {
                 XCTFail("\(w)x\(h) (\(blocks.count)blocks) PD420: totalDiff=\(totalDiff) firstBlock=\(firstDiffBlock)")
             }

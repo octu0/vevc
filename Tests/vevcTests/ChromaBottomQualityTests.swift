@@ -246,7 +246,8 @@ final class ChromaBottomQualityTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
         
         // I-Frame: encode → reconstruct
-        let (iBytes, iRecon) = try await encodeSpatialLayers(pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (iBytes, iRecon, releaseI) = try await encodeSpatialLayers(pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        defer { releaseI() }
         
         // I-Frame: decode
         let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
@@ -266,7 +267,8 @@ final class ChromaBottomQualityTests: XCTestCase {
         )
         
         // P-Frame: encode (without motion compensation since it's removed)
-        let (pBytes, pRecon) = try await encodeSpatialLayers(pd: pd1, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (pBytes, pRecon, releaseP) = try await encodeSpatialLayers(pd: pd1, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        defer { releaseP() }
         
         // P-Frame: decode
         let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon, roundOffset: 0)
