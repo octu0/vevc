@@ -27,6 +27,7 @@ struct MotionEstimation {
 
     // why: Lagrange multiplier for rate-distortion optimization:
     // penalizes motion vectors with large magnitude to favor zero-MV
+    @inline(__always)
     static func getPenalty(dx: Int, dy: Int, pmv: MotionVector, lambda: Int) -> Int {
         return (abs(dx) + abs(dy)) * lambda
     }
@@ -196,6 +197,7 @@ struct MotionEstimation {
         }
         return Int(sad)
     }
+
     @inline(__always)
     static func compute32PointSAD_EvenRows(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
         var sad: Int32 = 0
@@ -215,6 +217,7 @@ struct MotionEstimation {
     static func median(_ a: Int, _ b: Int, _ c: Int) -> Int {
         return max(min(a, b), min(max(a, b), c))
     }
+
     @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 

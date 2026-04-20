@@ -252,49 +252,49 @@ private func deblockFilterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>
 
 @inline(__always)
 private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>) {
-    let p1x = SIMD16<Int32>(truncatingIfNeeded: p1)
-    let p0x = SIMD16<Int32>(truncatingIfNeeded: p0)
-    let q0x = SIMD16<Int32>(truncatingIfNeeded: q0)
-    let q1x = SIMD16<Int32>(truncatingIfNeeded: q1)
+    // why: Int16 domain eliminates 4 widen + 2 narrow operations vs Int32
+    // Safe because masked lanes satisfy |delta| < beta ≤ 45, so 9*delta ≤ 405 fits Int16
+    // Unmasked lanes may overflow but are masked away before store
+    let betah = Int16(beta >> 1)
+    let beta16 = Int16(beta)
     
-    let delta = q0x &- p0x
-    let diffP = p1x &- p0x
-    let diffQ = q1x &- q0x
+    let betaV = SIMD16<Int16>(repeating: beta16)
+    let betahV = SIMD16<Int16>(repeating: betah)
+    let tcV = SIMD16<Int16>(repeating: tc)
+    let ntcV = .zero &- tcV
+    let v9 = SIMD16<Int16>(repeating: 9)
+    let v3 = SIMD16<Int16>(repeating: 3)
+    let v8 = SIMD16<Int16>(repeating: 8)
     
+    let delta = q0 &- p0
     let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
-    let absP = diffP.replacing(with: .zero &- diffP, where: diffP .< 0)
-    let absQ = diffQ.replacing(with: .zero &- diffQ, where: diffQ .< 0)
     
-    let betah = beta >> 1
-    let maskDelta = absDelta .< beta
-    let maskP = absP .< betah
-    let maskQ = absQ .< betah
-    let mask = maskDelta .& maskP .& maskQ
+    let pDiff = p1 &- p0
+    let qDiff = q1 &- q0
+    let absP = pDiff.replacing(with: .zero &- pDiff, where: pDiff .< 0)
+    let absQ = qDiff.replacing(with: .zero &- qDiff, where: qDiff .< 0)
     
-    let delta9 = delta &* 9
-    let diffQ1P1 = q1x &- p1x
-    let diffQ1P1_3 = diffQ1P1 &* 3
-    let dSum = (delta9 &- diffQ1P1_3) &+ 8
-    let dUnclipped = dSum &>> 4
+    let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
     
-    let threshold = Int32(tc)
-    let lower = SIMD16<Int32>(repeating: -threshold)
-    let upper = SIMD16<Int32>(repeating: threshold)
-    var d = dUnclipped
-    d.clamp(lowerBound: lower, upperBound: upper)
+    let t1 = q0 &- p0
+    let t2 = q1 &- p1
+    let d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
     
-    let dMasked = SIMD16<Int32>(repeating: 0).replacing(with: d, where: mask)
-    let d16 = SIMD16<Int16>(truncatingIfNeeded: dMasked)
+    var dClipped = d
+    dClipped.replace(with: tcV, where: tcV .< dClipped)
+    dClipped.replace(with: ntcV, where: dClipped .< ntcV)
     
-    let newP0 = p0 &+ d16
-    let newQ0 = q0 &- d16
+    let dHalf = dClipped / 2
     
-    let dMaskedSign = SIMD16<Int32>(repeating: 0).replacing(with: 1, where: dMasked .< 0)
-    let dHalfMasked = (dMasked &+ dMaskedSign) &>> 1
-    let dHalf16 = SIMD16<Int16>(truncatingIfNeeded: dHalfMasked)
+    var newP0 = p0
+    var newQ0 = q0
+    var newP1 = p1
+    var newQ1 = q1
     
-    let newP1 = p1 &+ dHalf16
-    let newQ1 = q1 &- dHalf16
+    newP0.replace(with: p0 &+ dClipped, where: mask)
+    newQ0.replace(with: q0 &- dClipped, where: mask)
+    newP1.replace(with: p1 &+ dHalf, where: mask)
+    newQ1.replace(with: q1 &- dHalf, where: mask)
     
     return (newP1, newP0, newQ0, newQ1)
 }
