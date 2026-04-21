@@ -58,28 +58,6 @@ struct BlockView: @unchecked Sendable {
         }
     }
 
-    @inline(__always)
-    func clearAll() {
-        if stride == width {
-            let total = width * height
-            UnsafeMutableRawPointer(base).initializeMemory(as: UInt8.self, repeating: 0, count: total * 2)
-            return
-        }
-        var i = 0
-        let zero16 = SIMD16<Int16>.zero
-        for y in 0..<height {
-            let ptr = rowPointer(y: y)
-            i = 0
-            while i + 16 <= width {
-                UnsafeMutableRawPointer(ptr + i).storeBytes(of: zero16, as: SIMD16<Int16>.self)
-                i += 16
-            }
-            while i < width {
-                ptr[i] = 0
-                i += 1
-            }
-        }
-    }
 
     @inline(__always)
     static func allocate(width: Int, height: Int, stride strideVal: Int? = nil) -> BlockView {
@@ -126,6 +104,7 @@ func clearBlockRegion(base: UnsafeMutablePointer<Int16>, width: Int, height: Int
 final class BaseBlockViewPool: @unchecked Sendable {
     private var pools: [Int: [BlockView]] = [:]
     private var int16Pools: [Int: [[Int16]]] = [:]
+    private var arrayPools: [Int: [[BlockView]]] = [:]
     
     private let maxPerSize: Int
     
@@ -162,7 +141,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
         if var bucket = pools[key], bucket.isEmpty != true {
             let block = bucket.removeLast()
             pools[key] = bucket
-            block.clearAll()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
         }
         #else
@@ -171,7 +150,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
             let block = bucket.removeLast()
             pools[key] = bucket
             os_unfair_lock_unlock(lock)
-            block.clearAll()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
         }
         os_unfair_lock_unlock(lock)
@@ -252,6 +231,52 @@ final class BaseBlockViewPool: @unchecked Sendable {
         os_unfair_lock_unlock(lock)
         #endif
     }
+    
+    @inline(__always)
+    func getBlockViewArray(capacity: Int) -> [BlockView] {
+        #if arch(wasm32)
+        if var bucket = arrayPools[capacity], bucket.isEmpty != true {
+            let arr = bucket.removeLast()
+            arrayPools[capacity] = bucket
+            return arr
+        }
+        #else
+        os_unfair_lock_lock(lock)
+        if var bucket = arrayPools[capacity], bucket.isEmpty != true {
+            let arr = bucket.removeLast()
+            arrayPools[capacity] = bucket
+            os_unfair_lock_unlock(lock)
+            return arr
+        }
+        os_unfair_lock_unlock(lock)
+        #endif
+        var arr = [BlockView]()
+        arr.reserveCapacity(capacity)
+        return arr
+    }
+
+    @inline(__always)
+    func putBlockViewArray(_ array: [BlockView]) {
+        let capacity = array.capacity
+        var arr = array
+        arr.removeAll(keepingCapacity: true)
+        
+        #if arch(wasm32)
+        var bucket = arrayPools[capacity] ?? []
+        if bucket.count < maxPerSize {
+            bucket.append(arr)
+            arrayPools[capacity] = bucket
+        }
+        #else
+        os_unfair_lock_lock(lock)
+        var bucket = arrayPools[capacity] ?? []
+        if bucket.count < maxPerSize {
+            bucket.append(arr)
+            arrayPools[capacity] = bucket
+        }
+        os_unfair_lock_unlock(lock)
+        #endif
+    }
 }
 
 #if !arch(wasm32)
@@ -275,7 +300,7 @@ final class BlockViewPool: @unchecked Sendable {
     private let shards: [BaseBlockViewPool]
     #endif
 
-    init(shardCount: Int = 32, maxPerSize: Int = 256) {
+    init(shardCount: Int = 4, maxPerSize: Int = 256) {
         #if arch(wasm32)
         self.pool = BaseBlockViewPool(maxPerSize: maxPerSize)
         #else
@@ -328,6 +353,26 @@ final class BlockViewPool: @unchecked Sendable {
         #else
         let idx = currentThreadShardIndex(shardCount: shardCount)
         shards[idx].putInt16(array)
+        #endif
+    }
+    
+    @inline(__always)
+    func getBlockViewArray(capacity: Int) -> [BlockView] {
+        #if arch(wasm32)
+        return pool.getBlockViewArray(capacity: capacity)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        return shards[idx].getBlockViewArray(capacity: capacity)
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray(_ array: [BlockView]) {
+        #if arch(wasm32)
+        pool.putBlockViewArray(array)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].putBlockViewArray(array)
         #endif
     }
 }

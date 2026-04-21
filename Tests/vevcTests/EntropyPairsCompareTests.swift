@@ -51,9 +51,9 @@ final class EntropyPairsCompareTests: XCTestCase {
                 let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
                 let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
                 let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                hlView.clearAll()
-                lhView.clearAll()
-                hhView.clearAll()
+                clearBlockRegion(base: hlView.base, width: hlView.width, height: hlView.height, stride: hlView.stride)
+                clearBlockRegion(base: lhView.base, width: lhView.width, height: lhView.height, stride: lhView.stride)
+                clearBlockRegion(base: hhView.base, width: hhView.width, height: hhView.height, stride: hhView.stride)
                         } else {
                 bwFlags.writeBit(false)
                 

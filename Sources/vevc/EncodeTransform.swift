@@ -566,7 +566,8 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
         if isZero {
             bwFlags.writeBit(true)
             bwFlags.writeBit(false)
-            blocks[i].clearAll()
+            let b = blocks[i]
+            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
         } else {
             bwFlags.writeBit(false)
             bwFlags.writeBit(false)
@@ -617,7 +618,8 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
         if isZero {
             bwFlags.writeBit(true)
             bwFlags.writeBit(false)
-            blocks[i].clearAll()
+            let b = blocks[i]
+            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
         } else {
             bwFlags.writeBit(false)
             bwFlags.writeBit(false)
@@ -672,7 +674,8 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
         let isZero = isEffectivelyZeroBase32(data: blocks[i].base, threshold: zeroThreshold)
         if isZero {
             bwFlags.writeBit(true)
-            blocks[i].clearAll()
+            let b = blocks[i]
+            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
             tasks.append((i, .skip))
             zeroCount += 1
         } else {

@@ -67,20 +67,14 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
-    let dstBaseAlloc = UnsafeMutablePointer<Int16>.allocate(capacity: subWidth * subHeight)
-    dstBaseAlloc.initialize(repeating: 0, count: subWidth * subHeight)
-    defer { 
-        dstBaseAlloc.deinitialize(count: subWidth * subHeight)
-        dstBaseAlloc.deallocate() 
-    }
-    let safeDst = SendableInt16Ptr(dstBaseAlloc)
+    var subband = pool.getInt16(count: subWidth * subHeight)
+    let safeDst = subband.withUnsafeMutableBufferPointer { SendableInt16Ptr($0.baseAddress!) }
     
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
     let totalBlocks = rowCount * colCount
     
-    var tmpBlocks: [BlockView] = []
-    tmpBlocks.reserveCapacity(totalBlocks)
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
@@ -146,11 +140,9 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
         }
     }
     
-    var subband = pool.getInt16(count: subWidth * subHeight)
-    subband.withUnsafeMutableBufferPointer { buf in
-        buf.baseAddress!.update(from: dstBaseAlloc, count: subWidth * subHeight)
-    }
-    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putAll(tmpBlocks); pool.putInt16(subband) })
+    
+    withExtendedLifetime(subband) {}
+    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
@@ -162,8 +154,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
     let colCount = ((width + 32 - 1) / 32)
     let totalBlocks = rowCount * colCount
     
-    var tmpBlocks: [BlockView] = []
-    tmpBlocks.reserveCapacity(totalBlocks)
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
@@ -239,28 +230,23 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    pool.putAll(tmpBlocks)
-    return (subband, { [subband] in pool.putInt16(subband) })
+    
+    withExtendedLifetime(subband) {}
+    return (subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
 func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
-    let dstBaseAlloc = UnsafeMutablePointer<Int16>.allocate(capacity: subWidth * subHeight)
-    dstBaseAlloc.initialize(repeating: 0, count: subWidth * subHeight)
-    defer { 
-        dstBaseAlloc.deinitialize(count: subWidth * subHeight)
-        dstBaseAlloc.deallocate() 
-    }
-    let safeDst = SendableInt16Ptr(dstBaseAlloc)
+    var subband = pool.getInt16(count: subWidth * subHeight)
+    let safeDst = subband.withUnsafeMutableBufferPointer { SendableInt16Ptr($0.baseAddress!) }
     
     let rowCount = ((height + 16 - 1) / 16)
     let colCount = ((width + 16 - 1) / 16)
     let totalBlocks = rowCount * colCount
     
-    var tmpBlocks: [BlockView] = []
-    tmpBlocks.reserveCapacity(totalBlocks)
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 16, height: 16))
     }
@@ -318,11 +304,9 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
         }
     }
     
-    var subband = pool.getInt16(count: subWidth * subHeight)
-    subband.withUnsafeMutableBufferPointer { buf in
-        buf.baseAddress!.update(from: dstBaseAlloc, count: subWidth * subHeight)
-    }
-    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putAll(tmpBlocks); pool.putInt16(subband) })
+    
+    withExtendedLifetime(subband) {}
+    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
@@ -334,8 +318,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     let colCount = (width + (16 - 1)) / 16
     let totalBlocks = rowCount * colCount
     
-    var tmpBlocks: [BlockView] = []
-    tmpBlocks.reserveCapacity(totalBlocks)
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 16, height: 16))
     }
@@ -403,8 +386,9 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    pool.putAll(tmpBlocks)
-    return (subband, { [subband] in pool.putInt16(subband) })
+    
+    withExtendedLifetime(subband) {}
+    return (subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
@@ -413,8 +397,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
     let colCount = ((width + 8 - 1) / 8)
     let totalBlocks = rowCount * colCount
     
-    var tmpBlocks: [BlockView] = []
-    tmpBlocks.reserveCapacity(totalBlocks)
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 8, height: 8))
     }
@@ -438,7 +421,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
             }
         }
     }    
-    return (tmpBlocks, { [tmpBlocks] in pool.putAll(tmpBlocks) })
+    return (tmpBlocks, { [tmpBlocks] in pool.putBlockViewArray(tmpBlocks) })
 }
 
 @inline(__always)
@@ -447,8 +430,7 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int,
     let colCount = ((width + 32 - 1) / 32)
     let totalBlocks = rowCount * colCount
     
-    var tmpBlocks: [BlockView] = []
-    tmpBlocks.reserveCapacity(totalBlocks)
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
@@ -472,7 +454,7 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int,
             }
         }
     }    
-    return (tmpBlocks, { [tmpBlocks] in pool.putAll(tmpBlocks) })
+    return (tmpBlocks, { [tmpBlocks] in pool.putBlockViewArray(tmpBlocks) })
 }
 
 @inline(__always)
@@ -1141,7 +1123,10 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
                 let col = i % yColCount8
                 let row = i / yColCount8
                 let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
-                if sList[i] < threshold { blocks[i].clearAll() }
+                if sList[i] < threshold { 
+                    let b = blocks[i]
+                    clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+                }
             }
             evaluateQuantizeBase8(view: blocks[i], qt: qtY)
         }
@@ -1178,7 +1163,10 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
             }
             let threshold = scaledSADThreshold(75, step: Int(qtC.step))
-            if sadVal < threshold { blocks[i].clearAll() }
+            if sadVal < threshold { 
+                let b = blocks[i]
+                clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+            }
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
         
@@ -1210,7 +1198,10 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
                 if lumaIdx < sList.count { sadVal = sList[lumaIdx] }
             }
             let threshold = scaledSADThreshold(75, step: Int(qtC.step))
-            if sadVal < threshold { blocks[i].clearAll() }
+            if sadVal < threshold { 
+                let b = blocks[i]
+                clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+            }
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
         
