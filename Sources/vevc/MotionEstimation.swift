@@ -317,15 +317,15 @@ struct MotionEstimation {
                     if maxDy < dy { continue }
                     
                     let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
-                    let maxSad = bestCoarseSAD - penalty
-                    if maxSad < 0 { continue }
+                    let maxSAD = bestCoarseSAD - penalty
+                    if maxSAD < 0 { continue }
                     
                     let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
                     let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
                     
-                    let totalSad = sad + penalty
-                    if totalSad < minSAD {
-                        minSAD = totalSad
+                    let totalSAD = sad + penalty
+                    if totalSAD < minSAD {
+                        minSAD = totalSAD
                         minDxPos = dx
                         minDyPos = dy
                         foundSmaller = true
@@ -362,15 +362,15 @@ struct MotionEstimation {
                     if maxDy < dy { continue }
                     
                     let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
-                    let maxSad = bestCoarseSAD - penalty
-                    if maxSad < 0 { continue }
+                    let maxSAD = bestCoarseSAD - penalty
+                    if maxSAD < 0 { continue }
                     
                     let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
                     let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
                     
-                    let totalSad = sad + penalty
-                    if totalSad < finalMinSAD {
-                        finalMinSAD = totalSad
+                    let totalSAD = sad + penalty
+                    if totalSAD < finalMinSAD {
+                        finalMinSAD = totalSAD
                         finalMinDx = dx
                         finalMinDy = dy
                     }
@@ -397,15 +397,15 @@ struct MotionEstimation {
             if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
             let penalty = getPenalty(dx: fineDx, dy: fineDy, pmv: pmv, lambda: 8)
-            let maxSad = bestFineSAD - penalty
-            if maxSad < 0 { continue }
+            let maxSAD = bestFineSAD - penalty
+            if maxSAD < 0 { continue }
             
             fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
             let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
             
-            let totalSad = sad + penalty
-            if totalSad < bestFineSAD {
-                bestFineSAD = totalSad
+            let totalSAD = sad + penalty
+            if totalSAD < bestFineSAD {
+                bestFineSAD = totalSAD
                 bestFineDx = fineDx
                 bestFineDy = fineDy
             }
@@ -429,8 +429,8 @@ struct MotionEstimation {
                 
                 let blurPenalty = (fractX + fractY) * 16
                 let penalty = getPenalty(dx: hpDx, dy: hpDy, pmv: pmv, lambda: 4) + blurPenalty
-                let maxSad = bestHpSAD - penalty
-                if maxSad < 0 { continue }
+                let maxSAD = bestHpSAD - penalty
+                if maxSAD < 0 { continue }
                 
                 fetchHalfPixelBlock8(
                     plane: pBase, width: width, height: height,
@@ -469,8 +469,8 @@ struct MotionEstimation {
                 let blurPenalty = (bX + bY) * 4
                 
                 let penalty = getPenalty(dx: epDx, dy: epDy, pmv: pmv, lambda: 2) + blurPenalty
-                let maxSad = bestEpSAD - penalty
-                if maxSad < 0 { continue }
+                let maxSAD = bestEpSAD - penalty
+                if maxSAD < 0 { continue }
                 
                 fetchEighthPixelBlock8(
                     plane: pBase, width: width, height: height,
@@ -814,14 +814,14 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
     let oPtr = tmpO.base
     let tPtr = tmpT.base
 
-    mvs.withUnsafeMutableBufferPointer { mvsPtr in
-        sads.withUnsafeMutableBufferPointer { sadsPtr in
+    mvs.withUnsafeMutableBufferPointer { ptrMVs in
+        sads.withUnsafeMutableBufferPointer { ptrSADs in
             for idx in currBlocks8.indices {
                 let col = idx % colCount
                 let row = idx / colCount
                 let bx = col * 8
                 let by = row * 8
-                let pmv = if 0 < col { mvsPtr[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
+                let pmv = if 0 < col { ptrMVs[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
                 let (mv, sad) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: prevSub1, 
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
@@ -836,11 +836,11 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
                 let dynamicThreshold = max(256, 2048 - (currContrast * 2))
                 
                 if dynamicThreshold < sad {
-                    mvsPtr[idx] = MotionVector.intraBlock
-                    sadsPtr[idx] = sad
+                    ptrMVs[idx] = MotionVector.intraBlock
+                    ptrSADs[idx] = sad
                 } else {
-                    mvsPtr[idx] = mv
-                    sadsPtr[idx] = sad
+                    ptrMVs[idx] = mv
+                    ptrSADs[idx] = sad
                 }
             }
         }
@@ -850,7 +850,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
 
 /// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames, 
 /// and selects the one with smaller SAD per block.
-/// - Returns: (mvs, sads, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
+/// - Returns: (mvs, SADs, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
 @inline(__always)
 func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, pool: BlockViewPool, roundOffset: Int, gopPosition: Int) async -> ([MotionVector], [Int], [Bool]) {
     let dx = curr.width
@@ -906,16 +906,16 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let oPtr = tmpO.base
     let tPtr = tmpT.base
 
-    withUnsafePointers(mut: &mvs, mut: &sads, mut: &refDirs) { mvsPtr, sadsPtr, refDirsPtr in
+    withUnsafePointers(mut: &mvs, mut: &sads, mut: &refDirs) { ptrMVs, ptrSADs, ptrRefDirs in
         for idx in currBlocks8.indices {
             let col = idx % colCount
             let row = idx / colCount
             let bx = col * 8
             let by = row * 8
             
-            let mvA = if 0 < col { mvsPtr[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
-            let mvB = if 0 < row { mvsPtr[idx - colCount] } else { MotionVector(dx: 0, dy: 0) }
-            let mvC = if 0 < row && col < (colCount - 1) { mvsPtr[idx - colCount + 1] } else { MotionVector(dx: 0, dy: 0) }
+            let mvA = if 0 < col { ptrMVs[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
+            let mvB = if 0 < row { ptrMVs[idx - colCount] } else { MotionVector(dx: 0, dy: 0) }
+            let mvC = if 0 < row && col < (colCount - 1) { ptrMVs[idx - colCount + 1] } else { MotionVector(dx: 0, dy: 0) }
             
             let pmvDx = MotionEstimation.median(Int(mvA.dx), Int(mvB.dx), Int(mvC.dx))
             let pmvDy = MotionEstimation.median(Int(mvA.dy), Int(mvB.dy), Int(mvC.dy))
@@ -941,11 +941,11 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             var bestMV = mvPrev
             var dir = false
             
-            // Early Exit: If the forward prediction is extremely good, skip backward prediction.
-            // A SAD of 256 means an average error of 4 per pixel in an 8x8 block.
-            // Always check backward prediction if sadPrev >= 256, so trailing ghosts can be erased.
+            // Dynamic Early Exit: If the forward prediction is good enough, skip backward prediction.
+            let earlyExitThreshold = 512 + (gopPosition * 64)
             let gopPenalty = gopPosition * 64
-            if 256 <= prevSAD {
+            
+            if earlyExitThreshold <= prevSAD {
                 let (mvNext, nextSAD) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: nextSub1,
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
@@ -1008,13 +1008,13 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let dynamicThreshold = max(1024, 8192 - (currContrast * 8))
             
             if dynamicThreshold < rSAD {
-                mvsPtr[idx] = MotionVector.intraBlock
-                sadsPtr[idx] = rSAD
-                refDirsPtr[idx] = false
+                ptrMVs[idx] = MotionVector.intraBlock
+                ptrSADs[idx] = rSAD
+                ptrRefDirs[idx] = false
             } else {
-                mvsPtr[idx] = rv
-                sadsPtr[idx] = rSAD
-                refDirsPtr[idx] = dir
+                ptrMVs[idx] = rv
+                ptrSADs[idx] = rSAD
+                ptrRefDirs[idx] = dir
             }
         }
     }
