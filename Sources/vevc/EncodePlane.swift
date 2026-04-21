@@ -1382,9 +1382,9 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     var mutReconCb = reconCb
     var mutReconCr = reconCr
     
-    applyDeblockingFilter(plane: &mutReconY, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    applyDeblockingFilter(plane: &mutReconCb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &mutReconCr, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC.step))
+    applyDeblockingFilter32(plane: &mutReconY, width: dx, height: dy, qStep: Int(qtY.step))
+    applyDeblockingFilter32(plane: &mutReconCb, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+    applyDeblockingFilter32(plane: &mutReconCr, width: cbDx, height: cbDy, qStep: Int(qtC.step))
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     

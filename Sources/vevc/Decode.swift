@@ -737,9 +737,9 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         }
     }
 
-    applyDeblockingFilter(plane: &sub.y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY.step))
-    applyDeblockingFilter(plane: &sub.cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC.step))
-    applyDeblockingFilter(plane: &sub.cr, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC.step))
+    applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step))
+    applyDeblockingFilter32(plane: &sub.cb, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+    applyDeblockingFilter32(plane: &sub.cr, width: cbDx, height: cbDy, qStep: Int(qtC.step))
     
     return sub
 }
