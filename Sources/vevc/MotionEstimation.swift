@@ -44,22 +44,19 @@ struct MotionEstimation {
     @inline(__always)
     static func fetchPixelsBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, x: Int, y: Int, dest: UnsafeMutablePointer<Int16>) {
         if 0 <= x && 0 <= y && x + 8 <= width && y + 8 <= height {
-            // Fast path: block is fully within image bounds
             for ry in 0..<8 {
                 let offset = (y + ry) * width + x
-                let srcPtr = plane.advanced(by: offset)
-                let dstPtr = dest.advanced(by: ry * 8)
-                for rx in 0..<8 {
-                    dstPtr[rx] = srcPtr[rx]
-                }
+                let sPtr = plane.advanced(by: offset)
+                let dPtr = dest.advanced(by: ry * 8)
+                dPtr[0] = sPtr[0]; dPtr[1] = sPtr[1]; dPtr[2] = sPtr[2]; dPtr[3] = sPtr[3]
+                dPtr[4] = sPtr[4]; dPtr[5] = sPtr[5]; dPtr[6] = sPtr[6]; dPtr[7] = sPtr[7]
             }
         } else {
-            // Slow path: clamp to bounds
             for i in 0..<64 {
-                let ry = i / 8
-                let rx = i % 8
-                let srcY = min(max(0, y + ry), height - 1)
-                let srcX = min(max(0, x + rx), width - 1)
+                let ry = i >> 3
+                let rx = i & 7
+                let srcY = max(0, min(y + ry, height - 1))
+                let srcX = max(0, min(x + rx, width - 1))
                 dest[i] = plane[srcY * width + srcX]
             }
         }
@@ -527,50 +524,55 @@ struct MotionEstimation {
         let cY0 = Int32(fY[0]), cY1 = Int32(fY[1]), cY2 = Int32(fY[2]), cY3 = Int32(fY[3])
         
         if safe {
-            for ry in stride(from: 0, to: 32, by: 4) {
-                let cy = by + ry
-                let rowC = curr.advanced(by: cy * width + bx)
-                
-                let py = by + intDy + ry
-                if useFIR != true {
+            if useFIR != true {
+                for ry in stride(from: 0, to: 32, by: 4) {
+                    let cy = by + ry
+                    let rowC = curr.advanced(by: cy * width + bx)
+                    
+                    let py = by + intDy + ry
                     let r = prev.advanced(by: py * width + bx + intDx)
                     for rx in stride(from: 0, to: 32, by: 2) {
                         let diff = Int32(rowC[rx]) - Int32(r[rx])
                         let absDiff = if diff < 0 { -1 * diff } else { diff }
                         sad &+= absDiff
                     }
-                    continue
                 }
-                
-                let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
-                let r0 = prev.advanced(by: py * width + bx + intDx)
-                let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
-                let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-                
-                var rx = 0
-                while rx < 32 {
-                    let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
-                    let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
-                    let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
-                    let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
+            } else {
+                for ry in stride(from: 0, to: 32, by: 4) {
+                    let cy = by + ry
+                    let rowC = curr.advanced(by: cy * width + bx)
                     
-                    let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let pVal = (refVal &+ 31) >> 6
-                    let diff = Int32(rowC[rx]) &- pVal
-                    let absDiff = if diff < 0 { -1 * diff } else { diff }
-                    sad &+= absDiff
-                    rx &+= 2
+                    let py = by + intDy + ry
+                    let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
+                    let r0 = prev.advanced(by: py * width + bx + intDx)
+                    let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
+                    let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
+                    
+                    var rx = 0
+                    while rx < 32 {
+                        let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
+                        let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
+                        let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
+                        let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
+                        
+                        let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
+                        let pVal = (refVal &+ 31) >> 6
+                        let diff = Int32(rowC[rx]) &- pVal
+                        let absDiff = if diff < 0 { -1 * diff } else { diff }
+                        sad &+= absDiff
+                        rx &+= 2
+                    }
                 }
             }
             return Int(sad)
         }
         
-        for ry in stride(from: 0, to: 32, by: 4) {
-            let cy = min(by + ry, height - 1)
-            let rowC = curr.advanced(by: cy * width)
-            
-            let py = by + intDy + ry
-            if useFIR != true {
+        if useFIR != true {
+            for ry in stride(from: 0, to: 32, by: 4) {
+                let cy = min(by + ry, height - 1)
+                let rowC = curr.advanced(by: cy * width)
+                
+                let py = by + intDy + ry
                 let sy0 = max(0, min(py, height - 1))
                 let r = prev.advanced(by: sy0 * width)
                 for rx in stride(from: 0, to: 32, by: 2) {
@@ -581,39 +583,44 @@ struct MotionEstimation {
                     let absDiff = if diff < 0 { -1 * diff } else { diff }
                     sad &+= absDiff
                 }
-                continue
             }
-            
-            let syM1 = max(0, min(py - 1, height - 1))
-            let sy0  = max(0, min(py, height - 1))
-            let syP1 = max(0, min(py + 1, height - 1))
-            let syP2 = max(0, min(py + 2, height - 1))
-            let rM1 = prev.advanced(by: syM1 * width)
-            let r0  = prev.advanced(by: sy0 * width)
-            let rP1 = prev.advanced(by: syP1 * width)
-            let rP2 = prev.advanced(by: syP2 * width)
-            
-            var rx = 0
-            while rx < 32 {
-                let px = bx &+ intDx &+ rx
-                let cx = min(bx &+ rx, width - 1)
+        } else {
+            for ry in stride(from: 0, to: 32, by: 4) {
+                let cy = min(by + ry, height - 1)
+                let rowC = curr.advanced(by: cy * width)
                 
-                let sxM1 = max(0, min(px - 1, width - 1))
-                let sx0  = max(0, min(px, width - 1))
-                let sxP1 = max(0, min(px + 1, width - 1))
-                let sxP2 = max(0, min(px + 2, width - 1))
+                let py = by + intDy + ry
+                let syM1 = max(0, min(py - 1, height - 1))
+                let sy0  = max(0, min(py, height - 1))
+                let syP1 = max(0, min(py + 1, height - 1))
+                let syP2 = max(0, min(py + 2, height - 1))
+                let rM1 = prev.advanced(by: syM1 * width)
+                let r0  = prev.advanced(by: sy0 * width)
+                let rP1 = prev.advanced(by: syP1 * width)
+                let rP2 = prev.advanced(by: syP2 * width)
                 
-                let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
-                let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
-                let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
-                let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
-                
-                let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let pVal = (refVal &+ 31) >> 6
-                let diff = Int32(rowC[cx]) &- pVal
-                let absDiff = if diff < 0 { -1 * diff } else { diff }
-                sad &+= absDiff
-                rx &+= 2
+                var rx = 0
+                while rx < 32 {
+                    let px = bx &+ intDx &+ rx
+                    let cx = min(bx &+ rx, width - 1)
+                    
+                    let sxM1 = max(0, min(px - 1, width - 1))
+                    let sx0  = max(0, min(px, width - 1))
+                    let sxP1 = max(0, min(px + 1, width - 1))
+                    let sxP2 = max(0, min(px + 2, width - 1))
+                    
+                    let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
+                    let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
+                    let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
+                    let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
+                    
+                    let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
+                    let pVal = (refVal &+ 31) >> 6
+                    let diff = Int32(rowC[cx]) &- pVal
+                    let absDiff = if diff < 0 { -1 * diff } else { diff }
+                    sad &+= absDiff
+                    rx &+= 2
+                }
             }
         }
         return Int(sad)
