@@ -22,10 +22,8 @@ final class EncodePlaneTests: XCTestCase {
             }
         }
         
-        // Convert
-        let planes = toPlaneData420(images: [img])
-        XCTAssertEqual(planes.count, 1)
-        let plane = planes[0]
+        let pool = BlockViewPool()
+        let (plane, _) = toPlaneData420(image: img, pool: pool)
         
         XCTAssertEqual(plane.width, 4)
         XCTAssertEqual(plane.height, 4)
@@ -66,10 +64,8 @@ final class EncodePlaneTests: XCTestCase {
         for i in 0..<img.cbPlane.count { img.cbPlane[i] = UInt8(128 + i) }
         for i in 0..<img.crPlane.count { img.crPlane[i] = UInt8(128 + i) }
 
-        // Convert
-        let planes = toPlaneData420(images: [img])
-        XCTAssertEqual(planes.count, 1)
-        let plane = planes[0]
+        let pool = BlockViewPool()
+        let (plane, _) = toPlaneData420(image: img, pool: pool)
 
         XCTAssertEqual(plane.y.count, width * height)
         XCTAssertEqual(plane.cb.count, cWidth * cHeight)
@@ -96,10 +92,8 @@ final class EncodePlaneTests: XCTestCase {
         for i in 0..<img.cbPlane.count { img.cbPlane[i] = UInt8(128 + i) }
         for i in 0..<img.crPlane.count { img.crPlane[i] = UInt8(128 + i) }
 
-        // Convert
-        let planes = toPlaneData420(images: [img])
-        XCTAssertEqual(planes.count, 1)
-        let plane = planes[0]
+        let pool = BlockViewPool()
+        let (plane, _) = toPlaneData420(image: img, pool: pool)
 
         // Chroma dimensions for 3x3 are 2x2
         XCTAssertEqual(plane.width, 3)

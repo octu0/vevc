@@ -206,7 +206,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             }
         }
         
-        let pd = toPlaneData420(images: [img])[0]
+        let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
@@ -335,7 +335,7 @@ final class SubbandsRoundtripTests: XCTestCase {
                 }
             }
             
-            let pd = toPlaneData420(images: [img])[0]
+            let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
             let qtY = QuantizationTable(baseStep: 2)
             
             var (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool, qt: qtY)

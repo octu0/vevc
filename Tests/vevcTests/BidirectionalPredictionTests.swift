@@ -64,9 +64,9 @@ final class BidirectionalPredictionTests: XCTestCase {
         let img1 = makeTestImage(width: width, height: height, seed: 10) // フレーム0から大きく変化
         let img2 = makeTestImage(width: width, height: height, seed: 11) // フレーム1に近い
         
-        let pd0 = toPlaneData420(images: [img0])[0]
-        let pd1 = toPlaneData420(images: [img1])[0]
-        let pd2 = toPlaneData420(images: [img2])[0]
+        let pd0 = toPlaneData420(image: img0, pool: BlockViewPool()).0
+        let pd1 = toPlaneData420(image: img1, pool: BlockViewPool()).0
+        let pd2 = toPlaneData420(image: img2, pool: BlockViewPool()).0
         
         let pool = BlockViewPool()
         // 前方MV（pd0 → pd1）と後方MV（pd2 → pd1）を計算

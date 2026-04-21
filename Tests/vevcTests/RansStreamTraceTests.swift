@@ -25,7 +25,7 @@ final class RansStreamTraceTests: XCTestCase {
                 img.crPlane[cy * cW + cx] = 128
             }
         }
-        let pd = toPlaneData420(images: [img])[0]
+        let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }

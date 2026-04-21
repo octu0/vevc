@@ -25,7 +25,7 @@ final class Chunk3IsolationTests: XCTestCase {
             }
         }
         
-        let pd = toPlaneData420(images: [img])[0]
+        let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
         

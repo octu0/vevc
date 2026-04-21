@@ -97,7 +97,31 @@ struct BlockView: @unchecked Sendable {
     }
 }
 
+@inline(__always)
+func clearBlockRegion(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, stride: Int) {
+    if stride == width {
+        let total = width * height
+        UnsafeMutableRawPointer(base).initializeMemory(as: UInt8.self, repeating: 0, count: total * 2)
+        return
+    }
+    var i = 0
+    let zero16 = SIMD16<Int16>.zero
+    for y in 0..<height {
+        let ptr = base.advanced(by: y * stride)
+        i = 0
+        while i + 16 <= width {
+            UnsafeMutableRawPointer(ptr + i).storeBytes(of: zero16, as: SIMD16<Int16>.self)
+            i += 16
+        }
+        while i < width {
+            ptr[i] = 0
+            i += 1
+        }
+    }
+}
+
 // MARK: - BlockViewPool
+
 
 final class BaseBlockViewPool: @unchecked Sendable {
     private var pools: [Int: [BlockView]] = [:]

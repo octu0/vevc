@@ -425,8 +425,8 @@ final class VevcTests: XCTestCase {
         let img0 = makeImage(seed: 0) // I-Frame
         let img3 = makeImage(seed: 3) // P-Frame（テストで14.4dBだったフレーム）
         
-        let pd0 = toPlaneData420(images: [img0])[0]
-        let pd3 = toPlaneData420(images: [img3])[0]
+        let pd0 = toPlaneData420(image: img0, pool: BlockViewPool()).0
+        let pd3 = toPlaneData420(image: img3, pool: BlockViewPool()).0
         
         let qtY = QuantizationTable(baseStep: 1) // 最小量子化ステップ
         let qtC = QuantizationTable(baseStep: 1)

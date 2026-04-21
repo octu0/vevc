@@ -26,7 +26,7 @@ final class BlockDataCompareTests: XCTestCase {
             }
         }
         
-        let pd = toPlaneData420(images: [img])[0]
+        let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
         let pool = BlockViewPool()

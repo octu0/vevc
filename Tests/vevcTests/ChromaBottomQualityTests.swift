@@ -239,8 +239,8 @@ final class ChromaBottomQualityTests: XCTestCase {
         let img0 = generateNaturalImage(width: width, height: height, seed: 0)
         let img1 = generateNaturalImage(width: width, height: height, seed: 3)
         
-        let pd0 = toPlaneData420(images: [img0])[0]
-        let pd1 = toPlaneData420(images: [img1])[0]
+        let pd0 = toPlaneData420(image: img0, pool: BlockViewPool()).0
+        let pd1 = toPlaneData420(image: img1, pool: BlockViewPool()).0
         
         let qtY = QuantizationTable(baseStep: 1) // 量子化を最小にして処理フローのみ検証
         let qtC = QuantizationTable(baseStep: 1)
