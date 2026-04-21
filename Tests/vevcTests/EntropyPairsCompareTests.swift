@@ -29,7 +29,8 @@ final class EntropyPairsCompareTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
         
-        let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
@@ -80,29 +81,29 @@ final class EntropyPairsCompareTests: XCTestCase {
             let subs = getSubbands32(view: view)
             switch task {
             case .encode16:
-                blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-                blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-                blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+                blockEncode16V(encoder: &encoder, block: subs.hl)
+                blockEncode16H(encoder: &encoder, block: subs.lh)
+                blockEncode16H(encoder: &encoder, block: subs.hh)
             case .split8(let tl, let tr, let bl, let br):
                 if tl {
-                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32))
                 }
                 if tr {
-                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32))
                 }
                 if bl {
-                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32))
                 }
                 if br {
-                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
-                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32), parentBlock: nil)
+                    blockEncode8V(encoder: &encoder, block: BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32))
+                    blockEncode8H(encoder: &encoder, block: BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32))
                 }
             }
         }

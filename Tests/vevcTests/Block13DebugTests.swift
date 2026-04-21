@@ -29,7 +29,8 @@ final class Block13DebugTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
         
-        let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
@@ -53,7 +54,8 @@ final class Block13DebugTests: XCTestCase {
         }
         
         // isEffectivelyZeroチェックがblockのデータを変更するため、元のブロックを再作成
-        var (blocks2, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        var (blocks2, _, rel2) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel2() }
         for i in blocks2.indices {
             evaluateQuantizeLayer32(view: blocks2[i], qt: qtY)
         }

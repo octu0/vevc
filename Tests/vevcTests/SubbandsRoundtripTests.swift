@@ -210,7 +210,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
-        var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        var (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
@@ -274,7 +275,8 @@ final class SubbandsRoundtripTests: XCTestCase {
         
         let qtY = QuantizationTable(baseStep: 2)
         let reader = Int16Reader(data: rY, width: width, height: height)
-        var (blocks, _) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool, qt: qtY)
+        var (blocks, _, rel) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
@@ -336,7 +338,8 @@ final class SubbandsRoundtripTests: XCTestCase {
             let pd = toPlaneData420(images: [img])[0]
             let qtY = QuantizationTable(baseStep: 2)
             
-            var (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool, qt: qtY)
+            var (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool, qt: qtY)
+            defer { rel() }
             for i in blocks.indices {
                 evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
             }

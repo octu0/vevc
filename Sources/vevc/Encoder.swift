@@ -187,7 +187,7 @@ actor LayersEncodeActor {
         encodedFrames.reserveCapacity(images.count)
         
         let firstImg = images[0]
-        var previousInputPlane = toPlaneData420(image: firstImg, pool: pool)
+        var (previousInputPlane, releasePreviousInput) = toPlaneData420(image: firstImg, pool: pool)
         
         let firstQtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
         let firstQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
@@ -205,22 +205,19 @@ actor LayersEncodeActor {
         
         for idx in 1..<images.count {
             let img = images[idx]
-            let plane = toPlaneData420(image: img, pool: pool)
+            let (plane, releasePlane) = toPlaneData420(image: img, pool: pool)
             
             // Duplicate frame detection
             let isDuplicate = isPlaneIdentical(a: plane, b: previousInputPlane)
             if isDuplicate {
                 encodedFrames.append([]) // empty = copy frame (FrameLen=0)
-                pool.putInt16(plane.y)
-                pool.putInt16(plane.cb)
-                pool.putInt16(plane.cr)
+                releasePlane()
                 continue
             }
             
-            pool.putInt16(previousInputPlane.y)
-            pool.putInt16(previousInputPlane.cb)
-            pool.putInt16(previousInputPlane.cr)
+            releasePreviousInput()
             previousInputPlane = plane
+            releasePreviousInput = releasePlane
             
             // P-frame Rate Control
             let frameSAD = estimateFrameSAD(current: plane, previous: previousReconstructed)
@@ -250,21 +247,15 @@ actor LayersEncodeActor {
             previousReconstructed = reconstructed
         }
         
-        pool.putInt16(previousInputPlane.y)
-        pool.putInt16(previousInputPlane.cb)
-        pool.putInt16(previousInputPlane.cr)
+        releasePreviousInput()
         
         let isFinalPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
             firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
         }
         if isFinalPrevFirst != true {
-            pool.putInt16(previousReconstructed.y)
-            pool.putInt16(previousReconstructed.cb)
-            pool.putInt16(previousReconstructed.cr)
+            previousRelease()
         }
-        pool.putInt16(firstReconstructed.y)
-        pool.putInt16(firstReconstructed.cb)
-        pool.putInt16(firstReconstructed.cr)
+        releaseFirstRecon()
 
         var gopBody: [UInt8] = []
         appendUInt32BE(&gopBody, UInt32(images.count)) // GOP size
@@ -290,7 +281,8 @@ actor LayersEncodeActor {
     
     @inline(__always)
     func encodeSingleFrame(image: YCbCrImage) async throws -> [UInt8] {
-        let curr = toPlaneData420(image: image, pool: pool)
+        let (curr, releaseCurr) = toPlaneData420(image: image, pool: pool)
+        defer { releaseCurr() }
         
         if keyint <= framesSinceKeyframe || frameIndex == 0 {
             let targetBits = rateController.beginGOP()
@@ -302,13 +294,8 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0)
         
-        let (bytes, recon, releaseRecon) = try await encodeSpatialLayers(pd: curr, pool: pool, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: frameIndex % 2)
+        let (bytes, _, releaseRecon) = try await encodeSpatialLayers(pd: curr, pool: pool, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: frameIndex % 2)
         defer { releaseRecon() }
-        defer {
-            pool.putInt16(curr.y)
-            pool.putInt16(curr.cb)
-            pool.putInt16(curr.cr)
-        }
         
         framesSinceKeyframe += 1
         frameIndex += 1

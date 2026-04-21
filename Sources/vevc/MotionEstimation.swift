@@ -687,12 +687,21 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
     let l0dx = (l1dx + 1) / 2
     let l0dy = (l1dy + 1) / 2
     
-    let currSub2 = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
-    let currSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
+    let (currSub2, rCurrSub2) = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
+    let (currSub1, rCurrSub1) = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    let (currBlocks8, rCurrBlocks8) = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
+    defer {
+        rCurrSub2()
+        rCurrSub1()
+        rCurrBlocks8()
+    }
 
-    let prevSub2 = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
-    let prevSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    let (prevSub2, rPrevSub2) = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
+    let (prevSub1, rPrevSub1) = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    defer {
+        rPrevSub2()
+        rPrevSub1()
+    }
     
     let targetWidth = l0dx
     let targetHeight = l0dy
@@ -760,17 +769,30 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let l0dy = (l1dy + 1) / 2
     
     // Compute DWT LL band (Base8 resolution) for current frame
-    let currSub2 = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
-    let currSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    let currBlocks8 = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
+    let (currSub2, rCurrSub2) = await extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
+    let (currSub1, rCurrSub1) = await extractSingleTransformSubband16(r: Int16Reader(data: currSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    let (currBlocks8, rCurrBlocks8) = await extractSingleTransformBlocksBase8(r: Int16Reader(data: currSub1, width: l0dx, height: l0dy), width: l0dx, height: l0dy, pool: pool)
+    defer {
+        rCurrSub2()
+        rCurrSub1()
+        rCurrBlocks8()
+    }
 
     // Forward reference DWT LL band
-    let prevSub2 = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
-    let prevSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    let (prevSub2, rPrevSub2) = await extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
+    let (prevSub1, rPrevSub1) = await extractSingleTransformSubband16(r: Int16Reader(data: prevSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    defer {
+        rPrevSub2()
+        rPrevSub1()
+    }
     
     // Backward reference DWT LL band
-    let nextSub2 = await extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
-    let nextSub1 = await extractSingleTransformSubband16(r: Int16Reader(data: nextSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    let (nextSub2, rNextSub2) = await extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
+    let (nextSub1, rNextSub1) = await extractSingleTransformSubband16(r: Int16Reader(data: nextSub2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    defer {
+        rNextSub2()
+        rNextSub1()
+    }
     
     let targetWidth = l0dx
     let targetHeight = l0dy

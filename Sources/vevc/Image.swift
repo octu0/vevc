@@ -151,7 +151,7 @@ extension PlaneData420 {
 }
 
 @inline(__always)
-func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> PlaneData420 {
+func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> (PlaneData420, @Sendable () -> Void) {
     @inline(__always)
     func convertPlane(src: UnsafeBufferPointer<UInt8>, dst: UnsafeMutableBufferPointer<Int16>) {
         guard let srcPtr = src.baseAddress, let dstPtr = dst.baseAddress else { return }
@@ -230,7 +230,8 @@ func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> PlaneData420 {
         }
     }
     
-    return PlaneData420(width: image.width, height: image.height, y: y, cb: cb, cr: cr)
+    let pd = PlaneData420(width: image.width, height: image.height, y: y, cb: cb, cr: cr)
+    return (pd, { [y, cb, cr] in pool.putInt16(y); pool.putInt16(cb); pool.putInt16(cr) })
 }
 
 func toPlaneData420(images: [YCbCrImage]) -> [PlaneData420] {

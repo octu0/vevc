@@ -29,7 +29,8 @@ final class RealPairsRansTests: XCTestCase {
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
         
-        let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
@@ -43,9 +44,9 @@ final class RealPairsRansTests: XCTestCase {
             
             let view = blocks[i]
             let subs = getSubbands32(view: view)
-            blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: subs.hl)
+            blockEncode16H(encoder: &encoder, block: subs.lh)
+            blockEncode16H(encoder: &encoder, block: subs.hh)
         }
         
         encoder.bypassWriter.flush()

@@ -64,7 +64,7 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16]) {
+func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     let dstBaseAlloc = UnsafeMutablePointer<Int16>.allocate(capacity: subWidth * subHeight)
@@ -148,14 +148,13 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     
     var subband = pool.getInt16(count: subWidth * subHeight)
     subband.withUnsafeMutableBufferPointer { buf in
-        let base = buf.baseAddress!
-        base.update(from: dstBaseAlloc, count: subWidth * subHeight)
+        buf.baseAddress!.update(from: dstBaseAlloc, count: subWidth * subHeight)
     }
-    return (blocks, subband)
+    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putAll(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
-func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [Int16] {
+func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([Int16], @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -240,12 +239,12 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    pool.putAll(blocks)
-    return subband
+    pool.putAll(tmpBlocks)
+    return (subband, { [subband] in pool.putInt16(subband) })
 }
 
 @inline(__always)
-func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16]) {
+func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     let dstBaseAlloc = UnsafeMutablePointer<Int16>.allocate(capacity: subWidth * subHeight)
@@ -323,11 +322,11 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     subband.withUnsafeMutableBufferPointer { buf in
         buf.baseAddress!.update(from: dstBaseAlloc, count: subWidth * subHeight)
     }
-    return (blocks, subband)
+    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putAll(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
-func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [Int16] {
+func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([Int16], @Sendable () -> Void) {
     let subWidth = (width + 1) / 2
     let subHeight = (height + 1) / 2
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -404,12 +403,12 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    pool.putAll(blocks)
-    return subband
+    pool.putAll(tmpBlocks)
+    return (subband, { [subband] in pool.putInt16(subband) })
 }
 
 @inline(__always)
-func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [BlockView] {
+func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([BlockView], @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
     let totalBlocks = rowCount * colCount
@@ -439,11 +438,11 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
             }
         }
     }    
-    return blocks
+    return (tmpBlocks, { [tmpBlocks] in pool.putAll(tmpBlocks) })
 }
 
 @inline(__always)
-func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> [BlockView] {
+func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([BlockView], @Sendable () -> Void) {
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
     let totalBlocks = rowCount * colCount
@@ -473,7 +472,7 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int,
             }
         }
     }    
-    return blocks
+    return (tmpBlocks, { [tmpBlocks] in pool.putAll(tmpBlocks) })
 }
 
 @inline(__always)
@@ -561,63 +560,63 @@ func subtractCoeffsBase32(currBlocks: inout [BlockView], predBlocks: inout [Bloc
 }
 
 @inline(__always)
-func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView]) {
+func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = { () -> ([Int16], [BlockView]) in
-        let (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
-        return (subband, blocks)
+    async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
+        return (subband, blocks, r)
     }()
     
-    async let taskBufCb = { () -> ([Int16], [BlockView]) in
-        let (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
-        return (subband, blocks)
+    async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        return (subband, blocks, r)
     }()
     
-    async let taskBufCr = { () -> ([Int16], [BlockView]) in
-        let (blocks, subband) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
-        return (subband, blocks)
+    async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        return (subband, blocks, r)
     }()
 
-    let (subY, yBlocks) = await taskBufY
-    let (subCb, cbBlocks) = await taskBufCb
-    let (subCr, crBlocks) = await taskBufCr
+    let (subY, yBlocks, relY) = await taskBufY
+    let (subCb, cbBlocks, relCb) = await taskBufCb
+    let (subCr, crBlocks, relCr) = await taskBufCr
 
     let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
-    return (subPlane, yBlocks, cbBlocks, crBlocks)
+    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
 }
 
 @inline(__always)
-func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView]) {
+func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = { () -> ([Int16], [BlockView]) in
-        let (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
-        return (subband, blocks)
+    async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
+        return (subband, blocks, r)
     }()
     
-    async let taskBufCb = { () -> ([Int16], [BlockView]) in
-        let (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
-        return (subband, blocks)
+    async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        return (subband, blocks, r)
     }()
     
-    async let taskBufCr = { () -> ([Int16], [BlockView]) in
-        let (blocks, subband) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
-        return (subband, blocks)
+    async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        return (subband, blocks, r)
     }()
 
-    let (subY, yBlocks) = await taskBufY
-    let (subCb, cbBlocks) = await taskBufCb
-    let (subCr, crBlocks) = await taskBufCr
+    let (subY, yBlocks, relY) = await taskBufY
+    let (subCb, cbBlocks, relCb) = await taskBufCb
+    let (subCr, crBlocks, relCr) = await taskBufCr
 
     let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
-    return (subPlane, yBlocks, cbBlocks, crBlocks)
+    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
 }
 
 @inline(__always)
@@ -1125,7 +1124,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView]) {
+func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1134,8 +1133,8 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     let yColCount8 = (dx + 7) / 8
     let yRowCount8 = (dy + 7) / 8
     
-    async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView]) in
-        var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
+    async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
         let isIFrame = (sads == nil)
         for i in blocks.indices {
             if let sList = sads, i < sList.count {
@@ -1159,14 +1158,14 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
-        return (buf, reconPlane, rPlane, quantizedBlocks)
+        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
     }()
     
     let lumaColCount = (dx + 7) / 8
     let chromaColCount = (cbDx + 7) / 8
     
-    async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView]) in
-        var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
+    async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
         let isIFrame = (sads == nil)
         for i in blocks.indices {
             var sadVal: Int = Int.max
@@ -1194,11 +1193,11 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, rPlane, quantizedBlocks)
+        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
     }()
     
-    async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView]) in
-        var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
+    async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
         let isIFrame = (sads == nil)
         for i in blocks.indices {
             var sadVal: Int = Int.max
@@ -1226,13 +1225,12 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, rPlane, quantizedBlocks)
+        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
     }()
 
-    let (bufY, reconY, r0Y, base8YBlocks) = await taskBufY
-    let (bufCb, reconCb, r0Cb, base8CbBlocks) = await taskBufCb
-    let (bufCr, reconCr, r0Cr, base8CrBlocks) = await taskBufCr
-    defer { r0Y(); r0Cb(); r0Cr() }
+    let (bufY, reconY, r0Y, base8YBlocks, relYBlocks) = await taskBufY
+    let (bufCb, reconCb, r0Cb, base8CbBlocks, relCbBlocks) = await taskBufCb
+    let (bufCr, reconCr, r0Cr, base8CrBlocks, relCrBlocks) = await taskBufCr
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
     
@@ -1253,7 +1251,14 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
     
-    return (out, reconstructed, base8YBlocks, base8CbBlocks, base8CrBlocks)
+    return (out, reconstructed, base8YBlocks, base8CbBlocks, base8CrBlocks, {
+        r0Y()
+        r0Cb()
+        r0Cr()
+        relYBlocks()
+        relCbBlocks()
+        relCrBlocks()
+    })
 }
 
 // encoder-side reconstruction:
@@ -1310,10 +1315,13 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void) in
-        var blocks = await extractSingleTransformBlocksBase32(r: pd.rY, width: dx, height: dy, pool: pool)
+        var (blocks, rB) = await extractSingleTransformBlocksBase32(r: pd.rY, width: dx, height: dy, pool: pool)
+        var rP: (@Sendable () -> Void)? = nil
         if let pPd = predictedPd {
-            var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rY, width: dx, height: dy, pool: pool)
+            let (pBlocksVal, rPVal) = await extractSingleTransformBlocksBase32(r: pPd.rY, width: dx, height: dy, pool: pool)
+            var pBlocks = pBlocksVal
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
+            rP = rPVal
         }
         for i in blocks.indices {
             evaluateQuantizeBase32(view: blocks[i], qt: qtY)
@@ -1321,14 +1329,19 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
         let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let (reconPlane, rPlane) = reconstructPlaneBase32(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
-        return (buf, reconPlane, rPlane)
+        let relB = rB
+        let relP = rP
+        return (buf, reconPlane, { relB(); relP?(); rPlane() })
     }()
     
     async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void) in
-        var blocks = await extractSingleTransformBlocksBase32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
+        var (blocks, rB) = await extractSingleTransformBlocksBase32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
+        var rP: (@Sendable () -> Void)? = nil
         if let pPd = predictedPd {
-            var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rCb, width: cbDx, height: cbDy, pool: pool)
+            let (pBlocksVal, rPVal) = await extractSingleTransformBlocksBase32(r: pPd.rCb, width: cbDx, height: cbDy, pool: pool)
+            var pBlocks = pBlocksVal
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
+            rP = rPVal
         }
         for i in blocks.indices {
             evaluateQuantizeBase32(view: blocks[i], qt: qtC)
@@ -1336,14 +1349,19 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
         let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let (reconPlane, rPlane) = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, rPlane)
+        let relB = rB
+        let relP = rP
+        return (buf, reconPlane, { relB(); relP?(); rPlane() })
     }()
     
     async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void) in
-        var blocks = await extractSingleTransformBlocksBase32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
+        var (blocks, rB) = await extractSingleTransformBlocksBase32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
+        var rP: (@Sendable () -> Void)? = nil
         if let pPd = predictedPd {
-            var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rCr, width: cbDx, height: cbDy, pool: pool)
+            let (pBlocksVal, rPVal) = await extractSingleTransformBlocksBase32(r: pPd.rCr, width: cbDx, height: cbDy, pool: pool)
+            var pBlocks = pBlocksVal
             subtractCoeffsBase32(currBlocks: &blocks, predBlocks: &pBlocks)
+            rP = rPVal
         }
         for i in blocks.indices {
             evaluateQuantizeBase32(view: blocks[i], qt: qtC)
@@ -1351,7 +1369,9 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
         let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
         let (reconPlane, rPlane) = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, rPlane)
+        let relB = rB
+        let relP = rP
+        return (buf, reconPlane, { relB(); relP?(); rPlane() })
     }()
 
     let (bufY, reconY, releaseL2Y) = await taskBufY

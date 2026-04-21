@@ -32,7 +32,8 @@ final class BlockDataCompareTests: XCTestCase {
         let pool = BlockViewPool()
         
         // エンコーダ: Layer32 のバイト + blocks を取得
-        var (_, encYBlocks, encCbBlocks, encCrBlocks) = try await preparePlaneLayer32(pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (_, encYBlocks, encCbBlocks, encCrBlocks, rel) = try await preparePlaneLayer32(pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        defer { rel() }
         let layer2Bytes = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
 
         

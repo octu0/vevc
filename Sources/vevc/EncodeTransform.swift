@@ -599,9 +599,9 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
             let view = blocks[i]
             let subs = getSubbands8(view: view)
             blockEncodeDPCM4(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-            blockEncode4V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode4V(encoder: &encoder, block: subs.hl)
+            blockEncode4H(encoder: &encoder, block: subs.lh)
+            blockEncode4H(encoder: &encoder, block: subs.hh)
         } else {
             lastVal = 0
         }
@@ -648,10 +648,10 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
 
             let view = blocks[i]
             let subs = getSubbands8(view: view)
-            blockEncode4H(encoder: &encoder, block: subs.ll, parentBlock: nil)
-            blockEncode4V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: subs.ll)
+            blockEncode4V(encoder: &encoder, block: subs.hl)
+            blockEncode4H(encoder: &encoder, block: subs.lh)
+            blockEncode4H(encoder: &encoder, block: subs.hh)
         }
     }
     
@@ -724,9 +724,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
             let view = blocks[i]
             let subs = getSubbands32(view: view)
             blockEncodeDPCM16(encoder: &encoder, block: subs.ll, lastVal: &lastVal)
-            blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: subs.hl)
+            blockEncode16H(encoder: &encoder, block: subs.lh)
+            blockEncode16H(encoder: &encoder, block: subs.hh)
         
         case .split8(let tl, let tr, let bl, let br):
             let view = blocks[i]
@@ -737,9 +737,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl)
+                blockEncode8H(encoder: &encoder, block: lh)
+                blockEncode8H(encoder: &encoder, block: hh)
             }
             if tr {
                 let ll = BlockView(base: subs.ll.base.advanced(by: 8), width: 8, height: 8, stride: 32)
@@ -747,9 +747,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl)
+                blockEncode8H(encoder: &encoder, block: lh)
+                blockEncode8H(encoder: &encoder, block: hh)
             }
             if bl {
                 let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
@@ -757,9 +757,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl)
+                blockEncode8H(encoder: &encoder, block: lh)
+                blockEncode8H(encoder: &encoder, block: hh)
             }
             if br {
                 let ll = BlockView(base: subs.ll.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
@@ -767,9 +767,9 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
                 let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 blockEncodeDPCM8(encoder: &encoder, block: ll, lastVal: &lastVal)
-                blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-                blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+                blockEncode8H(encoder: &encoder, block: hl)
+                blockEncode8H(encoder: &encoder, block: lh)
+                blockEncode8H(encoder: &encoder, block: hh)
             }
         }
     }
@@ -793,9 +793,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode16:
-        blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: parentHL)
-        blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
-        blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
+        blockEncode16VWithParent(encoder: &encoder, block: subs.hl, parentBlock: parentHL)
+        blockEncode16HWithParent(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
+        blockEncode16HWithParent(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
     case .split8(let tl, let tr, let bl, let br):
         if tl {
             let pbHL = BlockView(base: parentHL.base, width: 4, height: 4, stride: parentHL.stride)
@@ -804,9 +804,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32).clearAll()
@@ -819,9 +819,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
@@ -834,9 +834,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
@@ -849,9 +849,9 @@ func encodeSubbands32WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode8HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode8HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode8HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
@@ -868,17 +868,17 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode16:
-        blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-        blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-        blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+        blockEncode16V(encoder: &encoder, block: subs.hl)
+        blockEncode16H(encoder: &encoder, block: subs.lh)
+        blockEncode16H(encoder: &encoder, block: subs.hh)
     case .split8(let tl, let tr, let bl, let br):
         if tl {
             let hl = BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base, width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl)
+            blockEncode8H(encoder: &encoder, block: lh)
+            blockEncode8H(encoder: &encoder, block: hh)
         } else {
             BlockView(base: subs.hl.base, width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base, width: 8, height: 8, stride: 32).clearAll()
@@ -888,9 +888,9 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8), width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl)
+            blockEncode8H(encoder: &encoder, block: lh)
+            blockEncode8H(encoder: &encoder, block: hh)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8), width: 8, height: 8, stride: 32).clearAll()
@@ -900,9 +900,9 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl)
+            blockEncode8H(encoder: &encoder, block: lh)
+            blockEncode8H(encoder: &encoder, block: hh)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32), width: 8, height: 8, stride: 32).clearAll()
@@ -912,9 +912,9 @@ func encodeSubbands32WithoutParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let lh = BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
             let hh = BlockView(base: subs.hh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-            blockEncode8H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode8H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode8H(encoder: &encoder, block: hl)
+            blockEncode8H(encoder: &encoder, block: lh)
+            blockEncode8H(encoder: &encoder, block: hh)
         } else {
             BlockView(base: subs.hl.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
             BlockView(base: subs.lh.base.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32).clearAll()
@@ -934,9 +934,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode8:
-        blockEncode8V(encoder: &encoder, block: subs.hl, parentBlock: parentHL)
-        blockEncode8H(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
-        blockEncode8H(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
+        blockEncode8VWithParent(encoder: &encoder, block: subs.hl, parentBlock: parentHL)
+        blockEncode8HWithParent(encoder: &encoder, block: subs.lh, parentBlock: parentLH)
+        blockEncode8HWithParent(encoder: &encoder, block: subs.hh, parentBlock: parentHH)
     case .split4(let tl, let tr, let bl, let br):
         if tl {
             let pbHL = BlockView(base: parentHL.base, width: 2, height: 2, stride: parentHL.stride)
@@ -945,9 +945,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
         if tr {
             let pbHL = BlockView(base: parentHL.base.advanced(by: 2), width: 2, height: 2, stride: parentHL.stride)
@@ -956,9 +956,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
         if bl {
             let pbHL = BlockView(base: parentHL.base.advanced(by: 2 * parentHL.stride), width: 2, height: 2, stride: parentHL.stride)
@@ -967,9 +967,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
         if br {
             let pbHL = BlockView(base: parentHL.base.advanced(by: 2 * parentHL.stride + 2), width: 2, height: 2, stride: parentHL.stride)
@@ -978,9 +978,9 @@ func encodeSubbands16WithParent<M: EntropyModelProvider>(
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: pbHL)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: pbLH)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: pbHH)
+            blockEncode4HWithParent(encoder: &encoder, block: hl, parentBlock: pbHL)
+            blockEncode4HWithParent(encoder: &encoder, block: lh, parentBlock: pbLH)
+            blockEncode4HWithParent(encoder: &encoder, block: hh, parentBlock: pbHH)
         }
     }
 }
@@ -993,41 +993,41 @@ func encodeSubbands16WithoutParent<M: EntropyModelProvider>(
 ) {
     switch task {
     case .encode8:
-        blockEncode8V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-        blockEncode8H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-        blockEncode8H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+        blockEncode8V(encoder: &encoder, block: subs.hl)
+        blockEncode8H(encoder: &encoder, block: subs.lh)
+        blockEncode8H(encoder: &encoder, block: subs.hh)
     case .split4(let tl, let tr, let bl, let br):
         if tl {
             let hl = BlockView(base: subs.hl.base, width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base, width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base, width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl)
+            blockEncode4H(encoder: &encoder, block: lh)
+            blockEncode4H(encoder: &encoder, block: hh)
         }
         if tr {
             let hl = BlockView(base: subs.hl.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4), width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl)
+            blockEncode4H(encoder: &encoder, block: lh)
+            blockEncode4H(encoder: &encoder, block: hh)
         }
         if bl {
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl)
+            blockEncode4H(encoder: &encoder, block: lh)
+            blockEncode4H(encoder: &encoder, block: hh)
         }
         if br {
             let hl = BlockView(base: subs.hl.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let lh = BlockView(base: subs.lh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
             let hh = BlockView(base: subs.hh.base.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-            blockEncode4H(encoder: &encoder, block: hl, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: lh, parentBlock: nil)
-            blockEncode4H(encoder: &encoder, block: hh, parentBlock: nil)
+            blockEncode4H(encoder: &encoder, block: hl)
+            blockEncode4H(encoder: &encoder, block: lh)
+            blockEncode4H(encoder: &encoder, block: hh)
         }
     }
 }

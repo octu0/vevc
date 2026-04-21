@@ -32,7 +32,8 @@ final class RansModelTests: XCTestCase {
         }
         let pd = toPlaneData420(images: [img])[0]
         let qtY = QuantizationTable(baseStep: 2)
-        let (blocks, _) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
+        defer { rel() }
         for i in blocks.indices { evaluateQuantizeLayer32(view: blocks[i], qt: qtY) }
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
@@ -42,9 +43,9 @@ final class RansModelTests: XCTestCase {
             if isZero { continue }
             let view = blocks[i]
             let subs = getSubbands32(view: view)
-            blockEncode16V(encoder: &encoder, block: subs.hl, parentBlock: nil)
-            blockEncode16H(encoder: &encoder, block: subs.lh, parentBlock: nil)
-            blockEncode16H(encoder: &encoder, block: subs.hh, parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: subs.hl)
+            blockEncode16H(encoder: &encoder, block: subs.lh)
+            blockEncode16H(encoder: &encoder, block: subs.hh)
                 }
         
         // pairs からrunTokenCountsとvalTokenCountsを計算

@@ -218,10 +218,11 @@ final class ImageUtilTests: XCTestCase {
         // Convert
         // Assuming BlockViewPool doesn't exist, toPlaneData420 might have an overload or we use the array map list
         let pool = BlockViewPool()
-        let pds = [toPlaneData420(image: source, pool: pool)]
+        let (pd, releasePd) = toPlaneData420(image: source, pool: pool)
+        defer { releasePd() }
+        let pds = [pd]
         
         XCTAssertEqual(pds.count, 1)
-        let pd = pds[0]
         
         // Now convert back
         let upsampled = pd.toYCbCr()

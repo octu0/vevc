@@ -21,7 +21,7 @@ final class BlockRoundtripTests: XCTestCase {
         
         // blockEncode16
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        blockEncode16V(encoder: &encoder, block: block, parentBlock: nil)
+        blockEncode16V(encoder: &encoder, block: block)
         encoder.flush()
         let encoded = encoder.getData()
         
@@ -55,7 +55,7 @@ final class BlockRoundtripTests: XCTestCase {
         let originalData = Array(UnsafeBufferPointer(start: block.base, count: 64))
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        blockEncode8V(encoder: &encoder, block: block, parentBlock: nil)
+        blockEncode8V(encoder: &encoder, block: block)
         encoder.flush()
         let encoded = encoder.getData()
         
@@ -94,7 +94,7 @@ final class BlockRoundtripTests: XCTestCase {
         let beforeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
         
         var encoder = EntropyEncoder<DynamicEntropyModel>()
-        blockEncode16V(encoder: &encoder, block: block, parentBlock: nil)
+        blockEncode16V(encoder: &encoder, block: block)
             
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
         let afterData = Array(UnsafeBufferPointer(start: block.base, count: 256))
@@ -126,7 +126,7 @@ final class BlockRoundtripTests: XCTestCase {
         // エンコード (stride=32)
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         hlView = BlockView(base: block32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-        blockEncode16V(encoder: &encoder, block: hlView, parentBlock: nil)
+        blockEncode16V(encoder: &encoder, block: hlView)
         encoder.flush()
         let encoded = encoder.getData()
         

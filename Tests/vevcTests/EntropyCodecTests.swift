@@ -49,7 +49,7 @@ final class EntropyCodecTests: XCTestCase {
         // 全ブロックをエンコード
         var encoder = EntropyEncoder<DynamicEntropyModel>()
         for i in 0..<16 {
-            blockEncode16V(encoder: &encoder, block: blocks[i], parentBlock: nil)
+            blockEncode16V(encoder: &encoder, block: blocks[i])
         }
         
         let data = encoder.getData()
