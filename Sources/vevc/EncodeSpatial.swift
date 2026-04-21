@@ -58,13 +58,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     }())
     
     var out: [UInt8] = []
-    appendUInt32BE(&out, 0)
-    appendUInt32BE(&out, 0)
-    appendUInt32BE(&out, UInt32(layer0.count))
+    let frameHeader = VEVCFrameHeader(isCopyFrame: false, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: layer0)
-    appendUInt32BE(&out, UInt32(layer1.count))
     out.append(contentsOf: layer1)
-    appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
     return (out, reconstructed, { r2Y(); r2Cb(); r2Cr() })
@@ -147,18 +144,14 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     }())
     
     var out: [UInt8] = []
-    
     let mvCount = mvs.count
-    appendUInt32BE(&out, UInt32(mvCount))
     let mvData = encodeMVs(mvs: mvs)
-    appendUInt32BE(&out, UInt32(mvData.count))
+    
+    let frameHeader = VEVCFrameHeader(isCopyFrame: false, mvsCount: mvCount, mvsSize: mvData.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: mvData)
-
-    appendUInt32BE(&out, UInt32(layer0.count))
     out.append(contentsOf: layer0)
-    appendUInt32BE(&out, UInt32(layer1.count))
     out.append(contentsOf: layer1)
-    appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
     return (out, reconstructed, { r2Y(); r2Cb(); r2Cr() })
@@ -250,31 +243,22 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var out: [UInt8] = []
     
     let mvCount = mvs.count
-    appendUInt32BE(&out, UInt32(mvCount))
-    
-    // serialize MV data + reference direction flags
     let mvData = encodeMVs(mvs: mvs)
-    appendUInt32BE(&out, UInt32(mvData.count))
-    out.append(contentsOf: mvData)
     
-    // reference direction flags: 1 bit per block, packed in bytes
     let refDirByteCount = (refDirs.count + 7) / 8
-    appendUInt32BE(&out, UInt32(refDirByteCount))
     var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
     for i in refDirs.indices {
         if refDirs[i] {
             refDirBuf[i / 8] |= UInt8(1 << (i % 8))
         }
     }
+    
+    let frameHeader = VEVCFrameHeader(isCopyFrame: false, mvsCount: mvCount, mvsSize: mvData.count, refDirSize: refDirBuf.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    out.append(contentsOf: frameHeader.serialize())
+    out.append(contentsOf: mvData)
     out.append(contentsOf: refDirBuf)
-
-    appendUInt32BE(&out, UInt32(layer0.count))
     out.append(contentsOf: layer0)
-    
-    appendUInt32BE(&out, UInt32(layer1.count))
     out.append(contentsOf: layer1)
-    
-    appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
     return (out, reconstructed, { r2Y(); r2Cb(); r2Cr() })

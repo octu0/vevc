@@ -141,7 +141,7 @@ DWT Coefficients
 | Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
 +-------------------+------------+-----------------+-----+-------------+
 
-    Metadata (Profile 2)
+    Metadata (Profile 1)
 +---------------------------------------------+
 | Metadata Size (2B) | Profile Version(1B)    |
 +------------+-------+-----+------------------+----------+----------------+
@@ -157,31 +157,32 @@ DWT Coefficients
   Timescale:   0x00=1000ms, 0x01=90000hz
 
     Variable GOP (I-Frame followed by P-Frames up to keyint / scene change)
-+---------------+-----------------+
-| Data Size(4B) | GOP Size X (4B) |
-+---------------+-----------------+-------------+--------------------+
-| F0 len (4B)   | F0 (I-Frame)    | F1 len (4B) | F1 (P-Frame)       |
-+---------------+-----------------+-------------+--------------------+
-| F2 len (4B)   | F2 (P-Frame)    | F3 len (4B) | F3 (P-Frame)       | 
-+---------------+-----------------+-------------+--------------------+
++-------------------+
+| Frame Count (4B)  |
++-------------------+-------------+--------------------+--------------------+
+| F0 (I-Frame)                    | F1 (P-Frame)       | F2 (P-Frame)       |
++---------------------------------+--------------------+--------------------+
 
-    Copy Frame (Duplicate Frame Skip):
-    When Fn len == 0, the frame is a "copy frame" — pixel-identical to its
-    predecessor. The encoder detects duplicate input frames (common in
-    telecine/pulldown content, e.g. 24fps→60fps where ~60% are duplicates)
-    and emits FrameLen=0 instead of encoding redundant data.
-    The decoder reuses the previous reconstructed frame verbatim.
-
-    Spatial Frame (Motion Vectors + 3 Layers structure)
-    +-------------------------------------------------------------+
-    | MVs Count (4B) | MV Data Len (4B)  | rANS Encoded MVs       |
-    +----------------+-------------------+------------------------+
-    | L0 len (4B)  | Layer 0 Payload (8x8 base)               |
-    +--------------+------------------------------------------+
-    | L1 len (4B)  | Layer 1 Payload (16x16 refinement)       |
-    +--------------+------------------------------------------+
-    | L2 len (4B)  | Layer 2 Payload (32x32 refinement)       |
-    +--------------+------------------------------------------+
+    Spatial Frame Packet (Length-Value format)
+    A delivery server can perform O(1) resolution scaling by simply dropping
+    the trailing layer payloads without recalculating sizes.
+    +--------------------------------------------------------------------------------------------------+
+    | Status Flags (1B) (0x01: IsCopyFrame, 0x00: Normal)                                              |
+    +---- IF NOT CopyFrame ----------------------------------------------------------------------------+
+    | MVs Count (4B) | MVs Size (4B)    | RefDir Size (4B)                                             |
+    +----------------+------------------+--------------------------------------------------------------+
+    | Layer0 Size(4B)| Layer1 Size (4B) | Layer2 Size (4B)                                             |
+    +----------------+------------------+--------------------------------------------------------------+
+    | MVs Data Payload (MVs Size bytes)                                                                |
+    +--------------------------------------------------------------------------------------------------+
+    | RefDir Data Payload (RefDir Size bytes)   (Only for Bidirectional Frames)                        |
+    +--------------------------------------------------------------------------------------------------+
+    | Layer 0 Payload (Layer0 Size bytes)       (Base8: Thumbnail)                                     |
+    +--------------------------------------------------------------------------------------------------+
+    | Layer 1 Payload (Layer1 Size bytes)       (Level16: Preview)                                     |
+    +--------------------------------------------------------------------------------------------------+
+    | Layer 2 Payload (Layer2 Size bytes)       (Level32: Full Archive)                                |
+    +--------------------------------------------------------------------------------------------------+
 
         Layer Payload
         +-------------+-----------+

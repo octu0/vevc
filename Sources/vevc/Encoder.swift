@@ -1,29 +1,6 @@
 import Foundation
 
-@inline(__always)
-private func buildVEVCHeader(width: Int, height: Int, framerate: Int) -> [UInt8] {
-    var header: [UInt8] = [0x56, 0x45, 0x56, 0x43] // Magic 'VEVC'
-    
-    // Size is: 9 (Profile1 original parts) + 6 models * 256 bytes = 9 + 1536 = 1545 bytes
-    let metadataPayloadSize: UInt16 = 1545
-    appendUInt16BE(&header, metadataPayloadSize)
-    header.append(0x02) // Profile 2 (supports DWT with embedded rANS models)
-    appendUInt16BE(&header, UInt16(width))
-    appendUInt16BE(&header, UInt16(height))
-    header.append(0x01) // ColorGamut: BT.709
-    appendUInt16BE(&header, UInt16(framerate))
-    header.append(0x00) // Timescale: 0=1000ms
-    
-    // Append embedded rANS models
-    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel0))
-    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel0))
-    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel1))
-    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel1))
-    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmRunModel))
-    header.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmValModel))
-    
-    return header
-}
+
 
 // MARK: - LayersEncoder & LayersCoreEncoder (Temporal DWT, Mode=0x00)
 
@@ -98,7 +75,8 @@ public class VEVCEncoder {
                 )
                 
                 do {
-                    continuation.yield(buildVEVCHeader(width: width, height: height, framerate: framerate))
+                    let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate)
+                    continuation.yield(fileHeader.serialize())
                     
                     var buffer: [YCbCrImage] = []
                     while let img = await iterator.next() {
@@ -210,7 +188,7 @@ actor LayersEncodeActor {
             // Duplicate frame detection
             let isDuplicate = isPlaneIdentical(a: plane, b: previousInputPlane)
             if isDuplicate {
-                encodedFrames.append([]) // empty = copy frame (FrameLen=0)
+                encodedFrames.append(VEVCFrameHeader(isCopyFrame: true).serialize())
                 releasePlane()
                 continue
             }
@@ -257,24 +235,14 @@ actor LayersEncodeActor {
         }
         releaseFirstRecon()
 
-        var gopBody: [UInt8] = []
-        appendUInt32BE(&gopBody, UInt32(images.count)) // GOP size
-        
-        // GOP bitstream layout: [GOPBodySize(4B)] [GOPSize(4B)] [FrameLen(4B) FrameData]...
-        // Convention: FrameLen == 0 indicates a "copy frame" — the frame is
-        // pixel-identical to its predecessor and carries no encoded payload.
-        // This avoids encoding redundant data for duplicate input frames,
-        // which is common in telecine/pulldown converted content (e.g. 24fps→60fps,
-        // where approximately 60% of frames are exact duplicates).
-        // The decoder recognizes FrameLen == 0 and reuses the previous decoded frame.
-        for encoded in encodedFrames {
-            appendUInt32BE(&gopBody, UInt32(encoded.count))
-            gopBody.append(contentsOf: encoded)
-        }
+        let gopHeader = VEVCGOPHeader(frameCount: images.count)
         
         var out: [UInt8] = []
-        appendUInt32BE(&out, UInt32(gopBody.count))
-        out.append(contentsOf: gopBody)
+        out.append(contentsOf: gopHeader.serialize())
+        
+        for encoded in encodedFrames {
+            out.append(contentsOf: encoded)
+        }
         
         return out
     }
@@ -300,15 +268,11 @@ actor LayersEncodeActor {
         framesSinceKeyframe += 1
         frameIndex += 1
         
-        var gopBody: [UInt8] = []
-        appendUInt32BE(&gopBody, 1) // GOP size
-        
-        appendUInt32BE(&gopBody, UInt32(bytes.count))
-        gopBody.append(contentsOf: bytes)
+        let gopHeader = VEVCGOPHeader(frameCount: 1)
         
         var out: [UInt8] = []
-        appendUInt32BE(&out, UInt32(gopBody.count))
-        out.append(contentsOf: gopBody)
+        out.append(contentsOf: gopHeader.serialize())
+        out.append(contentsOf: bytes)
         
         return out
     }
