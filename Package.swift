@@ -54,6 +54,11 @@ var packageTargets: [Target] = [
             .product(name: "PNG", package: "swift-png")
         ],
         path: "Sources/example"
+    ),
+    .executableTarget(
+        name: "vevc-splitter",
+        dependencies: ["vevc"],
+        path: "Sources/vevc-splitter"
     )
 ]
 
