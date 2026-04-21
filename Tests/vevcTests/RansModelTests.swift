@@ -84,9 +84,9 @@ final class RansModelTests: XCTestCase {
             runSum += runModel.tokenFreqs[i]
             resRunSum += runFreqsRestored[i]
         }
-        print("=== Run freq sum: \(runSum) restored sum: \(resRunSum) RANS_SCALE=\(RANS_SCALE) ===")
-        XCTAssertEqual(runSum, RANS_SCALE, "Run freq sum != RANS_SCALE")
-        XCTAssertEqual(resRunSum, RANS_SCALE, "Restored run freq sum != RANS_SCALE")
+        print("=== Run freq sum: \(runSum) restored sum: \(resRunSum) rANSScale=\(rANSScale) ===")
+        XCTAssertEqual(runSum, rANSScale, "Run freq sum != rANSScale")
+        XCTAssertEqual(resRunSum, rANSScale, "Restored run freq sum != rANSScale")
         
         print("=== Val token counts: \(valTokenCounts) ===")
         print("=== Val tokenFreqs: \(valModel.tokenFreqs) ===")
@@ -98,11 +98,11 @@ final class RansModelTests: XCTestCase {
             resValSum += valFreqsRestored[i]
         }
         print("=== Val freq sum: \(valSum) restored sum: \(resValSum) ===")
-        XCTAssertEqual(valSum, RANS_SCALE, "Val freq sum != RANS_SCALE")
+        XCTAssertEqual(valSum, rANSScale, "Val freq sum != rANSScale")
         
         // LUT 検証
-        let restoredRunModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runFreqsRestored)
-        let restoredValModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valFreqsRestored)
+        let restoredRunModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runFreqsRestored)
+        let restoredValModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valFreqsRestored)
         
         // cumFreqs 比較
         for i in 0..<64 {

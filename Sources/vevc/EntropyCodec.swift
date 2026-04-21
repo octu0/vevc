@@ -505,16 +505,16 @@ struct EntropyDecoder {
             self.valModel1 = StaticRANSModels.shared.valModel1
         case (false, _):
             let runTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
-            self.runModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs0)
+            self.runModel0 = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runTokenFreqs0)
             
             let valTokenFreqs0 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
-            self.valModel0 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs0)
+            self.valModel0 = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valTokenFreqs0)
             
             let runTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
-            self.runModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runTokenFreqs1)
+            self.runModel1 = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runTokenFreqs1)
             
             let valTokenFreqs1 = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
-            self.valModel1 = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valTokenFreqs1)
+            self.valModel1 = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valTokenFreqs1)
         }
         
         // 4-way bypass data
@@ -669,10 +669,10 @@ func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
         let bufCount = buf.count
         
         let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelDx = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDx)
+        let modelDx = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: freqsDx)
         
         let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelDy = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqsDy)
+        let modelDy = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: freqsDy)
         
         let bpLen = Int(try readUInt32BEFromPtr(base, offset: &offset, count: bufCount))
         guard offset + bpLen <= bufCount else { throw DecodeError.insufficientData }

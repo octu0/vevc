@@ -700,7 +700,7 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 }
 
 @inline(__always)
-func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 7) / 8
     let rowCount = (height + 7) / 8
     var plane = pool.getInt16(count: width * height)
@@ -755,11 +755,11 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -816,11 +816,11 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -877,11 +877,11 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -938,11 +938,11 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
-func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
@@ -999,11 +999,11 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
-func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
@@ -1060,11 +1060,11 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
-func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
@@ -1121,7 +1121,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
@@ -1134,7 +1134,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     let yColCount8 = (dx + 7) / 8
     let yRowCount8 = (dy + 7) / 8
     
-    async let taskBufY = { () -> ([UInt8], [Int16], [BlockView]) in
+    async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
         let isIFrame = (sads == nil)
         let isPFrame = isIFrame != true
@@ -1159,14 +1159,14 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         }
         
         let quantizedBlocks = blocks
-        let reconPlane = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
-        return (buf, reconPlane, quantizedBlocks)
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
+        return (buf, reconPlane, rPlane, quantizedBlocks)
     }()
     
     let lumaColCount = (dx + 7) / 8
     let chromaColCount = (cbDx + 7) / 8
     
-    async let taskBufCb = { () -> ([UInt8], [Int16], [BlockView]) in
+    async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
         let isIFrame = (sads == nil)
         let isPFrame = isIFrame != true
@@ -1195,11 +1195,11 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         }
         
         let quantizedBlocks = blocks
-        let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, quantizedBlocks)
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        return (buf, reconPlane, rPlane, quantizedBlocks)
     }()
     
-    async let taskBufCr = { () -> ([UInt8], [Int16], [BlockView]) in
+    async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView]) in
         var blocks = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
         let isIFrame = (sads == nil)
         let isPFrame = isIFrame != true
@@ -1228,13 +1228,14 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         }
         
         let quantizedBlocks = blocks
-        let reconPlane = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, quantizedBlocks)
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        return (buf, reconPlane, rPlane, quantizedBlocks)
     }()
 
-    let (bufY, reconY, base8YBlocks) = await taskBufY
-    let (bufCb, reconCb, base8CbBlocks) = await taskBufCb
-    let (bufCr, reconCr, base8CrBlocks) = await taskBufCr
+    let (bufY, reconY, r0Y, base8YBlocks) = await taskBufY
+    let (bufCb, reconCb, r0Cb, base8CbBlocks) = await taskBufCb
+    let (bufCr, reconCr, r0Cr, base8CrBlocks) = await taskBufCr
+    defer { r0Y(); r0Cb(); r0Cr() }
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
     
@@ -1261,7 +1262,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
 // encoder-side reconstruction:
 // rANS decode without entropy, using quantized blocks directly
 @inline(__always)
-func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> [Int16] {
+func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 32 - 1) / 32
     var plane = pool.getInt16(count: width * height)
     plane.withUnsafeMutableBufferPointer { dstBuf in
@@ -1301,7 +1302,7 @@ func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: Qu
             }
         }
     }
-    return plane
+    return (plane, { [plane] in pool.putInt16(plane) })
 }
 
 @inline(__always)
@@ -1311,7 +1312,7 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = { () -> ([UInt8], [Int16]) in
+    async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void) in
         var blocks = await extractSingleTransformBlocksBase32(r: pd.rY, width: dx, height: dy, pool: pool)
         if let pPd = predictedPd {
             var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rY, width: dx, height: dy, pool: pool)
@@ -1322,11 +1323,11 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtY.step) / 2))
         let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        let reconPlane = reconstructPlaneBase32(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
-        return (buf, reconPlane)
+        let (reconPlane, rPlane) = reconstructPlaneBase32(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
+        return (buf, reconPlane, rPlane)
     }()
     
-    async let taskBufCb = { () -> ([UInt8], [Int16]) in
+    async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void) in
         var blocks = await extractSingleTransformBlocksBase32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
         if let pPd = predictedPd {
             var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rCb, width: cbDx, height: cbDy, pool: pool)
@@ -1337,11 +1338,11 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
         let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        let reconPlane = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane)
+        let (reconPlane, rPlane) = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        return (buf, reconPlane, rPlane)
     }()
     
-    async let taskBufCr = { () -> ([UInt8], [Int16]) in
+    async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void) in
         var blocks = await extractSingleTransformBlocksBase32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
         if let pPd = predictedPd {
             var pBlocks = await extractSingleTransformBlocksBase32(r: pPd.rCr, width: cbDx, height: cbDy, pool: pool)
@@ -1352,13 +1353,13 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         }
         let safeThreshold = max(0, zeroThreshold - (Int(qtC.step)  / 2))
         let buf = encodePlaneBaseSubbands32(blocks: &blocks, zeroThreshold: safeThreshold)
-        let reconPlane = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane)
+        let (reconPlane, rPlane) = reconstructPlaneBase32(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        return (buf, reconPlane, rPlane)
     }()
 
-    let (bufY, reconY) = await taskBufY
-    let (bufCb, reconCb) = await taskBufCb
-    let (bufCr, reconCr) = await taskBufCr
+    let (bufY, reconY, releaseL2Y) = await taskBufY
+    let (bufCb, reconCb, releaseL2Cb) = await taskBufCb
+    let (bufCr, reconCr, releaseL2Cr) = await taskBufCr
     
     var mutReconY = reconY
     var mutReconCb = reconCb
@@ -1386,12 +1387,8 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     
     appendUInt32BE(&out, UInt32(bufCr.count))
     out.append(contentsOf: bufCr)
-    
-    return (out, reconstructed, { [reconstructed] in
-        pool.putInt16(reconstructed.y)
-        pool.putInt16(reconstructed.cb)
-        pool.putInt16(reconstructed.cr)
-    })
+    let cR2Y = releaseL2Y; let cR2Cb = releaseL2Cb; let cR2Cr = releaseL2Cr
+    return (out, reconstructed, { cR2Y(); cR2Cb(); cR2Cr() })
 }
 
 @inline(__always)
@@ -1423,18 +1420,22 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    let mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    let mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    let mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    defer { r1Y(); r1Cb(); r1Cr() }
     
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
     
-    var mutReconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
-    var mutReconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    var mutReconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    
+    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
+    var mutReconL2Y = reconL2Y
+        let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cb = reconL2Cb
+        let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cr = reconL2Cr
+        
     applyDeblockingFilter(plane: &mutReconL2Y, width: dx, height: dy, blockSize: 32, qStep: Int(qtY2.step))
     applyDeblockingFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
     applyDeblockingFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, blockSize: 32, qStep: Int(qtC2.step))
@@ -1455,11 +1456,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed, { [reconstructed] in
-        pool.putInt16(reconstructed.y)
-        pool.putInt16(reconstructed.cb)
-        pool.putInt16(reconstructed.cr)
-    })
+    let rY2 = r2Y; let rCb2 = r2Cb; let rCr2 = r2Cr
+    return (out, reconstructed, { rY2(); rCb2(); rCr2() })
 }
 
 @inline(__always)
@@ -1504,18 +1502,22 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    let mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    let mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    let mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    defer { r1Y(); r1Cb(); r1Cr() }
     
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
     
-    var mutReconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
-    var mutReconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    var mutReconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    
+    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
+    var mutReconL2Y = reconL2Y
+        let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cb = reconL2Cb
+        let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cr = reconL2Cr
+        
     applyMotionCompensationPixelsLuma32(plane: &mutReconL2Y, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, roundOffset: roundOffset)
     applyMotionCompensationPixelsChroma16(plane: &mutReconL2Cb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
     applyMotionCompensationPixelsChroma16(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
@@ -1545,11 +1547,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed, { [reconstructed] in
-        pool.putInt16(reconstructed.y)
-        pool.putInt16(reconstructed.cb)
-        pool.putInt16(reconstructed.cr)
-    })
+    let rY2 = r2Y; let rCb2 = r2Cb; let rCr2 = r2Cr
+    return (out, reconstructed, { rY2(); rCb2(); rCr2() })
 }
 
 @inline(__always)
@@ -1601,20 +1600,20 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
     
-    let mutReconL1Y = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    let mutReconL1Cb = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    let mutReconL1Cr = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    defer { r1Y(); r1Cb(); r1Cr() }
     
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
     
-    let reconL2Y = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
-    let reconL2Cb = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    let reconL2Cr = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    
+    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
+    let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     var mutReconL2Cb = reconL2Cb
+    let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     var mutReconL2Cr = reconL2Cr
     
     // bidirectional motion compensation addition (reconstruction)
@@ -1662,11 +1661,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     appendUInt32BE(&out, UInt32(layer2.count))
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed, { [reconstructed] in
-        pool.putInt16(reconstructed.y)
-        pool.putInt16(reconstructed.cb)
-        pool.putInt16(reconstructed.cr)
-    })
+    let rY2 = r2Y; let rCb2 = r2Cb; let rCr2 = r2Cr
+    return (out, reconstructed, { rY2(); rCb2(); rCr2() })
 }
 
 

@@ -34,7 +34,7 @@ struct MotionEstimation {
         return abs(Int(a) - Int(b))
     }
 
-    // why: Lagrange multiplier for rate-distortion optimization:
+    // Lagrange multiplier for rate-distortion optimization:
     // penalizes motion vectors with large magnitude to favor zero-MV
     @inline(__always)
     static func getPenalty(dx: Int, dy: Int, pmv: MotionVector, lambda: Int) -> Int {
@@ -270,13 +270,13 @@ struct MotionEstimation {
             return (0, 0, zeroSad)
         }
         
-        var bestCoarseSad: Int = zeroSad
-        var bestCoarseDx: Int = 0
-        var bestCoarseDy: Int = 0
+        var bestCoarseSad = zeroSad
+        var bestCoarseDx = 0
+        var bestCoarseDy = 0
         
-        let minDy = max(-range, -by)
+        let minDy = max(-1 * range, -1 * by)
         let maxDy = min(range, height - by - 8)
-        let minDx = max(-range, -bx)
+        let minDx = max(-1 * range, -1 * bx)
         let maxDx = min(range, width - bx - 8)
         
         if minDy <= maxDy && minDx <= maxDx {
@@ -284,14 +284,14 @@ struct MotionEstimation {
                 for dx in minDx...maxDx {
                     if dx == 0 && dy == 0 { continue }
                     
-                    let penalty: Int = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
+                    let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
                     let maxSad = bestCoarseSad - penalty
                     if maxSad < 0 { continue }
                     
                     fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + dx, y: by + dy, dest: tPtr)
-                    let sad: Int = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+                    let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
                     
-                    let totalSad: Int = sad + penalty
+                    let totalSad = sad + penalty
                     if totalSad < bestCoarseSad {
                         bestCoarseSad = totalSad
                         bestCoarseDx = dx
@@ -315,14 +315,14 @@ struct MotionEstimation {
             
             if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
-            let penalty: Int = getPenalty(dx: fineDx, dy: fineDy, pmv: pmv, lambda: 8)
+            let penalty = getPenalty(dx: fineDx, dy: fineDy, pmv: pmv, lambda: 8)
             let maxSad = bestFineSad - penalty
             if maxSad < 0 { continue }
             
             fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
-            let sad: Int = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+            let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
             
-            let totalSad: Int = sad + penalty
+            let totalSad = sad + penalty
             if totalSad < bestFineSad {
                 bestFineSad = totalSad
                 bestFineDx = fineDx
@@ -346,7 +346,7 @@ struct MotionEstimation {
                 let fractX: Int = hpDx & 1
                 let fractY: Int = hpDy & 1
                 
-                let penalty: Int = getPenalty(dx: hpDx, dy: hpDy, pmv: pmv, lambda: 4)
+                let penalty = getPenalty(dx: hpDx, dy: hpDy, pmv: pmv, lambda: 4)
                 let maxSad = bestHpSad - penalty
                 if maxSad < 0 { continue }
                 
@@ -355,9 +355,9 @@ struct MotionEstimation {
                     intX: bx + intDx, intY: by + intDy,
                     fractX: fractX, fractY: fractY, dest: tPtr, roundOffset: roundOffset
                 )
-                let sad: Int = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+                let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
                 
-                let totalSad: Int = sad + penalty
+                let totalSad = sad + penalty
                 if totalSad < bestHpSad {
                     bestHpSad = totalSad
                     bestHpDx = hpDx
@@ -382,7 +382,7 @@ struct MotionEstimation {
                 let remX: Int = epDx & 7
                 let remY: Int = epDy & 7
                 
-                let penalty: Int = getPenalty(dx: epDx, dy: epDy, pmv: pmv, lambda: 2)
+                let penalty = getPenalty(dx: epDx, dy: epDy, pmv: pmv, lambda: 2)
                 let maxSad = bestEpSad - penalty
                 if maxSad < 0 { continue }
                 
@@ -391,9 +391,9 @@ struct MotionEstimation {
                     intX: bx + intDx, intY: by + intDy,
                     remX: remX, remY: remY, dest: tPtr, roundOffset: roundOffset
                 )
-                let sad: Int = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+                let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
                 
-                let totalSad: Int = sad + penalty
+                let totalSad = sad + penalty
                 if totalSad < bestEpSad {
                     bestEpSad = totalSad
                     bestEpDx = epDx
@@ -437,7 +437,9 @@ struct MotionEstimation {
         plane.withUnsafeBufferPointer { buf in
             guard let base = buf.baseAddress else { return }
             
-            if bx >= 0 && by >= 0 && bx + 8 <= width && by + 8 <= height {
+            let isSafeX = (0 <= bx) && (bx + 8 <= width)
+            let isSafeY = (0 <= by) && (by + 8 <= height)
+            if isSafeX && isSafeY {
                 for y in 0..<8 {
                     let row = base.advanced(by: (by + y) * width + bx)
                     for x in 0..<8 {
@@ -446,16 +448,17 @@ struct MotionEstimation {
                         if maxVal < val { maxVal = val }
                     }
                 }
-            } else {
-                for y in 0..<8 {
-                    let sy = max(0, min(by + y, height - 1))
-                    let row = base.advanced(by: sy * width)
-                    for x in 0..<8 {
-                        let sx = max(0, min(bx + x, width - 1))
-                        let val = Int32(row[sx])
-                        if val < minVal { minVal = val }
-                        if maxVal < val { maxVal = val }
-                    }
+                return
+            }
+
+            for y in 0..<8 {
+                let sy = max(0, min(by + y, height - 1))
+                let row = base.advanced(by: sy * width)
+                for x in 0..<8 {
+                    let sx = max(0, min(bx + x, width - 1))
+                    let val = Int32(row[sx])
+                    if val < minVal { minVal = val }
+                    if maxVal < val { maxVal = val }
                 }
             }
         }
@@ -475,11 +478,11 @@ struct MotionEstimation {
         let refX2 = bx2 + (refDx * 2)
         let refY2 = by2 + (refDy * 2)
         
-        var chromaSAD = 1000
-        if bx2 >= 0 && by2 >= 0 && bx2 + 16 <= cbw && by2 + 16 <= cbh &&
-           refX2 >= 0 && refY2 >= 0 && refX2 + 16 <= cbw && refY2 + 16 <= cbh {
-            withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
-                
+        let isCurrSafe = (0 <= bx2) && (0 <= by2) && (bx2 + 16 <= cbw) && (by2 + 16 <= cbh)
+        let isRefSafe = (0 <= refX2) && (0 <= refY2) && (refX2 + 16 <= cbw) && (refY2 + 16 <= cbh)
+        
+        if isCurrSafe && isRefSafe {
+            let sad = withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
                 var sad: Int32 = 0
                 for cy in stride(from: 0, to: 16, by: 2) {
                     let currOffset = (by2 + cy) * cbw + bx2
@@ -494,10 +497,11 @@ struct MotionEstimation {
                     }
                     if 2000 < sad { break } // Early Termination
                 }
-                chromaSAD = Int(sad) * 4 // 間引いた分をスケールアップ
+                return Int(sad) * 4 // 間引いた分をスケールアップ
             }
+            return sad
         }
-        return chromaSAD
+        return 1000
     }
 
     @inline(__always)

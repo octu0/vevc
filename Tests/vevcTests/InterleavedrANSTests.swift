@@ -70,7 +70,7 @@ final class InterleavedrANSTests: XCTestCase {
                     encoder.encodeSymbol(lane: lane, cumFreq: cumFreq, freq: freq)
                     encoder.encodeSymbol(lane: lane, cumFreq: 0, freq: model.sigFreq)
                 } else {
-                    encoder.encodeSymbol(lane: lane, cumFreq: model.sigFreq, freq: RANS_SCALE - model.sigFreq)
+                    encoder.encodeSymbol(lane: lane, cumFreq: model.sigFreq, freq: rANSScale - model.sigFreq)
                 }
             }
         }
@@ -109,7 +109,7 @@ final class InterleavedrANSTests: XCTestCase {
             BypassReader(base: bp3Buf.baseAddress!, count: bp3Buf.count)
         ]
         let sigFreqVec = SIMD4<UInt32>(repeating: model.sigFreq)
-        let invSigFreqVec = SIMD4<UInt32>(repeating: RANS_SCALE - model.sigFreq)
+        let invSigFreqVec = SIMD4<UInt32>(repeating: rANSScale - model.sigFreq)
         let zeroVec = SIMD4<UInt32>(repeating: 0)
         
         var finalDecodingResult = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)

@@ -235,7 +235,7 @@ fileprivate func subMCBlockLuma32(
                 }
             }
         }
-        default: do {
+        default:
             // Full 2D FIR: both fractX != 0 and fractY != 0
             let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
             let vcX2 = SIMD8<Int32>(repeating: cX2), vcX3 = SIMD8<Int32>(repeating: cX3)
@@ -272,7 +272,6 @@ fileprivate func subMCBlockLuma32(
                     x &+= 1
                 }
             }
-        }
         }
     } else {
         if useFIR  {
@@ -342,7 +341,7 @@ fileprivate func subMCBlockChroma16(
     let wAwD = wA * wD, wBwD = wB * wD
     let nx = if 0 < fractX { 1 } else { 0 }
     let ny = if 0 < fractY { 1 } else { 0 }
-    let safe = (0 <= blockX + shiftX) && (0 <= blockY + shiftY) && (blockX + shiftX + bw + nx < width) && (blockY + shiftY + bh + ny < height)
+    let safe = (0 <= (blockX + shiftX)) && (0 <= (blockY + shiftY)) && (((blockX + shiftX) + bw) + nx < width) && (((blockY + shiftY) + bh) + ny < height)
     let useFIR = (fractX != 0 || fractY != 0)
     
     if safe {
@@ -533,7 +532,7 @@ fileprivate func addMCBlockLuma32(
                 }
             }
         }
-        default: do {
+        default:
             // Full 2D FIR: both fractX != 0 and fractY != 0
             let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
             let vcX2 = SIMD8<Int32>(repeating: cX2), vcX3 = SIMD8<Int32>(repeating: cX3)
@@ -570,7 +569,6 @@ fileprivate func addMCBlockLuma32(
                     x &+= 1
                 }
             }
-        }
         }
     } else {
         if useFIR  {
@@ -640,7 +638,7 @@ fileprivate func addMCBlockChroma16(
     let wAwD = wA * wD, wBwD = wB * wD
     let nx = if 0 < fractX { 1 } else { 0 }
     let ny = if 0 < fractY { 1 } else { 0 }
-    let safe = (0 <= blockX + shiftX) && (0 <= blockY + shiftY) && (blockX + shiftX + bw + nx < width) && (blockY + shiftY + bh + ny < height)
+    let safe = (0 <= (blockX + shiftX)) && (0 <= (blockY + shiftY)) && (((blockX + shiftX) + bw) + nx < width) && (((blockY + shiftY) + bh) + ny < height)
     let useFIR = (fractX != 0 || fractY != 0)
     
     if safe {

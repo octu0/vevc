@@ -1,13 +1,13 @@
 import Foundation
 
-// why: 14-bit scale balances precision vs compression efficiency
-let RANS_SCALE_BITS: UInt32 = 14
-let RANS_SCALE: UInt32 = 1 << RANS_SCALE_BITS
-let RANS_L: UInt32 = 1 << 15
-let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
+// 14-bit scale balances precision vs compression efficiency
+let rANSScaleBits: UInt32 = 14
+let rANSScale: UInt32 = 1 << rANSScaleBits
+let rANSL: UInt32 = 1 << 15
+let rANSXMax: UInt32 = (rANSL >> rANSScaleBits) << 16
 
 // MARK: - Static rANS Frequency Tables
-// why: static tables eliminate per-stream frequency table headers (~120B),
+// static tables eliminate per-stream frequency table headers (~120B),
 // reducing compression overhead for small blocks
 //
 // Token mapping:
@@ -17,15 +17,15 @@ let RANS_XMAX: UInt32 = (RANS_L >> RANS_SCALE_BITS) << 16
 //   run tokens: 32..63 = run lengths 32+ (exp-golomb)
 
 /// Build static rANS model from predetermined frequency data.
-/// Normalizes the provided raw frequency array to sum exactly to RANS_SCALE.
+/// Normalizes the provided raw frequency array to sum exactly to rANSScale.
 @inline(__always)
 internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
     var freqs = rawFreqs
     let sum: UInt32 = freqs.reduce(0, +)
     
-    // why: rounding error is absorbed by the largest-frequency element
+    // rounding error is absorbed by the largest-frequency element
     // to minimize impact on the rest of the distribution
-    if sum != RANS_SCALE {
+    if sum != rANSScale {
         var maxIdx = 0
         var maxVal: UInt32 = 0
         for i in 0..<64 {
@@ -34,18 +34,18 @@ internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
                 maxIdx = i
             }
         }
-        if sum < RANS_SCALE {
-            freqs[maxIdx] += (RANS_SCALE - sum)
+        if sum < rANSScale {
+            freqs[maxIdx] += (rANSScale - sum)
         }
-        if RANS_SCALE < sum {
-            let diff = sum - RANS_SCALE
+        if rANSScale < sum {
+            let diff = sum - rANSScale
             if diff < freqs[maxIdx] {
                 freqs[maxIdx] -= diff
             }
         }
     }
     
-    return rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: freqs)
+    return rANSModel(sigFreq: rANSScale / 2, tokenFreqs: freqs)
 }
 
 final class StaticRANSModels: @unchecked Sendable {
@@ -128,10 +128,10 @@ struct rANSModel {
     private(set) var tokenLUT: [UInt8]
     
     init() {
-        self.sigFreq = RANS_SCALE / 2
-        self.tokenFreqs = Array(repeating: RANS_SCALE / 64, count: 64)
-        self.tokenCumFreqs = (0..<64).map { UInt32($0) * (RANS_SCALE / 64) }
-        self.tokenLUT = [UInt8](repeating: 0, count: Int(RANS_SCALE))
+        self.sigFreq = rANSScale / 2
+        self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)
+        self.tokenCumFreqs = (0..<64).map { UInt32($0) * (rANSScale / 64) }
+        self.tokenLUT = [UInt8](repeating: 0, count: Int(rANSScale))
         buildLUT()
     }
     
@@ -144,7 +144,7 @@ struct rANSModel {
             self.tokenCumFreqs[i] = sum
             sum += tokenFreqs[i]
         }
-        self.tokenLUT = [UInt8](repeating: 0, count: Int(RANS_SCALE))
+        self.tokenLUT = [UInt8](repeating: 0, count: Int(rANSScale))
         buildLUT()
     }
     
@@ -155,7 +155,7 @@ struct rANSModel {
                 let start = Int(tokenCumFreqs[sym])
                 let end = start + Int(tokenFreqs[sym])
                 let s = UInt8(sym)
-                for j in start..<min(end, Int(RANS_SCALE)) {
+                for j in start..<min(end, Int(rANSScale)) {
                     ptr[j] = s
                 }
             }
@@ -166,15 +166,15 @@ struct rANSModel {
     mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
         let totalSig = sigCounts[0] + sigCounts[1]
         if totalSig == 0 {
-            self.sigFreq = RANS_SCALE / 2
+            self.sigFreq = rANSScale / 2
         } else {
-            let f = UInt32((Int(RANS_SCALE) * sigCounts[1]) / totalSig)
-            self.sigFreq = max(1, min(RANS_SCALE - 1, f))
+            let f = UInt32((Int(rANSScale) * sigCounts[1]) / totalSig)
+            self.sigFreq = max(1, min(rANSScale - 1, f))
         }
         
         let totalTokens = tokenCounts.reduce(0, +)
         if totalTokens == 0 {
-            self.tokenFreqs = Array(repeating: RANS_SCALE / 64, count: 64)
+            self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)
         } else {
             // Count unused tokens to maximize scale allocation for valid tokens
             var zeroCount: UInt32 = 0
@@ -182,7 +182,7 @@ struct rANSModel {
                 if tokenCounts[i] == 0 { zeroCount += 1 }
             }
             // Assign minimum freq=1 to unused tokens, allocating the rest to valid tokens
-            let availableScale = RANS_SCALE - zeroCount
+            let availableScale = rANSScale - zeroCount
             
             var sum: UInt32 = 0
             for i in 0..<64 {
@@ -205,11 +205,11 @@ struct rANSModel {
             }
             
             // why: absorb deficit into the largest frequency to preserve distribution shape
-            if sum < RANS_SCALE {
-                self.tokenFreqs[maxIdx] += (RANS_SCALE - sum)
+            if sum < rANSScale {
+                self.tokenFreqs[maxIdx] += (rANSScale - sum)
             }
-            if RANS_SCALE < sum {
-                var diff = sum - RANS_SCALE
+            if rANSScale < sum {
+                var diff = sum - rANSScale
                 while 0 < diff {
                     var currentMaxIdx = 0
                     var currentMaxVal = self.tokenFreqs[0]
@@ -269,7 +269,7 @@ internal func deserializeRANSModel(from chunk: [UInt8], offset: inout Int) -> rA
         offset += 4
         freqs[i] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
     }
-    // rANSModel's sum may not be exactly RANS_SCALE if we blindly use freqs without rebuilding
+    // rANSModel's sum may not be exactly rANSScale if we blindly use freqs without rebuilding
     // Actually, freqs *were* written off a valid rANSModel, but to ensure lookup table is built:
     return buildStaticModel(rawFreqs: freqs)
 }
@@ -282,20 +282,20 @@ struct rANSEncoder {
     private(set) var stream: [UInt16]
     
     init() {
-        self.state = RANS_L
+        self.state = rANSL
         self.stream = []
         self.stream.reserveCapacity(4096)
     }
     
     @inline(__always)
     mutating func encodeSymbol(cumFreq: UInt32, freq: UInt32) {
-        let xMax = RANS_XMAX * freq
+        let xMax = rANSXMax * freq
         while xMax <= state {
             stream.append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
         let q = state / freq
-        state = (q << RANS_SCALE_BITS) + (state - (q * freq)) + cumFreq
+        state = (q << rANSScaleBits) + (state - (q * freq)) + cumFreq
     }
     
     @inline(__always)
@@ -349,15 +349,15 @@ struct rANSDecoder {
     
     @inline(__always)
     func getCumulativeFreq() -> UInt32 {
-        return state & (RANS_SCALE - 1)
+        return state & (rANSScale - 1)
     }
     
     @inline(__always)
     mutating func advanceSymbol(cumFreq: UInt32, freq: UInt32) {
-        let mask = RANS_SCALE - 1
-        state = freq * (state >> RANS_SCALE_BITS) + (state & mask) - cumFreq
+        let mask = rANSScale - 1
+        state = freq * (state >> rANSScaleBits) + (state & mask) - cumFreq
         
-        while state < RANS_L {
+        while state < rANSL {
             if offset + 1 < count {
                 let b0 = UInt32(base[offset])
                 let b1 = UInt32(base[offset + 1])
@@ -378,14 +378,14 @@ struct Interleaved4rANSEncoder {
     private(set) var stream: [UInt16]
     
     init() {
-        self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
+        self.states = (rANSL, rANSL, rANSL, rANSL)
         self.stream = []
         self.stream.reserveCapacity(4096)
     }
     
     @inline(__always)
     mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
-        let xMax = RANS_XMAX * freq
+        let xMax = rANSXMax * freq
         
         switch lane {
         case 0:
@@ -394,28 +394,28 @@ struct Interleaved4rANSEncoder {
                 states.0 >>= 16
             }
             let q = states.0 / freq
-            states.0 = (q << RANS_SCALE_BITS) + (states.0 - (q * freq)) + cumFreq
+            states.0 = (q << rANSScaleBits) + (states.0 - (q * freq)) + cumFreq
         case 1:
             while xMax <= states.1 {
                 stream.append(UInt16(truncatingIfNeeded: states.1))
                 states.1 >>= 16
             }
             let q = states.1 / freq
-            states.1 = (q << RANS_SCALE_BITS) + (states.1 - (q * freq)) + cumFreq
+            states.1 = (q << rANSScaleBits) + (states.1 - (q * freq)) + cumFreq
         case 2:
             while xMax <= states.2 {
                 stream.append(UInt16(truncatingIfNeeded: states.2))
                 states.2 >>= 16
             }
             let q = states.2 / freq
-            states.2 = (q << RANS_SCALE_BITS) + (states.2 - (q * freq)) + cumFreq
+            states.2 = (q << rANSScaleBits) + (states.2 - (q * freq)) + cumFreq
         case 3:
             while xMax <= states.3 {
                 stream.append(UInt16(truncatingIfNeeded: states.3))
                 states.3 >>= 16
             }
             let q = states.3 / freq
-            states.3 = (q << RANS_SCALE_BITS) + (states.3 - (q * freq)) + cumFreq
+            states.3 = (q << rANSScaleBits) + (states.3 - (q * freq)) + cumFreq
         default:
             break
         }
@@ -462,7 +462,7 @@ struct Interleaved4rANSDecoder {
         self.base = base
         self.count = count
         self.offset = 0
-        self.states = (RANS_L, RANS_L, RANS_L, RANS_L)
+        self.states = (rANSL, rANSL, rANSL, rANSL)
         
         guard count >= 16 else { return }
         
@@ -484,7 +484,7 @@ struct Interleaved4rANSDecoder {
     
     @inline(__always)
     func getCumulativeFreq(lane: Int) -> UInt32 {
-        let mask = RANS_SCALE - 1
+        let mask = rANSScale - 1
         switch lane {
         case 0: return states.0 & mask
         case 1: return states.1 & mask
@@ -507,21 +507,21 @@ struct Interleaved4rANSDecoder {
     
     @inline(__always)
     mutating func advanceSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
-        let mask = RANS_SCALE - 1
+        let mask = rANSScale - 1
         
         switch lane {
         case 0:
-            states.0 = freq * (states.0 >> RANS_SCALE_BITS) + (states.0 & mask) - cumFreq
-            while states.0 < RANS_L { states.0 = (states.0 << 16) | readWord() }
+            states.0 = freq * (states.0 >> rANSScaleBits) + (states.0 & mask) - cumFreq
+            while states.0 < rANSL { states.0 = (states.0 << 16) | readWord() }
         case 1:
-            states.1 = freq * (states.1 >> RANS_SCALE_BITS) + (states.1 & mask) - cumFreq
-            while states.1 < RANS_L { states.1 = (states.1 << 16) | readWord() }
+            states.1 = freq * (states.1 >> rANSScaleBits) + (states.1 & mask) - cumFreq
+            while states.1 < rANSL { states.1 = (states.1 << 16) | readWord() }
         case 2:
-            states.2 = freq * (states.2 >> RANS_SCALE_BITS) + (states.2 & mask) - cumFreq
-            while states.2 < RANS_L { states.2 = (states.2 << 16) | readWord() }
+            states.2 = freq * (states.2 >> rANSScaleBits) + (states.2 & mask) - cumFreq
+            while states.2 < rANSL { states.2 = (states.2 << 16) | readWord() }
         case 3:
-            states.3 = freq * (states.3 >> RANS_SCALE_BITS) + (states.3 & mask) - cumFreq
-            while states.3 < RANS_L { states.3 = (states.3 << 16) | readWord() }
+            states.3 = freq * (states.3 >> rANSScaleBits) + (states.3 & mask) - cumFreq
+            while states.3 < rANSL { states.3 = (states.3 << 16) | readWord() }
         default:
             break
         }
@@ -535,7 +535,7 @@ struct InterleavedrANSEncoder {
     private(set) var streams: [[UInt16]]
     
     init() {
-        self.states = [RANS_L, RANS_L, RANS_L, RANS_L]
+        self.states = [rANSL, rANSL, rANSL, rANSL]
         self.streams = [
             [UInt16](), [UInt16](), [UInt16](), [UInt16]()
         ]
@@ -547,14 +547,14 @@ struct InterleavedrANSEncoder {
     @inline(__always)
     mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
         var state = states[lane]
-        let xMax = RANS_XMAX * freq
+        let xMax = rANSXMax * freq
         
         while xMax <= state {
             streams[lane].append(UInt16(truncatingIfNeeded: state))
             state >>= 16
         }
         
-        state = ((state / freq) << RANS_SCALE_BITS) + (state % freq) + cumFreq
+        state = ((state / freq) << rANSScaleBits) + (state % freq) + cumFreq
         states[lane] = state
     }
     
@@ -664,21 +664,21 @@ struct InterleavedrANSDecoder {
     
     @inline(__always)
     func getCumulativeFreqs() -> SIMD4<UInt32> {
-        let mask = SIMD4<UInt32>(repeating: RANS_SCALE - 1)
+        let mask = SIMD4<UInt32>(repeating: rANSScale - 1)
         return states & mask
     }
     
     @inline(__always)
     mutating func advanceSymbols(cumFreqs: SIMD4<UInt32>, freqs: SIMD4<UInt32>, activeMask: SIMD4<UInt32> = SIMD4<UInt32>(repeating: 0xFFFFFFFF)) {
-        let mask = SIMD4<UInt32>(repeating: RANS_SCALE - 1)
-        let nextStates = freqs &* (states &>> RANS_SCALE_BITS) &+ (states & mask) &- cumFreqs
+        let mask = SIMD4<UInt32>(repeating: rANSScale - 1)
+        let nextStates = freqs &* (states &>> rANSScaleBits) &+ (states & mask) &- cumFreqs
         
         let boolMask = activeMask .== SIMD4<UInt32>(repeating: 0xFFFFFFFF)
         states.replace(with: nextStates, where: boolMask)
         
-        // why: renormalize lanes where state fell below RANS_L;
+        // why: renormalize lanes where state fell below rANSL;
         // at most 2 passes needed to restore all lanes
-        let th = SIMD4<UInt32>(repeating: RANS_L)
+        let th = SIMD4<UInt32>(repeating: rANSL)
         
         // first renormalization pass (sufficient for most cases)
         var renormMask = (states .< th) .& boolMask

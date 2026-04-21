@@ -103,7 +103,7 @@ final class DPCMDistributionTests: XCTestCase {
         var runNormalized = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
             if 0 < globalRunCounts[i] {
-                let normalized = max(1, UInt32(Double(globalRunCounts[i]) / Double(runTotal) * Double(RANS_SCALE)))
+                let normalized = max(1, UInt32(Double(globalRunCounts[i]) / Double(runTotal) * Double(rANSScale)))
                 runNormalized[i] = normalized
             }
         }
@@ -121,7 +121,7 @@ final class DPCMDistributionTests: XCTestCase {
         var valNormalized = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
             if 0 < globalValCounts[i] {
-                let normalized = max(1, UInt32(Double(globalValCounts[i]) / Double(valTotal) * Double(RANS_SCALE)))
+                let normalized = max(1, UInt32(Double(globalValCounts[i]) / Double(valTotal) * Double(rANSScale)))
                 valNormalized[i] = normalized
             }
         }

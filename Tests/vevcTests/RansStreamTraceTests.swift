@@ -152,11 +152,11 @@ final class RansStreamTraceTests: XCTestCase {
         XCTAssertEqual(decStates.3, enc.states.3, "state.3")
         
         var decReadWordsPerLane = [Int](repeating: 0, count: 4)
-        let mask = RANS_SCALE - 1
+        let mask = rANSScale - 1
         
         // 復元されたtokenFreqsとcumFreqsでモデル再構築
-        let decRunModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: runModel.tokenFreqs)
-        let decValModel = rANSModel(sigFreq: RANS_SCALE / 2, tokenFreqs: valModel.tokenFreqs)
+        let decRunModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runModel.tokenFreqs)
+        let decValModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valModel.tokenFreqs)
         
         for lane in 0..<4 {
             let chunkSize = chunkStarts[lane + 1] - chunkStarts[lane]
@@ -176,17 +176,17 @@ final class RansStreamTraceTests: XCTestCase {
                 // advance run
                 switch lane {
                 case 0:
-                    decStates.0 = rtInfo.freq * (decStates.0 >> UInt32(RANS_SCALE_BITS)) + (decStates.0 & mask) - rtInfo.cumFreq
-                    while decStates.0 < RANS_L { decStates.0 = (decStates.0 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.0 = rtInfo.freq * (decStates.0 >> UInt32(rANSScaleBits)) + (decStates.0 & mask) - rtInfo.cumFreq
+                    while decStates.0 < rANSL { decStates.0 = (decStates.0 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 case 1:
-                    decStates.1 = rtInfo.freq * (decStates.1 >> UInt32(RANS_SCALE_BITS)) + (decStates.1 & mask) - rtInfo.cumFreq
-                    while decStates.1 < RANS_L { decStates.1 = (decStates.1 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.1 = rtInfo.freq * (decStates.1 >> UInt32(rANSScaleBits)) + (decStates.1 & mask) - rtInfo.cumFreq
+                    while decStates.1 < rANSL { decStates.1 = (decStates.1 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 case 2:
-                    decStates.2 = rtInfo.freq * (decStates.2 >> UInt32(RANS_SCALE_BITS)) + (decStates.2 & mask) - rtInfo.cumFreq
-                    while decStates.2 < RANS_L { decStates.2 = (decStates.2 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.2 = rtInfo.freq * (decStates.2 >> UInt32(rANSScaleBits)) + (decStates.2 & mask) - rtInfo.cumFreq
+                    while decStates.2 < rANSL { decStates.2 = (decStates.2 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 default:
-                    decStates.3 = rtInfo.freq * (decStates.3 >> UInt32(RANS_SCALE_BITS)) + (decStates.3 & mask) - rtInfo.cumFreq
-                    while decStates.3 < RANS_L { decStates.3 = (decStates.3 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.3 = rtInfo.freq * (decStates.3 >> UInt32(rANSScaleBits)) + (decStates.3 & mask) - rtInfo.cumFreq
+                    while decStates.3 < rANSL { decStates.3 = (decStates.3 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 }
                 
                 // decode val token
@@ -202,17 +202,17 @@ final class RansStreamTraceTests: XCTestCase {
                 // advance val
                 switch lane {
                 case 0:
-                    decStates.0 = vtInfo.freq * (decStates.0 >> UInt32(RANS_SCALE_BITS)) + (decStates.0 & mask) - vtInfo.cumFreq
-                    while decStates.0 < RANS_L { decStates.0 = (decStates.0 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.0 = vtInfo.freq * (decStates.0 >> UInt32(rANSScaleBits)) + (decStates.0 & mask) - vtInfo.cumFreq
+                    while decStates.0 < rANSL { decStates.0 = (decStates.0 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 case 1:
-                    decStates.1 = vtInfo.freq * (decStates.1 >> UInt32(RANS_SCALE_BITS)) + (decStates.1 & mask) - vtInfo.cumFreq
-                    while decStates.1 < RANS_L { decStates.1 = (decStates.1 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.1 = vtInfo.freq * (decStates.1 >> UInt32(rANSScaleBits)) + (decStates.1 & mask) - vtInfo.cumFreq
+                    while decStates.1 < rANSL { decStates.1 = (decStates.1 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 case 2:
-                    decStates.2 = vtInfo.freq * (decStates.2 >> UInt32(RANS_SCALE_BITS)) + (decStates.2 & mask) - vtInfo.cumFreq
-                    while decStates.2 < RANS_L { decStates.2 = (decStates.2 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.2 = vtInfo.freq * (decStates.2 >> UInt32(rANSScaleBits)) + (decStates.2 & mask) - vtInfo.cumFreq
+                    while decStates.2 < rANSL { decStates.2 = (decStates.2 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 default:
-                    decStates.3 = vtInfo.freq * (decStates.3 >> UInt32(RANS_SCALE_BITS)) + (decStates.3 & mask) - vtInfo.cumFreq
-                    while decStates.3 < RANS_L { decStates.3 = (decStates.3 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    decStates.3 = vtInfo.freq * (decStates.3 >> UInt32(rANSScaleBits)) + (decStates.3 & mask) - vtInfo.cumFreq
+                    while decStates.3 < rANSL { decStates.3 = (decStates.3 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
                 }
             }
             
