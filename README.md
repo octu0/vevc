@@ -5,102 +5,43 @@
 > Work In Progress
 
 
-**vevc** is a high-speed video compression format, extending the high-efficiency, multi-resolution image format [veif](https://github.com/octu0/veif) (velocity image format) with Temporal DWT, Spatial 2D-DWT, and SIMD-optimized entropy coding.
+**vevc** is a resolution-scalable, high-speed video codec designed to fundamentally solve the compute bottlenecks of modern adaptive bitrate (ABR) streaming.
+
+Inspired by the spatial scalability philosophy of **JPEG 2000**, `vevc` reimagines this concept for modern video. It extends the high-efficiency image format [veif](https://github.com/octu0/veif) with Temporal DWT, Spatial 2D-DWT, and massively parallel SIMD-optimized entropy coding to achieve hardware-like speeds purely in software.
 
 ![figure0](docs/fig0.jpg)
 
+## The Vision: Zero-Transcoding Delivery
+
+Modern video delivery platforms suffer from immense server-side CPU loads. To serve diverse clients seamlessly, servers must constantly decode and re-encode a single source stream into multiple resolutions (e.g., 1080p, 720p, 360p).
+
+**`vevc` shifts the paradigm to "Encode Once, Route Anywhere."**
+Because the video is natively encoded into hierarchical spatial frequency layers (DWT subbands), the delivery server **does not need to re-encode anything**. To serve a lower-resolution client, the server simply demuxes and drops the higher-frequency layer packets on the fly. This transforms a CPU-heavy transcoding pipeline into a lightweight network routing task—drastically slashing infrastructure costs.
+
 ## Features
 
-1. **Wavelet Domain Motion Compensation (WDMC) Architecture**
-   - **Subband Motion Estimation**: `vevc` employs a hierarchical Wavelet Domain Motion Compensation (WDMC) pattern. Instead of predicting full-resolution pixel blocks, motion estimation works directly on reduced-resolution spatial frequency layers (Layer 0 HL, LH, HH domains), avoiding DWT-shift dependency while enabling lighting-fast sub-millisecond coarse-to-fine searches.
-   - **Zero-Data Skip Blocks**: P-frame residuals are intelligently threshold-tested. Unchanged macroblocks have their transform coefficients completely nulled out at the encoder, yielding extreme entropy compression on structural backgrounds.
-   - **Spatial DWT**: LeGall 5/3 2D-DWT with multi-resolution Layers (Layer 0, 1, 2) inherited from `veif`. I-frames and P-frame residuals are cleanly decomposed into spatial frequency layers.
-   - **SIMD-Optimized Path**: Motion searches and DWT lifting are strictly unrolled without branches and optimized with `SIMD8<Int16>` vectorization for massively parallel pixel processing.
+### 1. Extractable Multi-Resolution Design
+At decode or delivery time, specific spatial resolutions can be instantly extracted from a single `.vevc` file. This enables highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple transcoded variants.
 
-2. **Multi-Resolution Design**
-   - At decode time, you can extract specific spatial resolutions from a single file depending on your needs. This enables flexible, highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple video files.
+**Extraction Patterns (assuming a 1080p source):**
 
-   **Extraction Patterns (assuming a 1080p source):**
+| Target Use Case           | Spatial (`-maxLayer`) | Result Output | Server-Side Action (CPU Cost: Near Zero) |
+| :------------------------ | :-------------------- | :------------ | :--------------------------------------- |
+| **Max Quality (Archive)** | `2` (Layer 0,1,2)     | 1080p         | None (Transfer bitstream as-is)          |
+| **Medium (Preview)**      | `1` (Layer 0,1)       | 540p          | **O(1) Drop Layer 2 packets**            |
+| **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p          | **O(1) Drop Layer 1 & 2 packets**        |
 
-   | Target Use Case           | Spatial (`-maxLayer`) | Result Output            | Server-Side Action             |
-   | :------------------------ | :-------------------- | :----------------------- | :----------------------------- |
-   | **Max Quality (Archive)** | `2` (Layer 0,1,2)     | 1080p                    | No extraction (transfer as is) |
-   | **Medium (Preview)**      | `1` (Layer 0,1)       | 540p                     | Skip Layer 2                   |
-   | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p                     | Skip Layer 1, 2               |
+### 2. Wavelet Domain Motion Compensation (Inspired by Dirac)
+Combining Discrete Wavelet Transform (DWT) with motion compensation has historically been a monumental challenge, famously pioneered by the BBC's open video codec **Dirac**. `vevc` revives and modernizes this ambition:
+- **Subband Motion Estimation**: Instead of predicting full-resolution pixel blocks, motion estimation operates directly on reduced-resolution spatial frequency domains (Layer 0 HL, LH, HH). This elegantly avoids traditional DWT shift-variance issues while enabling lightning-fast, sub-millisecond coarse-to-fine searches.
+- **Zero-Data Skip Blocks**: P-frame residuals undergo strict structural threshold tests. Unchanged macroblock coefficients are aggressively nulled out at the encoder, pushing entropy compression to its limits on static backgrounds.
+- **Spatial DWT**: Clean LeGall 5/3 2D-DWT decomposes I-frames and P-frame residuals, completely eliminating the blocking artifacts inherent in traditional DCT-based codecs (like AVC/HEVC).
 
-3. **Acceleration via Concurrency & SIMD**
-   - Temporal subband frames are encoded/decoded in parallel (4-way `TaskGroup`).
-   - Spatial DWT, plane matching, shifting, and difference calculations are fully vectorized.
-   - Temporal DWT lifting is SIMD8-optimized with scalar tail handling.
-
----
-
-## Data Layout
-
-`vevc` encodes video using Temporal GOP (Group of Pictures) of 4 frames, processed through a temporal-spatial wavelet pipeline.
-
-**Bitstream Structure:**
-
-```
-                           VEVC File Structure
-+-------------------+------------+-----------------+-----+-------------+
-| Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
-+-------------------+------------+-----------------+-----+-------------+
-
-    Metadata (Profile 2)
-+---------------------------------------------+
-| Metadata Size (2B) | Profile Version(1B)    |
-+------------+-------+-----+------------------+----------+----------------+
-| Width (2B) | Height (2B) | Color Gamut (1B) | FPS (2B) | Timescale (1B) |
-+------------+-------------+------------------+----------+----------------+
-| rANS Run 0 (256B)          | rANS Val 0 (256B)                          |
-+----------------------------+--------------------------------------------+
-| rANS Run 1 (256B)          | rANS Val 1 (256B)                          |
-+----------------------------+--------------------------------------------+
-| rANS DPCM Run (256B)       | rANS DPCM Val (256B)                       |
-+----------------------------+--------------------------------------------+
-  Color Gamut: 0x01=BT.709, 0x02=BT.2020
-  Timescale:   0x00=1000ms, 0x01=90000hz
-
-    Variable GOP (I-Frame followed by P-Frames up to keyint / scene change)
-+---------------+-----------------+
-| Data Size(4B) | GOP Size X (4B) |
-+---------------+-----------------+-------------+--------------------+
-| F0 len (4B)   | F0 (I-Frame)    | F1 len (4B) | F1 (P-Frame)       |
-+---------------+-----------------+-------------+--------------------+
-| F2 len (4B)   | F2 (P-Frame)    | F3 len (4B) | F3 (P-Frame)       | 
-+---------------+-----------------+-------------+--------------------+
-
-    Copy Frame (Duplicate Frame Skip):
-    When Fn len == 0, the frame is a "copy frame" — pixel-identical to its
-    predecessor. The encoder detects duplicate input frames (common in
-    telecine/pulldown content, e.g. 24fps→60fps where ~60% are duplicates)
-    and emits FrameLen=0 instead of encoding redundant data.
-    The decoder reuses the previous reconstructed frame verbatim.
-
-    Spatial Frame (Motion Vectors + 3 Layers structure)
-    +-------------------------------------------------------------+
-    | MVs Count (4B) | MV Data Len (4B)  | rANS Encoded MVs       |
-    +----------------+-------------------+------------------------+
-    | L0 len (4B)  | Layer 0 Payload (8x8 base)               |
-    +--------------+------------------------------------------+
-    | L1 len (4B)  | Layer 1 Payload (16x16 refinement)       |
-    +--------------+------------------------------------------+
-    | L2 len (4B)  | Layer 2 Payload (32x32 refinement)       |
-    +--------------+------------------------------------------+
-
-        Layer Payload
-        +-------------+-----------+
-        | qtY (2B)    | qtC (2B)  |
-        +-------------+-----------+
-        | Y len (4B)  | Y data    |
-        +-------------+-----------+
-        | Cb len (4B) | Cb data   |
-        +-------------+-----------+
-        | Cr len (4B) | Cr data   |
-        +-------------+-----------+
-```
-
+### 3. Built for Massive Concurrency & SIMD
+Where legacy wavelet codecs (like JPEG 2000's EBCOT) and modern DCT codecs (with CABAC) suffer from strictly serial bottlenecks, `vevc` is fundamentally architected for modern multi-core, SIMD-rich processors:
+- **Multi-Threaded Pipeline**: Temporal subband frames and spatial code-blocks are completely decoupled. This data-agnostic structure allows the encoder and decoder to aggressively distribute workloads across multiple CPU threads without complex synchronization locks.
+- **Vectorized Core Loops**: Spatial DWT lifting, plane matching, sub-pixel shifting, and residual calculations are strictly unrolled and fully vectorized using `SIMD8` and `SIMD16` for maximum ALU utilization.
+- **Parallel Entropy Coding**: Bypassing the serial nature of traditional arithmetic coding, `vevc` employs a 4-way **Interleaved rANS (Asymmetric Numeral Systems)** coder. This guarantees high compression ratios while enabling simultaneous, multi-lane decoding.
 ---
 
 ## Performance
@@ -164,7 +105,11 @@ SW: Software, HWA: Hardware Acceleration
 
 `vevc` uses **Interleaved 4-way rANS (Asymmetric Numeral Systems)** for entropy coding. rANS provides near-optimal compression and enables SIMD-parallel decoding, unlike CABAC which is inherently serial.
 
-### Architecture
+## Architecture & Internals
+
+For codec researchers and developers, `vevc` features a modern, SIMD-optimized pipeline and a predictable bitstream layout.
+
+### Entropy Coding: Interleaved rANS
 
 ```
 DWT Coefficients
@@ -182,14 +127,85 @@ DWT Coefficients
   (4 independent states, shared stream)
 ```
 
-### Key Components
+<details>
+<summary><b>View VEVC Bitstream Data Layout</b> (Click to expand)</summary>
 
-| File | Role |
-|------|------|
-| `rANS.swift` | Core rANS encoder/decoder, Interleaved 4-way variants, Bypass I/O, probability model with O(1) LUT |
-| `EntropyCodec.swift` | `VevcEncoder` / `VevcDecoder`: Zero-Run RLE, raw fallback, compressed freq tables |
-| `ValueTokenizer.swift` | Token/bypass decomposition for signed/unsigned values |
-| `rANSCompressor.swift` | Standalone rANS compression for generic byte data |
+`vevc` encodes video using Temporal GOP (Group of Pictures) of 4 frames, processed through a temporal-spatial wavelet pipeline.
+*Note: The encoder detects duplicate input frames (common in telecine content like 24fps in 60fps) and emits `FrameLen=0` instead of encoding redundant data, saving massive bitrate.*
+
+**Bitstream Structure:**
+
+```
+                           VEVC File Structure
++-------------------+------------+-----------------+-----+-------------+
+| Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
++-------------------+------------+-----------------+-----+-------------+
+
+    Metadata (Profile 2)
++---------------------------------------------+
+| Metadata Size (2B) | Profile Version(1B)    |
++------------+-------+-----+------------------+----------+----------------+
+| Width (2B) | Height (2B) | Color Gamut (1B) | FPS (2B) | Timescale (1B) |
++------------+-------------+------------------+----------+----------------+
+| rANS Run 0 (256B)          | rANS Val 0 (256B)                          |
++----------------------------+--------------------------------------------+
+| rANS Run 1 (256B)          | rANS Val 1 (256B)                          |
++----------------------------+--------------------------------------------+
+| rANS DPCM Run (256B)       | rANS DPCM Val (256B)                       |
++----------------------------+--------------------------------------------+
+  Color Gamut: 0x01=BT.709, 0x02=BT.2020
+  Timescale:   0x00=1000ms, 0x01=90000hz
+
+    Variable GOP (I-Frame followed by P-Frames up to keyint / scene change)
++---------------+-----------------+
+| Data Size(4B) | GOP Size X (4B) |
++---------------+-----------------+-------------+--------------------+
+| F0 len (4B)   | F0 (I-Frame)    | F1 len (4B) | F1 (P-Frame)       |
++---------------+-----------------+-------------+--------------------+
+| F2 len (4B)   | F2 (P-Frame)    | F3 len (4B) | F3 (P-Frame)       | 
++---------------+-----------------+-------------+--------------------+
+
+    Copy Frame (Duplicate Frame Skip):
+    When Fn len == 0, the frame is a "copy frame" — pixel-identical to its
+    predecessor. The encoder detects duplicate input frames (common in
+    telecine/pulldown content, e.g. 24fps→60fps where ~60% are duplicates)
+    and emits FrameLen=0 instead of encoding redundant data.
+    The decoder reuses the previous reconstructed frame verbatim.
+
+    Spatial Frame (Motion Vectors + 3 Layers structure)
+    +-------------------------------------------------------------+
+    | MVs Count (4B) | MV Data Len (4B)  | rANS Encoded MVs       |
+    +----------------+-------------------+------------------------+
+    | L0 len (4B)  | Layer 0 Payload (8x8 base)               |
+    +--------------+------------------------------------------+
+    | L1 len (4B)  | Layer 1 Payload (16x16 refinement)       |
+    +--------------+------------------------------------------+
+    | L2 len (4B)  | Layer 2 Payload (32x32 refinement)       |
+    +--------------+------------------------------------------+
+
+        Layer Payload
+        +-------------+-----------+
+        | qtY (2B)    | qtC (2B)  |
+        +-------------+-----------+
+        | Y len (4B)  | Y data    |
+        +-------------+-----------+
+        | Cb len (4B) | Cb data   |
+        +-------------+-----------+
+        | Cr len (4B) | Cr data   |
+        +-------------+-----------+
+```
+
+</details>
+
+### Aiming for Hardware/Silicon-Friendly by Design
+
+While `vevc` currently achieves extreme speeds in software via SIMD, its foundational architecture is deliberately designed with future hardware acceleration (ASIC/FPGA/Mobile SoCs) in mind. By maintaining predictable data flows and minimizing complex logic, `vevc` provides a clean, silicon-friendly foundation:
+
+- **Multiplier-Free Transforms**: The core LeGall 5/3 2D-DWT operates entirely using bit-shifts (`>>`) and additions/subtractions (`+`, `-`). By eliminating the need for large, power-hungry DSP multiplier blocks, the transform pipeline can achieve high clock frequencies with a minimal thermal and silicon footprint.
+- **Parallel-Ready Entropy Coding**: The Interleaved 4-way rANS structure is naturally suited for parallel hardware execution. Hardware implementations can instantiate four independent, lightweight ALUs side-by-side. The O(1) decoding LUTs fit cleanly into tiny on-chip SRAMs (~32KB), breaking the strict serial dependency chains found in traditional arithmetic coders.
+- **Localized SRAM Footprint**: `vevc` strictly confines its spatial DWT operations to independent 32x32 code-blocks. This ensures that the working set (approx. 2KB per block) remains entirely within fast, on-chip L1 scratchpad memory, bypassing the massive line-buffer requirements of traditional full-frame wavelet transforms.
+- **Predictable Data Paths**: With a fixed block hierarchy (32x32 → 16x16 → Base8) and streamlined prediction modes, the datapath is highly deterministic. This allows RTL designers to build deep, efficient, feed-forward pipelines without unpredictable branching or overly complex state machines.
+- **Reduced Memory Bandwidth**: Wavelet Domain Motion Compensation (WDMC) performs motion searches and compensation on reduced-resolution subbands. This inherently reduces the volume of reference pixel data that must be fetched from external DRAM, directly contributing to lower power consumption on mobile devices.
 
 ### Hybrid Static/Dynamic Frequency Tables
 
@@ -254,16 +270,6 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 # Online DEMO
 
 [vevc wasm demo](https://octu0.github.io/vevc-wasm-demo/)
-
-## Internals
-
-The core components of the implementation consist of the following files:
-
-- `MotionEstimation`: SIMD-optimized hierarchical motion search directly operating on 2D DWT subbands for rapid P-frame prediction and Skip Block zeroing.
-- `DWT`: Spatial LeGall 5/3 2D-DWT with SIMD-optimized lifting steps.
-- `EncodePlane` / `DecodePlane`: The encode/decode pipeline applying spatial 2D-DWT, Wavelet Motion Compensation (MC), residual differencing, and entropy encoding.
-- `Encoder` / `Decoder`: Video-level abstractions mapping dynamic GOP boundaries, scene change cut-offs, and bit rate approximations to planes.
-- `rANS` / `EntropyCodec`: Interleaved 4-way rANS entropy coding engine with adaptive token-based probability modeling, O(1) LUT decoding, and raw fallback for sparse data.
 
 ## License
 
