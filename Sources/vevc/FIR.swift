@@ -6,7 +6,7 @@ let FIRLUMACoeffs: [[Int]] = [
     [0, 2, 7, -1]
 ]
 
-// why: SIMD8<Int32> horizontal FIR helper for Luma 4-tap filter
+// SIMD8<Int32> horizontal FIR helper for Luma 4-tap filter
 // Loads 4 shifted SIMD8<Int16> vectors from row pointer, widens to Int32, multiplies by coefficients and sums
 @inline(__always)
 func horizontalFIRLuma8(

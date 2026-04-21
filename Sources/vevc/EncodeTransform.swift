@@ -477,7 +477,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         let blockThreshold: Int
         switch true {
         case isHighError:
-            // Adaptive AC Preservation (緩和版): if the prediction error is significant,
+            // Adaptive AC Preservation: if the prediction error is significant,
             // half the zero thresholds to preserve edge details and suppress ghosts,
             // while still discarding the ±1 mosquito noise.
             blockThreshold = max(1, zeroThreshold / 2)
