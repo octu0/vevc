@@ -221,6 +221,22 @@ struct MotionEstimation {
     }
 
     @inline(__always)
+    static func compute64PointSADBlocksWithStride(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>, pStride: Int) -> Int {
+        var sad: Int32 = 0
+        for ry in 0..<8 {
+            let cRow = cBase.advanced(by: ry * 8)
+            let pRow = pBase.advanced(by: ry * pStride)
+            
+            for rx in 0..<8 {
+                let diff = Int32(cRow[rx]) - Int32(pRow[rx])
+                let absDiff = if diff < 0 { -1 * diff } else { diff }
+                sad &+= absDiff
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
     static func compute64PointSADBlocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
         var sad: Int32 = 0
         for i in 0..<64 {
@@ -252,6 +268,11 @@ struct MotionEstimation {
         return max(min(a, b), min(max(a, b), c))
     }
 
+    private static let dsLdspX: [Int] = [0, 1, 2, 1, 0, -1, -2, -1]
+    private static let dsLdspY: [Int] = [-2, -1, 0, 1, 2, 1, 0, -1]
+    private static let dsSdspX: [Int] = [0, 1, 0, -1]
+    private static let dsSdspY: [Int] = [-1, 0, 1, 0]
+
     @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
@@ -277,25 +298,88 @@ struct MotionEstimation {
         let maxDx = min(range, width - bx - 8)
         
         if minDy <= maxDy && minDx <= maxDx {
-            for dy in minDy...maxDy {
-                for dx in minDx...maxDx {
-                    if dx == 0 && dy == 0 { continue }
+            var centerX = 0
+            var centerY = 0
+            
+            while true {
+                var minSAD = bestCoarseSad
+                var minDxPos = centerX
+                var minDyPos = centerY
+                var foundSmaller = false
+                
+                for i in 0..<8 {
+                    let dx = centerX + dsLdspX[i]
+                    let dy = centerY + dsLdspY[i]
+                    
+                    if dx < minDx { continue }
+                    if maxDx < dx { continue }
+                    if dy < minDy { continue }
+                    if maxDy < dy { continue }
                     
                     let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
                     let maxSad = bestCoarseSad - penalty
                     if maxSad < 0 { continue }
                     
-                    fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + dx, y: by + dy, dest: tPtr)
-                    let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+                    let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
+                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
                     
                     let totalSad = sad + penalty
-                    if totalSad < bestCoarseSad {
-                        bestCoarseSad = totalSad
-                        bestCoarseDx = dx
-                        bestCoarseDy = dy
+                    if totalSad < minSAD {
+                        minSAD = totalSad
+                        minDxPos = dx
+                        minDyPos = dy
+                        foundSmaller = true
+                    }
+                }
+                
+                if !foundSmaller {
+                    break
+                }
+                
+                bestCoarseSad = minSAD
+                bestCoarseDx = minDxPos
+                bestCoarseDy = minDyPos
+                centerX = minDxPos
+                centerY = minDyPos
+                
+                if bestCoarseSad < 64 {
+                    break
+                }
+            }
+            
+            var finalMinSAD = bestCoarseSad
+            var finalMinDx = centerX
+            var finalMinDy = centerY
+            
+            if finalMinSAD >= 64 {
+                for i in 0..<4 {
+                    let dx = centerX + dsSdspX[i]
+                    let dy = centerY + dsSdspY[i]
+                    
+                    if dx < minDx { continue }
+                    if maxDx < dx { continue }
+                    if dy < minDy { continue }
+                    if maxDy < dy { continue }
+                    
+                    let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
+                    let maxSad = bestCoarseSad - penalty
+                    if maxSad < 0 { continue }
+                    
+                    let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
+                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+                    
+                    let totalSad = sad + penalty
+                    if totalSad < finalMinSAD {
+                        finalMinSAD = totalSad
+                        finalMinDx = dx
+                        finalMinDy = dy
                     }
                 }
             }
+            
+            bestCoarseSad = finalMinSAD
+            bestCoarseDx = finalMinDx
+            bestCoarseDy = finalMinDy
         }
         
         var bestFineSad: Int = bestCoarseSad
