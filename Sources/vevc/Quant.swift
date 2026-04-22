@@ -81,7 +81,11 @@ struct QuantizationTable: Sendable {
         } else {
             self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
             self.qMid = Quantizer(step: Int(min(8192, max(1, (baseStep * qMidNum) / qMidDen))), roundToNearest: true)
-            self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: true)
+            if layerIndex == 2 {
+                self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: false, deadZoneBias: -1638)
+            } else {
+                self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: true)
+            }
         }
     }
 }

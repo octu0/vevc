@@ -7,8 +7,8 @@ import Foundation
 func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
     plane.withUnsafeMutableBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }
-        let tc = Int16(min(12, max(4, (qStep / 2) + 2)))
-        let beta = Int32(min(45, max(16, qStep + 4)))
+        let tc = Int16(min(15, max(5, (qStep / 2) + 3)))
+        let beta = Int32(min(50, max(18, qStep + 6)))
         
         let hFast = (height / 32) * 32
         let wFast = (width / 32) * 32
@@ -38,8 +38,8 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
 func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
     plane.withUnsafeMutableBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }
-        let tc = Int16(min(12, max(4, (qStep / 2) + 2)))
-        let beta = Int32(min(45, max(16, qStep + 4)))
+        let tc = Int16(min(15, max(5, (qStep / 2) + 3)))
+        let beta = Int32(min(50, max(18, qStep + 6)))
         
         let hFast = (height / 16) * 16
         let wFast = (width / 16) * 16
