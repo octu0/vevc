@@ -281,16 +281,34 @@ actor LayersEncodeActor {
 @inline(__always)
 private func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
     guard a.yPlane.count == b.yPlane.count, 0 < a.yPlane.count else { return 0 }
-    let count = a.yPlane.count
-    var sum: UInt64 = 0
+    let yCount = a.yPlane.count
+    var sumY: UInt64 = 0
     a.yPlane.withUnsafeBufferPointer { aPtr in
         b.yPlane.withUnsafeBufferPointer { bPtr in
-            for i in stride(from: 0, to: count, by: 4) {
-                sum += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
+            for i in stride(from: 0, to: yCount, by: 4) {
+                sumY += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
             }
         }
     }
-    return Int((sum * 4) / UInt64(count))
+    let ySAD = Int((sumY * 4) / UInt64(yCount))
+    
+    // Chroma SAD: detect scene changes where luminance is similar but color differs
+    // (e.g. dark scene to dark scene with different color palette)
+    let cbCount = a.cbPlane.count
+    guard a.cbPlane.count == b.cbPlane.count, 0 < cbCount else { return ySAD }
+    
+    var sumCb: UInt64 = 0
+    var sumCr: UInt64 = 0
+    withUnsafePointers(a.cbPlane, b.cbPlane, a.crPlane, b.crPlane) { aCb, bCb, aCr, bCr in
+        for i in stride(from: 0, to: cbCount, by: 4) {
+            sumCb += UInt64(abs(Int(aCb[i]) - Int(bCb[i])))
+            sumCr += UInt64(abs(Int(aCr[i]) - Int(bCr[i])))
+        }
+    }
+    let chromaSAD = Int(((sumCb + sumCr) * 4) / UInt64(cbCount * 2))
+    
+    // Weight: Y dominates but Chroma provides critical color-change detection
+    return ySAD + chromaSAD
 }
 
 /// Estimate frame-level SAD (Sum of Absolute Differences) between current

@@ -371,7 +371,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            blockThreshold = (max(1, zeroThreshold) * weight) / 1024
+            blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
         } else {
             blockThreshold = zeroThreshold
         }
@@ -477,10 +477,10 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
             // Adaptive AC Preservation: if the prediction error is significant,
             // half the zero thresholds to preserve edge details and suppress ghosts,
             // while still discarding the ±1 mosquito noise.
-            blockThreshold = max(1, zeroThreshold / 2)
+            blockThreshold = if zeroThreshold == 0 { 0 } else { max(1, zeroThreshold / 2) }
         case useSpatialWeight:
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            blockThreshold = (max(1, zeroThreshold) * weight) / 1024
+            blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
         default:
             blockThreshold = zeroThreshold
         }
