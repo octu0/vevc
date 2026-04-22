@@ -559,31 +559,30 @@ struct MotionEstimation {
     ) -> Int {
         let cbw = (curr.width + 1) / 2
         let cbh = (curr.height + 1) / 2
-        let bx2 = bx * 2
-        let by2 = by * 2
-        let refX2 = bx2 + (refDx * 2)
-        let refY2 = by2 + (refDy * 2)
+        let cx = bx / 2
+        let cy = by / 2
+        let crx = cx + (refDx / 2)
+        let cry = cy + (refDy / 2)
         
-        let isCurrSafe = (0 <= bx2) && (0 <= by2) && (bx2 + 16 <= cbw) && (by2 + 16 <= cbh)
-        let isRefSafe = (0 <= refX2) && (0 <= refY2) && (refX2 + 16 <= cbw) && (refY2 + 16 <= cbh)
+        let isCurrSafe = (0 <= cx) && (0 <= cy) && (cx + 4 <= cbw) && (cy + 4 <= cbh)
+        let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 4 <= cbw) && (cry + 4 <= cbh)
         
         if isCurrSafe && isRefSafe {
             let sad = withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
                 var sad: Int32 = 0
-                for cy in stride(from: 0, to: 16, by: 2) {
-                    let currOffset = (by2 + cy) * cbw + bx2
-                    let refOffset = (refY2 + cy) * cbw + refX2
-                    for cx in stride(from: 0, to: 16, by: 2) {
-                        let diffCb = Int32(cCb[currOffset + cx]) - Int32(rCb[refOffset + cx])
+                for y in 0..<4 {
+                    let currOffset = (cy + y) * cbw + cx
+                    let refOffset = (cry + y) * cbw + crx
+                    for x in 0..<4 {
+                        let diffCb = Int32(cCb[currOffset + x]) - Int32(rCb[refOffset + x])
                         let absDiffCb = if diffCb < 0 { -1 * diffCb } else { diffCb }
                         sad &+= absDiffCb
-                        let diffCr = Int32(cCr[currOffset + cx]) - Int32(rCr[refOffset + cx])
+                        let diffCr = Int32(cCr[currOffset + x]) - Int32(rCr[refOffset + x])
                         let absDiffCr = if diffCr < 0 { -1 * diffCr } else { diffCr }
                         sad &+= absDiffCr
                     }
-                    if 2000 < sad { break } // Early Termination
                 }
-                return Int(sad) * 4 // 間引いた分をスケールアップ
+                return Int(sad) * 4 // Luma SAD scale matching (since we check 16 pixels here instead of 64 in Luma, *4 keeps penalty scale relative to Luma)
             }
             return sad
         }

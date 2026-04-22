@@ -7,7 +7,7 @@ import vevc
 struct Config {
     var bitrate: Int = 500
     var framerate: Int = 60
-    var zeroThreshold: Int = 0
+    var zeroThreshold: Int = 3
     var keyint: Int = 60
     var sceneThreshold: Int = 32
     var maxLayer: Int = 2
