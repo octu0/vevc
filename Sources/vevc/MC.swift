@@ -326,10 +326,12 @@ fileprivate func subMCBlockChroma16(
     
     let mvDx = Int(mv.dx)
     let mvDy = Int(mv.dy)
-    let shiftX = (mvDx >> 3)
-    let shiftY = (mvDy >> 3)
-    let fractX = (mvDx & 7)
-    let fractY = (mvDy & 7)
+    let roundedMvDx = (mvDx + 2) & ~3
+    let roundedMvDy = (mvDy + 2) & ~3
+    let shiftX = (roundedMvDx >> 3)
+    let shiftY = (roundedMvDy >> 3)
+    let fractX = (roundedMvDx & 7)
+    let fractY = (roundedMvDy & 7)
     
     let bw = min(16, width - blockX)
     let bh = min(16, height - blockY)
@@ -623,10 +625,12 @@ fileprivate func addMCBlockChroma16(
     
     let mvDx = Int(mv.dx)
     let mvDy = Int(mv.dy)
-    let shiftX = (mvDx >> 3)
-    let shiftY = (mvDy >> 3)
-    let fractX = (mvDx & 7)
-    let fractY = (mvDy & 7)
+    let roundedMvDx = (mvDx + 2) & ~3
+    let roundedMvDy = (mvDy + 2) & ~3
+    let shiftX = (roundedMvDx >> 3)
+    let shiftY = (roundedMvDy >> 3)
+    let fractX = (roundedMvDx & 7)
+    let fractY = (roundedMvDy & 7)
     
     let bw = min(16, width - blockX)
     let bh = min(16, height - blockY)

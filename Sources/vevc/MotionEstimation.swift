@@ -35,10 +35,10 @@ struct MotionEstimation {
     }
 
     // Lagrange multiplier for rate-distortion optimization:
-    // penalizes motion vectors with large magnitude to favor zero-MV
+    // penalizes Motion Vector Difference (MVD) to favor pmv
     @inline(__always)
-    static func getPenalty(dx: Int, dy: Int, pmv: MotionVector, lambda: Int) -> Int {
-        return (abs(dx) + abs(dy)) * lambda
+    static func getMVDPenalty(dx: Int, dy: Int, pmvDx: Int, pmvDy: Int, lambda: Int) -> Int {
+        return (abs(dx - pmvDx) + abs(dy - pmvDy)) * lambda
     }
 
     @inline(__always)
@@ -288,7 +288,8 @@ struct MotionEstimation {
             return (0, 0, zeroSAD)
         }
         
-        var bestCoarseSAD = zeroSAD
+        let zeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
+        var bestCoarseSAD = zeroSAD + zeroPenalty
         var bestCoarseDx = 0
         var bestCoarseDy = 0
         
@@ -298,8 +299,23 @@ struct MotionEstimation {
         let maxDx = min(range, width - bx - 8)
         
         if minDy <= maxDy && minDx <= maxDx {
-            var centerX = 0
-            var centerY = 0
+            var centerX = Int(pmv.dx) / 8
+            var centerY = Int(pmv.dy) / 8
+            centerX = max(minDx, min(maxDx, centerX))
+            centerY = max(minDy, min(maxDy, centerY))
+            
+            let pPtr = pBase.advanced(by: (by + centerY) * width + (bx + centerX))
+            let pmvSAD = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+            let pmvPenalty = getMVDPenalty(dx: centerX, dy: centerY, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
+            
+            if pmvSAD + pmvPenalty < bestCoarseSAD {
+                bestCoarseSAD = pmvSAD + pmvPenalty
+                bestCoarseDx = centerX
+                bestCoarseDy = centerY
+            } else {
+                centerX = 0
+                centerY = 0
+            }
             
             while true {
                 var minSAD = bestCoarseSAD
@@ -316,7 +332,7 @@ struct MotionEstimation {
                     if dy < minDy { continue }
                     if maxDy < dy { continue }
                     
-                    let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
                     let maxSAD = bestCoarseSAD - penalty
                     if maxSAD < 0 { continue }
                     
@@ -361,7 +377,7 @@ struct MotionEstimation {
                     if dy < minDy { continue }
                     if maxDy < dy { continue }
                     
-                    let penalty = getPenalty(dx: dx, dy: dy, pmv: pmv, lambda: 8)
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
                     let maxSAD = bestCoarseSAD - penalty
                     if maxSAD < 0 { continue }
                     
@@ -396,7 +412,7 @@ struct MotionEstimation {
             
             if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
-            let penalty = getPenalty(dx: fineDx, dy: fineDy, pmv: pmv, lambda: 8)
+            let penalty = getMVDPenalty(dx: fineDx, dy: fineDy, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
             let maxSAD = bestFineSAD - penalty
             if maxSAD < 0 { continue }
             
@@ -428,7 +444,7 @@ struct MotionEstimation {
                 let fractY: Int = hpDy & 1
                 
                 let blurPenalty = (fractX + fractY) * 16
-                let penalty = getPenalty(dx: hpDx, dy: hpDy, pmv: pmv, lambda: 4) + blurPenalty
+                let penalty = getMVDPenalty(dx: hpDx, dy: hpDy, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 4) + blurPenalty
                 let maxSAD = bestHpSAD - penalty
                 if maxSAD < 0 { continue }
                 
@@ -468,7 +484,7 @@ struct MotionEstimation {
                 let bY = if 4 < remY { 8 - remY } else { remY }
                 let blurPenalty = (bX + bY) * 4
                 
-                let penalty = getPenalty(dx: epDx, dy: epDy, pmv: pmv, lambda: 2) + blurPenalty
+                let penalty = getMVDPenalty(dx: epDx, dy: epDy, pmvDx: Int(pmv.dx), pmvDy: Int(pmv.dy), lambda: 2) + blurPenalty
                 let maxSAD = bestEpSAD - penalty
                 if maxSAD < 0 { continue }
                 
@@ -559,10 +575,10 @@ struct MotionEstimation {
     ) -> Int {
         let cbw = (curr.width + 1) / 2
         let cbh = (curr.height + 1) / 2
-        let cx = bx / 2
-        let cy = by / 2
-        let crx = cx + (refDx / 2)
-        let cry = cy + (refDy / 2)
+        let cx = bx
+        let cy = by
+        let crx = cx + (refDx >> 1)
+        let cry = cy + (refDy >> 1)
         
         let isCurrSafe = (0 <= cx) && (0 <= cy) && (cx + 4 <= cbw) && (cy + 4 <= cbh)
         let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 4 <= cbw) && (cry + 4 <= cbh)
@@ -824,23 +840,18 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
                 let (mv, sad) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: prevSub1, 
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 2, pmv: pmv,
+                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv,
                     roundOffset: roundOffset
                 )
                 
-                let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
-                
-                // Dynamic Threshold: For flat blocks use 2048 (lenient), for high contrast (< 1000) use a lower value to promote Intra prediction.
-                // Ghosting occurs when high contrast edges are dragged in the wrong direction.
-                let dynamicThreshold = max(256, 2048 - (currContrast * 2))
+                let dynamicThreshold = max(1024, MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by) * 48)
                 
                 if dynamicThreshold < sad {
-                    ptrMVs[idx] = MotionVector.intraBlock
-                    ptrSADs[idx] = sad
+                    ptrMVs[idx] = MotionVector(dx: 0, dy: 0)
                 } else {
                     ptrMVs[idx] = mv
-                    ptrSADs[idx] = sad
                 }
+                ptrSADs[idx] = sad
             }
         }
     }
@@ -923,7 +934,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let (mvPrev, mutSADPrev) = MotionEstimation.searchPixels(
                 currPlane: currSub1, prevPlane: prevSub1,
                 cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: pmv, roundOffset: roundOffset
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
             )
             
             let prevChromaPenalty: Int
@@ -948,7 +959,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 let (mvNext, nextSAD) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: nextSub1,
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: pmv, roundOffset: roundOffset
+                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
                 )
                 
                 let mvEnergyNext = abs(Int(mvNext.dx)) + abs(Int(mvNext.dy))
@@ -998,23 +1009,15 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 bx: bx * 4, by: by * 4, pmv: bestMV
             )
             
-            // Full res 32x32 block (1024 pixels).
-            // Average allowed pixel error.
-            let currContrast = MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by)
-            // If there is strong contrast (edges), aggressively lower the SAD tolerance.
-            // 8192 corresponds to an average error of 8, causing white blurring and ghosting globally.
-            // Lower the SAD tolerance based on contrast (max 8192, min ~1024).
-            let dynamicThreshold = max(1024, 8192 - (currContrast * 8))
+            let dynamicThreshold = max(1024, MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by) * 48)
             
             if dynamicThreshold < rSAD {
-                ptrMVs[idx] = MotionVector.intraBlock
-                ptrSADs[idx] = rSAD
-                ptrRefDirs[idx] = false
+                ptrMVs[idx] = MotionVector(dx: 0, dy: 0)
             } else {
                 ptrMVs[idx] = rv
-                ptrSADs[idx] = rSAD
-                ptrRefDirs[idx] = dir
             }
+            ptrSADs[idx] = rSAD
+            ptrRefDirs[idx] = dir
         }
     }
     return (mvs, sads, refDirs)

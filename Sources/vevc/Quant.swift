@@ -75,9 +75,13 @@ struct QuantizationTable: Sendable {
         }
 
         if isChroma {
-            self.qLow = Quantizer(step: Int(min(2048, max(1, baseStep / 8))), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(min(4096, max(1, (baseStep * qMidNum) / qMidDen))), roundToNearest: true)
-            self.qHigh = Quantizer(step: Int(min(8192, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: true)
+            // Prevent color loss in high-motion scenes by capping chroma quantization steps.
+            let qMidBase = min(32, max(1, (baseStep * qMidNum) / qMidDen))
+            let qHighBase = min(64, max(1, (baseStep * qHighNum) / qHighDen))
+            
+            self.qLow = Quantizer(step: Int(min(64, max(1, baseStep / 8))), roundToNearest: true)
+            self.qMid = Quantizer(step: Int(qMidBase), roundToNearest: true)
+            self.qHigh = Quantizer(step: Int(qHighBase), roundToNearest: true)
         } else {
             self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
             self.qMid = Quantizer(step: Int(min(8192, max(1, (baseStep * qMidNum) / qMidDen))), roundToNearest: true)
