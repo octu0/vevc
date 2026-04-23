@@ -84,12 +84,21 @@ struct QuantizationTable: Sendable {
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
             self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: true)
         } else {
-            self.qLow = Quantizer(step: Int(min(4096, max(1, baseStep / qLowDivisor))), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(min(8192, max(1, (baseStep * qMidNum) / qMidDen))), roundToNearest: true)
+            // qLow: Strictly cap at 16 to completely preserve face gradients and base brightness
+            let lLow = min(16, max(1, baseStep / qLowDivisor))
+            self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
+            
+            // qMid: Cap at 128 to preserve facial contours and important structural edges
+            let lMid = min(128, max(1, (baseStep * qMidNum) / qMidDen))
+            self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
+            
+            // qHigh: Uncapped (16384) to allow background/fine details to heavily degrade during high motion, saving bitrate for the face
             if layerIndex == 2 {
-                self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: false, deadZoneBias: -1638)
+                let lHigh = min(16384, max(1, (baseStep * qHighNum) / qHighDen))
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: -1638)
             } else {
-                self.qHigh = Quantizer(step: Int(min(16384, max(1, (baseStep * qHighNum) / qHighDen))), roundToNearest: true)
+                let lHigh = min(16384, max(1, (baseStep * qHighNum) / qHighDen))
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             }
         }
     }
