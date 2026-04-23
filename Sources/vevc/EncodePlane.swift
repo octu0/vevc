@@ -608,7 +608,7 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // more aggressively (threshold=4) than Layer1 (threshold=2) without
     // perceptible quality loss.
     let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
-    let safeThresholdC = max(0, (zeroThreshold / 4) - (Int(qtC.step) / 2))
+    let safeThresholdC = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
     
     let colCountY = (dx + 31) / 32
     let rowCountY = (dy + 31) / 32
@@ -644,7 +644,7 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 @inline(__always)
 func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil) -> [UInt8] {
     let safeThresholdY = max(0, zeroThreshold - (Int(qtY.step) / 2))
-    let safeThresholdC = max(0, (zeroThreshold / 4) - (Int(qtC.step) / 2))
+    let safeThresholdC = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
     
     let colCountY = (dx + 15) / 16
     let rowCountY = (dy + 15) / 16
@@ -1156,7 +1156,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
 
-        let safeThreshold = max(0, (zeroThreshold / 4) - (Int(qtC.step)  / 2))
+        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 2)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
@@ -1177,7 +1177,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
-        let safeThreshold = max(0, (zeroThreshold / 4) - (Int(qtC.step) / 2))
+        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
