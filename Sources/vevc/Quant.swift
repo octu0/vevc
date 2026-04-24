@@ -88,18 +88,13 @@ struct QuantizationTable: Sendable {
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
             
-            // qMid: Cap at 128 to preserve facial contours and important structural edges
-            let lMid = min(128, max(1, (baseStep * qMidNum) / qMidDen))
+            // qMid: Cap at 32 to ensure contour motion residuals are always updated
+            let lMid = min(32, max(1, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
             
-            // qHigh: Uncapped (16384) to allow background/fine details to heavily degrade during high motion, saving bitrate for the face
-            if layerIndex == 2 {
-                let lHigh = min(16384, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: -1638)
-            } else {
-                let lHigh = min(16384, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
-            }
+            // qHigh: Cap at 64 to ensure fine edge motion residuals are always updated
+            let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
+            self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
         }
     }
 }
