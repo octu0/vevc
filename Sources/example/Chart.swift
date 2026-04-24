@@ -272,10 +272,10 @@ struct BitrateSsimChart: View {
                 "HEVC (SW)": Color.blue.opacity(0.3),
                 "H.264 (SW)": Color.green.opacity(0.3)
             ])
-            .chartXScale(domain: 100...1500)
+            .chartXScale(domain: 300...1500)
             .chartYScale(domain: .automatic(includesZero: false))
             .chartXAxis {
-                AxisMarks(values: Array(stride(from: 100, through: 1500, by: 100))) { value in
+                AxisMarks(values: Array(stride(from: 300, through: 1500, by: 100))) { value in
                     AxisGridLine()
                     AxisTick()
                     AxisValueLabel()
