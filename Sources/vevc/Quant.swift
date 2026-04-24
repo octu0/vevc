@@ -61,24 +61,23 @@ struct QuantizationTable: Sendable {
         switch layerIndex {
         case 2:
             qLowDivisor = 1
-            // 以前は Layer2 の高周波帯を 1.5倍 で粗く量子化していたため、サブピクセル予測でボヤケた輪郭の残差が削られてモヤモヤ（ゴースト）になっていた。
-            // これを 1.0x (Num=4, Den=4) に変更し、高周波成分を正確に残す。
-            qMidNum = 4; qMidDen = 4          // 1.0 (old: 1.2)
-            qHighNum = 4; qHighDen = 4        // 1.0 (old: 1.5)
+            // Scale up quantization steps faster for higher frequencies to save bitrate
+            qMidNum = 3; qMidDen = 2          // 1.5
+            qHighNum = 2; qHighDen = 1        // 2.0
         case 1:
-            qMidNum = 2; qMidDen = 4          // 0.5
-            qHighNum = 4; qHighDen = 4        // 1.0
+            qMidNum = 1; qMidDen = 1          // 1.0
+            qHighNum = 3; qHighDen = 2        // 1.5
         default: // layerIndex == 0
-            qMidNum = 1; qMidDen = 4          // 0.25
-            qHighNum = 2; qHighDen = 4        // 0.5
-            qLowDivisor = 12
+            qMidNum = 1; qMidDen = 2          // 0.5
+            qHighNum = 1; qHighDen = 1        // 1.0
+            qLowDivisor = 8
         }
 
         if isChroma {
-            // Prevent color loss in high-motion scenes by strictly capping chroma quantization steps.
-            let cLow = min(12, max(1, baseStep / 16))
-            let cMid = min(24, max(1, (baseStep * qMidNum) / (qMidDen * 2)))
-            let cHigh = min(32, max(1, (baseStep * qHighNum) / (qHighDen * 2)))
+            // Allow chroma to be quantized much more coarsely than luma to save massive bitrate.
+            let cLow = min(32, max(1, baseStep / 8))
+            let cMid = min(64, max(1, (baseStep * qMidNum) / qMidDen))
+            let cHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
             
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
@@ -88,12 +87,12 @@ struct QuantizationTable: Sendable {
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
             
-            // qMid: Cap at 32 to ensure contour motion residuals are always updated
-            let lMid = min(32, max(1, (baseStep * qMidNum) / qMidDen))
+            // qMid: Cap at 40 to tightly balance bitrate reduction and contour protection (SD <= 0.03)
+            let lMid = min(40, max(1, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
             
-            // qHigh: Cap at 64 to ensure fine edge motion residuals are always updated
-            let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
+            // qHigh: Cap at 80 to tightly balance bitrate reduction and fine edge protection (SD <= 0.03)
+            let lHigh = min(80, max(1, (baseStep * qHighNum) / qHighDen))
             self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
         }
     }

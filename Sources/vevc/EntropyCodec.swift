@@ -48,7 +48,7 @@ struct DynamicEntropyModel: EntropyModelProvider {
     /// Below this threshold, the frequency table header overhead (~400B)
     /// exceeds the compression improvement from data-specific tables.
     /// Determined by breakeven analysis in StaticVsDynamicModelTests.
-    private static let dynamicThreshold: Int = 500
+    private static let dynamicThreshold: Int = 100
     
     @inline(__always)
     static func generateModels(
@@ -708,3 +708,98 @@ func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
         return mvs
     }
 }
+
+// MARK: - Subband Entropy Codecs
+
+struct SubbandEncoders<MLL: EntropyModelProvider, M: EntropyModelProvider> {
+    var ll: EntropyEncoder<MLL>
+    var hl: EntropyEncoder<M>
+    var lh: EntropyEncoder<M>
+    var hh: EntropyEncoder<M>
+    
+    init() {
+        self.ll = EntropyEncoder<MLL>()
+        self.hl = EntropyEncoder<M>()
+        self.lh = EntropyEncoder<M>()
+        self.hh = EntropyEncoder<M>()
+    }
+    
+    @inline(__always)
+    mutating func flush() {
+        ll.flush()
+        hl.flush()
+        lh.flush()
+        hh.flush()
+    }
+    
+    @inline(__always)
+    mutating func getData() -> [UInt8] {
+        var out = [UInt8]()
+        
+        let dLL = ll.getData()
+        let dHL = hl.getData()
+        let dLH = lh.getData()
+        let dHH = hh.getData()
+        
+        out.append(UInt8((dLL.count >> 24) & 0xFF))
+        out.append(UInt8((dLL.count >> 16) & 0xFF))
+        out.append(UInt8((dLL.count >> 8) & 0xFF))
+        out.append(UInt8(dLL.count & 0xFF))
+        out.append(contentsOf: dLL)
+        
+        out.append(UInt8((dHL.count >> 24) & 0xFF))
+        out.append(UInt8((dHL.count >> 16) & 0xFF))
+        out.append(UInt8((dHL.count >> 8) & 0xFF))
+        out.append(UInt8(dHL.count & 0xFF))
+        out.append(contentsOf: dHL)
+        
+        out.append(UInt8((dLH.count >> 24) & 0xFF))
+        out.append(UInt8((dLH.count >> 16) & 0xFF))
+        out.append(UInt8((dLH.count >> 8) & 0xFF))
+        out.append(UInt8(dLH.count & 0xFF))
+        out.append(contentsOf: dLH)
+        
+        out.append(UInt8((dHH.count >> 24) & 0xFF))
+        out.append(UInt8((dHH.count >> 16) & 0xFF))
+        out.append(UInt8((dHH.count >> 8) & 0xFF))
+        out.append(UInt8(dHH.count & 0xFF))
+        out.append(contentsOf: dHH)
+        
+        return out
+    }
+}
+
+struct SubbandDecoders {
+    var ll: EntropyDecoder
+    var hl: EntropyDecoder
+    var lh: EntropyDecoder
+    var hh: EntropyDecoder
+    private(set) var consumedBytes: Int
+    
+    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int) throws {
+        var offset = startOffset
+        
+        let llSize = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+        guard offset + llSize <= count else { throw DecodeError.insufficientData }
+        self.ll = try EntropyDecoder(base: base, count: count, startOffset: offset)
+        offset += llSize
+        
+        let hlSize = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+        guard offset + hlSize <= count else { throw DecodeError.insufficientData }
+        self.hl = try EntropyDecoder(base: base, count: count, startOffset: offset)
+        offset += hlSize
+        
+        let lhSize = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+        guard offset + lhSize <= count else { throw DecodeError.insufficientData }
+        self.lh = try EntropyDecoder(base: base, count: count, startOffset: offset)
+        offset += lhSize
+        
+        let hhSize = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+        guard offset + hhSize <= count else { throw DecodeError.insufficientData }
+        self.hh = try EntropyDecoder(base: base, count: count, startOffset: offset)
+        offset += hhSize
+        
+        self.consumedBytes = offset
+    }
+}
+
