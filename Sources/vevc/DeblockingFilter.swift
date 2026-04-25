@@ -1,4 +1,4 @@
-import Foundation
+// MARK: - Deblocking Filter
 
 // Smooths block boundary discontinuities to suppress block noise.
 // tc/beta parameters use non-linear scaling based on quantization step.
@@ -18,7 +18,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         // Vertical Edges
         for x in stride(from: 32, to: width, by: 32) {
             for y in stride(from: 0, to: hFast, by: 32) {
-                deblockFilterVerticalEdge32Scalar(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
             }
             deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: hFast, count: hRem, tc: tc, beta: beta)
         }
@@ -49,7 +49,7 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
         // Vertical Edges
         for x in stride(from: 16, to: width, by: 16) {
             for y in stride(from: 0, to: hFast, by: 16) {
-                deblockFilterVerticalEdge16Scalar(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
             }
             deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: hFast, count: hRem, tc: tc, beta: beta)
         }
@@ -65,87 +65,37 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
 }
 
 @inline(__always)
-private func deblockFilterVerticalEdge32Scalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    let betah = beta >> 1
-    var offset = y * width + x
-    for _ in 0..<32 {
-        var p1 = base[offset - 2]
-        var p0 = base[offset - 1]
-        var q0 = base[offset + 0]
-        var q1 = base[offset + 1]
-        
-        let delta = Int32(q0) - Int32(p0)
-        let absDelta = if delta < 0 { -delta } else { delta }
-        if absDelta < beta {
-            let deltaP = Int32(p1) - Int32(p0)
-            let deltaQ = Int32(q1) - Int32(q0)
-            let absP = if deltaP < 0 { -deltaP } else { deltaP }
-            let absQ = if deltaQ < 0 { -deltaQ } else { deltaQ }
-            if absP < betah && absQ < betah {
-                var d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
-                let t = Int32(tc)
-                if t < d { d = t }
-                if d < (-1 * t) { d = (-1 * t) }
-                
-                let dHalf = d / 2
-                let d16 = Int16(d)
-                let dh16 = Int16(dHalf)
-                
-                p0 = p0 &+ d16
-                q0 = q0 &- d16
-                p1 = p1 &+ dh16
-                q1 = q1 &- dh16
-                
-                base[offset - 2] = p1
-                base[offset - 1] = p0
-                base[offset + 0] = q0
-                base[offset + 1] = q1
-            }
-        }
-        offset += width
+private func deblockFilterVerticalEdge16SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
+    var vP1 = SIMD16<Int16>()
+    var vP0 = SIMD16<Int16>()
+    var vQ0 = SIMD16<Int16>()
+    var vQ1 = SIMD16<Int16>()
+    
+    var off = (y * width) + x
+    for i in 0..<16 {
+        vP1[i] = base[off - 2]
+        vP0[i] = base[off - 1]
+        vQ0[i] = base[off + 0]
+        vQ1[i] = base[off + 1]
+        off += width
+    }
+    
+    let (nP1, nP0, nQ0, nQ1) = deblockComputeFilter(p1: vP1, p0: vP0, q0: vQ0, q1: vQ1, tc: tc, beta: beta)
+    
+    off = (y * width) + x
+    for i in 0..<16 {
+        base[off - 2] = nP1[i]
+        base[off - 1] = nP0[i]
+        base[off + 0] = nQ0[i]
+        base[off + 1] = nQ1[i]
+        off += width
     }
 }
 
 @inline(__always)
-private func deblockFilterVerticalEdge16Scalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    let betah = beta >> 1
-    var offset = y * width + x
-    for _ in 0..<16 {
-        var p1 = base[offset - 2]
-        var p0 = base[offset - 1]
-        var q0 = base[offset + 0]
-        var q1 = base[offset + 1]
-        
-        let delta = Int32(q0) - Int32(p0)
-        let absDelta = if delta < 0 { -delta } else { delta }
-        if absDelta < beta {
-            let deltaP = Int32(p1) - Int32(p0)
-            let deltaQ = Int32(q1) - Int32(q0)
-            let absP = if deltaP < 0 { -deltaP } else { deltaP }
-            let absQ = if deltaQ < 0 { -deltaQ } else { deltaQ }
-            if absP < betah && absQ < betah {
-                var d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
-                let t = Int32(tc)
-                if t < d { d = t }
-                if d < (-1 * t) { d = (-1 * t) }
-                
-                let dHalf = d / 2
-                let d16 = Int16(d)
-                let dh16 = Int16(dHalf)
-                
-                p0 = p0 &+ d16
-                q0 = q0 &- d16
-                p1 = p1 &+ dh16
-                q1 = q1 &- dh16
-                
-                base[offset - 2] = p1
-                base[offset - 1] = p0
-                base[offset + 0] = q0
-                base[offset + 1] = q1
-            }
-        }
-        offset += width
-    }
+private func deblockFilterVerticalEdge32SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
+    deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+    deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y + 16, tc: tc, beta: beta)
 }
 
 @inline(__always)
@@ -267,6 +217,7 @@ private func deblockFilterHorizontalEdge32SIMD(base: UnsafeMutablePointer<Int16>
     deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
     deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x + 16, y: y, tc: tc, beta: beta)
 }
+
 @inline(__always)
 private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>) {
     // why: Int16 domain eliminates 4 widen + 2 narrow operations vs Int32
@@ -314,4 +265,3 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     
     return (newP1, newP0, newQ0, newQ1)
 }
-

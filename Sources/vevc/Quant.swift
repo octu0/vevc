@@ -397,11 +397,19 @@ internal func dequantizeSIMDSignedMapping8(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<8 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<8 {
-            let uVal = UInt16(bitPattern: ptr[i])
-            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
-        }
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<UInt16>.self)
+        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+        let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
+        let v0 = Int16(clamping: Int32(v16[0]) &* step)
+        let v1 = Int16(clamping: Int32(v16[1]) &* step)
+        let v2 = Int16(clamping: Int32(v16[2]) &* step)
+        let v3 = Int16(clamping: Int32(v16[3]) &* step)
+        let v4 = Int16(clamping: Int32(v16[4]) &* step)
+        let v5 = Int16(clamping: Int32(v16[5]) &* step)
+        let v6 = Int16(clamping: Int32(v16[6]) &* step)
+        let v7 = Int16(clamping: Int32(v16[7]) &* step)
+        let res16 = SIMD8<Int16>(v0, v1, v2, v3, v4, v5, v6, v7)
+        UnsafeMutableRawPointer(ptr).storeBytes(of: res16, as: SIMD8<Int16>.self)
     }
 }
 
@@ -410,11 +418,15 @@ internal func dequantizeSIMDSignedMapping4(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<4 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<4 {
-            let uVal = UInt16(bitPattern: ptr[i])
-            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
-        }
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<UInt16>.self)
+        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+        let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
+        let v0 = Int16(clamping: Int32(v16[0]) &* step)
+        let v1 = Int16(clamping: Int32(v16[1]) &* step)
+        let v2 = Int16(clamping: Int32(v16[2]) &* step)
+        let v3 = Int16(clamping: Int32(v16[3]) &* step)
+        let res16 = SIMD4<Int16>(v0, v1, v2, v3)
+        UnsafeMutableRawPointer(ptr).storeBytes(of: res16, as: SIMD4<Int16>.self)
     }
 }
 
@@ -423,11 +435,30 @@ internal func dequantizeSIMDSignedMapping16(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<16 {
-            let uVal = UInt16(bitPattern: ptr[i])
-            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
-        }
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<UInt16>.self)
+        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+        let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
+        let v0 = Int16(clamping: Int32(v16[0]) &* step)
+        let v1 = Int16(clamping: Int32(v16[1]) &* step)
+        let v2 = Int16(clamping: Int32(v16[2]) &* step)
+        let v3 = Int16(clamping: Int32(v16[3]) &* step)
+        let v4 = Int16(clamping: Int32(v16[4]) &* step)
+        let v5 = Int16(clamping: Int32(v16[5]) &* step)
+        let v6 = Int16(clamping: Int32(v16[6]) &* step)
+        let v7 = Int16(clamping: Int32(v16[7]) &* step)
+        let v8 = Int16(clamping: Int32(v16[8]) &* step)
+        let v9 = Int16(clamping: Int32(v16[9]) &* step)
+        let v10 = Int16(clamping: Int32(v16[10]) &* step)
+        let v11 = Int16(clamping: Int32(v16[11]) &* step)
+        let v12 = Int16(clamping: Int32(v16[12]) &* step)
+        let v13 = Int16(clamping: Int32(v16[13]) &* step)
+        let v14 = Int16(clamping: Int32(v16[14]) &* step)
+        let v15 = Int16(clamping: Int32(v16[15]) &* step)
+        let res16 = SIMD16<Int16>(
+            v0, v1, v2, v3, v4, v5, v6, v7,
+            v8, v9, v10, v11, v12, v13, v14, v15
+        )
+        UnsafeMutableRawPointer(ptr).storeBytes(of: res16, as: SIMD16<Int16>.self)
     }
 }
 
@@ -436,11 +467,52 @@ internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<32 {
-            let uVal = UInt16(bitPattern: ptr[i])
-            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
-        }
+        let ptrRaw0 = UnsafeRawPointer(ptr)
+        let ptrRaw1 = UnsafeRawPointer(ptr.advanced(by: 16))
+        let v0 = ptrRaw0.loadUnaligned(as: SIMD16<UInt16>.self)
+        let v1 = ptrRaw1.loadUnaligned(as: SIMD16<UInt16>.self)
+        let decodedUInt0 = ((v0 &>> 1) ^ (.zero &- (v0 & 1)))
+        let decodedUInt1 = ((v1 &>> 1) ^ (.zero &- (v1 & 1)))
+        let v16_0 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt0)
+        let v16_1 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt1)
+        
+        let a0 = Int16(clamping: Int32(v16_0[0]) &* step)
+        let a1 = Int16(clamping: Int32(v16_0[1]) &* step)
+        let a2 = Int16(clamping: Int32(v16_0[2]) &* step)
+        let a3 = Int16(clamping: Int32(v16_0[3]) &* step)
+        let a4 = Int16(clamping: Int32(v16_0[4]) &* step)
+        let a5 = Int16(clamping: Int32(v16_0[5]) &* step)
+        let a6 = Int16(clamping: Int32(v16_0[6]) &* step)
+        let a7 = Int16(clamping: Int32(v16_0[7]) &* step)
+        let a8 = Int16(clamping: Int32(v16_0[8]) &* step)
+        let a9 = Int16(clamping: Int32(v16_0[9]) &* step)
+        let a10 = Int16(clamping: Int32(v16_0[10]) &* step)
+        let a11 = Int16(clamping: Int32(v16_0[11]) &* step)
+        let a12 = Int16(clamping: Int32(v16_0[12]) &* step)
+        let a13 = Int16(clamping: Int32(v16_0[13]) &* step)
+        let a14 = Int16(clamping: Int32(v16_0[14]) &* step)
+        let a15 = Int16(clamping: Int32(v16_0[15]) &* step)
+        let res16_0 = SIMD16<Int16>(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15)
+        
+        let b0 = Int16(clamping: Int32(v16_1[0]) &* step)
+        let b1 = Int16(clamping: Int32(v16_1[1]) &* step)
+        let b2 = Int16(clamping: Int32(v16_1[2]) &* step)
+        let b3 = Int16(clamping: Int32(v16_1[3]) &* step)
+        let b4 = Int16(clamping: Int32(v16_1[4]) &* step)
+        let b5 = Int16(clamping: Int32(v16_1[5]) &* step)
+        let b6 = Int16(clamping: Int32(v16_1[6]) &* step)
+        let b7 = Int16(clamping: Int32(v16_1[7]) &* step)
+        let b8 = Int16(clamping: Int32(v16_1[8]) &* step)
+        let b9 = Int16(clamping: Int32(v16_1[9]) &* step)
+        let b10 = Int16(clamping: Int32(v16_1[10]) &* step)
+        let b11 = Int16(clamping: Int32(v16_1[11]) &* step)
+        let b12 = Int16(clamping: Int32(v16_1[12]) &* step)
+        let b13 = Int16(clamping: Int32(v16_1[13]) &* step)
+        let b14 = Int16(clamping: Int32(v16_1[14]) &* step)
+        let b15 = Int16(clamping: Int32(v16_1[15]) &* step)
+        let res16_1 = SIMD16<Int16>(b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15)
+        UnsafeMutableRawPointer(ptr).storeBytes(of: res16_0, as: SIMD16<Int16>.self)
+        UnsafeMutableRawPointer(ptr.advanced(by: 16)).storeBytes(of: res16_1, as: SIMD16<Int16>.self)
     }
 }
 
