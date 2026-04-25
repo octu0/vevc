@@ -607,8 +607,8 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=3) than Layer1 (threshold=2) without
     // perceptible quality loss.
-    let safeThresholdY = min(3, max(0, zeroThreshold - (Int(qtY.step) / 2)))
-    let safeThresholdC = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
+    let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
+    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 4)))
     
     let colCountY = (dx + 31) / 32
     let rowCountY = (dy + 31) / 32
@@ -643,8 +643,8 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 
 @inline(__always)
 func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil) -> [UInt8] {
-    let safeThresholdY = min(2, max(0, zeroThreshold - (Int(qtY.step) / 2)))
-    let safeThresholdC = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
+    let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
+    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 4)))
     
     let colCountY = (dx + 15) / 16
     let rowCountY = (dy + 15) / 16
@@ -1134,7 +1134,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
-        let safeThreshold = min(1, max(0, zeroThreshold - (Int(qtY.step) / 2)))
+        let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {

@@ -68,10 +68,10 @@ struct RateController {
         let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
         
         // SSIM Min 0.71, Max 0.99
-        let maxStep = max(baseStep * 4, 512)
+        let maxStep = max(baseStep * 2, min(512, baseStep * 8))
         
         var newStepInt = baseStep
-        let minStep = max(8, baseStep / 2)
+        let minStep = max(2, baseStep / 2)
         if 0 < lastPFrameBits && 0 < lastPFrameQStep {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
             // predictedCurrentBits = lastPFrameBits * multiplier
