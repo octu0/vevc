@@ -106,59 +106,6 @@ struct QuantizationTable: Sendable {
 // MARK: - Quantization SIMD
 
 @inline(__always)
-private func performQuantizeSIMD8(_ vec: SIMD8<Int16>, mul: Int32, shift: Int32, bias: Int32) -> SIMD8<Int16> {
-    let mask = vec &>> 15
-    let absVec = (vec ^ mask) &- mask
-    
-    let low32 = SIMD4<Int32>(
-        Int32(absVec[0]), Int32(absVec[1]), Int32(absVec[2]), Int32(absVec[3])
-    )
-    let high32 = SIMD4<Int32>(
-        Int32(absVec[4]), Int32(absVec[5]), Int32(absVec[6]), Int32(absVec[7])
-    )
-    
-    let mulVec = SIMD4<Int32>(repeating: mul)
-    let shiftVec = SIMD4<Int32>(repeating: shift)
-    let biasVec = SIMD4<Int32>(repeating: bias)
-    
-    var resLow32 = (((low32 &* mulVec) &+ biasVec) &>> shiftVec)
-    var resHigh32 = (((high32 &* mulVec) &+ biasVec) &>> shiftVec)
-    
-    resLow32.replace(with: SIMD4<Int32>.zero, where: resLow32 .< 0)
-    resHigh32.replace(with: SIMD4<Int32>.zero, where: resHigh32 .< 0)
-    
-    let res = SIMD8<Int16>(
-        Int16(resLow32[0]), Int16(resLow32[1]), Int16(resLow32[2]), Int16(resLow32[3]),
-        Int16(resHigh32[0]), Int16(resHigh32[1]), Int16(resHigh32[2]), Int16(resHigh32[3])
-    )
-    
-    return (res ^ mask) &- mask
-}
-
-@inline(__always)
-private func performQuantizeSIMD4(_ vec: SIMD4<Int16>, mul: Int32, shift: Int32, bias: Int32) -> SIMD4<Int16> {
-    let mask = vec &>> 15
-    let absVec = (vec ^ mask) &- mask
-    
-    let vals = SIMD4<Int32>(
-        Int32(absVec[0]), Int32(absVec[1]), Int32(absVec[2]), Int32(absVec[3])
-    )
-    
-    let mulVec = SIMD4<Int32>(repeating: mul)
-    let shiftVec = SIMD4<Int32>(repeating: shift)
-    let biasVec = SIMD4<Int32>(repeating: bias)
-    
-    var res = (((vals &* mulVec) &+ biasVec) &>> shiftVec)
-    res.replace(with: SIMD4<Int32>.zero, where: res .< 0)
-    
-    let res16 = SIMD4<Int16>(
-        Int16(res[0]), Int16(res[1]), Int16(res[2]), Int16(res[3])
-    )
-    
-    return (res16 ^ mask) &- mask
-}
-
-@inline(__always)
 internal func quantizeSIMD(_ block: BlockView, q: Quantizer) {
     switch block.width {
     case 8:  quantizeSIMD8(block, q: q)
@@ -175,9 +122,14 @@ internal func quantizeSIMD8(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<8 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<8 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            ptr[i] = Int16(clamping: res)
+        }
     }
 }
 
@@ -188,9 +140,14 @@ internal func quantizeSIMD4(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<4 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-        let res = performQuantizeSIMD4(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD4<Int16>.self)
+        for i in 0..<4 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            ptr[i] = Int16(clamping: res)
+        }
     }
 }
 
@@ -201,13 +158,14 @@ internal func quantizeSIMD16(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
-
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<16 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            ptr[i] = Int16(clamping: res)
+        }
     }
 }
 
@@ -218,21 +176,14 @@ internal func quantizeSIMD32(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
-
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: res, as: SIMD8<Int16>.self)
-
-        vec = UnsafeRawPointer(ptr + 16).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr + 16).storeBytes(of: res, as: SIMD8<Int16>.self)
-
-        vec = UnsafeRawPointer(ptr + 24).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        UnsafeMutableRawPointer(ptr + 24).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<32 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            ptr[i] = Int16(clamping: res)
+        }
     }
 }
 
@@ -241,26 +192,15 @@ internal func quantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
-    
     for y in 0..<block.height {
         let ptr = block.rowPointer(y: y)
-        var i = 0
-        while (i + 8) <= block.width {
-            let vec = UnsafeRawPointer(ptr + i).loadUnaligned(as: SIMD8<Int16>.self)
-            let res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-            UnsafeMutableRawPointer(ptr + i).storeBytes(of: res, as: SIMD8<Int16>.self)
-            i += 8
-        }
-        while i < block.width {
+        for i in 0..<block.width {
             let val = Int32(ptr[i])
-            let absVal = abs(val)
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
             let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
-            var res: Int32 = qVal
-            if val <= -1 {
-                res = (-1 * qVal)
-            }
-            ptr[i] = Int16(res)
-            i += 1
+            let res = (qVal ^ signMask) &- signMask
+            ptr[i] = Int16(clamping: res)
         }
     }
 }
@@ -282,10 +222,15 @@ internal func quantizeSIMDSignedMapping8(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<8 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        let mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr).storeBytes(of: mask, as: SIMD8<Int16>.self)
+        for i in 0..<8 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            let v = Int16(clamping: res)
+            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+        }
     }
 }
 
@@ -296,10 +241,15 @@ internal func quantizeSIMDSignedMapping4(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<4 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-        let res = performQuantizeSIMD4(vec, mul: mul, shift: shift, bias: bias)
-        let mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr).storeBytes(of: mask, as: SIMD4<Int16>.self)
+        for i in 0..<4 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            let v = Int16(clamping: res)
+            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+        }
     }
 }
 
@@ -310,15 +260,15 @@ internal func quantizeSIMDSignedMapping16(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        var mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr).storeBytes(of: mask, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: mask, as: SIMD8<Int16>.self)
+        for i in 0..<16 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            let v = Int16(clamping: res)
+            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+        }
     }
 }
 
@@ -329,25 +279,15 @@ internal func quantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
     let bias = q.bias
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        var mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr).storeBytes(of: mask, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: mask, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 16).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr + 16).storeBytes(of: mask, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 24).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-        mask = ((res &<< 1) ^ (res &>> 15))
-        UnsafeMutableRawPointer(ptr + 24).storeBytes(of: mask, as: SIMD8<Int16>.self)
+        for i in 0..<32 {
+            let val = Int32(ptr[i])
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
+            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+            let res = (qVal ^ signMask) &- signMask
+            let v = Int16(clamping: res)
+            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+        }
     }
 }
 
@@ -356,76 +296,21 @@ internal func quantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantizer)
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
-    
     for y in 0..<block.height {
         let ptr = block.rowPointer(y: y)
-        var i = 0
-        while (i + 8) <= block.width {
-            let vec = UnsafeRawPointer(ptr + i).loadUnaligned(as: SIMD8<Int16>.self)
-            let res = performQuantizeSIMD8(vec, mul: mul, shift: shift, bias: bias)
-            let mask = ((res &<< 1) ^ (res &>> 15))
-            UnsafeMutableRawPointer(ptr + i).storeBytes(of: mask, as: SIMD8<Int16>.self)
-            i += 8
-        }
-        while i < block.width {
+        for i in 0..<block.width {
             let val = Int32(ptr[i])
-            let absVal = abs(val)
+            let signMask = val &>> 31
+            let absVal = (val ^ signMask) &- signMask
             let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
-            var res: Int32 = qVal
-            if val <= -1 {
-                res = (-1 * qVal)
-            }
-            let v = Int16(res)
+            let res = (qVal ^ signMask) &- signMask
+            let v = Int16(clamping: res)
             ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
-            i += 1
         }
     }
 }
 
 // MARK: - Dequantization SIMD
-
-@inline(__always)
-private func performDequantizeSIMD8(_ vec: SIMD8<Int16>, step: Int32) -> SIMD8<Int16> {
-    let vLow32 = SIMD4<Int32>(
-        Int32(vec[0]), Int32(vec[1]), Int32(vec[2]), Int32(vec[3])
-    )
-    let vHigh32 = SIMD4<Int32>(
-        Int32(vec[4]), Int32(vec[5]), Int32(vec[6]), Int32(vec[7])
-    )
-    
-    let stepVec = SIMD4<Int32>(repeating: step)
-    let rLow32 = vLow32 &* stepVec
-    let rHigh32 = vHigh32 &* stepVec
-    
-    return SIMD8<Int16>(
-        Int16(clamping: rLow32[0]), Int16(clamping: rLow32[1]), Int16(clamping: rLow32[2]), Int16(clamping: rLow32[3]),
-        Int16(clamping: rHigh32[0]), Int16(clamping: rHigh32[1]), Int16(clamping: rHigh32[2]), Int16(clamping: rHigh32[3])
-    )
-}
-
-@inline(__always)
-private func performDequantizeSIMD4(_ vec: SIMD4<Int16>, step: Int32) -> SIMD4<Int16> {
-    let vals = SIMD4<Int32>(
-        Int32(vec[0]), Int32(vec[1]), Int32(vec[2]), Int32(vec[3])
-    )
-    let stepVec = SIMD4<Int32>(repeating: step)
-    let r = vals &* stepVec
-    
-    return SIMD4<Int16>(
-        Int16(clamping: r[0]), Int16(clamping: r[1]), Int16(clamping: r[2]), Int16(clamping: r[3])
-    )
-}
-
-@inline(__always)
-private func performDequantizeSIMDSignedMapping8(_ vec: SIMD8<Int16>, step: Int32) -> SIMD8<Int16> {
-    let dVal = unsafeBitCast(vec, to: SIMD8<UInt16>.self)
-    let one = SIMD8<UInt16>(repeating: 1)
-    let signMask = ~(dVal & one) &+ one
-    let sign = unsafeBitCast(signMask, to: SIMD8<Int16>.self)
-    let orig = unsafeBitCast(dVal &>> 1, to: SIMD8<Int16>.self) ^ sign
-    
-    return performDequantizeSIMD8(orig, step: step)
-}
 
 @inline(__always)
 internal func dequantizeSIMD(_ block: BlockView, q: Quantizer) {
@@ -443,9 +328,9 @@ internal func dequantizeSIMD8(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<8 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<8 {
+            ptr[i] = Int16(clamping: Int32(ptr[i]) &* step)
+        }
     }
 }
 
@@ -454,9 +339,9 @@ internal func dequantizeSIMD4(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<4 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-        let res = performDequantizeSIMD4(vec, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD4<Int16>.self)
+        for i in 0..<4 {
+            ptr[i] = Int16(clamping: Int32(ptr[i]) &* step)
+        }
     }
 }
 
@@ -465,13 +350,9 @@ internal func dequantizeSIMD16(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<16 {
+            ptr[i] = Int16(clamping: Int32(ptr[i]) &* step)
+        }
     }
 }
 
@@ -480,43 +361,22 @@ internal func dequantizeSIMD32(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: res, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 16).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr + 16).storeBytes(of: res, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 24).loadUnaligned(as: SIMD8<Int16>.self)
-        res = performDequantizeSIMD8(vec, step: step)
-        UnsafeMutableRawPointer(ptr + 24).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<32 {
+            ptr[i] = Int16(clamping: Int32(ptr[i]) &* step)
+        }
     }
 }
 
 @inline(__always)
 internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
-    
     for y in 0..<block.height {
         let ptr = block.rowPointer(y: y)
-        var i = 0
-        while (i + 8) <= block.width {
-            let vec = UnsafeRawPointer(ptr + i).loadUnaligned(as: SIMD8<Int16>.self)
-            let res = performDequantizeSIMD8(vec, step: step)
-            UnsafeMutableRawPointer(ptr + i).storeBytes(of: res, as: SIMD8<Int16>.self)
-            i += 8
-        }
-        while i < block.width {
+        for i in 0..<block.width {
             let val = Int32(ptr[i])
             let res = val &* step
             let offset: Int32 = if 0 < val { step / 2 } else if val < 0 { -step / 2 } else { 0 }
             ptr[i] = Int16(clamping: res + offset)
-            i += 1
         }
     }
 }
@@ -537,12 +397,11 @@ internal func dequantizeSIMDSignedMapping8(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<8 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let mask = (0 &- (vec & 1))
-        let logicalShift = ((vec &>> 1) & 0x7FFF)
-        let decoded = (logicalShift ^ mask)
-        let res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<8 {
+            let uVal = UInt16(bitPattern: ptr[i])
+            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
+        }
     }
 }
 
@@ -551,12 +410,11 @@ internal func dequantizeSIMDSignedMapping4(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<4 {
         let ptr = block.rowPointer(y: y)
-        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-        let mask = (0 &- (vec & 1))
-        let logicalShift = ((vec &>> 1) & 0x7FFF)
-        let decoded = (logicalShift ^ mask)
-        let res = performDequantizeSIMD4(decoded, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD4<Int16>.self)
+        for i in 0..<4 {
+            let uVal = UInt16(bitPattern: ptr[i])
+            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
+        }
     }
 }
 
@@ -565,19 +423,11 @@ internal func dequantizeSIMDSignedMapping16(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var mask = (0 &- (vec & 1))
-        var logicalShift = ((vec &>> 1) & 0x7FFF)
-        var decoded = (logicalShift ^ mask)
-        var res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        mask = (0 &- (vec & 1))
-        logicalShift = ((vec &>> 1) & 0x7FFF)
-        decoded = (logicalShift ^ mask)
-        res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<16 {
+            let uVal = UInt16(bitPattern: ptr[i])
+            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
+        }
     }
 }
 
@@ -586,64 +436,26 @@ internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        var vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        var mask = (0 &- (vec & 1))
-        var logicalShift = ((vec &>> 1) & 0x7FFF)
-        var decoded = (logicalShift ^ mask)
-        var res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr).storeBytes(of: res, as: SIMD8<Int16>.self)
-
-        vec = UnsafeRawPointer(ptr + 8).loadUnaligned(as: SIMD8<Int16>.self)
-        mask = (0 &- (vec & 1))
-        logicalShift = ((vec &>> 1) & 0x7FFF)
-        decoded = (logicalShift ^ mask)
-        res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr + 8).storeBytes(of: res, as: SIMD8<Int16>.self)
-
-        vec = UnsafeRawPointer(ptr + 16).loadUnaligned(as: SIMD8<Int16>.self)
-        mask = (0 &- (vec & 1))
-        logicalShift = ((vec &>> 1) & 0x7FFF)
-        decoded = (logicalShift ^ mask)
-        res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr + 16).storeBytes(of: res, as: SIMD8<Int16>.self)
-        
-        vec = UnsafeRawPointer(ptr + 24).loadUnaligned(as: SIMD8<Int16>.self)
-        mask = (0 &- (vec & 1))
-        logicalShift = ((vec &>> 1) & 0x7FFF)
-        decoded = (logicalShift ^ mask)
-        res = performDequantizeSIMD8(decoded, step: step)
-        UnsafeMutableRawPointer(ptr + 24).storeBytes(of: res, as: SIMD8<Int16>.self)
+        for i in 0..<32 {
+            let uVal = UInt16(bitPattern: ptr[i])
+            let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+            ptr[i] = Int16(clamping: Int32(Int16(bitPattern: decodedUInt)) &* step)
+        }
     }
 }
 
 @inline(__always)
 internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
-    
     for y in 0..<block.height {
         let ptr = block.rowPointer(y: y)
-        var i = 0
-        while (i + 8) <= block.width {
-            let vec = UnsafeRawPointer(ptr + i).loadUnaligned(as: SIMD8<Int16>.self)
-            let mask = (0 &- (vec & 1))
-            let logicalShift = ((vec &>> 1) & 0x7FFF)
-            let decoded = (logicalShift ^ mask)
-            
-            let res = performDequantizeSIMD8(decoded, step: step)
-            UnsafeMutableRawPointer(ptr + i).storeBytes(of: res, as: SIMD8<Int16>.self)
-            i += 8
-        }
-        while i < block.width {
+        for i in 0..<block.width {
             let uVal = UInt16(bitPattern: ptr[i])
             let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
-            let decoded = Int16(bitPattern: decodedUInt)
-            let val = Int32(decoded)
+            let val = Int32(Int16(bitPattern: decodedUInt))
             let res = val &* step
             let offset: Int32 = if 0 < val { step / 2 } else if val < 0 { -step / 2 } else { 0 }
             ptr[i] = Int16(clamping: res + offset)
-            i += 1
         }
     }
 }
-
-

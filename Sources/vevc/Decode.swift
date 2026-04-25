@@ -711,50 +711,28 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     }
     
-    let chunkSize = 16
-    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeLayer32ProcessY(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateY(data: &blk, startX: w, startY: h, size: 32)
-            }
-        }
+    let resY32 = decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY)
+    for j in resY32.indices {
+        var blk = resY32[j].0
+        let w = resY32[j].1
+        let h = resY32[j].2
+        sub.updateY(data: &blk, startX: w, startY: h, size: 32)
     }
     
-    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeLayer32ProcessCb(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCb(data: &blk, startX: w, startY: h, size: 32)
-            }
-        }
+    let resCb32 = decodeLayer32ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC)
+    for j in resCb32.indices {
+        var blk = resCb32[j].0
+        let w = resCb32[j].1
+        let h = resCb32[j].2
+        sub.updateCb(data: &blk, startX: w, startY: h, size: 32)
     }
-    
-    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeLayer32ProcessCr(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCr(data: &blk, startX: w, startY: h, size: 32)
-            }
-        }
+        
+    let resCr32 = decodeLayer32ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC)
+    for j in resCr32.indices {
+        var blk = resCr32[j].0
+        let w = resCr32[j].1
+        let h = resCr32[j].2
+        sub.updateCr(data: &blk, startX: w, startY: h, size: 32)
     }
     
     if let tPrev = predictedPd, let mvs = mvs {
@@ -830,51 +808,28 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     }
     
-    let chunkSize = 16
-    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeLayer16ProcessY(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateY(data: &blk, startX: w, startY: h, size: 16)
-            }
-        }
+    let resY16 = decodeLayer16ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY)
+    for j in resY16.indices {
+        var blk = resY16[j].0
+        let w = resY16[j].1
+        let h = resY16[j].2
+        sub.updateY(data: &blk, startX: w, startY: h, size: 16)
     }
 
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeLayer16ProcessCb(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCb(data: &blk, startX: w, startY: h, size: 16)
-            }
-        }
+    let resCb16 = decodeLayer16ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC)
+    for j in resCb16.indices {
+        var blk = resCb16[j].0
+        let w = resCb16[j].1
+        let h = resCb16[j].2
+        sub.updateCb(data: &blk, startX: w, startY: h, size: 16)
     }
     
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeLayer16ProcessCr(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCr(data: &blk, startX: w, startY: h, size: 16)
-            }
-        }
+    let resCr16 = decodeLayer16ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC)
+    for j in resCr16.indices {
+        var blk = resCr16[j].0
+        let w = resCr16[j].1
+        let h = resCr16[j].2
+        sub.updateCr(data: &blk, startX: w, startY: h, size: 16)
     }
     
     return (sub, yBlocks, cbBlocks, crBlocks)
@@ -917,51 +872,28 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
     let colCountCr = (cbDx + 8 - 1) / 8
     let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, isIFrame: isIFrame)
     
-    let chunkSize = 16
-    let taskCountY = (rowCountY + chunkSize - 1) / chunkSize
-    let taskCountCb = (rowCountCb + chunkSize - 1) / chunkSize
-    let taskCountCr = (rowCountCr + chunkSize - 1) / chunkSize
-
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountY {
-            group.addTask { return decodeBase8ProcessY(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateY(data: &blk, startX: w, startY: h, size: 8)
-            }
-        }
+    let resY8 = decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY)
+    for j in resY8.indices {
+        var blk = resY8[j].0
+        let w = resY8[j].1
+        let h = resY8[j].2
+        sub.updateY(data: &blk, startX: w, startY: h, size: 8)
     }
 
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCb {
-            group.addTask { return decodeBase8ProcessCb(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCb(data: &blk, startX: w, startY: h, size: 8)
-            }
-        }
+    let resCb8 = decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC)
+    for j in resCb8.indices {
+        var blk = resCb8[j].0
+        let w = resCb8[j].1
+        let h = resCb8[j].2
+        sub.updateCb(data: &blk, startX: w, startY: h, size: 8)
     }
     
-    try await withThrowingTaskGroup(of: [(BlockView, Int, Int)].self) { group in
-        for taskIdx in 0..<taskCountCr {
-            group.addTask { return decodeBase8ProcessCr(pool: pool, taskIdx: taskIdx, chunkSize: chunkSize, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC) }
-        }
-        for try await res in group {
-            for j in res.indices {
-                var blk = res[j].0
-                let w = res[j].1
-                let h = res[j].2
-                sub.updateCr(data: &blk, startX: w, startY: h, size: 8)
-            }
-        }
+    let resCr8 = decodeBase8ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC)
+    for j in resCr8.indices {
+        var blk = resCr8[j].0
+        let w = resCr8[j].1
+        let h = resCr8[j].2
+        sub.updateCr(data: &blk, startX: w, startY: h, size: 8)
     }
         
     return (sub, yBlocks, cbBlocks, crBlocks)
