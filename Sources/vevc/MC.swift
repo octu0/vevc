@@ -351,13 +351,7 @@ fileprivate func subMCBlockLuma32(
     let bh = min(32, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
-    let fX = FIRLUMACoeffs[fractX]
-    let fY = FIRLUMACoeffs[fractY]
     let safe = (0 <= blockX + shiftX - 1) && (0 <= blockY + shiftY - 1) && (blockX + shiftX + bw + 2 < width) && (blockY + shiftY + bh + 2 < height)
-    let cX0 = Int32(fX[0]), cX1 = Int32(fX[1]), cX2 = Int32(fX[2]), cX3 = Int32(fX[3])
-    let cY0 = Int32(fY[0]), cY1 = Int32(fY[1]), cY2 = Int32(fY[2]), cY3 = Int32(fY[3])
-    let useFIR = (fractX != 0 || fractY != 0)
-    
     if safe {
         subMCBlockLuma32Inner(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: blockX, blockY: blockY, shiftX: shiftX, shiftY: shiftY, fractX: fractX, fractY: fractY, bw: bw, bh: bh, roundOffset: roundOffset)
     } else {
@@ -488,15 +482,7 @@ fileprivate func subMCBlockChroma16(
     let bh = min(16, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
-    let wB = Int32(fractX), wA = Int32(8 - fractX)
-    let wD = Int32(fractY), wC = Int32(8 - fractY)
-    let wAwC = wA * wC, wBwC = wB * wC
-    let wAwD = wA * wD, wBwD = wB * wD
-    let nx = if 0 < fractX { 1 } else { 0 }
-    let ny = if 0 < fractY { 1 } else { 0 }
-    let safe = (0 <= (blockX + shiftX)) && (0 <= (blockY + shiftY)) && (((blockX + shiftX) + bw) + nx < width) && (((blockY + shiftY) + bh) + ny < height)
-    let useFIR = (fractX != 0 || fractY != 0)
-    
+    let safe = (0 <= (blockX + shiftX)) && (0 <= (blockY + shiftY)) && (((blockX + shiftX) + bw) + 1 < width) && (((blockY + shiftY) + bh) + 1 < height)    
     if safe {
         subMCBlockChroma16Inner(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: blockX, blockY: blockY, shiftX: shiftX, shiftY: shiftY, fractX: fractX, fractY: fractY, bw: bw, bh: bh, roundOffset: roundOffset)
     } else {
@@ -732,48 +718,48 @@ fileprivate func addMCBlockChroma16Inner(
     let ny = if 0 < fractY { 1 } else { 0 }
     let useFIR = (fractX != 0 || fractY != 0)
     if useFIR  {
-            let vwAwC = SIMD8<Int32>(repeating: wAwC), vwBwC = SIMD8<Int32>(repeating: wBwC)
-            let vwAwD = SIMD8<Int32>(repeating: wAwD), vwBwD = SIMD8<Int32>(repeating: wBwD)
-            let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
-                let r1 = srcBase.advanced(by: (sy + ny) * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 7 {
-                    let s00 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s01 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s10 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let s11 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
-                    let v = vwAwC &* s00 &+ vwBwC &* s01 &+ vwAwD &* s10 &+ vwBwD &* s11
-                    let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ res16, as: SIMD8<Int16>.self)
-                    x &+= 8
-                }
-                while x < bw {
-                    let v = wAwC &* Int32(r0[x]) &+ wBwC &* Int32(r0[x + nx]) &+ wAwD &* Int32(r1[x]) &+ wBwD &* Int32(r1[x + nx])
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                    x &+= 1
-                }
+        let vwAwC = SIMD8<Int32>(repeating: wAwC), vwBwC = SIMD8<Int32>(repeating: wBwC)
+        let vwAwD = SIMD8<Int32>(repeating: wAwD), vwBwD = SIMD8<Int32>(repeating: wBwD)
+        let vRound = SIMD8<Int32>(repeating: Int32(31) &+ Int32(roundOffset))
+        for y in 0..<bh {
+            let sy = blockY + shiftY + y
+            let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+            let r0 = srcBase.advanced(by: sy * width + blockX + shiftX)
+            let r1 = srcBase.advanced(by: (sy + ny) * width + blockX + shiftX)
+            var x = 0
+            while x < bw - 7 {
+                let s00 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
+                let s01 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
+                let s10 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self))
+                let s11 = SIMD8<Int32>(truncatingIfNeeded: UnsafeRawPointer(r1.advanced(by: x + nx)).loadUnaligned(as: SIMD8<Int16>.self))
+                let v = vwAwC &* s00 &+ vwBwC &* s01 &+ vwAwD &* s10 &+ vwBwD &* s11
+                let res16 = SIMD8<Int16>(truncatingIfNeeded: (v &+ vRound) &>> 6)
+                let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD8<Int16>.self)
+                UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ res16, as: SIMD8<Int16>.self)
+                x &+= 8
             }
-        } else {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let r = srcBase.advanced(by: sy * width + blockX + shiftX)
-                var x = 0
-                while x < bw - 15 {
-                    let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    let s = UnsafeRawPointer(r.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
-                    UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ s, as: SIMD16<Int16>.self)
-                    x &+= 16
-                }
-                while x < bw { dstPtr[x] = dstPtr[x] &+ r[x]; x &+= 1 }
+            while x < bw {
+                let v = wAwC &* Int32(r0[x]) &+ wBwC &* Int32(r0[x + nx]) &+ wAwD &* Int32(r1[x]) &+ wBwD &* Int32(r1[x + nx])
+                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                dstPtr[x] = dstPtr[x] &+ res
+                x &+= 1
             }
         }
+    } else {
+        for y in 0..<bh {
+            let sy = blockY + shiftY + y
+            let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+            let r = srcBase.advanced(by: sy * width + blockX + shiftX)
+            var x = 0
+            while x < bw - 15 {
+                let d = UnsafeRawPointer(dstPtr.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
+                let s = UnsafeRawPointer(r.advanced(by: x)).loadUnaligned(as: SIMD16<Int16>.self)
+                UnsafeMutableRawPointer(dstPtr.advanced(by: x)).storeBytes(of: d &+ s, as: SIMD16<Int16>.self)
+                x &+= 16
+            }
+            while x < bw { dstPtr[x] = dstPtr[x] &+ r[x]; x &+= 1 }
+        }
+    }
 }
 
 @inline(__always)
@@ -790,34 +776,34 @@ fileprivate func addMCBlockChroma16Edge(
     let ny = if 0 < fractY { 1 } else { 0 }
     let useFIR = (fractX != 0 || fractY != 0)
     if useFIR  {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let sy0 = max(0, min(sy, height - 1))
-                let sy1 = max(0, min(sy + ny, height - 1))
-                let r0 = srcBase.advanced(by: sy0 * width)
-                let r1 = srcBase.advanced(by: sy1 * width)
-                for x in 0..<bw {
-                    let cx = blockX + shiftX + x
-                    let sx0 = max(0, min(cx, width - 1))
-                    let sx1 = max(0, min(cx + nx, width - 1))
-                    let v = wAwC &* Int32(r0[sx0]) &+ wBwC &* Int32(r0[sx1]) &+ wAwD &* Int32(r1[sx0]) &+ wBwD &* Int32(r1[sx1])
-                    let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
-                    dstPtr[x] = dstPtr[x] &+ res
-                }
-            }
-        } else {
-            for y in 0..<bh {
-                let sy = blockY + shiftY + y
-                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                let safeSy = max(0, min(sy, height - 1))
-                let r = srcBase.advanced(by: safeSy * width)
-                for x in 0..<bw {
-                    let sx = max(0, min(blockX + shiftX + x, width - 1))
-                    dstPtr[x] = dstPtr[x] &+ r[sx]
-                }
+        for y in 0..<bh {
+            let sy = blockY + shiftY + y
+            let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+            let sy0 = max(0, min(sy, height - 1))
+            let sy1 = max(0, min(sy + ny, height - 1))
+            let r0 = srcBase.advanced(by: sy0 * width)
+            let r1 = srcBase.advanced(by: sy1 * width)
+            for x in 0..<bw {
+                let cx = blockX + shiftX + x
+                let sx0 = max(0, min(cx, width - 1))
+                let sx1 = max(0, min(cx + nx, width - 1))
+                let v = wAwC &* Int32(r0[sx0]) &+ wBwC &* Int32(r0[sx1]) &+ wAwD &* Int32(r1[sx0]) &+ wBwD &* Int32(r1[sx1])
+                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                dstPtr[x] = dstPtr[x] &+ res
             }
         }
+    } else {
+        for y in 0..<bh {
+            let sy = blockY + shiftY + y
+            let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+            let safeSy = max(0, min(sy, height - 1))
+            let r = srcBase.advanced(by: safeSy * width)
+            for x in 0..<bw {
+                let sx = max(0, min(blockX + shiftX + x, width - 1))
+                dstPtr[x] = dstPtr[x] &+ r[sx]
+            }
+        }
+    }
 }
 
 @inline(__always)
@@ -841,14 +827,9 @@ fileprivate func addMCBlockChroma16(
     let bh = min(16, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
-    let wB = Int32(fractX), wA = Int32(8 - fractX)
-    let wD = Int32(fractY), wC = Int32(8 - fractY)
-    let wAwC = wA * wC, wBwC = wB * wC
-    let wAwD = wA * wD, wBwD = wB * wD
     let nx = if 0 < fractX { 1 } else { 0 }
     let ny = if 0 < fractY { 1 } else { 0 }
     let safe = (0 <= (blockX + shiftX)) && (0 <= (blockY + shiftY)) && (((blockX + shiftX) + bw) + nx < width) && (((blockY + shiftY) + bh) + ny < height)
-    let useFIR = (fractX != 0 || fractY != 0)
     
     if safe {
         addMCBlockChroma16Inner(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: blockX, blockY: blockY, shiftX: shiftX, shiftY: shiftY, fractX: fractX, fractY: fractY, bw: bw, bh: bh, roundOffset: roundOffset)

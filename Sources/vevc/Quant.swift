@@ -192,15 +192,55 @@ internal func quantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
-    for y in 0..<block.height {
+    let width = block.width
+    let height = block.height
+    for y in 0..<height {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<block.width {
-            let val = Int32(ptr[i])
+        var x = 0
+        while x + 16 <= width {
+            for i in 0..<16 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let signMask = val &>> 31
+                let absVal = (val ^ signMask) &- signMask
+                let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+                let res = (qVal ^ signMask) &- signMask
+                ptr[idx] = Int16(clamping: res)
+            }
+            x += 16
+        }
+        while x + 8 <= width {
+            for i in 0..<8 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let signMask = val &>> 31
+                let absVal = (val ^ signMask) &- signMask
+                let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+                let res = (qVal ^ signMask) &- signMask
+                ptr[idx] = Int16(clamping: res)
+            }
+            x += 8
+        }
+        while x + 4 <= width {
+            for i in 0..<4 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let signMask = val &>> 31
+                let absVal = (val ^ signMask) &- signMask
+                let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+                let res = (qVal ^ signMask) &- signMask
+                ptr[idx] = Int16(clamping: res)
+            }
+            x += 4
+        }
+        while x < width {
+            let val = Int32(ptr[x])
             let signMask = val &>> 31
             let absVal = (val ^ signMask) &- signMask
             let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
             let res = (qVal ^ signMask) &- signMask
-            ptr[i] = Int16(clamping: res)
+            ptr[x] = Int16(clamping: res)
+            x += 1
         }
     }
 }
@@ -296,16 +336,59 @@ internal func quantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantizer)
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
-    for y in 0..<block.height {
+    let width = block.width
+    let height = block.height
+    for y in 0..<height {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<block.width {
-            let val = Int32(ptr[i])
+        var x = 0
+        while x + 16 <= width {
+            for i in 0..<16 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let signMask = val &>> 31
+                let absVal = (val ^ signMask) &- signMask
+                let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+                let res = (qVal ^ signMask) &- signMask
+                let v = Int16(clamping: res)
+                ptr[idx] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+            }
+            x += 16
+        }
+        while x + 8 <= width {
+            for i in 0..<8 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let signMask = val &>> 31
+                let absVal = (val ^ signMask) &- signMask
+                let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+                let res = (qVal ^ signMask) &- signMask
+                let v = Int16(clamping: res)
+                ptr[idx] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+            }
+            x += 8
+        }
+        while x + 4 <= width {
+            for i in 0..<4 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let signMask = val &>> 31
+                let absVal = (val ^ signMask) &- signMask
+                let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
+                let res = (qVal ^ signMask) &- signMask
+                let v = Int16(clamping: res)
+                ptr[idx] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+            }
+            x += 4
+        }
+        while x < width {
+            let val = Int32(ptr[x])
             let signMask = val &>> 31
             let absVal = (val ^ signMask) &- signMask
             let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
             let res = (qVal ^ signMask) &- signMask
             let v = Int16(clamping: res)
-            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+            ptr[x] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
+            x += 1
         }
     }
 }
@@ -370,13 +453,75 @@ internal func dequantizeSIMD32(_ block: BlockView, q: Quantizer) {
 @inline(__always)
 internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
-    for y in 0..<block.height {
+    let width = block.width
+    let height = block.height
+    for y in 0..<height {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<block.width {
-            let val = Int32(ptr[i])
+        var x = 0
+        while x + 16 <= width {
+            for i in 0..<16 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let res = val &* step
+                let offset: Int32
+                if 0 < val {
+                    offset = step / 2
+                } else if val < 0 {
+                    offset = -step / 2
+                } else {
+                    offset = 0
+                }
+                ptr[idx] = Int16(clamping: res + offset)
+            }
+            x += 16
+        }
+        while x + 8 <= width {
+            for i in 0..<8 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let res = val &* step
+                let offset: Int32
+                if 0 < val {
+                    offset = step / 2
+                } else if val < 0 {
+                    offset = -step / 2
+                } else {
+                    offset = 0
+                }
+                ptr[idx] = Int16(clamping: res + offset)
+            }
+            x += 8
+        }
+        while x + 4 <= width {
+            for i in 0..<4 {
+                let idx = x + i
+                let val = Int32(ptr[idx])
+                let res = val &* step
+                let offset: Int32
+                if 0 < val {
+                    offset = step / 2
+                } else if val < 0 {
+                    offset = -step / 2
+                } else {
+                    offset = 0
+                }
+                ptr[idx] = Int16(clamping: res + offset)
+            }
+            x += 4
+        }
+        while x < width {
+            let val = Int32(ptr[x])
             let res = val &* step
-            let offset: Int32 = if 0 < val { step / 2 } else if val < 0 { -step / 2 } else { 0 }
-            ptr[i] = Int16(clamping: res + offset)
+            let offset: Int32
+            if 0 < val {
+                offset = step / 2
+            } else if val < 0 {
+                offset = -step / 2
+            } else {
+                offset = 0
+            }
+            ptr[x] = Int16(clamping: res + offset)
+            x += 1
         }
     }
 }
@@ -519,15 +664,83 @@ internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
 @inline(__always)
 internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
-    for y in 0..<block.height {
+    let width = block.width
+    let height = block.height
+    for y in 0..<height {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<block.width {
-            let uVal = UInt16(bitPattern: ptr[i])
+        var x = 0
+        while x + 16 <= width {
+            for i in 0..<16 {
+                let idx = x + i
+                let uVal = UInt16(bitPattern: ptr[idx])
+                let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+                let val = Int32(Int16(bitPattern: decodedUInt))
+                let res = val &* step
+                let offset: Int32
+                if 0 < val {
+                    offset = step / 2
+                } else if val < 0 {
+                    offset = -step / 2
+                } else {
+                    offset = 0
+                }
+                ptr[idx] = Int16(clamping: res + offset)
+            }
+            x += 16
+        }
+        while x + 8 <= width {
+            for i in 0..<8 {
+                let idx = x + i
+                let uVal = UInt16(bitPattern: ptr[idx])
+                let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+                let val = Int32(Int16(bitPattern: decodedUInt))
+                let res = val &* step
+                let offset: Int32
+                if 0 < val {
+                    offset = step / 2
+                } else if val < 0 {
+                    offset = -step / 2
+                } else {
+                    offset = 0
+                }
+                ptr[idx] = Int16(clamping: res + offset)
+            }
+            x += 8
+        }
+        while x + 4 <= width {
+            for i in 0..<4 {
+                let idx = x + i
+                let uVal = UInt16(bitPattern: ptr[idx])
+                let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
+                let val = Int32(Int16(bitPattern: decodedUInt))
+                let res = val &* step
+                let offset: Int32
+                if 0 < val {
+                    offset = step / 2
+                } else if val < 0 {
+                    offset = -step / 2
+                } else {
+                    offset = 0
+                }
+                ptr[idx] = Int16(clamping: res + offset)
+            }
+            x += 4
+        }
+        while x < width {
+            let uVal = UInt16(bitPattern: ptr[x])
             let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
             let val = Int32(Int16(bitPattern: decodedUInt))
             let res = val &* step
-            let offset: Int32 = if 0 < val { step / 2 } else if val < 0 { -step / 2 } else { 0 }
-            ptr[i] = Int16(clamping: res + offset)
+            let offset: Int32
+            if 0 < val {
+                offset = step / 2
+            } else if val < 0 {
+                offset = -step / 2
+            } else {
+                offset = 0
+            }
+            ptr[x] = Int16(clamping: res + offset)
+            x += 1
         }
     }
 }
