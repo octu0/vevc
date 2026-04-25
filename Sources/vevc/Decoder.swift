@@ -2,6 +2,68 @@ import Foundation
 
 
 
+actor ConcurrencyLimiter {
+
+    private var permits: Int
+
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    
+
+    init(limit: Int) {
+
+        self.permits = limit
+
+    }
+
+    
+
+    @inline(__always)
+
+    func wait() async {
+
+        if 0 < permits {
+
+            permits -= 1
+
+        } else {
+
+            await withCheckedContinuation { continuation in
+
+                waiters.append(continuation)
+
+            }
+
+        }
+
+    }
+
+    
+
+    @inline(__always)
+
+    func signal() {
+
+        let isEmpty = waiters.isEmpty
+
+        if isEmpty != true {
+
+            let next = waiters.removeFirst()
+
+            next.resume()
+
+        } else {
+
+            permits += 1
+
+        }
+
+    }
+
+}
+
+
+
 actor StreamingDecoderActor {
     let maxLayer: Int
     let width: Int
@@ -107,6 +169,36 @@ public struct Decoder: Sendable {
         self.maxConcurrency = maxConcurrency
     }
 
+    @inline(__always)
+    private func createGOPTask(
+        gopContinuation: AsyncStream<AsyncThrowingStream<YCbCrImage, Error>>.Continuation,
+        limiter: ConcurrencyLimiter,
+        maxLayer: Int, width: Int, height: Int
+    ) -> AsyncStream<[UInt8]>.Continuation {
+        let (chunkStream, chunkContinuation) = AsyncStream<[UInt8]>.makeStream()
+        let (imgStream, imgContinuation) = AsyncThrowingStream<YCbCrImage, Error>.makeStream()
+        gopContinuation.yield(imgStream)
+        
+        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height)
+        
+        Task {
+            await limiter.wait()
+            do {
+                for await gopChunk in chunkStream {
+                    if let img = try await decoderActor.decodeNextFrame(chunk: gopChunk) {
+                        imgContinuation.yield(img)
+                    }
+                }
+                imgContinuation.finish()
+            } catch {
+                imgContinuation.finish(throwing: error)
+            }
+            await limiter.signal()
+        }
+        
+        return chunkContinuation
+    }
+
     public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
         return AsyncThrowingStream { continuation in
             Task {
@@ -117,23 +209,63 @@ public struct Decoder: Sendable {
                     return
                 }
                 
-                var headerOffset = 0
-                let fileHeader = try VEVCFileHeader.deserialize(from: firstChunk, offset: &headerOffset)
-                let effectiveWidth = fileHeader.width
-                let effectiveHeight = fileHeader.height
-                let effectiveFps = fileHeader.framerate
-                
-                let decoderActor = StreamingDecoderActor(maxLayer: self.maxLayer, width: effectiveWidth, height: effectiveHeight)
-                
                 do {
-                    while let chunk = await iterator.next() {
-                        if let img = try await decoderActor.decodeNextFrame(chunk: chunk) {
-                            var mutableImg = img
-                            mutableImg.fps = effectiveFps
-                            continuation.yield(mutableImg)
+                    var headerOffset = 0
+                    let fileHeader = try VEVCFileHeader.deserialize(from: firstChunk, offset: &headerOffset)
+                    let effectiveWidth = fileHeader.width
+                    let effectiveHeight = fileHeader.height
+                    let effectiveFps = fileHeader.framerate
+                    let maxConcurrency = self.maxConcurrency
+                    let maxLayer = self.maxLayer
+                    
+                    let (gopStream, gopContinuation) = AsyncStream<AsyncThrowingStream<YCbCrImage, Error>>.makeStream()
+                    
+                    Task {
+                        do {
+                            for await gopOutput in gopStream {
+                                for try await img in gopOutput {
+                                    var mutableImg = img
+                                    mutableImg.fps = effectiveFps
+                                    continuation.yield(mutableImg)
+                                }
+                            }
+                            continuation.finish()
+                        } catch {
+                            continuation.finish(throwing: error)
                         }
                     }
-                    continuation.finish()
+                    
+                    let limiter = ConcurrencyLimiter(limit: maxConcurrency)
+                    var currentGOPInput: AsyncStream<[UInt8]>.Continuation? = nil
+                    
+                    while let chunk = await iterator.next() {
+                        var offset = 0
+                        let frameHeader = try? VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
+                        let isIFrame = frameHeader?.isIFrame ?? false
+                        
+                        if isIFrame {
+                            currentGOPInput?.finish()
+                            currentGOPInput = createGOPTask(
+                                gopContinuation: gopContinuation,
+                                limiter: limiter,
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight
+                            )
+                        }
+                        
+                        if let currentInput = currentGOPInput {
+                            currentInput.yield(chunk)
+                        } else {
+                            let newInput = createGOPTask(
+                                gopContinuation: gopContinuation,
+                                limiter: limiter,
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight
+                            )
+                            currentGOPInput = newInput
+                            newInput.yield(chunk)
+                        }
+                    }
+                    currentGOPInput?.finish()
+                    gopContinuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
