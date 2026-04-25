@@ -28,6 +28,10 @@ public struct VEVCFileHeader {
         payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel0))
         payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel1))
         payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel1))
+        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel2))
+        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel2))
+        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel3))
+        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel3))
         payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmRunModel))
         payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmValModel))
         
@@ -70,6 +74,10 @@ public struct VEVCFileHeader {
             StaticRANSModels.shared.valModel0 = deserializeRANSModel(from: chunk, offset: &offset)
             StaticRANSModels.shared.runModel1 = deserializeRANSModel(from: chunk, offset: &offset)
             StaticRANSModels.shared.valModel1 = deserializeRANSModel(from: chunk, offset: &offset)
+            StaticRANSModels.shared.runModel2 = deserializeRANSModel(from: chunk, offset: &offset)
+            StaticRANSModels.shared.valModel2 = deserializeRANSModel(from: chunk, offset: &offset)
+            StaticRANSModels.shared.runModel3 = deserializeRANSModel(from: chunk, offset: &offset)
+            StaticRANSModels.shared.valModel3 = deserializeRANSModel(from: chunk, offset: &offset)
             StaticRANSModels.shared.dpcmRunModel = deserializeRANSModel(from: chunk, offset: &offset)
             StaticRANSModels.shared.dpcmValModel = deserializeRANSModel(from: chunk, offset: &offset)
         }

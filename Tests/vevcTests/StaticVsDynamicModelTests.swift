@@ -66,7 +66,7 @@ struct StaticVsDynamicModelTests {
         encoder.encodeBypass(binVal: 1) // lscpX
         encoder.encodeBypass(binVal: 1) // lscpY
         for pair in pairs {
-            encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
+            encoder.addPair(run: pair.run, val: pair.val, context: 0)
         }
         if 0 < trailingZeros {
             encoder.addTrailingZeros(trailingZeros)
@@ -130,7 +130,7 @@ struct StaticVsDynamicModelTests {
             encoder.encodeBypass(binVal: 1) // lscpX
             encoder.encodeBypass(binVal: 1) // lscpY
             for pair in pairs {
-                encoder.addPair(run: pair.run, val: pair.val, isParentZero: false)
+                encoder.addPair(run: pair.run, val: pair.val, context: 0)
             }
             encoder.flush()
             let data = encoder.getData()
@@ -143,7 +143,7 @@ struct StaticVsDynamicModelTests {
                 let _ = try decoder.decodeBypass() // lscpY
                 
                 for (pIdx, original) in pairs.enumerated() {
-                    let decoded = decoder.readPair(isParentZero: false)
+                    let decoded = decoder.readPair(context: 0)
                     #expect(decoded.run == Int(original.run),
                            "Dataset \(idx) pair \(pIdx): run mismatch expected=\(String(original.run)) got=\(String(decoded.run))")
                     #expect(decoded.val == original.val,

@@ -52,47 +52,59 @@ final class StaticRANSModels: @unchecked Sendable {
     static let shared = StaticRANSModels()
 
     var runModel0 = buildStaticModel(rawFreqs: [
-        11172, 2025, 1036, 793, 299, 185, 165, 181,
-          104,   62,   52,  54,  57,  36,  32,  37,
-            9,    7,    5,   4,   4,   3,   4,   4,
-            3,    2,    2,   2,   2,   1,   1,   2,
-            1,    1,    2,   4,   5,   6,   1,   1,
-            1,    1,    1,   1,   1,   1,   1,   1,
-            1,    1,    1,   1,   1,   1,   1,   1,
-            1,    1,    1,   1,   1,   1,   1,   1,
+        2892, 1460, 1192, 998, 1061, 753, 662, 669, 680, 434, 398, 384, 571, 385, 354, 387,
+        139, 83, 78, 77, 68, 63, 62, 93, 110, 68, 67, 60, 51, 51, 47, 76,
+        83, 53, 48, 45, 44, 41, 39, 65, 67, 42, 39, 40, 35, 34, 35, 58,
+        71, 42, 37, 35, 33, 34, 30, 54, 112, 65, 55, 53, 52, 47, 44, 349,
     ])
 
     var valModel0 = buildStaticModel(rawFreqs: [
-        3235,  964, 2731,  425, 1173,  289, 1134,  222,
-         618,  179,  610,  151,  379,  129,  373,  111,
-         254,   97,  251,   86,  181,   76,  180,   69,
-         135,   63,  136,   56,  103,   52,  104,   47,
-         124,  123,  201,  302,  363,  337,  221,   76,
-           3,    1,    1,    1,    1,    1,    1,    1,
-           1,    1,    1,    1,    1,    1,    1,    1,
-           1,    1,    1,    1,    1,    1,    1,    1,
+        1, 7701, 1204, 6916, 102, 153, 37, 151, 20, 24, 10, 23, 7, 6, 5, 1,
+        6, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     ])
 
     var runModel1 = buildStaticModel(rawFreqs: [
-        3339, 1389, 1644, 2459, 822, 668, 725, 1009,
-         417,  306,  338,  429, 512, 332, 329,  435,
-          82,   66,   61,   63,  48,  50,  46,   67,
-          56,   37,   33,   36,  26,  26,  28,   42,
-          23,   16,   32,   77, 103, 195,   1,    1,
-           1,    1,    1,    1,   1,   1,   1,    1,
-           1,    1,    1,    1,   1,   1,   1,    1,
-           1,    1,    1,    1,   1,   1,   1,    1,
+        6581, 2019, 1310, 1178, 631, 523, 555, 726, 299, 216, 176, 169, 152, 158, 177, 216,
+        109, 69, 52, 46, 42, 41, 43, 50, 37, 32, 30, 30, 30, 32, 33, 38,
+        29, 24, 20, 18, 17, 16, 16, 17, 14, 14, 14, 13, 13, 13, 12, 14,
+        11, 10, 10, 8, 8, 7, 6, 7, 6, 7, 6, 6, 5, 5, 5, 181,
     ])
 
     var valModel1 = buildStaticModel(rawFreqs: [
-        5838,    1, 6989,    1, 1004,   1, 1582,   1,
-         219,    1,  465,    1,   52,   1,  141,   1,
-          13,    1,   44,    1,    5,   1,   17,   1,
-           1,    1,    5,    1,    1,   1,    1,   1,
-           1,    1,    1,    1,    1,   1,    1,   1,
-           1,    1,    1,    1,    1,   1,    1,   1,
-           1,    1,    1,    1,    1,   1,    1,   1,
-           1,    1,    1,    1,    1,   1,    1,   1,
+        1, 7467, 1229, 6485, 153, 383, 55, 377, 25, 69, 15, 64, 9, 16, 5, 1,
+        14, 4, 5, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
+
+    var runModel2 = buildStaticModel(rawFreqs: [
+        1608, 966, 870, 920, 775, 642, 624, 778, 684, 530, 513, 575, 677, 526, 501, 623,
+        150, 103, 96, 98, 96, 86, 93, 144, 132, 92, 86, 85, 87, 79, 81, 134,
+        102, 70, 69, 68, 68, 68, 69, 114, 91, 65, 60, 61, 61, 60, 59, 113,
+        100, 71, 64, 59, 58, 62, 62, 109, 171, 107, 100, 93, 90, 94, 94, 366,
+    ])
+
+    var valModel2 = buildStaticModel(rawFreqs: [
+        1, 7505, 190, 8339, 88, 79, 41, 72, 18, 12, 9, 9, 4, 3, 2, 1,
+        2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
+
+    var runModel3 = buildStaticModel(rawFreqs: [
+        4726, 1497, 1152, 1489, 684, 598, 768, 1406, 429, 275, 221, 222, 180, 186, 227, 303,
+        161, 108, 83, 75, 67, 69, 73, 103, 67, 54, 47, 45, 42, 46, 52, 63,
+        42, 36, 32, 29, 27, 25, 28, 34, 24, 21, 20, 20, 17, 19, 20, 26,
+        17, 17, 15, 14, 12, 11, 12, 13, 9, 9, 9, 7, 7, 7, 6, 249,
+    ])
+
+    var valModel3 = buildStaticModel(rawFreqs: [
+        1, 7625, 52, 8176, 24, 189, 15, 202, 12, 26, 10, 23, 4, 5, 2, 1,
+        5, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     ])
 
     var dpcmRunModel = buildStaticModel(rawFreqs: [
@@ -843,26 +855,26 @@ struct BypassReader {
     }
 }
 
-// why: |val| <= 15 maps to token only (no bypass bits, covers most frequent range)
-// |val| >= 16 splits into token + variable-length bypass bits
+// why: |val| <= 7 maps to token only (no bypass bits, covers most frequent range)
+// |val| >= 8 splits into token + variable-length bypass bits
 @inline(__always)
 func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
     if value == 0 { return (0, 0, 0) }
     let sign = value < 0
     let absValue = UInt16(value.magnitude)
     
-    if absValue <= 15 {
+    if absValue <= 7 {
         let offset: UInt16 = if sign { 1 } else { 0 }
         let token = UInt8(((absValue - 1) * 2) + 1 + offset)
         return (token, 0, 0)
     }
     
-    let v = UInt32(absValue - 16)
+    let v = UInt32(absValue - 8)
     if v == 0 {
         if sign {
-            return (32, 1, 1)
+            return (16, 1, 1)
         }
-        return (32, 0, 1)
+        return (16, 0, 1)
     }
     
     let bits = UInt32.bitWidth - v.leadingZeroBitCount
@@ -870,7 +882,7 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
     let bypass = UInt32(v & ((1 << (bits - 1)) - 1))
     let bypassLen = bits - 1
     
-    let token = 32 + subToken
+    let token = 16 + subToken
     let signBit: UInt32 = if sign { 1 } else { 0 }
     let finalBypass = (bypass << 1) | signBit
     let finalBypassLen = bypassLen + 1
@@ -881,7 +893,7 @@ func valueTokenize(_ value: Int16) -> (token: UInt8, bypassBits: UInt32, bypassL
 @inline(__always)
 func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
     if token == 0 { return 0 }
-    if token < 32 {
+    if token < 16 {
         let t = token - 1
         let absValue = (UInt16(t) / 2) + 1
         let isNegative = (t % 2) == 1
@@ -891,7 +903,7 @@ func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
         return Int16(bitPattern: absValue)
     }
     
-    let subToken = token - 32
+    let subToken = token - 16
     let sign = (bypassBits & 1) == 1
     let bypass = bypassBits >> 1
     
@@ -903,7 +915,7 @@ func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
         v = base | UInt32(bypass)
     }
     
-    let absValue = v + 16
+    let absValue = v + 8
     if sign {
         let neg = 0 &- absValue
         return Int16(truncatingIfNeeded: neg)
@@ -914,13 +926,13 @@ func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
 
 @inline(__always)
 func valueTokenizeUnsigned(_ value: UInt32) -> (token: UInt8, bypassBits: UInt32, bypassLen: Int) {
-    if value < 32 {
+    if value < 16 {
         return (UInt8(value), 0, 0)
     }
     
-    let v = value - 32
+    let v = value - 16
     if v == 0 {
-        return (32, 0, 0)
+        return (16, 0, 0)
     }
     
     let bits = UInt32.bitWidth - v.leadingZeroBitCount
@@ -928,16 +940,16 @@ func valueTokenizeUnsigned(_ value: UInt32) -> (token: UInt8, bypassBits: UInt32
     let bypass = UInt32(v & ((1 << (bits - 1)) - 1))
     let bypassLen = bits - 1
     
-    return (32 + subToken, bypass, bypassLen)
+    return (16 + subToken, bypass, bypassLen)
 }
 
 @inline(__always)
 func valueDetokenizeUnsigned(token: UInt8, bypassBits: UInt32) -> UInt32 {
-    if token < 32 {
+    if token < 16 {
         return UInt32(token)
     }
     
-    let subToken = token - 32
+    let subToken = token - 16
     let v: UInt32
     if subToken == 0 {
         v = 0
@@ -945,21 +957,21 @@ func valueDetokenizeUnsigned(token: UInt8, bypassBits: UInt32) -> UInt32 {
         let base: UInt32 = 1 << (UInt32(subToken) - 1)
         v = base | UInt32(bypassBits)
     }
-    return v + 32
+    return v + 16
 }
 
 @inline(__always)
 func valueBypassLength(for token: UInt8) -> Int {
-    if token < 32 { return 0 }
-    if token == 32 { return 1 }
+    if token < 16 { return 0 }
+    if token == 16 { return 1 }
     let t = min(token, 63)
-    return Int(t - 32)
+    return Int(t - 16)
 }
 
 @inline(__always)
 func valueBypassLengthUnsigned(for token: UInt8) -> Int {
-    if token < 32 { return 0 }
-    if token == 32 { return 0 }
+    if token < 16 { return 0 }
+    if token == 16 { return 0 }
     let t = min(token, 63)
-    return Int(t - 33)
+    return Int(t - 17)
 }

@@ -122,7 +122,7 @@ final class EntropyPairsCompareTests: XCTestCase {
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             var decPairs: [(run: Int, val: Int16)] = []
             for i in 0..<encoder.pairs.count {
-                let pair = decoder.readPair(isParentZero: encoder.pairs[i].isParentZero)
+                let pair = decoder.readPair(context: encoder.pairs[i].context)
                 decPairs.append(pair)
             }
             

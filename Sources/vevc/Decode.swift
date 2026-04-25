@@ -61,8 +61,8 @@ func decodeExpGolomb(decoder: inout EntropyDecoder) throws -> UInt32 {
 }
 
 @inline(__always)
-func decodeCoeffRun(decoder: inout EntropyDecoder, isParentZero: Bool) throws -> (Int, Int16) {
-    let pair = decoder.readPair(isParentZero: isParentZero)
+func decodeCoeffRun(decoder: inout EntropyDecoder, context: UInt8) throws -> (Int, Int16) {
+    let pair = decoder.readPair(context: context)
     return (pair.run, pair.val)
 }
 
@@ -78,6 +78,7 @@ func blockDecode32V(decoder: inout EntropyDecoder, block: BlockView, parentBlock
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 32 + lscpY
     while currentIdx <= lscpIdx {
         let startX = currentIdx / 32
@@ -88,7 +89,8 @@ func blockDecode32V(decoder: inout EntropyDecoder, block: BlockView, parentBlock
         } else {
             isParentZero = false
         }
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -113,6 +115,7 @@ func blockDecode32H(decoder: inout EntropyDecoder, block: BlockView, parentBlock
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 32 + lscpX
     while currentIdx <= lscpIdx {
         let startY = currentIdx / 32
@@ -123,7 +126,8 @@ func blockDecode32H(decoder: inout EntropyDecoder, block: BlockView, parentBlock
         } else {
             isParentZero = false
         }
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -148,10 +152,12 @@ func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 16 + lscpY
     while currentIdx <= lscpIdx {
         let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -176,12 +182,14 @@ func blockDecode16VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 16 + lscpY
     while currentIdx <= lscpIdx {
         let startX = currentIdx / 16
         let startY = currentIdx % 16
         let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -206,10 +214,12 @@ func blockDecode16H(decoder: inout EntropyDecoder, block: BlockView) throws {
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 16 + lscpX
     while currentIdx <= lscpIdx {
         let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -234,12 +244,14 @@ func blockDecode16HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 16 + lscpX
     while currentIdx <= lscpIdx {
         let startY = currentIdx / 16
         let startX = currentIdx % 16
         let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -263,10 +275,12 @@ func blockDecode8V(decoder: inout EntropyDecoder, block: BlockView) throws {
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 8 + lscpY
     while currentIdx <= lscpIdx {
         let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -290,12 +304,14 @@ func blockDecode8VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 8 + lscpY
     while currentIdx <= lscpIdx {
         let startX = currentIdx / 8
         let startY = currentIdx % 8
         let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -319,10 +335,12 @@ func blockDecode8H(decoder: inout EntropyDecoder, block: BlockView) throws {
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 8 + lscpX
     while currentIdx <= lscpIdx {
         let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -346,12 +364,14 @@ func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
     let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 8 + lscpX
     while currentIdx <= lscpIdx {
         let startY = currentIdx / 8
         let startX = currentIdx % 8
         let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -376,10 +396,12 @@ func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 4 + lscpY
     while currentIdx <= lscpIdx {
         let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -404,12 +426,14 @@ func blockDecode4VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpX * 4 + lscpY
     while currentIdx <= lscpIdx {
         let startX = currentIdx / 4
         let startY = currentIdx % 4
         let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -434,10 +458,12 @@ func blockDecode4H(decoder: inout EntropyDecoder, block: BlockView) throws {
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 4 + lscpX
     while currentIdx <= lscpIdx {
         let isParentZero = false
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -462,12 +488,14 @@ func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     let lscpIdx = lscpY * 4 + lscpX
     while currentIdx <= lscpIdx {
         let startY = currentIdx / 4
         let startX = currentIdx % 4
         let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: isParentZero)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -492,8 +520,10 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
     }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     while currentIdx <= lscpIdx {
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: false)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getDPCMContext(prevVal: prevVal))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -545,8 +575,10 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
     }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     while currentIdx <= lscpIdx {
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: false)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getDPCMContext(prevVal: prevVal))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -590,8 +622,10 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
     }
 
     var currentIdx = 0
+    var prevVal: Int16 = 0
     while currentIdx <= lscpIdx {
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, isParentZero: false)
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getDPCMContext(prevVal: prevVal))
+        prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {

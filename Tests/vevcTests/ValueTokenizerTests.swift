@@ -7,7 +7,8 @@ final class ValueTokenizerTests: XCTestCase {
     func testSignedRoundtrip() {
         let testValues: [Int16] = [
             0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6, -6, 7, -7, 8, -8,
-            9, -9, 10, -10, 15, -15, 16, -16, 20, -20, 50, -50, 100, -100,
+            9, -9, 10, -10, 15, -15, 16, -16, 20, -20, 23, -23, 24, -24, 25, -25,
+            30, -30, 46, -46, 47, -47, 48, -48, 50, -50, 100, -100,
             127, -128, 255, -256, 500, -500, 1000, -1000,
             Int16.max, Int16.min, Int16.max - 1, Int16.min + 1
         ]
@@ -22,7 +23,7 @@ final class ValueTokenizerTests: XCTestCase {
     }
     
     func testUnsignedRoundtrip() {
-        let testValues: [UInt32] = [0, 1, 2, 3, 4, 5, 10, 15, 16, 17, 20, 30, 50, 100, 200, 500, 1000]
+        let testValues: [UInt32] = [0, 1, 2, 3, 4, 5, 10, 15, 16, 17, 20, 30, 46, 47, 48, 50, 100, 200, 500, 1000, 32768, 65535]
         
         for val in testValues {
             let result = valueTokenizeUnsigned(val)
@@ -89,7 +90,7 @@ final class ValueTokenizerTests: XCTestCase {
         try data.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             for i in 0..<encPairs.count {
-                let pair = decoder.readPair(isParentZero: encPairs[i].isParentZero)
+                let pair = decoder.readPair(context: encPairs[i].context)
                 decPairs.append(pair)
             }
         }

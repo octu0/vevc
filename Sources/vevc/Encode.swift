@@ -23,8 +23,24 @@ func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout Entrop
 }
 
 @inline(__always)
-func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, isParentZero: Bool = false) {
-    encoder.addPair(run: UInt32(run), val: val, isParentZero: isParentZero)
+func getContext(prevVal: Int16, isParentZero: Bool) -> UInt8 {
+    let base: UInt8 = isParentZero ? 2 : 0
+    let v: UInt8 = (prevVal == 0) ? 0 : 1
+    return base + v
+}
+
+@inline(__always)
+func getDPCMContext(prevVal: Int16) -> UInt8 {
+    let absVal = prevVal.magnitude
+    if absVal == 0 { return 0 }
+    if absVal == 1 { return 1 }
+    if absVal <= 3 { return 2 }
+    return 3
+}
+
+@inline(__always)
+func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, context: UInt8) {
+    encoder.addPair(run: UInt32(run), val: val, context: context)
 }
 
 // why: blockEncode32V/H were dead code (no call sites in EncodeTransform.swift or tests) — removed
@@ -61,6 +77,7 @@ func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
 
     for x in 0...lscpX {
         let endY = if x == lscpX { lscpY } else { 16 - 1 }
@@ -70,7 +87,8 @@ func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
                 run += 1
             }
             if val != 0 {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+                prevVal = val
                 run = 0
             }
         }
@@ -118,6 +136,7 @@ func blockEncode16VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnc
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     var currentIdx = 0
     var startIdx = 0
 
@@ -135,7 +154,8 @@ func blockEncode16VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnc
                 let startX = startIdx / 16
                 let startY = startIdx % 16
                 let isParentZ = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: isParentZ))
+                prevVal = val
                 run = 0
             }
             currentIdx += 1
@@ -200,6 +220,7 @@ func blockEncode16H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
@@ -210,7 +231,8 @@ func blockEncode16H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
                 run += 1
             }
             if val != 0 {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+                prevVal = val
                 run = 0
             }
         }
@@ -274,6 +296,7 @@ func blockEncode16HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnc
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     var currentIdx = 0
     var startIdx = 0
     
@@ -292,7 +315,8 @@ func blockEncode16HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnc
                 let startY = startIdx / 16
                 let startX = startIdx % 16
                 let isParentZ = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: isParentZ))
+                prevVal = val
                 run = 0
             }
             currentIdx += 1
@@ -341,6 +365,7 @@ func blockEncode8V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     
     for x in 0...lscpX {
         let endY = if x == lscpX { lscpY } else { 8 - 1 }
@@ -350,7 +375,8 @@ func blockEncode8V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
                 run += 1
             }
             if val != 0 {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+                prevVal = val
                 run = 0
             }
         }
@@ -397,6 +423,7 @@ func blockEncode8VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     var currentIdx = 0
     var startIdx = 0
     
@@ -412,7 +439,8 @@ func blockEncode8VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
                 let startX = startIdx / 8
                 let startY = startIdx % 8
                 let isParentZ = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: isParentZ))
+                prevVal = val
                 run = 0
             }
             currentIdx += 1
@@ -476,6 +504,7 @@ func blockEncode8H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
 
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
@@ -486,7 +515,8 @@ func blockEncode8H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
                 run += 1
             }
             if val != 0 {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+                prevVal = val
                 run = 0
             }
         }
@@ -550,6 +580,7 @@ func blockEncode8HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     var currentIdx = 0
     var startIdx = 0
     
@@ -566,7 +597,8 @@ func blockEncode8HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
                 let startY = startIdx / 8
                 let startX = startIdx % 8
                 let isParentZ = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: isParentZ))
+                prevVal = val
                 run = 0
             }
             currentIdx += 1
@@ -615,6 +647,7 @@ func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     
     for x in 0...lscpX {
         let endY = if x == lscpX { lscpY } else { 4 - 1 }
@@ -624,7 +657,8 @@ func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
                 run += 1
             }
             if val != 0 {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+                prevVal = val
                 run = 0
             }
         }
@@ -674,6 +708,7 @@ func blockEncode4H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
 
     for y in 0...lscpY {
         let ptr = block.rowPointer(y: y)
@@ -684,7 +719,8 @@ func blockEncode4H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
                 run += 1
             }
             if val != 0 {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+                prevVal = val
                 run = 0
             }
         }
@@ -734,6 +770,7 @@ func blockEncode4HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
     encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
     var run = 0
+    var prevVal: Int16 = 0
     var currentIdx = 0
     var startIdx = 0
     
@@ -752,7 +789,8 @@ func blockEncode4HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
                 let startY = startIdx / 4
                 let startX = startIdx % 4
                 let isParentZ = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, isParentZero: isParentZ)
+                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: isParentZ))
+                prevVal = val
                 run = 0
             }
             currentIdx += 1
@@ -888,12 +926,14 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
 
         var run = 0
+        var prevVal: Int16 = 0
         for i in 0...lscpIdx {
             let diff = errors[i]
             if diff == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
+                prevVal = diff
                 run = 0
             }
         }
@@ -994,12 +1034,14 @@ func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
         lastVal = last
         
         var run = 0
+        var prevVal: Int16 = 0
         for i in 0...lscpIdx {
             let diff = baseErr[i]
             if diff == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
+                prevVal = diff
                 run = 0
             }
         }
@@ -1083,6 +1125,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     lastVal = last
 
     var run = 0
+    var prevVal: Int16 = 0
     var currentIdx = 0
     last = originalLastVal
 
@@ -1091,7 +1134,8 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     if diffRunFirst == 0 {
         run += 1
     } else {
-        encodeCoeffRun(val: diffRunFirst, encoder: &encoder, run: run)
+        encodeCoeffRun(val: diffRunFirst, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
+        prevVal = diffRunFirst
         run = 0
     }
     currentIdx += 1
@@ -1102,7 +1146,8 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
             if diff == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
+                prevVal = diff
                 run = 0
             }
             currentIdx += 1
@@ -1120,7 +1165,8 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
             if diffY0 == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run)
+                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
+                prevVal = diffY0
                 run = 0
             }
             currentIdx += 1
@@ -1131,7 +1177,8 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
                 if diff == 0 {
                     run += 1
                 } else {
-                    encodeCoeffRun(val: diff, encoder: &encoder, run: run)
+                    encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
+                    prevVal = diff
                     run = 0
                 }
                 currentIdx += 1
