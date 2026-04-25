@@ -2,11 +2,16 @@ import Foundation
 
 
 
-class CoreDecoder {
+actor StreamingDecoderActor {
     let maxLayer: Int
     let width: Int
     let height: Int
     let pool: BlockViewPool
+    
+    private var previousReconstructed: PlaneData420?
+    private var firstReconstructed: PlaneData420?
+    private var roundOffsetIndex = 0
+    private var seenY = Set<UnsafeMutableRawPointer>()
     
     init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
         self.maxLayer = maxLayer
@@ -15,105 +20,78 @@ class CoreDecoder {
         self.pool = BlockViewPool()
     }
     
-    /// Decode a GOP chunk into one or more YCbCrImages.
-    /// Mode=0x00 (Temporal): applies inverse temporal DWT to reconstruct original frames.
-    /// Mode=0x01 (Direct): outputs frames directly.
     @inline(__always)
-    func decodeGOP(chunk: [UInt8]) async throws -> [YCbCrImage] {
-        guard 4 <= chunk.count else {
-            throw DecodeError.insufficientDataContext("decodeGOP: chunk.count=\(chunk.count) < 4")
-        }
+    func decodeNextFrame(chunk: [UInt8]) async throws -> YCbCrImage? {
+        guard !chunk.isEmpty else { return nil }
+        
         var offset = 0
-        let gopHeader = try VEVCGOPHeader.deserialize(from: chunk, offset: &offset)
+        let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
         
-        var frameData: [[UInt8]] = []
-        for _ in 0..<gopHeader.frameCount {
-            let frameHeaderOffset = offset
-            let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
-            if frameHeader.isCopyFrame {
-                frameData.append([]) // Copy frame
-            } else {
-                let len = frameHeader.payloadSize
-                guard (offset + len) <= chunk.count else {
-                    throw DecodeError.insufficientDataContext("decodeGOP: offset(\(offset)) + len(\(len)) > chunk.count(\(chunk.count))")
-                }
-                
-                // For decodeSpatialLayers, we pass the memory segment containing the FrameHeader and payload
-                let totalLenWithHeader = len + (offset - frameHeaderOffset)
-                frameData.append(Array(chunk[frameHeaderOffset..<(frameHeaderOffset + totalLenWithHeader)]))
-                offset += len
+        if frameHeader.isCopyFrame {
+            guard let prev = previousReconstructed else {
+                throw DecodeError.insufficientDataContext("Copy frame without previous frame")
             }
+            return prev.toYCbCr()
         }
         
-        let localMaxLayer = maxLayer
-        let localWidth = width
-        let localHeight = height
-        var decodedPlanes = [PlaneData420?](repeating: nil, count: frameData.count)
-        
-        var previousReconstructed: PlaneData420? = nil
-        // Bidirectional prediction: keep the reconstructed result of the first frame of GOP (I-frame) as backward reference
-        var firstReconstructed: PlaneData420? = nil
-        
-        for (idx, data) in frameData.enumerated() {
-            // Copy frame: reuse previous reconstructed frame verbatim.
-            // This is valid because the encoder only emits FrameLen=0 when
-            // the input frame was pixel-identical to the previous one.
-            if data.isEmpty {
-                decodedPlanes[idx] = previousReconstructed
-                // Do NOT update previousReconstructed — it stays the same
-                continue
-            }
+        if frameHeader.isIFrame {
+            var oldPlanes = [PlaneData420]()
+            if let f = firstReconstructed { oldPlanes.append(f) }
+            if let p = previousReconstructed { oldPlanes.append(p) }
             
-            // Bidirectional prediction check: [Experiment] Apply bidirectional prediction to all P-frames
-            let isPFrame = (previousReconstructed != nil)
-            let useBidirectional = isPFrame && firstReconstructed != nil && frameData.count >= 2
-            
-            let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
-            let img16 = try await decodeSpatialLayers(r: data, pool: pool, maxLayer: localMaxLayer, dx: localWidth, dy: localHeight, predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: idx % 2)
-            let pd = PlaneData420(img16: img16)
-            decodedPlanes[idx] = pd
-            previousReconstructed = pd
-            
-            // Save reconstructed result of first frame (I-frame)
-            if firstReconstructed == nil {
-                firstReconstructed = pd
-            }
-        }
-        
-        let validPlanes = decodedPlanes.compactMap { $0 }
-        let result = validPlanes.map { $0.toYCbCr() }
-        
-        var seenY = Set<UnsafeMutableRawPointer>()
-        for p in validPlanes {
-            p.y.withUnsafeBufferPointer { yPtr in
-                if let yBase = yPtr.baseAddress { // Cast to avoid Array copy
-                    let ptr = UnsafeMutableRawPointer(mutating: yBase)
-                    if seenY.contains(ptr) != true {
-                        seenY.insert(ptr)
-                        pool.putInt16(p.y)
-                        pool.putInt16(p.cb)
-                        pool.putInt16(p.cr)
+            for p in oldPlanes {
+                p.y.withUnsafeBufferPointer { yPtr in
+                    if let yBase = yPtr.baseAddress {
+                        let ptr = UnsafeMutableRawPointer(mutating: yBase)
+                        if seenY.contains(ptr) {
+                            seenY.remove(ptr)
+                            pool.putInt16(p.y)
+                            pool.putInt16(p.cb)
+                            pool.putInt16(p.cr)
+                        }
                     }
                 }
             }
+            seenY.removeAll()
+            
+            firstReconstructed = nil
+            previousReconstructed = nil
+            roundOffsetIndex = 0
         }
         
-        return result
-    }
-}
-
-@inline(__always)
-private func submitGOPChunk(
-    _ chunk: [UInt8],
-    index: Int,
-    maxLayer: Int,
-    width: Int,
-    height: Int,
-    group: inout ThrowingTaskGroup<(Int, [YCbCrImage]), Error>
-) {
-    group.addTask {
-        let decoder = CoreDecoder(maxLayer: maxLayer, width: width, height: height)
-        return (index, try await decoder.decodeGOP(chunk: chunk))
+        let isPFrame = (previousReconstructed != nil)
+        let useBidirectional = isPFrame && firstReconstructed != nil
+        let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
+        
+        let img16 = try await decodeSpatialLayers(
+            r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
+            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+        )
+        
+        let pd = PlaneData420(img16: img16)
+        let yBase = pd.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+        seenY.insert(yBase)
+        
+        if let oldPrev = previousReconstructed {
+            let oldYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+            let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+            if oldYBase != firstYBase {
+                if seenY.contains(oldYBase) {
+                    seenY.remove(oldYBase)
+                    pool.putInt16(oldPrev.y)
+                    pool.putInt16(oldPrev.cb)
+                    pool.putInt16(oldPrev.cr)
+                }
+            }
+        }
+        
+        previousReconstructed = pd
+        if firstReconstructed == nil {
+            firstReconstructed = pd
+        }
+        
+        roundOffsetIndex += 1
+        return pd.toYCbCr()
     }
 }
 
@@ -123,23 +101,16 @@ public struct Decoder: Sendable {
 
     public init(
         maxLayer: Int = 2,
-        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount,
+        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount
     ) {
         self.maxLayer = maxLayer
         self.maxConcurrency = maxConcurrency
     }
 
-    /// Decodes a stream of VEVC chunks into a stream of images.
-    /// First chunk must be a VEVC header (Magic + Metadata), followed by GOP chunks.
-    /// Each GOP chunk is a self-contained unit that decodes to one or more frames.
-    /// Width/height are extracted from the VEVC header in the stream.
     public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
-                var currentGOPIndex = 0
-                var nextGOPIndexToYield = 0
-                var completedGOPs: [Int: [YCbCrImage]] = [:]
                 
                 guard let firstChunk = await iterator.next() else {
                     continuation.finish(throwing: DecodeError.insufficientDataContext("missing VEVC header chunk"))
@@ -152,42 +123,14 @@ public struct Decoder: Sendable {
                 let effectiveHeight = fileHeader.height
                 let effectiveFps = fileHeader.framerate
                 
-                let decoderMaxLayer = self.maxLayer
+                let decoderActor = StreamingDecoderActor(maxLayer: self.maxLayer, width: effectiveWidth, height: effectiveHeight)
                 
                 do {
-                    try await withThrowingTaskGroup(of: (Int, [YCbCrImage]).self) { group in
-                        var activeTasks = 0
-                        
-                        // Fill initial task pool
-                        while activeTasks < self.maxConcurrency {
-                            guard let chunk = await iterator.next() else { break }
-                            submitGOPChunk(chunk, index: currentGOPIndex, maxLayer: decoderMaxLayer, width: effectiveWidth, height: effectiveHeight, group: &group)
-                            currentGOPIndex += 1
-                            activeTasks += 1
-                        }
-                        
-                        // Process results and feed new tasks
-                        while let result = try await group.next() {
-                            activeTasks -= 1
-                            let (idx, frames) = result
-                            completedGOPs[idx] = frames
-                            
-                            // Yield frames in order
-                            while let consecutiveFrames = completedGOPs[nextGOPIndexToYield] {
-                                for var frame in consecutiveFrames {
-                                    frame.fps = effectiveFps
-                                    continuation.yield(frame)
-                                }
-                                completedGOPs.removeValue(forKey: nextGOPIndexToYield)
-                                nextGOPIndexToYield += 1
-                            }
-                            
-                            // Schedule next chunk if available
-                            if let chunk = await iterator.next() {
-                                submitGOPChunk(chunk, index: currentGOPIndex, maxLayer: decoderMaxLayer, width: effectiveWidth, height: effectiveHeight, group: &group)
-                                currentGOPIndex += 1
-                                activeTasks += 1
-                            }
+                    while let chunk = await iterator.next() {
+                        if let img = try await decoderActor.decodeNextFrame(chunk: chunk) {
+                            var mutableImg = img
+                            mutableImg.fps = effectiveFps
+                            continuation.yield(mutableImg)
                         }
                     }
                     continuation.finish()
@@ -198,8 +141,6 @@ public struct Decoder: Sendable {
         }
     }
     
-    /// Decode VEVC encoded byte array into images.
-    /// Parses the VEVC header and GOP chunks from the data, then decodes via streaming pipeline.
     public func decode(data: [UInt8]) async throws -> [YCbCrImage] {
         if data.isEmpty { return [] }
         
@@ -208,11 +149,7 @@ public struct Decoder: Sendable {
         var headerChunk: [UInt8]? = nil
         
         while offset < data.count {
-            guard offset + 4 <= data.count else { break }
-            
-            let first4Bytes = [data[offset], data[offset+1], data[offset+2], data[offset+3]]
-            if first4Bytes == [0x56, 0x45, 0x56, 0x43] {
-                // VEVC file header: magic(4B) + metadataSize(2B) + payload
+            if offset + 4 <= data.count && data[offset] == 0x56 && data[offset+1] == 0x45 && data[offset+2] == 0x56 && data[offset+3] == 0x43 {
                 let headerStart = offset
                 offset += 4
                 let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
@@ -220,13 +157,8 @@ public struct Decoder: Sendable {
                 headerChunk = Array(data[headerStart..<offset])
             } else {
                 let chunkStart = offset
-                let gopHeader = try VEVCGOPHeader.deserialize(from: data, offset: &offset)
-                
-                for _ in 0..<gopHeader.frameCount {
-                    let frameHeader = try VEVCFrameHeader.deserialize(from: data, offset: &offset)
-                    offset += frameHeader.payloadSize
-                }
-                
+                let frameHeader = try VEVCFrameHeader.deserialize(from: data, offset: &offset)
+                offset += frameHeader.payloadSize
                 let chunkEnd = offset
                 chunks.append(Array(data[chunkStart..<chunkEnd]))
             }
@@ -248,7 +180,6 @@ public struct Decoder: Sendable {
         return images
     }
 
-    /// Decodes an array of chunks. Convenience for tests and compare tool.
     public func decode(chunks: [[UInt8]]) async throws -> [YCbCrImage] {
         let stream = AsyncStream<[UInt8]> { continuation in
             for chunk in chunks {
@@ -263,74 +194,64 @@ public struct Decoder: Sendable {
         return images
     }
     
-    /// Decode VEVC data from a FileHandle (file or stdin).
-    /// Reads the VEVC header and GOP chunks, then decodes via streaming pipeline.
     public func decode(fileHandle: FileHandle) -> AsyncThrowingStream<YCbCrImage, Error> {
         let stream = AsyncStream<[UInt8]> { continuation in
             Task {
                 do {
                     while true {
-                        let first4Data = readFully(fileHandle: fileHandle, count: 4)
-                        if first4Data.isEmpty { break } // Normal EOF
-                        guard first4Data.count == 4 else {
+                        let firstByteData = readFully(fileHandle: fileHandle, count: 1)
+                        if firstByteData.isEmpty { break }
+                        let firstByte = firstByteData[0]
+                        
+                        if firstByte == 0x56 {
+                            let next3Data = readFully(fileHandle: fileHandle, count: 3)
+                            guard next3Data.count == 3 else { continuation.finish(); return }
+                            let next3Bytes = [UInt8](next3Data)
+                            if next3Bytes == [0x45, 0x56, 0x43] {
+                                let metaSizeData = readFully(fileHandle: fileHandle, count: 2)
+                                guard metaSizeData.count == 2 else { continuation.finish(); return }
+                                var msOffset = 0
+                                let metadataSize = Int(try readUInt16BEFromBytes([UInt8](metaSizeData), offset: &msOffset))
+                                let metaData = readFully(fileHandle: fileHandle, count: metadataSize)
+                                guard metaData.count == metadataSize else { continuation.finish(); return }
+                                
+                                var headerChunk: [UInt8] = [0x56, 0x45, 0x56, 0x43]
+                                headerChunk.append(contentsOf: metaSizeData)
+                                headerChunk.append(contentsOf: metaData)
+                                continuation.yield(headerChunk)
+                                continue
+                            }
                             continuation.finish()
                             return
                         }
                         
-                        let first4Bytes = [UInt8](first4Data)
-                        if first4Bytes == [0x56, 0x45, 0x56, 0x43] {
-                            // VEVC file header
-                            let metaSizeData = readFully(fileHandle: fileHandle, count: 2)
-                            guard metaSizeData.count == 2 else {
-                                continuation.finish()
-                                return
-                            }
-                            var msOffset = 0
-                            let metadataSize = Int(try readUInt16BEFromBytes([UInt8](metaSizeData), offset: &msOffset))
-                            let metaData = readFully(fileHandle: fileHandle, count: metadataSize)
-                            guard metaData.count == metadataSize else {
-                                continuation.finish()
-                                return
-                            }
+                        let flag = firstByte
+                        var chunk: [UInt8] = [flag]
+                        if flag == 0x01 {
+                            continuation.yield(chunk)
+                        } else if flag == 0x00 || flag == 0x02 {
+                            let headerBytes = readFully(fileHandle: fileHandle, count: 24)
+                            guard headerBytes.count == 24 else { continuation.finish(); return }
+                            chunk.append(contentsOf: headerBytes)
                             
-                            // Build complete header chunk for parseVEVCHeaderChunk
-                            var headerChunk: [UInt8] = first4Bytes
-                            headerChunk.append(contentsOf: metaSizeData)
-                            headerChunk.append(contentsOf: metaData)
-                            continuation.yield(headerChunk)
-                        } else {
-                            var dsOffset = 0
-                            let gopHeader = try VEVCGOPHeader.deserialize(from: first4Bytes, offset: &dsOffset)
-                            var chunk: [UInt8] = []
-                            chunk.append(contentsOf: first4Bytes)
+                            var hsOffset = 0
+                            _ = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            let mvsSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            let refDirSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            let layer0Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            let layer1Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            let layer2Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             
-                            for _ in 0..<gopHeader.frameCount {
-                                let flagData = readFully(fileHandle: fileHandle, count: 1)
-                                guard flagData.count == 1 else { continuation.finish(); return }
-                                chunk.append(contentsOf: flagData)
-                                
-                                if flagData[0] == 0x01 { continue }
-                                
-                                let headerBytes = readFully(fileHandle: fileHandle, count: 24) // 6 * 4B
-                                guard headerBytes.count == 24 else { continuation.finish(); return }
-                                chunk.append(contentsOf: headerBytes)
-                                
-                                var hsOffset = 0
-                                _ = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset)) // MVsCount
-                                let mvsSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
-                                let refDirSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
-                                let layer0Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
-                                let layer1Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
-                                let layer2Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
-                                
-                                let payloadSize = mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
-                                if 0 < payloadSize {
-                                    let payloadBody = readFully(fileHandle: fileHandle, count: payloadSize)
-                                    guard payloadBody.count == payloadSize else { continuation.finish(); return }
-                                    chunk.append(contentsOf: payloadBody)
-                                }
+                            let payloadSize = mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
+                            if 0 < payloadSize {
+                                let payloadBody = readFully(fileHandle: fileHandle, count: payloadSize)
+                                guard payloadBody.count == payloadSize else { continuation.finish(); return }
+                                chunk.append(contentsOf: payloadBody)
                             }
                             continuation.yield(chunk)
+                        } else {
+                            continuation.finish()
+                            return
                         }
                     }
                     continuation.finish()

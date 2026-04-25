@@ -145,12 +145,12 @@ final class BidirectionalPredictionTests: XCTestCase {
         }
         
         let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = CoreDecoder(width: width, height: height)
+        let decoder = StreamingDecoderActor(width: width, height: height)
         
         var psnrs: [Double] = []
         for i in 0..<frameCount {
-            let chunk = try await encoder.encodeSingleFrame(image: images[i])
-            let decodedImg = try await decoder.decodeGOP(chunk: chunk)[0]
+            let chunk = try await encoder.encodeNextFrame(image: images[i], isSceneChange: false)
+            let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
             let psnrY = calculatePSNR(original: images[i].yPlane, decoded: decodedImg.yPlane)
             psnrs.append(psnrY)
             let frameType = (i == 0) ? "I" : "P"

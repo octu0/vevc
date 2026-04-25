@@ -87,29 +87,14 @@ public struct VEVCFileHeader {
     }
 }
 
-public struct VEVCGOPHeader {
-    public let frameCount: Int
-    
-    public init(frameCount: Int) {
-        self.frameCount = frameCount
-    }
-    
-    @inline(__always)
-    public func serialize() -> [UInt8] {
-        var out = [UInt8]()
-        appendUInt32BE(&out, UInt32(frameCount))
-        return out
-    }
-    
-    @inline(__always)
-    public static func deserialize(from r: [UInt8], offset: inout Int) throws -> VEVCGOPHeader {
-        let count = Int(try readUInt32BEFromBytes(r, offset: &offset))
-        return VEVCGOPHeader(frameCount: count)
-    }
-}
-
 public struct VEVCFrameHeader {
-    public let isCopyFrame: Bool
+    public enum FrameType: UInt8 {
+        case pFrame = 0x00
+        case copyFrame = 0x01
+        case iFrame = 0x02
+    }
+    
+    public let frameType: FrameType
     public let mvsCount: Int
     public let mvsSize: Int
     public let refDirSize: Int
@@ -117,8 +102,8 @@ public struct VEVCFrameHeader {
     public let layer1Size: Int
     public let layer2Size: Int
     
-    public init(isCopyFrame: Bool, mvsCount: Int = 0, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
-        self.isCopyFrame = isCopyFrame
+    public init(frameType: FrameType, mvsCount: Int = 0, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
+        self.frameType = frameType
         self.mvsCount = mvsCount
         self.mvsSize = mvsSize
         self.refDirSize = refDirSize
@@ -128,18 +113,26 @@ public struct VEVCFrameHeader {
     }
     
     @inline(__always)
+    public var isCopyFrame: Bool {
+        return frameType == .copyFrame
+    }
+    
+    @inline(__always)
+    public var isIFrame: Bool {
+        return frameType == .iFrame
+    }
+    
+    @inline(__always)
     public var payloadSize: Int {
-        if isCopyFrame { return 0 }
+        if frameType == .copyFrame { return 0 }
         return mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
     }
     
     @inline(__always)
     public func serialize() -> [UInt8] {
         var out = [UInt8]()
-        if isCopyFrame {
-            out.append(0x01)
-        } else {
-            out.append(0x00)
+        out.append(frameType.rawValue)
+        if frameType != .copyFrame {
             appendUInt32BE(&out, UInt32(mvsCount))
             appendUInt32BE(&out, UInt32(mvsSize))
             appendUInt32BE(&out, UInt32(refDirSize))
@@ -156,8 +149,12 @@ public struct VEVCFrameHeader {
         let flag = r[offset]
         offset += 1
         
-        if flag == 0x01 {
-            return VEVCFrameHeader(isCopyFrame: true)
+        guard let fType = FrameType(rawValue: flag) else {
+            throw BinaryError.insufficientData(message: "VEVCFrameHeader invalid frameType \(flag)")
+        }
+        
+        if fType == .copyFrame {
+            return VEVCFrameHeader(frameType: .copyFrame)
         }
         
         let mvsCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
@@ -167,6 +164,6 @@ public struct VEVCFrameHeader {
         let layer1Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer2Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         
-        return VEVCFrameHeader(isCopyFrame: false, mvsCount: mvsCount, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, mvsCount: mvsCount, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }

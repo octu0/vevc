@@ -119,21 +119,28 @@ func createEncoder(width: Int, height: Int, maxbitrate: Int, framerate: Int, onC
 }
 
 @JS
-func encodeFrame(id: Int, data: JSValue) {
-    guard let session = encoderSessions[id] else { return }
-    guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { return }
-    
-    var localData = [UInt8](repeating: 0, count: typedArray.length)
-    localData.withUnsafeMutableBufferPointer { ptr in
-        typedArray.copyMemory(to: ptr)
-    }
-    let width = session.width
-    let height = session.height
-    Task {
-        // Run conversion in task to not block JS heavily
+func encodeFrame(id: Int, data: JSValue) -> JSValue {
+    let promise = JSPromise(resolver: { resolver in
+        guard let session = encoderSessions[id] else { 
+            resolver(.success(.undefined))
+            return 
+        }
+        guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { 
+            resolver(.success(.undefined))
+            return 
+        }
+        
+        var localData = [UInt8](repeating: 0, count: typedArray.length)
+        localData.withUnsafeMutableBufferPointer { ptr in
+            typedArray.copyMemory(to: ptr)
+        }
+        let width = session.width
+        let height = session.height
         let ycbcr = vevc.rgbaToYCbCr(data: localData, width: width, height: height)
         session.continuation.yield(ycbcr)
-    }
+        resolver(.success(.undefined))
+    })
+    return promise.jsValue
 }
 
 @JS
@@ -153,15 +160,25 @@ func createDecoder(onFrame: JSObject) -> JSValue {
 }
 
 @JS
-func decodeChunk(id: Int, data: JSValue) {
-    guard let session = decoderSessions[id] else { return }
-    guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { return }
-    
-    var localData = [UInt8](repeating: 0, count: typedArray.length)
-    localData.withUnsafeMutableBufferPointer { ptr in
-        typedArray.copyMemory(to: ptr)
-    }
-    session.continuation.yield(localData)
+func decodeChunk(id: Int, data: JSValue) -> JSValue {
+    let promise = JSPromise(resolver: { resolver in
+        guard let session = decoderSessions[id] else { 
+            resolver(.success(.undefined))
+            return 
+        }
+        guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { 
+            resolver(.success(.undefined))
+            return 
+        }
+        
+        var localData = [UInt8](repeating: 0, count: typedArray.length)
+        localData.withUnsafeMutableBufferPointer { ptr in
+            typedArray.copyMemory(to: ptr)
+        }
+        session.continuation.yield(localData)
+        resolver(.success(.undefined))
+    })
+    return promise.jsValue
 }
 
 @JS

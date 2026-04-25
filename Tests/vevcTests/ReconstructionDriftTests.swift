@@ -111,7 +111,7 @@ final class ReconstructionDriftTests: XCTestCase {
         let height = 480
         
         let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = CoreDecoder(width: width, height: height)
+        let decoder = StreamingDecoderActor(width: width, height: height)
         
         var img0 = YCbCrImage(width: width, height: height)
         for y in 0..<height {
@@ -128,8 +128,8 @@ final class ReconstructionDriftTests: XCTestCase {
             }
         }
         
-        let chunk0 = try await encoder.encodeSingleFrame(image: img0)
-        let dec0 = try await decoder.decodeGOP(chunk: chunk0)[0]
+        let chunk0 = try await encoder.encodeNextFrame(image: img0, isSceneChange: false)
+        let dec0 = try await decoder.decodeNextFrame(chunk: chunk0)!
         
         var img1 = img0
         for y in 0..<height {
@@ -139,8 +139,8 @@ final class ReconstructionDriftTests: XCTestCase {
             }
         }
         
-        let chunk1 = try await encoder.encodeSingleFrame(image: img1)
-        let dec1 = try await decoder.decodeGOP(chunk: chunk1)[0]
+        let chunk1 = try await encoder.encodeNextFrame(image: img1, isSceneChange: false)
+        let dec1 = try await decoder.decodeNextFrame(chunk: chunk1)!
         
         let enc0psnr = calculatePSNR(original: img0, decoded: dec0)
         let enc1psnr = calculatePSNR(original: img1, decoded: dec1)

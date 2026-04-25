@@ -78,29 +78,19 @@ public class VEVCEncoder {
                     let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate)
                     continuation.yield(fileHeader.serialize())
                     
-                    var buffer: [YCbCrImage] = []
+                    var lastImg: YCbCrImage? = nil
                     while let img = await iterator.next() {
-                        // Scene change detection: compare current frame with last frame in buffer
-                        if let lastImg = buffer.last {
-                            let sad = estimateFastSAD(a: img, b: lastImg)
-                            if sceneChangeThreshold < sad {
-                                // Scene change detected: force-flush current GOP buffer and encode
-                                let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
-                                continuation.yield(gopBytes)
-                                buffer.removeAll(keepingCapacity: true)
-                            }
+                        let isSceneChange: Bool
+                        if let last = lastImg {
+                            let sad = estimateFastSAD(a: img, b: last)
+                            isSceneChange = (sceneChangeThreshold < sad)
+                        } else {
+                            isSceneChange = false
                         }
                         
-                        buffer.append(img)
-                        if buffer.count == keyint {
-                            let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
-                            continuation.yield(gopBytes)
-                            buffer.removeAll(keepingCapacity: true)
-                        }
-                    }
-                    if buffer.isEmpty != true {
-                        let gopBytes = try await coreEncoder.encodeTemporalGOPChunk(images: buffer)
-                        continuation.yield(gopBytes)
+                        let bytes = try await coreEncoder.encodeNextFrame(image: img, isSceneChange: isSceneChange)
+                        continuation.yield(bytes)
+                        lastImg = img
                     }
                     continuation.finish()
                 } catch {
@@ -126,6 +116,15 @@ actor LayersEncodeActor {
     private var frameIndex = 0
     private var qt: QuantizationTable?
     
+    private var previousInputPlane: PlaneData420?
+    private var releasePreviousInput: (@Sendable () -> Void)?
+    
+    private var firstReconstructed: PlaneData420?
+    private var releaseFirstRecon: (@Sendable () -> Void)?
+    
+    private var previousReconstructed: PlaneData420?
+    private var releasePreviousRecon: (@Sendable () -> Void)?
+    
     init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool) {
         self.width = width
         self.height = height
@@ -138,143 +137,106 @@ actor LayersEncodeActor {
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
+    deinit {
+        releasePreviousInput?()
+        releasePreviousRecon?()
+        releaseFirstRecon?()
+    }
+    
     @inline(__always)
-    func encodeTemporalGOPChunk(images: [YCbCrImage]) async throws -> [UInt8] {
-        guard images.isEmpty != true else {
-            throw NSError(domain: "vevc.Encoder", code: 2, userInfo: [NSLocalizedDescriptionKey: "TemporalGOP4 requires at least 1 frame"])
-        }
+    func encodeNextFrame(image: YCbCrImage, isSceneChange: Bool) async throws -> [UInt8] {
+        let (plane, releasePlane) = toPlaneData420(image: image, pool: pool)
         
-        // Rate control
-        var baseQt: QuantizationTable
-        if keyint <= framesSinceKeyframe || frameIndex == 0 {
+        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange)
+        
+        if isIFrame {
+            // Rate control
             let targetBits = rateController.beginGOP()
-            baseQt = estimateQuantization(img: images[0], targetBits: targetBits)
+            let baseQt = estimateQuantization(img: image, targetBits: targetBits)
             self.qt = baseQt
             framesSinceKeyframe = 0
-        } else {
-            baseQt = self.qt!
-        }
-        framesSinceKeyframe += images.count
-        frameIndex += images.count
-        
-        let baseStep = Int(baseQt.step)
-        let localMaxbitrate = maxbitrate
-        let localZeroThreshold = zeroThreshold
-        
-        var encodedFrames = [[UInt8]]()
-        encodedFrames.reserveCapacity(images.count)
-        
-        let firstImg = images[0]
-        var (previousInputPlane, releasePreviousInput) = toPlaneData420(image: firstImg, pool: pool)
-        
-        let firstQtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
-        let firstQtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
-        
-        let (firstBytes, firstReconstructed, releaseFirstRecon) = try await encodeSpatialLayers(
-            pd: previousInputPlane, pool: pool, maxbitrate: localMaxbitrate,
-            qtY: firstQtY, qtC: firstQtC, zeroThreshold: localZeroThreshold, roundOffset: 0
-        )
-        defer { releaseFirstRecon() }
-        encodedFrames.append(firstBytes)
-        rateController.consumeIFrame(bits: firstBytes.count * 8, qStep: Int(firstQtY.step))
-        
-        var previousReconstructed = firstReconstructed
-        var previousRelease = releaseFirstRecon
-        
-        for idx in 1..<images.count {
-            let img = images[idx]
-            let (plane, releasePlane) = toPlaneData420(image: img, pool: pool)
             
-            // Duplicate frame detection
-            let isDuplicate = isPlaneIdentical(a: plane, b: previousInputPlane)
-            if isDuplicate {
-                encodedFrames.append(VEVCFrameHeader(isCopyFrame: true).serialize())
-                releasePlane()
-                continue
-            }
+            let baseStep = Int(baseQt.step)
+            let qtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
+            let qtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
             
-            releasePreviousInput()
+            let (bytes, reconstructed, releaseRecon) = try await encodeSpatialLayers(
+                pd: plane, pool: pool, maxbitrate: maxbitrate,
+                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0
+            )
+            
+            rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
+            
+            // Clean up old state
+            releasePreviousInput?()
+            releasePreviousRecon?()
+            releaseFirstRecon?()
+            
             previousInputPlane = plane
             releasePreviousInput = releasePlane
             
-            // P-frame Rate Control
-            let frameSAD = estimateFrameSAD(current: plane, previous: previousReconstructed)
+            firstReconstructed = reconstructed
+            releaseFirstRecon = releaseRecon
+            
+            previousReconstructed = reconstructed
+            releasePreviousRecon = nil
+            
+            framesSinceKeyframe += 1
+            frameIndex += 1
+            
+            return bytes
+        } else {
+            // Duplicate frame detection
+            if let prevIn = previousInputPlane {
+                let isDuplicate = isPlaneIdentical(a: plane, b: prevIn)
+                if isDuplicate {
+                    releasePlane()
+                    framesSinceKeyframe += 1
+                    frameIndex += 1
+                    return VEVCFrameHeader(frameType: .copyFrame).serialize()
+                }
+            }
+            
+            releasePreviousInput?()
+            previousInputPlane = plane
+            releasePreviousInput = releasePlane
+            
+            guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed else {
+                throw NSError(domain: "vevc.Encoder", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing reference frames for P-frame"])
+            }
+            let baseStep = Int(baseQt.step)
+            
+            let frameSAD = estimateFrameSAD(current: plane, previous: prevRecon)
             let adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
             let qtY = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
             
-            // Always encode bidirectionally after the first frame
             let (bytes, reconstructed, releaseRecon) = try await encodeSpatialLayers(
-                pd: plane, pool: pool, predictedPd: previousReconstructed, nextPd: firstReconstructed,
-                maxbitrate: localMaxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: localZeroThreshold,
-                roundOffset: idx % 2, gopPosition: idx
+                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon,
+                maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
+                roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
             )
             
-            encodedFrames.append(bytes)
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD)
             
-            let releaseOldRecon = previousRelease
-            previousRelease = releaseRecon
+            let oldRecon = previousReconstructed!
+            let oldRelease = releasePreviousRecon
             
-            let isPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
-                firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
+            let isPrevFirst = oldRecon.y.withUnsafeBufferPointer { p in
+                firstRecon.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
             }
             if isPrevFirst != true {
-                releaseOldRecon()
+                oldRelease?()
             }
+            
             previousReconstructed = reconstructed
+            releasePreviousRecon = releaseRecon
+            
+            framesSinceKeyframe += 1
+            frameIndex += 1
+            
+            return bytes
         }
-        
-        releasePreviousInput()
-        
-        let isFinalPrevFirst = previousReconstructed.y.withUnsafeBufferPointer { p in 
-            firstReconstructed.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
-        }
-        if isFinalPrevFirst != true {
-            previousRelease()
-        }
-        releaseFirstRecon()
-
-        let gopHeader = VEVCGOPHeader(frameCount: images.count)
-        
-        var out: [UInt8] = []
-        out.append(contentsOf: gopHeader.serialize())
-        
-        for encoded in encodedFrames {
-            out.append(contentsOf: encoded)
-        }
-        
-        return out
-    }
-    
-    @inline(__always)
-    func encodeSingleFrame(image: YCbCrImage) async throws -> [UInt8] {
-        let (curr, releaseCurr) = toPlaneData420(image: image, pool: pool)
-        defer { releaseCurr() }
-        
-        if keyint <= framesSinceKeyframe || frameIndex == 0 {
-            let targetBits = rateController.beginGOP()
-            self.qt = estimateQuantization(img: image, targetBits: targetBits)
-            framesSinceKeyframe = 0
-        }
-        guard let qt = self.qt else { throw NSError(domain: "vevc.Encoder", code: 1, userInfo: nil) }
-        
-        let qtY = QuantizationTable(baseStep: max(1, Int(qt.step)), isChroma: false, layerIndex: 0)
-        let qtC = QuantizationTable(baseStep: max(1, Int(qt.step) * 2), isChroma: true, layerIndex: 0)
-        
-        let (bytes, _, releaseRecon) = try await encodeSpatialLayers(pd: curr, pool: pool, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: frameIndex % 2)
-        defer { releaseRecon() }
-        
-        framesSinceKeyframe += 1
-        frameIndex += 1
-        
-        let gopHeader = VEVCGOPHeader(frameCount: 1)
-        
-        var out: [UInt8] = []
-        out.append(contentsOf: gopHeader.serialize())
-        out.append(contentsOf: bytes)
-        
-        return out
     }
 }
 

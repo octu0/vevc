@@ -64,8 +64,8 @@ final class ParallelCodecTests: XCTestCase {
         for try await chunk in chunkStream {
             chunks.append(chunk)
         }
-        // Temporal encoding: 10 frames with GOP=4 → 1 VEVC Header + 2 VTGI (4+4=8 frames) + 1 VTGI (2 frames) = 4 chunks
-        XCTAssertEqual(chunks.count, 4, "10 frames with temporal GOP=4 should produce 4 chunks (1 Header + 2 VTGI + 1 VTGI).")
+        // Temporal encoding: 10 frames -> 1 VEVC Header + 10 Frames = 11 chunks
+        XCTAssertEqual(chunks.count, 11, "10 frames should produce 11 chunks (1 Header + 10 Frames).")
         
         // Emulate streaming bitstream chunks
         let encodedStream = AsyncStream<[UInt8]> { continuation in

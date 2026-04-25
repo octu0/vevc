@@ -99,84 +99,79 @@ func runSplitter(input: String, output: String, maxLayer: Int) throws {
     var droppedLayer2Bytes = 0
     
     while true {
-        let gopHeaderData: [UInt8]
+        let flagData: [UInt8]
         do {
-            gopHeaderData = try readFully(count: 4) // GOPHeader is frameCount(UInt32)
+            flagData = try readFully(count: 1)
         } catch {
             break // EOF expected here
         }
         
-        var goOffset = 0
-        let gopHeader = try VEVCGOPHeader.deserialize(from: gopHeaderData, offset: &goOffset)
-        try outputHandle.write(contentsOf: gopHeaderData)
-        
-        for _ in 0..<gopHeader.frameCount {
-            let flagData = try readFully(count: 1)
-            let isCopyFrame = (flagData[0] == 0x01)
-            
-            if isCopyFrame {
-                try outputHandle.write(contentsOf: flagData)
-                processedFrames += 1
-                continue
-            }
-            
-            let sizesData = try readFully(count: 24)
-            var offset = 0
-            let mvsCount = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
-            let mvsSize = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
-            let refDirSize = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
-            let layer0Size = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
-            let layer1Size = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
-            let layer2Size = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
-            
-            // Reconstruct sizes based on maxLayer
-            let newLayer1Size = (maxLayer >= 1) ? layer1Size : 0
-            let newLayer2Size = (maxLayer >= 2) ? layer2Size : 0
-            
-            let newFrameHeader = VEVCFrameHeader(
-                isCopyFrame: false,
-                mvsCount: mvsCount,
-                mvsSize: mvsSize,
-                refDirSize: refDirSize,
-                layer0Size: layer0Size,
-                layer1Size: newLayer1Size,
-                layer2Size: newLayer2Size
-            )
-            
-            try outputHandle.write(contentsOf: newFrameHeader.serialize())
-            
-            // Read all payloads & slice
-            if mvsSize > 0 {
-                let mvsPayload = try readFully(count: mvsSize)
-                try outputHandle.write(contentsOf: mvsPayload)
-            }
-            if refDirSize > 0 {
-                let refDirPayload = try readFully(count: refDirSize)
-                try outputHandle.write(contentsOf: refDirPayload)
-            }
-            if layer0Size > 0 {
-                let layer0Payload = try readFully(count: layer0Size)
-                try outputHandle.write(contentsOf: layer0Payload)
-            }
-            
-            if layer1Size > 0 {
-                let bytes = try readFully(count: layer1Size)
-                if maxLayer >= 1 {
-                    try outputHandle.write(contentsOf: bytes)
-                } else {
-                    droppedLayer1Bytes += bytes.count
-                }
-            }
-            if layer2Size > 0 {
-                let bytes = try readFully(count: layer2Size)
-                if maxLayer >= 2 {
-                    try outputHandle.write(contentsOf: bytes)
-                } else {
-                    droppedLayer2Bytes += bytes.count
-                }
-            }
-            processedFrames += 1
+        guard let fType = VEVCFrameHeader.FrameType(rawValue: flagData[0]) else {
+            throw NSError(domain: "vevc-splitter", code: 2, userInfo: [NSLocalizedDescriptionKey: "Invalid frame type flag \(flagData[0])"])
         }
+        
+        if fType == .copyFrame {
+            try outputHandle.write(contentsOf: flagData)
+            processedFrames += 1
+            continue
+        }
+        
+        let sizesData = try readFully(count: 24)
+        var offset = 0
+        let mvsCount = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
+        let mvsSize = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
+        let refDirSize = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
+        let layer0Size = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
+        let layer1Size = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
+        let layer2Size = Int(try readUInt32BEFromBytes(sizesData, offset: &offset))
+        
+        // Reconstruct sizes based on maxLayer
+        let newLayer1Size = (maxLayer >= 1) ? layer1Size : 0
+        let newLayer2Size = (maxLayer >= 2) ? layer2Size : 0
+        
+        let newFrameHeader = VEVCFrameHeader(
+            frameType: fType,
+            mvsCount: mvsCount,
+            mvsSize: mvsSize,
+            refDirSize: refDirSize,
+            layer0Size: layer0Size,
+            layer1Size: newLayer1Size,
+            layer2Size: newLayer2Size
+        )
+        
+        try outputHandle.write(contentsOf: newFrameHeader.serialize())
+        
+        // Read all payloads & slice
+        if mvsSize > 0 {
+            let mvsPayload = try readFully(count: mvsSize)
+            try outputHandle.write(contentsOf: mvsPayload)
+        }
+        if refDirSize > 0 {
+            let refDirPayload = try readFully(count: refDirSize)
+            try outputHandle.write(contentsOf: refDirPayload)
+        }
+        if layer0Size > 0 {
+            let layer0Payload = try readFully(count: layer0Size)
+            try outputHandle.write(contentsOf: layer0Payload)
+        }
+        
+        if layer1Size > 0 {
+            let bytes = try readFully(count: layer1Size)
+            if maxLayer >= 1 {
+                try outputHandle.write(contentsOf: bytes)
+            } else {
+                droppedLayer1Bytes += bytes.count
+            }
+        }
+        if layer2Size > 0 {
+            let bytes = try readFully(count: layer2Size)
+            if maxLayer >= 2 {
+                try outputHandle.write(contentsOf: bytes)
+            } else {
+                droppedLayer2Bytes += bytes.count
+            }
+        }
+        processedFrames += 1
     }
     
     let totalDropped = droppedLayer1Bytes + droppedLayer2Bytes

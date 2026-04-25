@@ -114,7 +114,7 @@ final class FlickerDetectionTests: XCTestCase {
             sceneChangeThreshold: 8,
             pool: BlockViewPool()
         )
-        let decoder = CoreDecoder(width: width, height: height)
+        let decoder = StreamingDecoderActor(width: width, height: height)
 
         var originals: [YCbCrImage] = []
         var decoded: [YCbCrImage] = []
@@ -124,10 +124,10 @@ final class FlickerDetectionTests: XCTestCase {
             let img = generateGradientFrame(width: width, height: height, frameIndex: i)
             originals.append(img)
 
-            let chunk = try await encoder.encodeSingleFrame(image: img)
+            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
             frameSizes.append(chunk.count)
 
-            let dec = try await decoder.decodeGOP(chunk: chunk)[0]
+            let dec = try await decoder.decodeNextFrame(chunk: chunk)!
             decoded.append(dec)
         }
 
@@ -195,16 +195,16 @@ final class FlickerDetectionTests: XCTestCase {
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)
 
         // I-frame
-        let iFrameBytes = try await encoder.encodeSingleFrame(image: img)
+        let iFrameBytes = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
 
         // 動きがほぼないP-frame（同じ画像）
-        let pFrame1Bytes = try await encoder.encodeSingleFrame(image: img)
+        let pFrame1Bytes = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
 
         // 微小な動きのあるP-frame
-        let pFrame2Bytes = try await encoder.encodeSingleFrame(image: imgSlightlyDifferent)
+        let pFrame2Bytes = try await encoder.encodeNextFrame(image: imgSlightlyDifferent, isSceneChange: false)
 
         // 再度動きなし
-        let pFrame3Bytes = try await encoder.encodeSingleFrame(image: img)
+        let pFrame3Bytes = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
 
         // サイズの変動を記録
         print("[Flicker] I-frame: \(iFrameBytes.count) bytes")
@@ -212,15 +212,10 @@ final class FlickerDetectionTests: XCTestCase {
         print("[Flicker] P-frame2(微小動き): \(pFrame2Bytes.count) bytes")
         print("[Flicker] P-frame3(同一に戻る): \(pFrame3Bytes.count) bytes")
 
-        // P-frameサイズが急変していないか確認（フレームサイズが急変=量子化ステップが急変）
-        let maxPFrameSize = max(pFrame1Bytes.count, pFrame2Bytes.count, pFrame3Bytes.count)
-        let minPFrameSize = min(pFrame1Bytes.count, pFrame2Bytes.count, pFrame3Bytes.count)
-        let sizeRatio = Double(maxPFrameSize) / Double(max(1, minPFrameSize))
-
-        print("[Flicker] P-frameサイズ比: \(String(format: "%.2f", sizeRatio))x")
-
-        // サイズの急変はフリッカーの間接的指標
-        // 10倍以上の変動は問題（現状の閾値は緩め）
-        XCTAssertLessThan(sizeRatio, 10.0, "P-frameサイズの比率が大きすぎる")
+        // P-frame1 is identical to the I-frame, so it's a .copyFrame (1 byte).
+        // P-frame3 returns to 'img', which is different from its immediate predecessor 'imgSlightlyDifferent', so it has a normal size.
+        XCTAssertLessThan(pFrame1Bytes.count, 10, "Identical frame should be encoded as an extremely small copy frame")
+        XCTAssertGreaterThan(pFrame2Bytes.count, 100, "Frame with movement should have normal encoded size")
+        XCTAssertGreaterThan(pFrame3Bytes.count, 100, "Frame with movement should have normal encoded size")
     }
 }

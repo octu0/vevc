@@ -131,11 +131,11 @@ final class ChromaBlockTests: XCTestCase {
             sceneChangeThreshold: 8,
             pool: BlockViewPool()
         )
-        let decoder = CoreDecoder(width: width, height: height)
+        let decoder = StreamingDecoderActor(width: width, height: height)
 
         let original = generateColorBarFrame(width: width, height: height)
-        let chunk = try await encoder.encodeSingleFrame(image: original)
-        let dec = try await decoder.decodeGOP(chunk: chunk)[0]
+        let chunk = try await encoder.encodeNextFrame(image: original, isSceneChange: false)
+        let dec = try await decoder.decodeNextFrame(chunk: chunk)!
 
         // プレーンごとのSSIM
         let ssimY = calcPlaneSSIM(
@@ -180,17 +180,17 @@ final class ChromaBlockTests: XCTestCase {
             sceneChangeThreshold: 8,
             pool: BlockViewPool()
         )
-        let decoder = CoreDecoder(width: width, height: height)
+        let decoder = StreamingDecoderActor(width: width, height: height)
 
         // I-frame
         let frame0 = generateDiagonalGradientFrame(width: width, height: height)
-        let chunk0 = try await encoder.encodeSingleFrame(image: frame0)
-        _ = try await decoder.decodeGOP(chunk: chunk0)[0]
+        let chunk0 = try await encoder.encodeNextFrame(image: frame0, isSceneChange: false)
+        _ = try await decoder.decodeNextFrame(chunk: chunk0)!
 
         // P-frame: 同一フレーム（動きなし → 粗い量子化ケースへ）
         let frame1 = generateDiagonalGradientFrame(width: width, height: height)
-        let chunk1 = try await encoder.encodeSingleFrame(image: frame1)
-        let dec1 = try await decoder.decodeGOP(chunk: chunk1)[0]
+        let chunk1 = try await encoder.encodeNextFrame(image: frame1, isSceneChange: false)
+        let dec1 = try await decoder.decodeNextFrame(chunk: chunk1)!
 
         let cw = (width + 1) / 2
         let ch = (height + 1) / 2
