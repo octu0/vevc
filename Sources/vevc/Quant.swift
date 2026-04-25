@@ -74,10 +74,10 @@ struct QuantizationTable: Sendable {
         }
 
         if isChroma {
-            // Allow chroma to be quantized much more coarsely than luma to save massive bitrate.
-            let cLow = min(32, max(1, baseStep / 8))
-            let cMid = min(64, max(1, (baseStep * qMidNum) / qMidDen))
-            let cHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
+            // Prevent color loss in high-motion scenes by capping chroma quantization steps.
+            let cLow = min(16, max(1, baseStep / 8))
+            let cMid = min(24, max(1, (baseStep * qMidNum) / qMidDen))
+            let cHigh = min(48, max(1, (baseStep * qHighNum) / qHighDen))
             
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
@@ -87,13 +87,18 @@ struct QuantizationTable: Sendable {
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
             
-            // qMid: Cap at 40 to tightly balance bitrate reduction and contour protection (SD <= 0.03)
-            let lMid = min(40, max(1, (baseStep * qMidNum) / qMidDen))
+            // qMid: Cap at 64 to preserve facial contours and important structural edges
+            let lMid = min(64, max(1, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
             
-            // qHigh: Cap at 80 to tightly balance bitrate reduction and fine edge protection (SD <= 0.03)
-            let lHigh = min(80, max(1, (baseStep * qHighNum) / qHighDen))
-            self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
+            // qHigh: Cap at 128 to allow background/fine details to degrade but prevent severe blocking artifacts
+            if layerIndex == 2 {
+                let lHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: -1638)
+            } else {
+                let lHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
+            }
         }
     }
 }

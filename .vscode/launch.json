@@ -99,6 +99,46 @@
             "target": "example-dec",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release example-dec"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug vevc-splitter",
+            "target": "vevc-splitter",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vevc-splitter"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release vevc-splitter",
+            "target": "vevc-splitter",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vevc-splitter"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug vevc-training",
+            "target": "vevc-training",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vevc-training"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release vevc-training",
+            "target": "vevc-training",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vevc-training"
         }
     ]
 }
