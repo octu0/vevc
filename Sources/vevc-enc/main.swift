@@ -111,7 +111,7 @@ do {
         }
     }
 
-    let chunkStream = encoder.encode(stream: frameStream)
+    let chunkStream = await encoder.encode(stream: frameStream)
     frameCount = try await Task(priority: .userInitiated) {
         var count = 0
         for try await chunk in chunkStream {

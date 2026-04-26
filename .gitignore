@@ -64,3 +64,5 @@ fastlane/test_output
 .DS_Store
 .vscode/settings.json
 .tmp/
+
+Tests/vevcSpecV1/testdata/*.y4m

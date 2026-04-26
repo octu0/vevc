@@ -60,7 +60,7 @@ final class ParallelCodecTests: XCTestCase {
         let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 4, sceneChangeThreshold: 100, maxConcurrency: 2)
         
         var chunks: [[UInt8]] = []
-        let chunkStream = encoder.encode(stream: frameStream)
+        let chunkStream = await encoder.encode(stream: frameStream)
         for try await chunk in chunkStream {
             chunks.append(chunk)
         }

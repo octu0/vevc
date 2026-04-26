@@ -29,6 +29,11 @@ var packageTargets: [Target] = [
         name: "vevcTests",
         dependencies: ["vevc"]
     ),
+    .testTarget(
+        name: "vevcSpecV1",
+        dependencies: ["vevc"],
+        exclude: ["testdata"]
+    ),
     .executableTarget(
         name: "example-enc",
         dependencies: [
