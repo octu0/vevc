@@ -69,18 +69,20 @@ public struct VEVCFileHeader {
         _ = chunk[offset] // Timescale
         offset += 1
         
-        if offset + 1536 <= payloadEnd {
-            StaticRANSModels.shared.runModel0 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.valModel0 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.runModel1 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.valModel1 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.runModel2 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.valModel2 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.runModel3 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.valModel3 = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.dpcmRunModel = deserializeRANSModel(from: chunk, offset: &offset)
-            StaticRANSModels.shared.dpcmValModel = deserializeRANSModel(from: chunk, offset: &offset)
+        guard offset + 2560 <= payloadEnd else {
+            throw DecodeError.insufficientDataContext("VEVC FileHeader static rANS models missing or truncated")
         }
+        
+        StaticRANSModels.shared.runModel0 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.valModel0 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.runModel1 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.valModel1 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.runModel2 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.valModel2 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.runModel3 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.valModel3 = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.dpcmRunModel = deserializeRANSModel(from: chunk, offset: &offset)
+        StaticRANSModels.shared.dpcmValModel = deserializeRANSModel(from: chunk, offset: &offset)
         
         offset = payloadEnd
         return VEVCFileHeader(width: w, height: h, framerate: fps)
