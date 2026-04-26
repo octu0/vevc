@@ -6,3 +6,9 @@ wasm:
 .PHONY: build
 build:
 	swift build -c release
+
+.PHONY: libvevc
+libvevc:
+	swift build -c release --product libvevc
+	swift build -c release --product libvevc_static
+	@echo "Dynamic and static libraries are generated in .build/release/"

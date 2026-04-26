@@ -1,6 +1,5 @@
 // MARK: - Encode Context
 
-
 public enum EncodeError: Error {
     case unsupportedArchitecture
 }
@@ -1189,4 +1188,3 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     }
     lastVal = last
 }
-

@@ -268,9 +268,86 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 
 ---
 
+## C API (libvevc)
+
+We provide a C interface for synchronously encoding and decoding frame by frame.
+
+### Encoder Example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include "encode.h"
+
+int main() {
+    vevc_enc_param_t param = {
+        .width = 1920,
+        .height = 1080,
+        .maxbitrate = 1500,
+        .framerate = 30,
+        .zero_threshold = 3,
+        .keyint = 60,
+        .scene_change_threshold = 10,
+        .max_concurrency = 4
+    };
+
+    VEVC_ENC enc = vevc_enc_create(&param);
+
+    // Create and configure imgb
+    vevc_enc_imgb_t imgb = {
+        .y = y_buffer,
+        .u = u_buffer,
+        .v = v_buffer,
+        .stride_y = 1920,
+        .stride_u = 960,
+        .stride_v = 960
+    };
+
+    vevc_enc_result_t* res = vevc_enc_encode(enc, &imgb);
+    if (res->status == VEVC_OK && res->data != NULL) {
+        // Process res->data (e.g., write to a file)
+        // NOTE: The data pointer points to an internal buffer and is only valid until the next vevc_enc_* call.
+        printf("Encoded frame size: %zu\n", res->size);
+    }
+    
+    // Flush to push out remaining buffers (no B-frame delay in vevc)
+    vevc_enc_result_t* f_res = vevc_enc_flush(enc);
+
+    vevc_enc_destroy(enc);
+    return 0;
+}
+```
+
+### Decoder Example
+
+```c
+#include <stdio.h>
+#include <stdlib.h>
+#include "decode.h"
+
+int main() {
+    VEVC_DEC dec = vevc_dec_create(2, 4, 1920, 1080);
+
+    // Decode chunk data
+    vevc_dec_result_t* res = vevc_dec_decode(dec, chunk_data, chunk_size);
+    if (res->status == VEVC_OK && res->y != NULL) {
+        // Use res->y, res->u, res->v
+        // NOTE: The pointers point to an internal buffer and are only valid until the next vevc_dec_* call.
+        printf("Decoded frame size: %d x %d\n", res->width, res->height);
+    }
+
+    vevc_dec_destroy(dec);
+    return 0;
+}
+```
+
+---
+
 # Online DEMO
 
 [vevc wasm demo](https://octu0.github.io/vevc-wasm-demo/)
+
+---
 
 ## License
 

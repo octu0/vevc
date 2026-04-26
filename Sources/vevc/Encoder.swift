@@ -1,18 +1,21 @@
 import Foundation
 
-
-
 // MARK: - LayersEncoder & LayersCoreEncoder (Temporal DWT, Mode=0x00)
 
-public class VEVCEncoder {
-    public let width: Int
-    public let height: Int
-    public let maxbitrate: Int
-    public let framerate: Int
-    public let zeroThreshold: Int
-    public let keyint: Int
-    public let sceneChangeThreshold: Int
-    public let maxConcurrency: Int
+public actor VEVCEncoder {
+    public nonisolated let width: Int
+    public nonisolated let height: Int
+    public nonisolated let maxbitrate: Int
+    public nonisolated let framerate: Int
+    public nonisolated let zeroThreshold: Int
+    public nonisolated let keyint: Int
+    public nonisolated let sceneChangeThreshold: Int
+    public nonisolated let maxConcurrency: Int
+    
+    private let coreEncoder: LayersEncodeActor
+    private var lastImg: YCbCrImage? = nil
+    private var frameIndex = 0
+    private let pool: BlockViewPool
     
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
         self.width = width
@@ -23,6 +26,18 @@ public class VEVCEncoder {
         self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
         self.maxConcurrency = maxConcurrency
+        
+        self.pool = BlockViewPool()
+        self.coreEncoder = LayersEncodeActor(
+            width: width,
+            height: height,
+            maxbitrate: maxbitrate,
+            framerate: framerate,
+            zeroThreshold: zeroThreshold,
+            keyint: keyint,
+            sceneChangeThreshold: sceneChangeThreshold,
+            pool: pool
+        )
     }
     
     public func encode(images: [YCbCrImage]) async throws -> [[UInt8]] {
@@ -50,47 +65,38 @@ public class VEVCEncoder {
         return result
     }
 
-    public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
-        let width = self.width
-        let height = self.height
-        let maxbitrate = self.maxbitrate
-        let framerate = self.framerate
-        let zeroThreshold = self.zeroThreshold
-        let keyint = self.keyint
-        let sceneChangeThreshold = self.sceneChangeThreshold
+    public func encode(image: YCbCrImage) async throws -> [UInt8] {
+        let isSceneChange: Bool
+        if let last = lastImg {
+            let sad = estimateFastSAD(a: image, b: last)
+            isSceneChange = (sceneChangeThreshold < sad)
+        } else {
+            isSceneChange = false
+        }
         
+        let bytes = try await coreEncoder.encodeNextFrame(image: image, isSceneChange: isSceneChange)
+        
+        var result: [UInt8] = []
+        if frameIndex == 0 {
+            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate)
+            result.append(contentsOf: fileHeader.serialize())
+        }
+        result.append(contentsOf: bytes)
+        
+        lastImg = image
+        frameIndex += 1
+        
+        return result
+    }
+
+    public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
-                let pool = BlockViewPool()
-                let coreEncoder = LayersEncodeActor(
-                    width: width,
-                    height: height,
-                    maxbitrate: maxbitrate,
-                    framerate: framerate,
-                    zeroThreshold: zeroThreshold,
-                    keyint: keyint,
-                    sceneChangeThreshold: sceneChangeThreshold,
-                    pool: pool
-                )
-                
                 do {
-                    let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate)
-                    continuation.yield(fileHeader.serialize())
-                    
-                    var lastImg: YCbCrImage? = nil
                     while let img = await iterator.next() {
-                        let isSceneChange: Bool
-                        if let last = lastImg {
-                            let sad = estimateFastSAD(a: img, b: last)
-                            isSceneChange = (sceneChangeThreshold < sad)
-                        } else {
-                            isSceneChange = false
-                        }
-                        
-                        let bytes = try await coreEncoder.encodeNextFrame(image: img, isSceneChange: isSceneChange)
+                        let bytes = try await self.encode(image: img)
                         continuation.yield(bytes)
-                        lastImg = img
                     }
                     continuation.finish()
                 } catch {
@@ -125,7 +131,7 @@ actor LayersEncodeActor {
     private var previousReconstructed: PlaneData420?
     private var releasePreviousRecon: (@Sendable () -> Void)?
     
-    init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -137,6 +143,18 @@ actor LayersEncodeActor {
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int) {
+        self.width = width
+        self.height = height
+        self.maxbitrate = maxbitrate
+        self.framerate = framerate
+        self.zeroThreshold = zeroThreshold
+        self.keyint = keyint
+        self.sceneChangeThreshold = sceneChangeThreshold
+        self.pool = BlockViewPool()
+        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+    }
+    
     deinit {
         releasePreviousInput?()
         releasePreviousRecon?()
@@ -144,7 +162,7 @@ actor LayersEncodeActor {
     }
     
     @inline(__always)
-    func encodeNextFrame(image: YCbCrImage, isSceneChange: Bool) async throws -> [UInt8] {
+    public func encodeNextFrame(image: YCbCrImage, isSceneChange: Bool) async throws -> [UInt8] {
         let (plane, releasePlane) = toPlaneData420(image: image, pool: pool)
         
         let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange)

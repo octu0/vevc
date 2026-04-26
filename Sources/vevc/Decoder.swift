@@ -64,7 +64,7 @@ actor ConcurrencyLimiter {
 
 
 
-actor StreamingDecoderActor {
+public actor StreamingDecoderActor {
     let maxLayer: Int
     let width: Int
     let height: Int
@@ -75,7 +75,7 @@ actor StreamingDecoderActor {
     private var roundOffsetIndex = 0
     private var seenY = Set<UnsafeMutableRawPointer>()
     
-    init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
@@ -83,7 +83,7 @@ actor StreamingDecoderActor {
     }
     
     @inline(__always)
-    func decodeNextFrame(chunk: [UInt8]) async throws -> YCbCrImage? {
+    public func decodeNextFrame(chunk: [UInt8]) async throws -> YCbCrImage? {
         guard !chunk.isEmpty else { return nil }
         
         var offset = 0
