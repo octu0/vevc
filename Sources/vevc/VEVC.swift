@@ -165,7 +165,14 @@ final class BaseBlockViewPool: @unchecked Sendable {
         
         #if arch(wasm32)
         var bucket = pools[key] ?? []
-        if bucket.count < maxPerSize {
+        let limit: Int
+        switch key {
+        case 1024: limit = 8000
+        case 256: limit = 30000
+        case 64: limit = 100000
+        default: limit = maxPerSize
+        }
+        if bucket.count < limit {
             bucket.append(block)
             pools[key] = bucket
         } else {
@@ -217,7 +224,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
         let count = array.count
         #if arch(wasm32)
         var bucket = int16Pools[count] ?? []
-        if bucket.count < maxPerSize {
+        if bucket.count < 16 {
             bucket.append(array)
             int16Pools[count] = bucket
         }
@@ -257,13 +264,16 @@ final class BaseBlockViewPool: @unchecked Sendable {
 
     @inline(__always)
     func putBlockViewArray(_ array: [BlockView]) {
+        for block in array {
+            self.put(block)
+        }
         let capacity = array.capacity
         var arr = array
         arr.removeAll(keepingCapacity: true)
         
         #if arch(wasm32)
         var bucket = arrayPools[capacity] ?? []
-        if bucket.count < maxPerSize {
+        if bucket.count < 16 {
             bucket.append(arr)
             arrayPools[capacity] = bucket
         }

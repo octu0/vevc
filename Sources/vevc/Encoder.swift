@@ -89,12 +89,12 @@ public actor VEVCEncoder {
         return result
     }
 
-    public func encode(stream: AsyncStream<YCbCrImage>) -> AsyncThrowingStream<[UInt8], Error> {
+    public func encode<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<[UInt8], Error> where S.Element == YCbCrImage {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
                 do {
-                    while let img = await iterator.next() {
+                    while let img = try await iterator.next() {
                         let bytes = try await self.encode(image: img)
                         continuation.yield(bytes)
                     }

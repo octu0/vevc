@@ -199,17 +199,16 @@ public struct Decoder: Sendable {
         return chunkContinuation
     }
 
-    public func decode(stream: AsyncStream<[UInt8]>) -> AsyncThrowingStream<YCbCrImage, Error> {
+    public func decode<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<YCbCrImage, Error> where S.Element == [UInt8] {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
                 
-                guard let firstChunk = await iterator.next() else {
-                    continuation.finish(throwing: DecodeError.insufficientDataContext("missing VEVC header chunk"))
-                    return
-                }
-                
                 do {
+                    guard let firstChunk = try await iterator.next() else {
+                        continuation.finish(throwing: DecodeError.insufficientDataContext("missing VEVC header chunk"))
+                        return
+                    }
                     var headerOffset = 0
                     let fileHeader = try VEVCFileHeader.deserialize(from: firstChunk, offset: &headerOffset)
                     let effectiveWidth = fileHeader.width
@@ -238,7 +237,7 @@ public struct Decoder: Sendable {
                     let limiter = ConcurrencyLimiter(limit: maxConcurrency)
                     var currentGOPInput: AsyncStream<[UInt8]>.Continuation? = nil
                     
-                    while let chunk = await iterator.next() {
+                    let processChunk: ([UInt8]) -> Void = { chunk in
                         var offset = 0
                         let frameHeader = try? VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
                         let isIFrame = frameHeader?.isIFrame ?? false
@@ -263,6 +262,15 @@ public struct Decoder: Sendable {
                             currentGOPInput = newInput
                             newInput.yield(chunk)
                         }
+                    }
+
+                    if headerOffset < firstChunk.count {
+                        let remainder = Array(firstChunk[headerOffset...])
+                        processChunk(remainder)
+                    }
+
+                    while let chunk = try await iterator.next() {
+                        processChunk(chunk)
                     }
                     currentGOPInput?.finish()
                     gopContinuation.finish()

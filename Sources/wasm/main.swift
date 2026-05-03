@@ -27,12 +27,83 @@ final class UnsafeDecoder: @unchecked Sendable {
     init(_ raw: vevc.Decoder) { self.raw = raw }
 }
 
+final class ResolverBox: @unchecked Sendable {
+    var action: (() -> Void)?
+    init(action: @escaping () -> Void) { self.action = action }
+}
+
+actor FrameInbox<Element: Sendable>: Sendable {
+    private var queue: [Element] = []
+    private var waitingProducers: [(Element, CheckedContinuation<Void, Never>)] = []
+    private var waitingConsumer: CheckedContinuation<Element?, Never>?
+    private let capacity: Int
+    private var finished = false
+
+    init(capacity: Int) { self.capacity = capacity }
+
+    func produce(_ frame: Element) async {
+        if let c = waitingConsumer {
+            waitingConsumer = nil
+            c.resume(returning: frame)
+            return
+        }
+        if queue.count < capacity {
+            queue.append(frame)
+            return
+        }
+        await withCheckedContinuation { cont in
+            waitingProducers.append((frame, cont))
+        }
+    }
+
+    func consume() async -> Element? {
+        if queue.isEmpty == false {
+            let f = queue.removeFirst()
+            if let (next, cont) = waitingProducers.first {
+                waitingProducers.removeFirst()
+                queue.append(next)
+                cont.resume()
+            }
+            return f
+        }
+        if finished { return nil }
+        return await withCheckedContinuation { cont in
+            waitingConsumer = cont
+        }
+    }
+
+    func finish() {
+        finished = true
+        waitingConsumer?.resume(returning: nil)
+        waitingConsumer = nil
+        for (_, cont) in waitingProducers { cont.resume() }
+        waitingProducers.removeAll()
+    }
+}
+
+struct InboxStream<T: Sendable>: AsyncSequence, AsyncIteratorProtocol, @unchecked Sendable {
+    typealias Element = T
+    let inbox: FrameInbox<T>
+    
+    init(_ inbox: FrameInbox<T>) {
+        self.inbox = inbox
+    }
+    
+    func makeAsyncIterator() -> InboxStream {
+        return self
+    }
+    
+    mutating func next() async -> T? {
+        return await inbox.consume()
+    }
+}
+
 class EncoderSession {
     let id: Int
     let encoder: UnsafeEncoder
     let width: Int
     let height: Int
-    let continuation: AsyncStream<YCbCrImage>.Continuation
+    let inbox: FrameInbox<YCbCrImage>
     var onChunk: JSObject
     
     struct Callbacks: @unchecked Sendable {
@@ -46,21 +117,25 @@ class EncoderSession {
         self.encoder = UnsafeEncoder(vevc.VEVCEncoder(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate))
         self.onChunk = onChunk
         
-        let (stream, continuation) = AsyncStream<YCbCrImage>.makeStream()
-        self.continuation = continuation
+        self.inbox = FrameInbox(capacity: 2)
+        let localInbox = self.inbox
+        let stream = InboxStream(localInbox)
         
         let callbacks = Callbacks(onChunk: onChunk)
         let localEncoder = self.encoder
         
         Task {
             do {
-                let outStream = localEncoder.raw.encode(stream: stream)
+                print("EncoderTask: starting encode")
+                let outStream = await localEncoder.raw.encode(stream: stream)
                 for try await chunk in outStream {
+                    print("EncoderTask: got chunk of size \(chunk.count)")
                     let result = chunk.withUnsafeBytes { buf in
                         JSTypedArray<UInt8>(buffer: buf.bindMemory(to: UInt8.self))
                     }
                     _ = callbacks.onChunk.callAsFunction(result.jsValue)
                 }
+                print("EncoderTask: finished outStream")
             } catch {
                 print("Encoder error: \(error)")
             }
@@ -71,7 +146,7 @@ class EncoderSession {
 class DecoderSession {
     let id: Int
     let decoder: UnsafeDecoder
-    let continuation: AsyncStream<[UInt8]>.Continuation
+    let inbox: FrameInbox<[UInt8]>
     var onFrame: JSObject
     
     struct Callbacks: @unchecked Sendable {
@@ -83,15 +158,16 @@ class DecoderSession {
         self.decoder = UnsafeDecoder(vevc.Decoder(maxLayer: 2))
         self.onFrame = onFrame
         
-        let (stream, continuation) = AsyncStream<[UInt8]>.makeStream()
-        self.continuation = continuation
+        self.inbox = FrameInbox(capacity: 2)
+        let localInbox = self.inbox
+        let stream = InboxStream(localInbox)
         
         let callbacks = Callbacks(onFrame: onFrame)
         let localDecoder = self.decoder
         
         Task {
             do {
-                let outStream = localDecoder.raw.decode(stream: stream)
+                let outStream = await localDecoder.raw.decode(stream: stream)
                 for try await img in outStream {
                     let rgba = vevc.ycbcrToRGBA(img: img)
                     _ = callbacks.onFrame.callAsFunction(makeImageObject(width: img.width, height: img.height, data: rgba))
@@ -119,34 +195,42 @@ func createEncoder(width: Int, height: Int, maxbitrate: Int, framerate: Int, onC
 }
 
 @JS
-func encodeFrame(id: Int, data: JSValue) -> JSValue {
-    let promise = JSPromise(resolver: { resolver in
-        guard let session = encoderSessions[id] else { 
-            resolver(.success(.undefined))
-            return 
-        }
-        guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { 
-            resolver(.success(.undefined))
-            return 
-        }
-        
-        var localData = [UInt8](repeating: 0, count: typedArray.length)
-        localData.withUnsafeMutableBufferPointer { ptr in
-            typedArray.copyMemory(to: ptr)
-        }
-        let width = session.width
-        let height = session.height
-        let ycbcr = vevc.rgbaToYCbCr(data: localData, width: width, height: height)
-        session.continuation.yield(ycbcr)
-        resolver(.success(.undefined))
-    })
-    return promise.jsValue
+func encodeFrame(id: Int, data: JSValue, onDone: JSObject) {
+    guard let session = encoderSessions[id] else {
+        _ = onDone.callAsFunction()
+        return
+    }
+    
+    let width = session.encoder.raw.width
+    let height = session.encoder.raw.height
+    
+    guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { 
+        _ = onDone.callAsFunction()
+        return
+    }
+    
+    let localData = [UInt8](unsafeUninitializedCapacity: typedArray.length) { ptr, initializedCount in
+        typedArray.copyMemory(to: ptr)
+        initializedCount = typedArray.length
+    }
+    
+    let ycbcr = vevc.rgbaToYCbCr(data: localData, width: width, height: height)
+    let inbox = session.inbox
+    
+    let box = ResolverBox { _ = onDone.callAsFunction() }
+    Task {
+        await inbox.produce(ycbcr)
+        box.action?()
+    }
 }
 
 @JS
 func closeEncoder(id: Int) {
     guard let session = encoderSessions[id] else { return }
-    session.continuation.finish()
+    let inbox = session.inbox
+    Task {
+        await inbox.finish()
+    }
     encoderSessions.removeValue(forKey: id)
 }
 
@@ -160,30 +244,37 @@ func createDecoder(onFrame: JSObject) -> JSValue {
 }
 
 @JS
-func decodeChunk(id: Int, data: JSValue) -> JSValue {
-    let promise = JSPromise(resolver: { resolver in
-        guard let session = decoderSessions[id] else { 
-            resolver(.success(.undefined))
-            return 
-        }
-        guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { 
-            resolver(.success(.undefined))
-            return 
-        }
-        
-        var localData = [UInt8](repeating: 0, count: typedArray.length)
-        localData.withUnsafeMutableBufferPointer { ptr in
-            typedArray.copyMemory(to: ptr)
-        }
-        session.continuation.yield(localData)
-        resolver(.success(.undefined))
-    })
-    return promise.jsValue
+func decodeChunk(id: Int, data: JSValue, onDone: JSObject) {
+    guard let session = decoderSessions[id] else {
+        _ = onDone.callAsFunction()
+        return
+    }
+    
+    guard let object = data.object, let typedArray = JSTypedArray<UInt8>(from: object.jsValue) else { 
+        _ = onDone.callAsFunction()
+        return
+    }
+    
+    let localData = [UInt8](unsafeUninitializedCapacity: typedArray.length) { ptr, initializedCount in
+        typedArray.copyMemory(to: ptr)
+        initializedCount = typedArray.length
+    }
+    
+    let inbox = session.inbox
+    
+    let box = ResolverBox { _ = onDone.callAsFunction() }
+    Task {
+        await inbox.produce(localData)
+        box.action?()
+    }
 }
 
 @JS
 func closeDecoder(id: Int) {
     guard let session = decoderSessions[id] else { return }
-    session.continuation.finish()
+    let inbox = session.inbox
+    Task {
+        await inbox.finish()
+    }
     decoderSessions.removeValue(forKey: id)
 }
