@@ -100,31 +100,20 @@ do {
     )
 
     var frameCount = 0
-    let startTime = Date()
+    var totalEncodeTime: TimeInterval = 0
 
-    let frameStream = AsyncStream<YCbCrImage> {
-        do {
-            return try y4mReader.readFrame()
-        } catch {
-            fputs("Failed to read frame: \(error)\n", stderr)
-            return nil
-        }
+    while let image = try y4mReader.readFrame() {
+        let encStart = Date()
+        let chunk = try await encoder.encode(image: image)
+        totalEncodeTime += Date().timeIntervalSince(encStart)
+        
+        outFileHandle.write(Data(chunk))
+        frameCount += 1
     }
 
-    let chunkStream = await encoder.encode(stream: frameStream)
-    frameCount = try await Task(priority: .userInitiated) {
-        var count = 0
-        for try await chunk in chunkStream {
-            outFileHandle.write(Data(chunk))
-            count += 1
-        }
-        return count
-    }.value
-
-    let elapsed = Date().timeIntervalSince(startTime)
     if outPath != "-" {
-        let msPerFrame = frameCount > 0 ? (elapsed * 1000 / Double(frameCount)) : 0
-        let logMsg = String(format: "Encoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, elapsed * 1000, msPerFrame)
+        let msPerFrame = frameCount > 0 ? (totalEncodeTime * 1000 / Double(frameCount)) : 0
+        let logMsg = String(format: "Encoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, totalEncodeTime * 1000, msPerFrame)
         fputs(logMsg, stderr)
     }
 

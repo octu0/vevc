@@ -70,12 +70,17 @@ do {
 
     var y4mWriter: Y4MWriter? = nil
     var frameCount = 0
-    let startTime = Date()
 
     let imageStream = decoder.decode(fileHandle: inFileHandle)
-    frameCount = try await Task(priority: .userInitiated) {
-        var count = 0
+    let (count, decodeTime) = try await Task(priority: .userInitiated) {
+        var localCount = 0
+        var localDecodeTime: TimeInterval = 0
+        var lastDecodeEnd = Date()
+        
         for try await image in imageStream {
+            let decodeEnd = Date()
+            localDecodeTime += decodeEnd.timeIntervalSince(lastDecodeEnd)
+            
             if y4mWriter == nil {
                 // Use stream fps or fallback to 30fps
                 let fps = image.fps ?? 30
@@ -84,15 +89,17 @@ do {
             }
             
             try y4mWriter?.writeFrame(image)
-            count += 1
+            localCount += 1
+            
+            lastDecodeEnd = Date()
         }
-        return count
+        return (localCount, localDecodeTime)
     }.value
+    frameCount = count
 
-    let elapsed = Date().timeIntervalSince(startTime)
     if outPath != "-" {
-        let msPerFrame = frameCount > 0 ? (elapsed * 1000 / Double(frameCount)) : 0
-        let logMsg = String(format: "Decoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, elapsed * 1000, msPerFrame)
+        let msPerFrame = frameCount > 0 ? (decodeTime * 1000 / Double(frameCount)) : 0
+        let logMsg = String(format: "Decoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, decodeTime * 1000, msPerFrame)
         fputs(logMsg, stderr)
     }
 
