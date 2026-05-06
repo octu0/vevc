@@ -747,11 +747,15 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
             applyMotionCompensationPixelsChroma16(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
             applyMotionCompensationPixelsChroma16(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
         }
+        
+        blendIntraInterBoundaryLuma32(plane: &sub.y, mvs: mvs, width: dx, height: dy)
+        blendIntraInterBoundaryChroma16(plane: &sub.cb, mvs: mvs, width: cbDx, height: cbDy)
+        blendIntraInterBoundaryChroma16(plane: &sub.cr, mvs: mvs, width: cbDx, height: cbDy)
     }
 
-    applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step))
-    applyDeblockingFilter32(plane: &sub.cb, width: cbDx, height: cbDy, qStep: Int(qtC.step))
-    applyDeblockingFilter32(plane: &sub.cr, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+    applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step), mvs: mvs ?? [])
+    applyDeblockingFilter32(plane: &sub.cb, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: mvs ?? [])
+    applyDeblockingFilter32(plane: &sub.cr, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: mvs ?? [])
     
     return sub
 }

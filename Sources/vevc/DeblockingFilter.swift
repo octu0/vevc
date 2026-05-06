@@ -33,6 +33,68 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
     }
 }
 
+/// In-place applies deblocking filter to the reconstructed image (32x32 block resolution), with Intra/Inter boundary enhancement.
+@inline(__always)
+func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: [MotionVector]) {
+    plane.withUnsafeMutableBufferPointer { buffer in
+        guard let base = buffer.baseAddress else { return }
+        
+        let defaultTc = Int16(min(15, max(5, (qStep / 2) + 3)))
+        let defaultBeta = Int32(min(50, max(18, qStep + 6)))
+        
+        let enhancedTc = Int16(min(22, max(7, (qStep / 2) + 3) * 3 / 2))
+        let enhancedBeta = Int32(min(100, max(36, (qStep + 6) * 2)))
+        
+        let colCount = (width + 31) / 32
+        let rowCount = (height + 31) / 32
+        
+        let hFast = (height / 32) * 32
+        let wFast = (width / 32) * 32
+        let hRem = height - hFast
+        let wRem = width - wFast
+        
+        // Vertical Edges
+        for col in 1..<colCount {
+            let x = col * 32
+            for row in 0..<rowCount {
+                let y = row * 32
+                let idx = row * colCount + col
+                
+                let isIntraBoundary = (idx < mvs.count && (idx - 1) < mvs.count) && (mvs[idx].isIntra != mvs[idx - 1].isIntra)
+                let tc = isIntraBoundary ? enhancedTc : defaultTc
+                let beta = isIntraBoundary ? enhancedBeta : defaultBeta
+                
+                if y < hFast {
+                    deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                } else {
+                    let safeH = min(hRem, height - y)
+                    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                }
+            }
+        }
+        
+        // Horizontal Edges
+        for row in 1..<rowCount {
+            let y = row * 32
+            for col in 0..<colCount {
+                let x = col * 32
+                let idx = row * colCount + col
+                
+                let isIntraBoundary = (idx < mvs.count && (idx - colCount) >= 0) && (mvs[idx].isIntra != mvs[idx - colCount].isIntra)
+                let tc = isIntraBoundary ? enhancedTc : defaultTc
+                let beta = isIntraBoundary ? enhancedBeta : defaultBeta
+                
+                if x < wFast {
+                    deblockFilterHorizontalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                } else {
+                    let safeW = min(wRem, width - x)
+                    deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                }
+            }
+        }
+    }
+}
+
 /// In-place applies deblocking filter to the reconstructed image (16x16 block resolution).
 @inline(__always)
 func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
@@ -264,4 +326,199 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     newQ1.replace(with: q1 &- dHalf, where: mask)
     
     return (newP1, newP0, newQ0, newQ1)
+}
+
+// MARK: - Intra/Inter Boundary Blend
+
+/// Smooths the boundary between Intra and Inter blocks to reduce block noise.
+@inline(__always)
+func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: [MotionVector], width: Int, height: Int) {
+    let colCount = (width + 31) / 32
+    let rowCount = (height + 31) / 32
+    
+    plane.withUnsafeMutableBufferPointer { buffer in
+        guard let base = buffer.baseAddress else { return }
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let idx = row * colCount + col
+                if mvs[idx].isIntra {
+                    let bx = col * 32
+                    let by = row * 32
+                    
+                    // Left neighbor
+                    if 0 < col && !mvs[idx - 1].isIntra {
+                        let safeH = min(32, height - by)
+                        if 4 <= bx && bx + 3 < width {
+                            blendVerticalEdgeLuma32(base: base, width: width, x: bx, y: by, height: safeH)
+                        }
+                    }
+                    // Right neighbor
+                    if col < colCount - 1 && !mvs[idx + 1].isIntra {
+                        let bxRight = bx + 32
+                        if 4 <= bxRight && bxRight + 3 < width {
+                            let safeH = min(32, height - by)
+                            blendVerticalEdgeLuma32(base: base, width: width, x: bxRight, y: by, height: safeH)
+                        }
+                    }
+                    // Top neighbor
+                    if 0 < row && !mvs[idx - colCount].isIntra {
+                        let safeW = min(32, width - bx)
+                        if 4 <= by && by + 3 < height {
+                            blendHorizontalEdgeLuma32(base: base, width: width, x: bx, y: by, widthBlock: safeW)
+                        }
+                    }
+                    // Bottom neighbor
+                    if row < rowCount - 1 && !mvs[idx + colCount].isIntra {
+                        let byBottom = by + 32
+                        let safeW = min(32, width - bx)
+                        if 4 <= byBottom && byBottom + 3 < height {
+                            blendHorizontalEdgeLuma32(base: base, width: width, x: bx, y: byBottom, widthBlock: safeW)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blendIntraInterBoundaryChroma16(plane: inout [Int16], mvs: [MotionVector], width: Int, height: Int) {
+    // For Chroma, the blocks are 16x16, but they correspond to the same mvs array.
+    let colCount = (width + 15) / 16
+    let rowCount = (height + 15) / 16
+    // Note: The mvs array has dimensions based on Luma 32x32 blocks, which maps 1:1 to Chroma 16x16 blocks.
+    
+    plane.withUnsafeMutableBufferPointer { buffer in
+        guard let base = buffer.baseAddress else { return }
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let idx = row * colCount + col
+                if idx < mvs.count && mvs[idx].isIntra {
+                    let bx = col * 16
+                    let by = row * 16
+                    
+                    // Left neighbor
+                    if 0 < col && !mvs[idx - 1].isIntra {
+                        let safeH = min(16, height - by)
+                        if 2 <= bx && bx + 1 < width {
+                            blendVerticalEdgeChroma16(base: base, width: width, x: bx, y: by, height: safeH)
+                        }
+                    }
+                    // Right neighbor
+                    if col < colCount - 1 && !mvs[idx + 1].isIntra {
+                        let bxRight = bx + 16
+                        if 2 <= bxRight && bxRight + 1 < width {
+                            let safeH = min(16, height - by)
+                            blendVerticalEdgeChroma16(base: base, width: width, x: bxRight, y: by, height: safeH)
+                        }
+                    }
+                    // Top neighbor
+                    if 0 < row && !mvs[idx - colCount].isIntra {
+                        let safeW = min(16, width - bx)
+                        if 2 <= by && by + 1 < height {
+                            blendHorizontalEdgeChroma16(base: base, width: width, x: bx, y: by, widthBlock: safeW)
+                        }
+                    }
+                    // Bottom neighbor
+                    if row < rowCount - 1 && !mvs[idx + colCount].isIntra {
+                        let byBottom = by + 16
+                        let safeW = min(16, width - bx)
+                        if 2 <= byBottom && byBottom + 1 < height {
+                            blendHorizontalEdgeChroma16(base: base, width: width, x: bx, y: byBottom, widthBlock: safeW)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+private func blendVerticalEdgeLuma32(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, height: Int) {
+    var offset = y * width + x
+    for _ in 0..<height {
+        let p3 = Int32(base[offset - 4])
+        let p2 = Int32(base[offset - 3])
+        let p1 = Int32(base[offset - 2])
+        let p0 = Int32(base[offset - 1])
+        let q0 = Int32(base[offset + 0])
+        let q1 = Int32(base[offset + 1])
+        let q2 = Int32(base[offset + 2])
+        let q3 = Int32(base[offset + 3])
+        
+        base[offset - 4] = Int16((p3 * 7 + q0 * 1) >> 3)
+        base[offset - 3] = Int16((p2 * 6 + q0 * 2) >> 3)
+        base[offset - 2] = Int16((p1 * 5 + q0 * 3) >> 3)
+        base[offset - 1] = Int16((p0 * 4 + q0 * 4) >> 3)
+        
+        base[offset + 0] = Int16((q0 * 4 + p0 * 4) >> 3)
+        base[offset + 1] = Int16((q1 * 5 + p0 * 3) >> 3)
+        base[offset + 2] = Int16((q2 * 6 + p0 * 2) >> 3)
+        base[offset + 3] = Int16((q3 * 7 + p0 * 1) >> 3)
+        
+        offset += width
+    }
+}
+
+@inline(__always)
+private func blendHorizontalEdgeLuma32(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, widthBlock: Int) {
+    var offset = y * width + x
+    for _ in 0..<widthBlock {
+        let p3 = Int32(base[offset - 4 * width])
+        let p2 = Int32(base[offset - 3 * width])
+        let p1 = Int32(base[offset - 2 * width])
+        let p0 = Int32(base[offset - 1 * width])
+        let q0 = Int32(base[offset + 0 * width])
+        let q1 = Int32(base[offset + 1 * width])
+        let q2 = Int32(base[offset + 2 * width])
+        let q3 = Int32(base[offset + 3 * width])
+        
+        base[offset - 4 * width] = Int16((p3 * 7 + q0 * 1) >> 3)
+        base[offset - 3 * width] = Int16((p2 * 6 + q0 * 2) >> 3)
+        base[offset - 2 * width] = Int16((p1 * 5 + q0 * 3) >> 3)
+        base[offset - 1 * width] = Int16((p0 * 4 + q0 * 4) >> 3)
+        
+        base[offset + 0 * width] = Int16((q0 * 4 + p0 * 4) >> 3)
+        base[offset + 1 * width] = Int16((q1 * 5 + p0 * 3) >> 3)
+        base[offset + 2 * width] = Int16((q2 * 6 + p0 * 2) >> 3)
+        base[offset + 3 * width] = Int16((q3 * 7 + p0 * 1) >> 3)
+        
+        offset += 1
+    }
+}
+
+@inline(__always)
+private func blendVerticalEdgeChroma16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, height: Int) {
+    var offset = y * width + x
+    for _ in 0..<height {
+        let p1 = Int32(base[offset - 2])
+        let p0 = Int32(base[offset - 1])
+        let q0 = Int32(base[offset + 0])
+        let q1 = Int32(base[offset + 1])
+        
+        base[offset - 2] = Int16((p1 * 3 + q0 * 1) >> 2)
+        base[offset - 1] = Int16((p0 * 2 + q0 * 2) >> 2)
+        base[offset + 0] = Int16((q0 * 2 + p0 * 2) >> 2)
+        base[offset + 1] = Int16((q1 * 3 + p0 * 1) >> 2)
+        
+        offset += width
+    }
+}
+
+@inline(__always)
+private func blendHorizontalEdgeChroma16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, widthBlock: Int) {
+    var offset = y * width + x
+    for _ in 0..<widthBlock {
+        let p1 = Int32(base[offset - 2 * width])
+        let p0 = Int32(base[offset - 1 * width])
+        let q0 = Int32(base[offset + 0 * width])
+        let q1 = Int32(base[offset + 1 * width])
+        
+        base[offset - 2 * width] = Int16((p1 * 3 + q0 * 1) >> 2)
+        base[offset - 1 * width] = Int16((p0 * 2 + q0 * 2) >> 2)
+        base[offset + 0 * width] = Int16((q0 * 2 + p0 * 2) >> 2)
+        base[offset + 1 * width] = Int16((q1 * 3 + p0 * 1) >> 2)
+        
+        offset += 1
+    }
 }

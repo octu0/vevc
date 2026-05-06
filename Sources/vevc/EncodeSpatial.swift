@@ -133,9 +133,13 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     applyMotionCompensationPixelsChroma16(plane: &mutReconL2Cb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
     applyMotionCompensationPixelsChroma16(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
     
-    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step))
-    applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step))
-    applyDeblockingFilter32(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step))
+    blendIntraInterBoundaryLuma32(plane: &mutReconL2Y, mvs: mvs, width: dx, height: dy)
+    blendIntraInterBoundaryChroma16(plane: &mutReconL2Cb, mvs: mvs, width: cbDx, height: cbDy)
+    blendIntraInterBoundaryChroma16(plane: &mutReconL2Cr, mvs: mvs, width: cbDx, height: cbDy)
+    
+    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step), mvs: mvs)
+    applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
+    applyDeblockingFilter32(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
@@ -230,9 +234,13 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     applyBidirectionalMotionCompensationPixelsChroma16(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
     applyBidirectionalMotionCompensationPixelsChroma16(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
     
-    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step))
-    applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step))
-    applyDeblockingFilter32(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step))
+    blendIntraInterBoundaryLuma32(plane: &mutReconL2Y, mvs: mvs, width: dx, height: dy)
+    blendIntraInterBoundaryChroma16(plane: &mutReconL2Cb, mvs: mvs, width: cbDx, height: cbDy)
+    blendIntraInterBoundaryChroma16(plane: &mutReconL2Cr, mvs: mvs, width: cbDx, height: cbDy)
+    
+    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step), mvs: mvs)
+    applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
+    applyDeblockingFilter32(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
