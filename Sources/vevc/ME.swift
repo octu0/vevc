@@ -50,6 +50,8 @@ private let meFineOffsets: [(Int, Int)] = [
 private let meSearchOffsetX: [Int] = [-1, 0, 1, -1, 1, -1, 0, 1]
 private let meSearchOffsetY: [Int] = [-1, -1, -1, 0, 0, 1, 1, 1]
 
+// MARK: - MotionEstimation
+
 struct MotionEstimation {
 
     // small blocks benefit more from compiler auto-vectorization than manual SIMD

@@ -1,6 +1,4 @@
-import Foundation
-
-// MARK: - LayersEncoder & LayersCoreEncoder (Temporal DWT, Mode=0x00)
+// MARK: - VEVCEncoder
 
 public actor VEVCEncoder {
     public nonisolated let width: Int
@@ -220,7 +218,7 @@ actor LayersEncodeActor {
             releasePreviousInput = releasePlane
             
             guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed else {
-                throw NSError(domain: "vevc.Encoder", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing reference frames for P-frame"])
+                throw EncodeError.missingReferenceFramesForPFrame
             }
             let baseStep = Int(baseQt.step)
             

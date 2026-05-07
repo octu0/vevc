@@ -2,6 +2,7 @@
 
 public enum EncodeError: Error {
     case unsupportedArchitecture
+    case missingReferenceFramesForPFrame
 }
 
 @inline(__always)
@@ -41,8 +42,6 @@ func getDPCMContext(prevVal: Int16) -> UInt8 {
 func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, context: UInt8) {
     encoder.addPair(run: UInt32(run), val: val, context: context)
 }
-
-// why: blockEncode32V/H were dead code (no call sites in EncodeTransform.swift or tests) — removed
 
 @inline(__always)
 func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
