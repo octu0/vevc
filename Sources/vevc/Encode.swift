@@ -613,7 +613,6 @@ func blockEncode8HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
     }
 }
 
-// why: blockEncode4V is only called with parentBlock: nil, so parentBlock parameter removed entirely
 @inline(__always)
 func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
     var lscpX = -1
@@ -966,7 +965,6 @@ func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
     lastVal = ptr3[3]
 }
 
-// why: extracted from inner function to avoid closure capture overhead on hot path
 @inline(__always)
 func blockEncodeDPCMErrorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
     let ia = Int(a), ib = Int(b), ic = Int(c)
