@@ -37,23 +37,6 @@ func invDwt2d(_ block: BlockView, size: Int) {
     }
 }
 
-func dwt2dScalar(_ block: BlockView, size: Int) -> Subbands {
-    switch size {
-    case 32: return dwt2DBlock32Subbands(block)
-    case 16: return dwt2DBlock16Subbands(block)
-    case 8: return dwt2DBlock8Subbands(block)
-    default: fatalError()
-    }
-}
-
-func invDwt2dScalar(_ block: BlockView, size: Int) {
-    switch size {
-    case 32: inverseDWT2DBlock32(block)
-    case 16: inverseDWT2DBlock16(block)
-    case 8: inverseDWT2DBlock8(block)
-    default: fatalError()
-    }
-}
 
 func blockEncode(encoder: inout EntropyEncoder<DynamicEntropyModel>, block: BlockView, size: Int) {
     switch size {

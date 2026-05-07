@@ -282,7 +282,7 @@ private func deblockFilterHorizontalEdge32SIMD(base: UnsafeMutablePointer<Int16>
 
 @inline(__always)
 private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>) {
-    // why: Int16 domain eliminates 4 widen + 2 narrow operations vs Int32
+    // Int16 domain eliminates 4 widen + 2 narrow operations vs Int32
     // Safe because masked lanes satisfy |delta| < beta ≤ 45, so 9*delta ≤ 405 fits Int16
     // Unmasked lanes may overflow but are masked away before store
     let betah = Int16(beta >> 1)

@@ -1,6 +1,4 @@
-import Foundation
-
-// MARK: - VevcEncoder
+// MARK: - EntropyModelProvider
 
 protocol EntropyModelProvider {
     static var isStaticMode: Bool { get }
@@ -102,6 +100,8 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
         runModels: [rANSModel], valModels: [rANSModel]
     ) {}
 }
+
+// MARK: - EntropyEncoder
 
 struct EntropyEncoder<Model: EntropyModelProvider> {
     var bypassWriter: BypassWriter
@@ -292,7 +292,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         Model.writeHeaders(into: &out, runModels: runModels, valModels: valModels)
         let headerWasWritten = preHeaderSize < out.count
         
-        // why: when pair count is small, static tables produce better compression
+        // when pair count is small, static tables produce better compression
         // than writing per-stream frequency headers
         let staticBit: UInt8 = if Model.isStaticMode || (headerWasWritten != true) { FLAG_STATIC } else { 0 }
         out[flagsOffset] = staticBit | dpcmBit | trailBit
@@ -411,7 +411,7 @@ public final class ModelTrainer: @unchecked Sendable {
     }
 }
 
-// MARK: - VevcDecoder
+// MARK: - EntropyDecoder
 
 struct EntropyDecoder {
     var bypassReader: BypassReader

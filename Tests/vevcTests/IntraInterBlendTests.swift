@@ -71,7 +71,7 @@ final class IntraInterBlendTests: XCTestCase {
             }
         }
         
-        var mvs = [MotionVector](repeating: MotionVector(dx: 32767, dy: 32767), count: 2)
+        let mvs = [MotionVector](repeating: MotionVector(dx: 32767, dy: 32767), count: 2)
         
         blendIntraInterBoundaryLuma32(plane: &plane, mvs: mvs, width: width, height: height)
         
