@@ -165,6 +165,7 @@ actor LayersEncodeActor {
         
         let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange)
         
+        
         if isIFrame {
             // Rate control
             let targetBits = rateController.beginGOP()

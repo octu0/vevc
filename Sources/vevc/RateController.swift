@@ -22,7 +22,10 @@ struct RateController {
     
     @inline(__always)
     mutating func beginGOP() -> Int {
-        self.gopTargetBits = (maxbitrate * keyint) / framerate
+        let baseGOPBits = (maxbitrate * keyint) / framerate
+        // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
+        let carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
+        self.gopTargetBits = baseGOPBits + carryOver
         self.gopRemainingBits = self.gopTargetBits
         self.gopRemainingFrames = self.keyint
         
@@ -70,12 +73,15 @@ struct RateController {
         // SSIM Min 0.71, Max 0.99
         let maxStep = max(baseStep * 2, min(512, baseStep * 8))
         
-        var newStepInt = baseStep
-        let minStep = max(2, baseStep / 2)
-        if 0 < lastPFrameBits && 0 < lastPFrameQStep {
+        var newStepInt = (baseStep * 3) / 2
+        let minStep = max(2, baseStep)
+        if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
-            // predictedCurrentBits = lastPFrameBits * multiplier
-            let predictedBits64 = (Int64(lastPFrameBits) * multiplier16) >> 16
+            // The bits should scale with SAD relative to the last frame, NOT the average.
+            let sadRatio16 = (Int64(currentSAD) << 16) / Int64(lastPFrameSAD)
+            let clampedSadRatio16 = max(13107, min(327680, sadRatio16))
+            let predictedBits64 = (Int64(lastPFrameBits) * clampedSadRatio16) >> 16
+            
             // ratio = predictedCurrentBits / targetFrameBits
             let safeTarget = max(1, targetFrameBits)
             // val = lastPFrameQStep * ratio
