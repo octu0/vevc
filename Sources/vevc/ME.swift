@@ -54,10 +54,9 @@ private let meSearchOffsetY: [Int] = [-1, -1, -1, 0, 0, 1, 1, 1]
 
 struct MotionEstimation {
 
-    // small blocks benefit more from compiler auto-vectorization than manual SIMD
     @inline(__always)
-    static func absDiff(_ a: Int16, _ b: Int16) -> Int {
-        return abs(Int(a) - Int(b))
+    fileprivate static func median(_ a: Int, _ b: Int, _ c: Int) -> Int {
+        return max(min(a, b), min(max(a, b), c))
     }
 
     // Lagrange multiplier for rate-distortion optimization:
@@ -254,9 +253,7 @@ struct MotionEstimation {
             let pRow = pBase.advanced(by: ry * pStride)
             
             for rx in 0..<8 {
-                let diff = Int32(cRow[rx]) - Int32(pRow[rx])
-                let absDiff = if diff < 0 { -1 * diff } else { diff }
-                sad &+= absDiff
+                sad &+= abs(Int32(cRow[rx]) - Int32(pRow[rx]))
             }
         }
         return Int(sad)
@@ -266,9 +263,7 @@ struct MotionEstimation {
     static func compute64PointSADBlocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
         var sad: Int32 = 0
         for i in 0..<64 {
-            let diff = Int32(cBase[i]) - Int32(pBase[i])
-            let absDiff = if diff < 0 { -1 * diff } else { diff }
-            sad &+= absDiff
+            sad &+= abs(Int32(cBase[i]) - Int32(pBase[i]))
         }
         return Int(sad)
     }
@@ -281,17 +276,10 @@ struct MotionEstimation {
             let cRow = cBase.advanced(by: offset)
             let pRow = pBase.advanced(by: offset)
             for x in 0..<8 {
-                let diff = Int32(cRow[x]) - Int32(pRow[x])
-                let absDiff = if diff < 0 { -1 * diff } else { diff }
-                sad &+= absDiff
+                sad &+= abs(Int32(cRow[x]) - Int32(pRow[x]))
             }
         }
         return Int(sad) * 2
-    }
-    
-    @inline(__always)
-    static func median(_ a: Int, _ b: Int, _ c: Int) -> Int {
-        return max(min(a, b), min(max(a, b), c))
     }
 
     private static let dsLdspX: [Int] = [0, 1, 2, 1, 0, -1, -2, -1]
@@ -616,12 +604,8 @@ struct MotionEstimation {
                     let currOffset = (cy + y) * cbw + cx
                     let refOffset = (cry + y) * cbw + crx
                     for x in 0..<4 {
-                        let diffCb = Int32(cCb[currOffset + x]) - Int32(rCb[refOffset + x])
-                        let absDiffCb = if diffCb < 0 { -1 * diffCb } else { diffCb }
-                        sad &+= absDiffCb
-                        let diffCr = Int32(cCr[currOffset + x]) - Int32(rCr[refOffset + x])
-                        let absDiffCr = if diffCr < 0 { -1 * diffCr } else { diffCr }
-                        sad &+= absDiffCr
+                        sad &+= abs(Int32(cCb[currOffset + x]) - Int32(rCb[refOffset + x]))
+                        sad &+= abs(Int32(cCr[currOffset + x]) - Int32(rCr[refOffset + x]))
                     }
                 }
                 return Int(sad) * 4 // Luma SAD scale matching (since we check 16 pixels here instead of 64 in Luma, *4 keeps penalty scale relative to Luma)
@@ -662,9 +646,7 @@ struct MotionEstimation {
                     let py = by + intDy + ry
                     let r = prev.advanced(by: py * width + bx + intDx)
                     for rx in stride(from: 0, to: 32, by: 2) {
-                        let diff = Int32(rowC[rx]) - Int32(r[rx])
-                        let absDiff = if diff < 0 { -1 * diff } else { diff }
-                        sad &+= absDiff
+                        sad &+= abs(Int32(rowC[rx]) - Int32(r[rx]))
                     }
                 }
             } else {
@@ -687,9 +669,7 @@ struct MotionEstimation {
                         
                         let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
                         let pVal = (refVal &+ 31) >> 6
-                        let diff = Int32(rowC[rx]) &- pVal
-                        let absDiff = if diff < 0 { -1 * diff } else { diff }
-                        sad &+= absDiff
+                        sad &+= abs(Int32(rowC[rx]) &- pVal)
                         rx &+= 2
                     }
                 }
@@ -709,9 +689,7 @@ struct MotionEstimation {
                     let px = bx + intDx + rx
                     let sx = max(0, min(px, width - 1))
                     let cx = min(bx + rx, width - 1)
-                    let diff = Int32(rowC[cx]) - Int32(r[sx])
-                    let absDiff = if diff < 0 { -1 * diff } else { diff }
-                    sad &+= absDiff
+                    sad &+= abs(Int32(rowC[cx]) - Int32(r[sx]))
                 }
             }
         } else {
@@ -746,9 +724,7 @@ struct MotionEstimation {
                     
                     let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
                     let pVal = (refVal &+ 31) >> 6
-                    let diff = Int32(rowC[cx]) &- pVal
-                    let absDiff = if diff < 0 { -1 * diff } else { diff }
-                    sad &+= absDiff
+                    sad &+= abs(Int32(rowC[cx]) &- pVal)
                     rx &+= 2
                 }
             }
