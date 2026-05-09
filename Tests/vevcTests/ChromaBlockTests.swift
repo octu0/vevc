@@ -134,7 +134,7 @@ final class ChromaBlockTests: XCTestCase {
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         let original = generateColorBarFrame(width: width, height: height)
-        let chunk = try await encoder.encodeNextFrame(image: original, isSceneChange: false)
+        let chunk = try await encoder.encodeFrame(image: original)
         let dec = try await decoder.decodeNextFrame(chunk: chunk)!
 
         // プレーンごとのSSIM
@@ -184,12 +184,12 @@ final class ChromaBlockTests: XCTestCase {
 
         // I-frame
         let frame0 = generateDiagonalGradientFrame(width: width, height: height)
-        let chunk0 = try await encoder.encodeNextFrame(image: frame0, isSceneChange: false)
+        let chunk0 = try await encoder.encodeFrame(image: frame0)
         _ = try await decoder.decodeNextFrame(chunk: chunk0)!
 
         // P-frame: 同一フレーム（動きなし → 粗い量子化ケースへ）
         let frame1 = generateDiagonalGradientFrame(width: width, height: height)
-        let chunk1 = try await encoder.encodeNextFrame(image: frame1, isSceneChange: false)
+        let chunk1 = try await encoder.encodeFrame(image: frame1)
         let dec1 = try await decoder.decodeNextFrame(chunk: chunk1)!
 
         let cw = (width + 1) / 2

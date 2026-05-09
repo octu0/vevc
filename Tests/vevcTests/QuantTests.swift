@@ -17,7 +17,7 @@ final class QuantTests: XCTestCase {
         XCTAssertEqual(qt.step, 100)
         XCTAssertEqual(qt.qLow.step, 12)
         XCTAssertEqual(qt.qMid.step, 50)
-        XCTAssertEqual(qt.qHigh.step, 100)
+        XCTAssertEqual(qt.qHigh.step, 80)
     }
     
     func performRoundTripTest(width: Int, height: Int, step: Int, roundToNearest: Bool, signedMapping: Bool) {

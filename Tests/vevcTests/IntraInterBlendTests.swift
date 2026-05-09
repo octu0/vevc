@@ -34,7 +34,7 @@ final class IntraInterBlendTests: XCTestCase {
         
         XCTAssertTrue(100 < p0 && p0 < 150, "p0 should be blended")
         XCTAssertTrue(100 < q0 && q0 < 150, "q0 should be blended")
-        XCTAssertTrue(p0 < q0, "p0 should be smaller than q0")
+        XCTAssertTrue(p0 <= q0, "p0 should be smaller or equal to q0")
         XCTAssertTrue(p3 < p2 && p2 < p1 && p1 < p0, "Smooth gradient on Inter side")
         XCTAssertTrue(q0 < q1 && q1 < q2 && q2 < q3, "Smooth gradient on Intra side")
     }

@@ -124,7 +124,7 @@ final class FlickerDetectionTests: XCTestCase {
             let img = generateGradientFrame(width: width, height: height, frameIndex: i)
             originals.append(img)
 
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             frameSizes.append(chunk.count)
 
             let dec = try await decoder.decodeNextFrame(chunk: chunk)!
@@ -195,16 +195,16 @@ final class FlickerDetectionTests: XCTestCase {
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)
 
         // I-frame
-        let iFrameBytes = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+        let iFrameBytes = try await encoder.encodeFrame(image: img)
 
         // 動きがほぼないP-frame（同じ画像）
-        let pFrame1Bytes = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+        let pFrame1Bytes = try await encoder.encodeFrame(image: img)
 
         // 微小な動きのあるP-frame
-        let pFrame2Bytes = try await encoder.encodeNextFrame(image: imgSlightlyDifferent, isSceneChange: false)
+        let pFrame2Bytes = try await encoder.encodeFrame(image: imgSlightlyDifferent)
 
         // 再度動きなし
-        let pFrame3Bytes = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+        let pFrame3Bytes = try await encoder.encodeFrame(image: img)
 
         // サイズの変動を記録
         print("[Flicker] I-frame: \(iFrameBytes.count) bytes")

@@ -11,7 +11,6 @@ public actor VEVCEncoder {
     public nonisolated let maxConcurrency: Int
     
     private let coreEncoder: LayersEncodeActor
-    private var lastImg: YCbCrImage? = nil
     private var frameIndex = 0
     private let pool: BlockViewPool
     
@@ -63,16 +62,8 @@ public actor VEVCEncoder {
         return result
     }
 
-    public func encode(image: YCbCrImage) async throws -> [UInt8] {
-        let isSceneChange: Bool
-        if let last = lastImg {
-            let sad = estimateFastSAD(a: image, b: last)
-            isSceneChange = (sceneChangeThreshold < sad)
-        } else {
-            isSceneChange = false
-        }
-        
-        let bytes = try await coreEncoder.encodeNextFrame(image: image, isSceneChange: isSceneChange)
+    public func encode(image: YCbCrImage, forceKeyFrame: Bool = false) async throws -> [UInt8] {
+        let bytes = try await coreEncoder.encodeFrame(image: image, forceKeyFrame: forceKeyFrame)
         
         var result: [UInt8] = []
         if frameIndex == 0 {
@@ -81,7 +72,6 @@ public actor VEVCEncoder {
         }
         result.append(contentsOf: bytes)
         
-        lastImg = image
         frameIndex += 1
         
         return result
@@ -160,10 +150,16 @@ actor LayersEncodeActor {
     }
     
     @inline(__always)
-    public func encodeNextFrame(image: YCbCrImage, isSceneChange: Bool) async throws -> [UInt8] {
+    public func encodeFrame(image: YCbCrImage, forceKeyFrame: Bool = false) async throws -> [UInt8] {
         let (plane, releasePlane) = toPlaneData420(image: image, pool: pool)
         
-        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange)
+        var isSceneChange = false
+        if let prev = previousInputPlane {
+            let sad = estimateFastSAD(a: plane, b: prev)
+            isSceneChange = (sceneChangeThreshold < sad)
+        }
+        
+        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceKeyFrame)
         
         if isIFrame {
             // Rate control
@@ -257,12 +253,12 @@ actor LayersEncodeActor {
 }
 
 @inline(__always)
-private func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
-    guard a.yPlane.count == b.yPlane.count, 0 < a.yPlane.count else { return 0 }
-    let yCount = a.yPlane.count
+private func estimateFastSAD(a: PlaneData420, b: PlaneData420) -> Int {
+    guard a.y.count == b.y.count, 0 < a.y.count else { return 0 }
+    let yCount = a.y.count
     var sumY: UInt64 = 0
-    a.yPlane.withUnsafeBufferPointer { aPtr in
-        b.yPlane.withUnsafeBufferPointer { bPtr in
+    a.y.withUnsafeBufferPointer { aPtr in
+        b.y.withUnsafeBufferPointer { bPtr in
             for i in stride(from: 0, to: yCount, by: 4) {
                 sumY += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
             }
@@ -272,12 +268,12 @@ private func estimateFastSAD(a: YCbCrImage, b: YCbCrImage) -> Int {
     
     // Chroma SAD: detect scene changes where luminance is similar but color differs
     // (e.g. dark scene to dark scene with different color palette)
-    let cbCount = a.cbPlane.count
-    guard a.cbPlane.count == b.cbPlane.count, 0 < cbCount else { return ySAD }
+    let cbCount = a.cb.count
+    guard a.cb.count == b.cb.count, 0 < cbCount else { return ySAD }
     
     var sumCb: UInt64 = 0
     var sumCr: UInt64 = 0
-    withUnsafePointers(a.cbPlane, b.cbPlane, a.crPlane, b.crPlane) { aCb, bCb, aCr, bCr in
+    withUnsafePointers(a.cb, b.cb, a.cr, b.cr) { aCb, bCb, aCr, bCr in
         for i in stride(from: 0, to: cbCount, by: 4) {
             sumCb += UInt64(abs(Int(aCb[i]) - Int(bCb[i])))
             sumCr += UInt64(abs(Int(aCr[i]) - Int(bCr[i])))

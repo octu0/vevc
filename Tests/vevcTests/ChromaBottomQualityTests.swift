@@ -147,7 +147,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = StreamingDecoderActor(width: width, height: height)
         
-        let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+        let chunk = try await encoder.encodeFrame(image: img)
         let decoded = try await decoder.decodeNextFrame(chunk: chunk)!
         
         assertChromaBottomQuality(
@@ -185,7 +185,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         
         for i in 0..<frameCount {
             let img = generateNaturalImage(width: width, height: height, seed: i * 3)
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             let decoded = try await decoder.decodeNextFrame(chunk: chunk)!
             
             let frameType = (i == 0) ? "I" : "P"
@@ -349,7 +349,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = StreamingDecoderActor(width: width, height: height)
         
-        let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+        let chunk = try await encoder.encodeFrame(image: img)
         let decoded = try await decoder.decodeNextFrame(chunk: chunk)!
         
         // 最後のブロック行（8ピクセル行）のクロマPSNR

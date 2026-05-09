@@ -149,7 +149,7 @@ final class BidirectionalPredictionTests: XCTestCase {
         
         var psnrs: [Double] = []
         for i in 0..<frameCount {
-            let chunk = try await encoder.encodeNextFrame(image: images[i], isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: images[i])
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
             let psnrY = calculatePSNR(original: images[i].yPlane, decoded: decodedImg.yPlane)
             psnrs.append(psnrY)

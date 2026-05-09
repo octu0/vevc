@@ -179,7 +179,7 @@ final class VevcTests: XCTestCase {
         
         for i in 0..<frameCount {
             let img = generateGradientImage(width: width, height: height, seed: i * 5)
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
             
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
@@ -237,7 +237,7 @@ final class VevcTests: XCTestCase {
                 }
             }
             
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
             
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
@@ -294,7 +294,7 @@ final class VevcTests: XCTestCase {
                 }
             }
             
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
             
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
@@ -337,7 +337,7 @@ final class VevcTests: XCTestCase {
         let decoder = StreamingDecoderActor(width: width, height: height)
         
         for i in 0..<frameCount {
-            let chunk = try await encoder.encodeNextFrame(image: baseImg, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: baseImg)
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
             
             let psnrY = calculatePSNR(original: baseImg.yPlane, decoded: decodedImg.yPlane)
@@ -374,7 +374,7 @@ final class VevcTests: XCTestCase {
                 }
             }
             
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
             
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
@@ -482,7 +482,7 @@ final class VevcTests: XCTestCase {
                 }
             }
             
-            let chunk = try await encoder.encodeNextFrame(image: img, isSceneChange: false)
+            let chunk = try await encoder.encodeFrame(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
             
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!

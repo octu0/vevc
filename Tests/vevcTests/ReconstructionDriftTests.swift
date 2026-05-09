@@ -128,7 +128,7 @@ final class ReconstructionDriftTests: XCTestCase {
             }
         }
         
-        let chunk0 = try await encoder.encodeNextFrame(image: img0, isSceneChange: false)
+        let chunk0 = try await encoder.encodeFrame(image: img0)
         let dec0 = try await decoder.decodeNextFrame(chunk: chunk0)!
         
         var img1 = img0
@@ -139,7 +139,7 @@ final class ReconstructionDriftTests: XCTestCase {
             }
         }
         
-        let chunk1 = try await encoder.encodeNextFrame(image: img1, isSceneChange: false)
+        let chunk1 = try await encoder.encodeFrame(image: img1)
         let dec1 = try await decoder.decodeNextFrame(chunk: chunk1)!
         
         let enc0psnr = calculatePSNR(original: img0, decoded: dec0)
