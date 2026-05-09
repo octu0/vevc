@@ -94,7 +94,7 @@ struct QuantizationTable: Sendable {
             // qHigh: Cap at 128 to allow background/fine details to degrade but prevent severe blocking artifacts
             if layerIndex == 2 {
                 let lHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: -1638)
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             } else {
                 let lHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
                 self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
