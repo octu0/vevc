@@ -87,16 +87,16 @@ struct QuantizationTable: Sendable {
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
             
-            // qMid: Cap at 64 to preserve facial contours and important structural edges
-            let lMid = min(64, max(1, (baseStep * qMidNum) / qMidDen))
+            // qMid: Cap at 56 to preserve facial contours and important structural edges
+            let lMid = min(56, max(1, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
             
-            // qHigh: Cap at 128 to allow background/fine details to degrade but prevent severe blocking artifacts
+            // qHigh: Cap at 80 to preserve fine details during motion, reducing blurry ghost trails
             if layerIndex == 2 {
-                let lHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
+                let lHigh = min(80, max(1, (baseStep * qHighNum) / qHighDen))
                 self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             } else {
-                let lHigh = min(128, max(1, (baseStep * qHighNum) / qHighDen))
+                let lHigh = min(80, max(1, (baseStep * qHighNum) / qHighDen))
                 self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             }
         }
