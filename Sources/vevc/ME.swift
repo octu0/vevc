@@ -362,7 +362,7 @@ struct MotionEstimation {
                     }
                 }
                 
-                if !foundSmaller {
+                if foundSmaller != true {
                     break
                 }
                 
@@ -381,7 +381,7 @@ struct MotionEstimation {
             var finalMinDx = centerX
             var finalMinDy = centerY
             
-            if finalMinSAD >= 64 {
+            if 64 <= finalMinSAD {
                 for i in 0..<4 {
                     let dx = centerX + dsSdspX[i]
                     let dy = centerY + dsSdspY[i]
@@ -939,23 +939,18 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
             )
             
-            let prevChromaPenalty: Int
-            if mutSADPrev <= 512 {
-                let intPrevDx = Int(mvPrev.dx) >> 3
-                let intPrevDy = Int(mvPrev.dy) >> 3
-                let prevChromaSad = MotionEstimation.computeChromaSAD(curr: curr, ref: prev, bx: bx, by: by, refDx: intPrevDx, refDy: intPrevDy)
-                prevChromaPenalty = prevChromaSad / 4
-            } else {
-                prevChromaPenalty = 0
-            }
+            let intPrevDx = Int(mvPrev.dx) >> 3
+            let intPrevDy = Int(mvPrev.dy) >> 3
+            let prevChromaSad = MotionEstimation.computeChromaSAD(curr: curr, ref: prev, bx: bx, by: by, refDx: intPrevDx, refDy: intPrevDy)
+            let prevChromaPenalty = prevChromaSad / 4
             let prevSAD = mutSADPrev + prevChromaPenalty
             
             var bestMV = mvPrev
             var dir = false
             
             // Dynamic Early Exit: If the forward prediction is good enough, skip backward prediction.
-            let earlyExitThreshold = 512 + (gopPosition * 64)
-            let gopPenalty = gopPosition * 64
+            let earlyExitThreshold = min(1536, 512 + (gopPosition * 16))
+            let gopPenalty = min(1024, gopPosition * 16)
             
             if earlyExitThreshold <= prevSAD {
                 let (mvNext, nextSAD) = MotionEstimation.searchPixels(
@@ -968,7 +963,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 
                 // If I-frame (next) predicts the block extremely well, it's overwhelmingly likely
                 // a static background. Waive the GOP penalty to allow instantaneous ghost erasure.
-                let effectiveGopPenalty = if nextSAD < 256 { 0 } else { gopPenalty }
+                let effectiveGopPenalty = if nextSAD < 384 { 0 } else { gopPenalty }
                 let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
                 
                 if nextSAD + baselinePenalty < prevSAD {
@@ -979,7 +974,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     let nextContrast = MotionEstimation.extractContrast8x8(plane: nextSub1, width: targetWidth, height: targetHeight, bx: bx + intNextDx, by: by + intNextDy)
                     
                     let contrastDiff = abs(currContrast - nextContrast)
-                    let structurePenalty = contrastDiff * contrastDiff
+                    let structurePenalty = (contrastDiff * contrastDiff) / 4
                     
                     // Chroma SAD penalty to completely block mismatching colors (e.g. blue background vs red hair)
                     let chromaSAD = MotionEstimation.computeChromaSAD(curr: curr, ref: next, bx: bx, by: by, refDx: intNextDx, refDy: intNextDy)
