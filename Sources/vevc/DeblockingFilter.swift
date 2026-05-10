@@ -95,6 +95,72 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
     }
 }
 
+/// In-place applies deblocking filter to the Chroma plane (16x16 blocks), with Intra/Inter boundary enhancement using Luma MVs.
+@inline(__always)
+func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: [MotionVector]) {
+    plane.withUnsafeMutableBufferPointer { buffer in
+        guard let base = buffer.baseAddress else { return }
+        
+        let defaultTc = Int16(min(15, max(5, (qStep / 2) + 3)))
+        let defaultBeta = Int32(min(50, max(18, qStep + 6)))
+        
+        let enhancedTc = Int16(min(22, max(7, (qStep / 2) + 3) * 3 / 2))
+        let enhancedBeta = Int32(min(100, max(36, (qStep + 6) * 2)))
+        
+        let colCountC = (width + 15) / 16
+        let rowCountC = (height + 15) / 16
+        
+        // mvs array is based on 32x32 Luma blocks. 1 Chroma block (16x16) = 1 Luma block (32x32)
+        // so mvs array has exactly colCountC columns.
+        let mvColCount = colCountC 
+        
+        let hFast = (height / 16) * 16
+        let wFast = (width / 16) * 16
+        let hRem = height - hFast
+        let wRem = width - wFast
+        
+        // Vertical Edges
+        for col in 1..<colCountC {
+            let x = col * 16
+            for row in 0..<rowCountC {
+                let y = row * 16
+                let idx = row * mvColCount + col
+                
+                let isIntraBoundary = (idx < mvs.count && (idx - 1) < mvs.count) && (mvs[idx].isIntra != mvs[idx - 1].isIntra)
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if y < hFast {
+                    deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                } else {
+                    let safeH = min(hRem, height - y)
+                    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                }
+            }
+        }
+        
+        // Horizontal Edges
+        for row in 1..<rowCountC {
+            let y = row * 16
+            for col in 0..<colCountC {
+                let x = col * 16
+                let idx = row * mvColCount + col
+                
+                let isIntraBoundary = (idx < mvs.count && (idx - mvColCount) >= 0) && (mvs[idx].isIntra != mvs[idx - mvColCount].isIntra)
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if x < wFast {
+                    deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                } else {
+                    let safeW = min(wRem, width - x)
+                    deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                }
+            }
+        }
+    }
+}
+
 /// In-place applies deblocking filter to the reconstructed image (16x16 block resolution).
 @inline(__always)
 func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qStep: Int) {

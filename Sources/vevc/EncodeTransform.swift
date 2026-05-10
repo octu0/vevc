@@ -82,7 +82,9 @@ func isEffectivelyZero8(data base: UnsafeMutablePointer<Int16>, threshold: Int) 
         let overPos = vec .> thPos
         let underNeg = vec .< thNeg
         let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(mask) {
+            return false 
+        }
     }
     for y in 0..<4 {
         let ptr = base + y * 8 + 4
@@ -90,7 +92,9 @@ func isEffectivelyZero8(data base: UnsafeMutablePointer<Int16>, threshold: Int) 
         let overPos = vec .> thPos
         let underNeg = vec .< thNeg
         let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(mask) {
+            return false
+        }
     }
 
     let zeroVec = SIMD4<Int16>(repeating: 0)
@@ -112,22 +116,30 @@ func checkQuadrants16x16(base: UnsafeMutablePointer<Int16>, stride: Int, q0: ino
         let ptr = base.advanced(by: y * stride)
         if q0 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-            if any(v .!= zero8) { q0 = true }
+            if any(v .!= zero8) {
+                q0 = true
+            }
         }
         if q1 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
-            if any(v .!= zero8) { q1 = true }
+            if any(v .!= zero8) {
+                q1 = true
+            }
         }
     }
     for y in 8..<16 {
         let ptr = base.advanced(by: y * stride)
         if q2 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-            if any(v .!= zero8) { q2 = true }
+            if any(v .!= zero8) {
+                q2 = true
+            }
         }
         if q3 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
-            if any(v .!= zero8) { q3 = true }
+            if any(v .!= zero8) {
+                q3 = true
+            }
         }
     }
 }
@@ -176,22 +188,30 @@ func checkQuadrants8x8(base: UnsafeMutablePointer<Int16>, stride: Int, q0: inout
         let ptr = base.advanced(by: y * stride)
         if q0 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v .!= zero4) { q0 = true }
+            if any(v .!= zero4) {
+                q0 = true
+            }
         }
         if q1 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v .!= zero4) { q1 = true }
+            if any(v .!= zero4) {
+                q1 = true
+            }
         }
     }
     for y in 4..<8 {
         let ptr = base.advanced(by: y * stride)
         if q2 != true {
             let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v .!= zero4) { q2 = true }
+            if any(v .!= zero4) {
+                q2 = true
+            }
         }
         if q3 != true {
             let v = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
-            if any(v .!= zero4) { q3 = true }
+            if any(v .!= zero4) {
+                q3 = true
+            }
         }
     }
 }
@@ -216,91 +236,77 @@ func shouldSplit16(data base: UnsafeMutablePointer<Int16>) -> Bool {
 
 @inline(__always)
 func isEffectivelyZeroBase4(data base: UnsafeMutablePointer<Int16>, threshold: Int) -> Bool {
-    // I-frame path: LL must be exactly zero (DPCM requires exact values)
-    for y in 0..<2 {
-        let ptr = base + y * 4
-        let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
-        if vec[0] != 0 || vec[1] != 0 { return false }
-    }
-    
     let th = Int16(threshold)
-    let thPos = SIMD2<Int16>(repeating: th)
-    let thNeg = SIMD2<Int16>(repeating: -th)
+    let thPos = SIMD4<Int16>(repeating: th)
+    let thNeg = SIMD4<Int16>(repeating: -th)
     
-    // Check Subbands
-    let lowerHalfBase = base + 2 * 4
-    for i in stride(from: 0, to: 8, by: 2) {
-        let vec: SIMD2<Int16> = UnsafeRawPointer(lowerHalfBase + i).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+    // Check LL band (top-left 4x4) must be exactly zero
+    for y in 0..<4 {
+        let ptr = base.advanced(by: y * 8)
+        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        if vec[0] != 0 || vec[1] != 0 || vec[2] != 0 || vec[3] != 0 {
+            return false
+        }
     }
-    for y in 0..<2 {
-        let ptr = base + y * 4 + 2
-        let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+    
+    // Check top-right 4x4 (HL)
+    for y in 0..<4 {
+        let ptr = base.advanced(by: y * 8 + 4)
+        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if any(mask) {
+            return false
+        }
     }
-
-    let zeroVec = SIMD2<Int16>(repeating: 0)
-    for i in stride(from: 0, to: 8, by: 2) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
+    
+    // Check bottom half 8x4 (LH and HH)
+    for y in 4..<8 {
+        let ptr = base.advanced(by: y * 8)
+        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        let mask = (vec .> SIMD8<Int16>(repeating: th)) .| (vec .< SIMD8<Int16>(repeating: -th))
+        if any(mask) {
+            return false
+        }
     }
-    for y in 0..<2 {
-        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
-    }
+    
     return true
 }
 
 @inline(__always)
 func isEffectivelyZeroBase4PFrame(data base: UnsafeMutablePointer<Int16>, threshold: Int) -> Bool {
-    // P-frame path: LL is threshold-checked (residual values after motion compensation)
-    let th = Int16(threshold)
-    let thPos = SIMD2<Int16>(repeating: th)
-    let thNeg = SIMD2<Int16>(repeating: -th)
+    let safeThreshold = min(8, max(0, threshold))
+    let th = Int16(safeThreshold)
+    let thPos = SIMD4<Int16>(repeating: th)
+    let thNeg = SIMD4<Int16>(repeating: -th)
     
-    // Check LL with threshold
-    for y in 0..<2 {
-        let ptr = base + y * 4
-        let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+    // Check LL band (top-left 4x4) must be EXACTLY ZERO
+    // (Because any non-zero quantized LL value carries critical base color/luma)
+    for y in 0..<4 {
+        let ptr = base.advanced(by: y * 8)
+        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        if vec[0] != 0 || vec[1] != 0 || vec[2] != 0 || vec[3] != 0 {
+            return false
+        }
     }
     
-    // Check Subbands
-    let lowerHalfBase = base + 2 * 4
-    for i in stride(from: 0, to: 8, by: 2) {
-        let vec: SIMD2<Int16> = UnsafeRawPointer(lowerHalfBase + i).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+    // Check top-right 4x4 (HL) with threshold
+    for y in 0..<4 {
+        let ptr = base.advanced(by: y * 8 + 4)
+        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        let mask = (vec .> thPos) .| (vec .< thNeg)
+        if any(mask) {
+            return false
+        }
     }
-    for y in 0..<2 {
-        let ptr = base + (y * 4) + 2
-        let vec: SIMD2<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD2<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+    
+    // Check bottom half 8x4 (LH and HH) with threshold
+    for y in 4..<8 {
+        let ptr = base.advanced(by: y * 8)
+        let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        let mask = (vec .> SIMD8<Int16>(repeating: th)) .| (vec .< SIMD8<Int16>(repeating: -th))
+        if any(mask) {   return false }
     }
-
-    let zeroVec = SIMD2<Int16>(repeating: 0)
-    for i in stride(from: 0, to: 8, by: 2) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
-    }
-    for y in 0..<2 {
-        let ptr = UnsafeMutableRawPointer(base + y * 4 + 2).assumingMemoryBound(to: SIMD2<Int16>.self)
-        ptr.pointee = zeroVec
-    }
+    
     return true
 }
 
@@ -312,7 +318,9 @@ func isEffectivelyZeroBase32(data base: UnsafeMutablePointer<Int16>, threshold: 
         let ptr = base + y * 32
         let vec: SIMD16<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
         let mask = vec .!= zeroVec16
-        if any(mask) { return false }
+        if any(mask) {
+            return false
+        }
     }
     
     // Check Subbands
@@ -326,7 +334,9 @@ func isEffectivelyZeroBase32(data base: UnsafeMutablePointer<Int16>, threshold: 
         let overPos = vec .> thPos
         let underNeg = vec .< thNeg
         let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(mask) {
+            return false
+        }
     }
     for y in 0..<16 {
         let ptr = base + y * 32 + 16
@@ -334,7 +344,9 @@ func isEffectivelyZeroBase32(data base: UnsafeMutablePointer<Int16>, threshold: 
         let overPos = vec .> thPos
         let underNeg = vec .< thNeg
         let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(mask) {
+            return false
+        }
     }
 
     for i in stride(from: 0, to: 512, by: 16) {
