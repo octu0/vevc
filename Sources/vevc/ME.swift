@@ -615,27 +615,71 @@ struct MotionEstimation {
                     }
                 }
             } else {
-                for ry in stride(from: 0, to: 32, by: 4) {
-                    let cy = by + ry
-                    let rowC = curr.advanced(by: cy * width + bx)
-                    
-                    let py = by + intDy + ry
-                    let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
-                    let r0 = prev.advanced(by: py * width + bx + intDx)
-                    let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
-                    let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-                    
-                    var rx = 0
-                    while rx < 32 {
-                        let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
-                        let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
-                        let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
-                        let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
+                switch true {
+                case fractY == 0:
+                    for ry in stride(from: 0, to: 32, by: 4) {
+                        let cy = by + ry
+                        let rowC = curr.advanced(by: cy * width + bx)
                         
-                        let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                        let pVal = (refVal &+ 31) >> 6
-                        sad &+= abs(Int32(rowC[rx]) &- pVal)
-                        rx &+= 2
+                        let py = by + intDy + ry
+                        let r0 = prev.advanced(by: py * width + bx + intDx)
+                        
+                        var rx = 0
+                        while rx < 32 {
+                            // fractY==0: vertical FIR coeffs are [0,8,0,0], so vFIR = 8*hFIR
+                            // result = (8 * hFIR + 31) >> 6  ≈  (hFIR + 3) >> 3
+                            let h0 = cX0 &* Int32(r0[rx - 1]) &+ cX1 &* Int32(r0[rx]) &+ cX2 &* Int32(r0[rx + 1]) &+ cX3 &* Int32(r0[rx + 2])
+                            let pVal = (h0 &+ 3) >> 3
+                            sad &+= abs(Int32(rowC[rx]) &- pVal)
+                            rx &+= 2
+                        }
+                    }
+                case fractX == 0:
+                    for ry in stride(from: 0, to: 32, by: 4) {
+                        let cy = by + ry
+                        let rowC = curr.advanced(by: cy * width + bx)
+                        
+                        let py = by + intDy + ry
+                        let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
+                        let r0 = prev.advanced(by: py * width + bx + intDx)
+                        let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
+                        let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
+                        
+                        var rx = 0
+                        while rx < 32 {
+                            // fractX==0: horizontal FIR coeffs are [0,8,0,0], so hFIR = 8*pixel
+                            // vertFIR = cY0*(8*pM1) + cY1*(8*p0) + cY2*(8*pP1) + cY3*(8*pP2)
+                            //         = 8 * (cY0*pM1 + cY1*p0 + cY2*pP1 + cY3*pP2)
+                            // result  = (8 * vertSum + 31) >> 6  ≈  (vertSum + 3) >> 3
+                            let vertSum = cY0 &* Int32(rM1[rx]) &+ cY1 &* Int32(r0[rx]) &+ cY2 &* Int32(rP1[rx]) &+ cY3 &* Int32(rP2[rx])
+                            let pVal = (vertSum &+ 3) >> 3
+                            sad &+= abs(Int32(rowC[rx]) &- pVal)
+                            rx &+= 2
+                        }
+                    }
+                default:
+                    for ry in stride(from: 0, to: 32, by: 4) {
+                        let cy = by + ry
+                        let rowC = curr.advanced(by: cy * width + bx)
+                        
+                        let py = by + intDy + ry
+                        let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
+                        let r0 = prev.advanced(by: py * width + bx + intDx)
+                        let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
+                        let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
+                        
+                        var rx = 0
+                        while rx < 32 {
+                            let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
+                            let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
+                            let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
+                            let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
+                            
+                            let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
+                            let pVal = (refVal &+ 31) >> 6
+                            sad &+= abs(Int32(rowC[rx]) &- pVal)
+                            rx &+= 2
+                        }
                     }
                 }
             }
