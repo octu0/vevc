@@ -30,15 +30,22 @@ struct RateController {
         self.gopRemainingFrames = self.keyint
         
         self.lastPFrameBits = 0
-        // I-Frame receives roughly 5x the bits of an average P-frame.
-        // With shorter GOPs (keyint=45) and drift-adaptive I-frame insertion,
-        // I-frames are more frequent, so each can use a smaller share.
-        // Floor reduced from 15% to 14% to balance size vs. quality.
-        // iFrameRatio = max(0.14, 5.0 / (keyint + 4))
-        // Expressed as integer: max(gopTargetBits * 7 / 50, gopTargetBits * 5 / (keyint + 4))
-        let iFrameBitsFloor = (self.gopTargetBits * 7) / 50        // 14% = 7/50
+        // I-frame bit allocation with keyint-independent quality floor.
+        //
+        // Problem: with shorter GOPs, the GOP budget shrinks proportionally,
+        // and 15% of a smaller budget produces lower-quality I-frames.
+        // This defeats the purpose of shorter GOPs (better drift reset).
+        //
+        // Solution: compute the I-frame budget as if keyint=60 (reference GOP),
+        // then use that as the absolute floor. This ensures I-frame quality
+        // remains constant regardless of GOP length.
+        //
+        // referenceGOPBits = maxbitrate * 60 / framerate (keyint=60 equivalent)
+        // absoluteFloor = referenceGOPBits * 10% = maxbitrate * 60 / (framerate * 10)
+        //               = maxbitrate * 6 / framerate
+        let absoluteFloor = (self.maxbitrate * 6) / self.framerate
         let iFrameBitsProp = (self.gopTargetBits * 5) / (self.keyint + 4)
-        return max(1000, max(iFrameBitsFloor, iFrameBitsProp))
+        return max(1000, max(absoluteFloor, iFrameBitsProp))
     }
     
     @inline(__always)

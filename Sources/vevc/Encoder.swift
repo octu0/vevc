@@ -14,7 +14,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 45, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -415,12 +415,10 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // estimatedTotalBits = totalSampleBits * (totalPixels / samplePixels)
     // predictedStep = probeStep * estimatedTotalBits * 85 / (targetBits * 100)
     let estimatedTotalBits64 = (Int64(totalSampleBits) * Int64(totalPixels)) / Int64(samplePixels)
-    // I-frame quality bias: 0.90 = 90/100
-    // With drift-adaptive I-frame insertion and shorter GOPs (keyint=45),
-    // I-frames occur more frequently. Each can use slightly coarser
-    // quantization while maintaining overall quality through more
-    // frequent drift resets.
-    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 90) / (Int64(targetBits) * 100)
+    // I-frame quality bias: 0.85 = 85/100
+    // A lower factor produces larger (higher quality) I-frames, providing
+    // a stronger structural base for subsequent P-frames to reference.
+    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 85) / (Int64(targetBits) * 100)
 
     let q = min(256, Int(max(2, predictedStep64)))
     
