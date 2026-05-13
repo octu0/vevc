@@ -14,7 +14,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 60, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 45, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -159,7 +159,28 @@ actor LayersEncodeActor {
             isSceneChange = (sceneChangeThreshold < sad)
         }
         
-        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceKeyFrame)
+        // Drift detection: measure the divergence between the current input
+        // and the reconstructed reference. When quantization error accumulates
+        // across P-frames, this SAD grows even for static scenes. If it exceeds
+        // a threshold (derived from sceneChangeThreshold), force an I-frame to
+        // reset the drift. Only activate after a minimum number of P-frames
+        // to avoid interfering with the start of a GOP.
+        let minPFramesBeforeDriftCheck = 15
+        var isDriftReset = false
+        if isSceneChange != true, forceKeyFrame != true, minPFramesBeforeDriftCheck < framesSinceKeyframe {
+            if let prevRecon = previousReconstructed {
+                let driftSAD = estimateFastSAD(a: plane, b: prevRecon)
+                // Drift threshold: fixed at 9 SAD per pixel.
+                // Targets frames where quantization drift has accumulated
+                // enough to visibly degrade the reference frame.
+                let driftThreshold = 9
+                if driftThreshold < driftSAD {
+                    isDriftReset = true
+                }
+            }
+        }
+        
+        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceKeyFrame || isDriftReset)
         
         if isIFrame {
             // Rate control
@@ -394,8 +415,12 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // estimatedTotalBits = totalSampleBits * (totalPixels / samplePixels)
     // predictedStep = probeStep * estimatedTotalBits * 85 / (targetBits * 100)
     let estimatedTotalBits64 = (Int64(totalSampleBits) * Int64(totalPixels)) / Int64(samplePixels)
-    // I-frame quality bias: 0.85 = 85/100
-    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 85) / (Int64(targetBits) * 100)
+    // I-frame quality bias: 0.90 = 90/100
+    // With drift-adaptive I-frame insertion and shorter GOPs (keyint=45),
+    // I-frames occur more frequently. Each can use slightly coarser
+    // quantization while maintaining overall quality through more
+    // frequent drift resets.
+    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 90) / (Int64(targetBits) * 100)
 
     let q = min(256, Int(max(2, predictedStep64)))
     

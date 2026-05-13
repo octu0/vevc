@@ -31,11 +31,12 @@ struct RateController {
         
         self.lastPFrameBits = 0
         // I-Frame receives roughly 5x the bits of an average P-frame.
-        // However, to ensure a strong structural base (I-frame SSIM > 0.92) so that P-frames
-        // don't degrade below 0.85, we guarantee a MINIMUM of 15% of the GOP budget to the I-Frame.
-        // iFrameRatio = max(0.15, 5.0 / (keyint + 4))
-        // Expressed as integer: max(gopTargetBits * 3 / 20, gopTargetBits * 5 / (keyint + 4))
-        let iFrameBitsFloor = (self.gopTargetBits * 3) / 20        // 15% = 3/20
+        // With shorter GOPs (keyint=45) and drift-adaptive I-frame insertion,
+        // I-frames are more frequent, so each can use a smaller share.
+        // Floor reduced from 15% to 14% to balance size vs. quality.
+        // iFrameRatio = max(0.14, 5.0 / (keyint + 4))
+        // Expressed as integer: max(gopTargetBits * 7 / 50, gopTargetBits * 5 / (keyint + 4))
+        let iFrameBitsFloor = (self.gopTargetBits * 7) / 50        // 14% = 7/50
         let iFrameBitsProp = (self.gopTargetBits * 5) / (self.keyint + 4)
         return max(1000, max(iFrameBitsFloor, iFrameBitsProp))
     }

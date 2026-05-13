@@ -5,7 +5,7 @@ var inputPath = ""
 var outPath = ""
 var bitrate = 500
 var zeroThreshold = 3
-var keyint = 60
+var keyint = 45
 var sceneThreshold = 32
 
 let args = CommandLine.arguments
