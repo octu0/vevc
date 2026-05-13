@@ -103,6 +103,72 @@ struct QuantizationTable: Sendable {
     }
 }
 
+// MARK: - Adaptive Quantization Table
+
+/// Block-level adaptive quantization.
+/// Pre-generates a discrete set of QuantizationTables with scaled qMid/qHigh
+/// to redistribute bits from flat blocks to edge/texture blocks.
+///
+/// Selection logic:
+///   - Measure each block's AC energy (sum of |HL| + |LH| + |HH| coefficients)
+///   - Compare against the frame-wide average AC energy
+///   - High-energy blocks (edges/textures) → lower qStep (finer quantization)
+///   - Low-energy blocks (flat regions) → higher qStep (coarser quantization)
+///
+/// qLow is NOT scaled — base frequency quality must remain constant.
+struct AQTable: Sendable {
+    /// 5 discrete quantization levels.
+    /// Scale factors: [0.80, 0.90, 1.00, 1.10, 1.20]
+    /// Level 2 = original (unmodified) quantization.
+    /// Wider range prioritizes noise reduction in edge/texture regions at the cost of
+    /// slightly larger file size. Applied to both I-frames and P-frames.
+    let tables: (QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable)
+    
+    /// Unmodified table at level 2.
+    var base: QuantizationTable { tables.2 }
+    
+    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
+        let scaleDen = 10
+        
+        @inline(__always)
+        func makeScaled(_ num: Int) -> QuantizationTable {
+            let scaledStep = max(1, (baseStep * num) / scaleDen)
+            return QuantizationTable(baseStep: scaledStep, isChroma: isChroma, layerIndex: layerIndex)
+        }
+        
+        self.tables = (
+            makeScaled(8),   // 0.80 - high energy blocks (strong edge/texture protection)
+            makeScaled(9),   // 0.90
+            makeScaled(10),  // 1.00 - average blocks (identity)
+            makeScaled(11),  // 1.10
+            makeScaled(12)   // 1.20 - flat blocks (coarser quantization, bit saving)
+        )
+    }
+    
+    /// Select the appropriate quantization table based on block AC energy
+    /// relative to the frame average.
+    @inline(__always)
+    func select(energy: Int, avgEnergy: Int) -> QuantizationTable {
+        // ratio = avgEnergy / energy (inverted: high energy → low ratio → fine qt)
+        let safeEnergy = max(1, energy)
+        let ratioX10 = (avgEnergy * 10) / safeEnergy
+        
+        // ratioX10 <= 8  → level 0 (scale=0.80) = very high energy (strong edges)
+        // ratioX10 == 9  → level 1 (scale=0.90) = high energy
+        // ratioX10 == 10 → level 2 (scale=1.00) = average
+        // ratioX10 == 11 → level 3 (scale=1.10) = low energy
+        // ratioX10 >= 12 → level 4 (scale=1.20) = flat region
+        switch true {
+        case ratioX10 < 9:  return tables.0
+        case ratioX10 < 10: return tables.1
+        case ratioX10 < 11: return tables.2
+        case ratioX10 < 12: return tables.3
+        default:            return tables.4
+        }
+    }
+}
+
+
 // MARK: - Quantization SIMD
 
 @inline(__always)

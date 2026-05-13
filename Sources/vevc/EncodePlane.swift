@@ -2,6 +2,103 @@
 
 import Foundation
 
+// MARK: - AC Energy Measurement for Adaptive Quantization
+
+/// Measures the AC energy of a DWT-transformed 32x32 block.
+/// AC energy = sum of |HL| + |LH| + |HH| coefficients.
+/// This measures the "complexity" of the block: high energy = edges/textures,
+/// low energy = flat/smooth regions.
+///
+/// Layout after DWT of 32x32 block (stride=32):
+///   [LL 16x16] [HL 16x16]
+///   [LH 16x16] [HH 16x16]
+/// HL starts at base+16, LH at base+16*32, HH at base+16*32+16
+@inline(__always)
+func measureACEnergy32(view: BlockView) -> Int {
+    let base = view.base
+    let s = 32 // stride
+    var totalSum: Int = 0
+    
+    // HL subband: rows 0..15, cols 16..31
+    for y in 0..<16 {
+        let ptr = base + y * s + 16
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        let abs16 = v.replacing(with: .zero &- v, where: v .< 0)
+        // Horizontal sum of SIMD16<Int16>: split into two SIMD8, widen, sum
+        let lo8 = SIMD8<Int16>(abs16[0], abs16[1], abs16[2], abs16[3], abs16[4], abs16[5], abs16[6], abs16[7])
+        let hi8 = SIMD8<Int16>(abs16[8], abs16[9], abs16[10], abs16[11], abs16[12], abs16[13], abs16[14], abs16[15])
+        let sum8 = lo8 &+ hi8
+        let sum4 = SIMD4<Int16>(sum8[0] &+ sum8[4], sum8[1] &+ sum8[5], sum8[2] &+ sum8[6], sum8[3] &+ sum8[7])
+        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+    }
+    
+    // LH subband: rows 16..31, cols 0..15
+    for y in 16..<32 {
+        let ptr = base + y * s
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        let abs16 = v.replacing(with: .zero &- v, where: v .< 0)
+        let lo8 = SIMD8<Int16>(abs16[0], abs16[1], abs16[2], abs16[3], abs16[4], abs16[5], abs16[6], abs16[7])
+        let hi8 = SIMD8<Int16>(abs16[8], abs16[9], abs16[10], abs16[11], abs16[12], abs16[13], abs16[14], abs16[15])
+        let sum8 = lo8 &+ hi8
+        let sum4 = SIMD4<Int16>(sum8[0] &+ sum8[4], sum8[1] &+ sum8[5], sum8[2] &+ sum8[6], sum8[3] &+ sum8[7])
+        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+    }
+    
+    // HH subband: rows 16..31, cols 16..31
+    for y in 16..<32 {
+        let ptr = base + y * s + 16
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        let abs16 = v.replacing(with: .zero &- v, where: v .< 0)
+        let lo8 = SIMD8<Int16>(abs16[0], abs16[1], abs16[2], abs16[3], abs16[4], abs16[5], abs16[6], abs16[7])
+        let hi8 = SIMD8<Int16>(abs16[8], abs16[9], abs16[10], abs16[11], abs16[12], abs16[13], abs16[14], abs16[15])
+        let sum8 = lo8 &+ hi8
+        let sum4 = SIMD4<Int16>(sum8[0] &+ sum8[4], sum8[1] &+ sum8[5], sum8[2] &+ sum8[6], sum8[3] &+ sum8[7])
+        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+    }
+    
+    return totalSum
+}
+
+/// Measures the AC energy of a DWT-transformed 16x16 block.
+/// Layout after DWT of 16x16 block (stride=16):
+///   [LL 8x8] [HL 8x8]
+///   [LH 8x8] [HH 8x8]
+@inline(__always)
+func measureACEnergy16(view: BlockView) -> Int {
+    let base = view.base
+    let s = 16 // stride
+    var totalSum: Int = 0
+    
+    // HL subband: rows 0..7, cols 8..15
+    for y in 0..<8 {
+        let ptr = base + y * s + 8
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        let abs8 = v.replacing(with: .zero &- v, where: v .< 0)
+        let sum4 = SIMD4<Int16>(abs8[0] &+ abs8[4], abs8[1] &+ abs8[5], abs8[2] &+ abs8[6], abs8[3] &+ abs8[7])
+        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+    }
+    
+    // LH subband: rows 8..15, cols 0..7
+    for y in 8..<16 {
+        let ptr = base + y * s
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        let abs8 = v.replacing(with: .zero &- v, where: v .< 0)
+        let sum4 = SIMD4<Int16>(abs8[0] &+ abs8[4], abs8[1] &+ abs8[5], abs8[2] &+ abs8[6], abs8[3] &+ abs8[7])
+        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+    }
+    
+    // HH subband: rows 8..15, cols 8..15
+    for y in 8..<16 {
+        let ptr = base + y * s + 8
+        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        let abs8 = v.replacing(with: .zero &- v, where: v .< 0)
+        let sum4 = SIMD4<Int16>(abs8[0] &+ abs8[4], abs8[1] &+ abs8[5], abs8[2] &+ abs8[6], abs8[3] &+ abs8[7])
+        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+    }
+    
+    return totalSum
+}
+
 fileprivate struct SendableInt16Ptr: @unchecked Sendable {
     let ptr: UnsafeMutablePointer<Int16>
     init(_ ptr: UnsafeMutablePointer<Int16>) { self.ptr = ptr }
@@ -64,7 +161,7 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, aqTable: AQTable? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -81,59 +178,157 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     let blocks = tmpBlocks
     
     let chunkSize = 4
-    await withTaskGroup(of: Void.self) { group in
-        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
-            let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, safeDst, qt] in
-                let dstBase = safeDst.ptr
-                for i in sRow..<endRow {
-                    let h = (i * 32)
-                    for j in 0..<colCount {
-                        let w = (j * 32)
-                        if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        dwt2DBlock32(view)
-                        
-                        let destStartX = (w / 2)
-                        let destStartY = (h / 2)
-                        let subSize = (32 / 2)
-                        let subs = getSubbands32(view: view)
-                        let srcBase = subs.ll.base
-                        let limit = min(subSize, (subWidth - destStartX))
-                        
-                        if 0 < limit {
-                            if limit == subSize && (destStartY + subSize) <= subHeight {
-                                let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                                dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
-                            } else {
-                                for blockY in 0..<subSize {
-                                    let dstY = (destStartY + blockY)
-                                    if dstY < subHeight {
-                                        let srcPtr = srcBase.advanced(by: (blockY * 32))
-                                        let dstIdx = ((dstY * subWidth) + destStartX)
-                                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+    
+    if let aq = aqTable {
+        // --- 2-Pass AQ Mode ---
+        // Pass 1: DWT + LL extraction + AC energy measurement
+        let energyBox = ConcurrentBox([Int](repeating: 0, count: totalBlocks))
+        let safeEnergyBox = energyBox
+        await withTaskGroup(of: Void.self) { group in
+            for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+                let endRow = min(sRow + chunkSize, rowCount)
+                group.addTask { [blocks, safeDst, safeEnergyBox] in
+                    let dstBase = safeDst.ptr
+                    for i in sRow..<endRow {
+                        let h = (i * 32)
+                        for j in 0..<colCount {
+                            let w = (j * 32)
+                            if width <= w || height <= h { continue }
+                            let blockIdx = (i * colCount) + j
+                            let view = blocks[blockIdx]
+                            r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
+                            dwt2DBlock32(view)
+                            
+                            // Measure AC energy before quantization
+                            safeEnergyBox.value[blockIdx] = measureACEnergy32(view: view)
+                            
+                            // Extract LL coefficients to subband (same as before)
+                            let destStartX = (w / 2)
+                            let destStartY = (h / 2)
+                            let subSize = (32 / 2)
+                            let subs = getSubbands32(view: view)
+                            let srcBase = subs.ll.base
+                            let limit = min(subSize, (subWidth - destStartX))
+                            
+                            if 0 < limit {
+                                if limit == subSize && (destStartY + subSize) <= subHeight {
+                                    let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                                    dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+                                } else {
+                                    for blockY in 0..<subSize {
+                                        let dstY = (destStartY + blockY)
+                                        if dstY < subHeight {
+                                            let srcPtr = srcBase.advanced(by: (blockY * 32))
+                                            let dstIdx = ((dstY * subWidth) + destStartX)
+                                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                                        }
                                     }
                                 }
                             }
                         }
-                        
-                        evaluateQuantizeLayer32(view: view, qt: qt)
+                    }
+                }
+            }
+        }
+        let energies = energyBox.value
+        
+        // Compute average AC energy across all blocks
+        var totalEnergy: Int = 0
+        for i in 0..<totalBlocks {
+            totalEnergy += energies[i]
+        }
+        let avgEnergy = max(1, totalEnergy / max(1, totalBlocks))
+        
+        // Pass 2: Adaptive quantization using per-block energy
+        await withTaskGroup(of: Void.self) { group in
+            for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+                let endRow = min(sRow + chunkSize, rowCount)
+                group.addTask { [blocks, energies, aq] in
+                    for i in sRow..<endRow {
+                        let h = (i * 32)
+                        for j in 0..<colCount {
+                            let w = (j * 32)
+                            if width <= w || height <= h { continue }
+                            let blockIdx = (i * colCount) + j
+                            let view = blocks[blockIdx]
+                            let blockQt = aq.select(energy: energies[blockIdx], avgEnergy: avgEnergy)
+                            evaluateQuantizeLayer32(view: view, qt: blockQt)
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // --- Original 1-Pass Mode (no AQ) ---
+        await withTaskGroup(of: Void.self) { group in
+            for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+                let endRow = min(sRow + chunkSize, rowCount)
+                group.addTask { [blocks, safeDst, qt] in
+                    let dstBase = safeDst.ptr
+                    for i in sRow..<endRow {
+                        let h = (i * 32)
+                        for j in 0..<colCount {
+                            let w = (j * 32)
+                            if width <= w || height <= h { continue }
+                            let view = blocks[(i * colCount) + j]
+                            r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
+                            dwt2DBlock32(view)
+                            
+                            let destStartX = (w / 2)
+                            let destStartY = (h / 2)
+                            let subSize = (32 / 2)
+                            let subs = getSubbands32(view: view)
+                            let srcBase = subs.ll.base
+                            let limit = min(subSize, (subWidth - destStartX))
+                            
+                            if 0 < limit {
+                                if limit == subSize && (destStartY + subSize) <= subHeight {
+                                    let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                                    dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
+                                    dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+                                } else {
+                                    for blockY in 0..<subSize {
+                                        let dstY = (destStartY + blockY)
+                                        if dstY < subHeight {
+                                            let srcPtr = srcBase.advanced(by: (blockY * 32))
+                                            let dstIdx = ((dstY * subWidth) + destStartX)
+                                            dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            evaluateQuantizeLayer32(view: view, qt: qt)
+                        }
                     }
                 }
             }
@@ -542,24 +737,24 @@ func subtractCoeffsBase32(currBlocks: inout [BlockView], predBlocks: inout [Bloc
 }
 
 @inline(__always)
-func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, aqYTable: AQTable? = nil, aqCTable: AQTable? = nil) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, aqTable: aqYTable)
         return (subband, blocks, r)
     }()
     
     async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, aqTable: aqCTable)
         return (subband, blocks, r)
     }()
     
     async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, aqTable: aqCTable)
         return (subband, blocks, r)
     }()
 
