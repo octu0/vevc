@@ -118,6 +118,7 @@ public actor StreamingDecoderActor {
             
             firstReconstructed = nil
             previousReconstructed = nil
+
             roundOffsetIndex = 0
         }
         
