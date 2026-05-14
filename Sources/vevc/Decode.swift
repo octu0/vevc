@@ -28,8 +28,6 @@ public enum DecodeError: Error, CustomStringConvertible {
     }
 }
 
-
-
 // Adaptive predictor: selects prediction based on edge direction.
 // vertical edge -> min(a,b), horizontal edge -> max(a,b), flat -> a+b-c
 
@@ -737,20 +735,14 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     
     if let tPrev = predictedPd, let mvs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
-            // bidirectional prediction: use refDirs to select forward/backward prediction for each block
             applyBidirectionalMotionCompensationPixelsLuma32(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, roundOffset: roundOffset)
             applyBidirectionalMotionCompensationPixelsChroma16(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
             applyBidirectionalMotionCompensationPixelsChroma16(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
         } else {
-            // forward prediction only
             applyMotionCompensationPixelsLuma32(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, roundOffset: roundOffset)
             applyMotionCompensationPixelsChroma16(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
             applyMotionCompensationPixelsChroma16(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
         }
-        
-        blendIntraInterBoundaryLuma32(plane: &sub.y, mvs: mvs, width: dx, height: dy)
-        blendIntraInterBoundaryChroma16(plane: &sub.cb, mvs: mvs, width: cbDx, height: cbDy)
-        blendIntraInterBoundaryChroma16(plane: &sub.cr, mvs: mvs, width: cbDx, height: cbDy)
     }
 
     applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step), mvs: mvs ?? [])

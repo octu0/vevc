@@ -159,28 +159,7 @@ actor LayersEncodeActor {
             isSceneChange = (sceneChangeThreshold < sad)
         }
         
-        // Drift detection: measure the divergence between the current input
-        // and the reconstructed reference. When quantization error accumulates
-        // across P-frames, this SAD grows even for static scenes. If it exceeds
-        // a threshold (derived from sceneChangeThreshold), force an I-frame to
-        // reset the drift. Only activate after a minimum number of P-frames
-        // to avoid interfering with the start of a GOP.
-        let minPFramesBeforeDriftCheck = 15
-        var isDriftReset = false
-        if isSceneChange != true, forceKeyFrame != true, minPFramesBeforeDriftCheck < framesSinceKeyframe {
-            if let prevRecon = previousReconstructed {
-                let driftSAD = estimateFastSAD(a: plane, b: prevRecon)
-                // Drift threshold: fixed at 9 SAD per pixel.
-                // Targets frames where quantization drift has accumulated
-                // enough to visibly degrade the reference frame.
-                let driftThreshold = 9
-                if driftThreshold < driftSAD {
-                    isDriftReset = true
-                }
-            }
-        }
-        
-        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceKeyFrame || isDriftReset)
+        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceKeyFrame)
         
         if isIFrame {
             // Rate control
