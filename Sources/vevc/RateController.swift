@@ -14,6 +14,12 @@ struct RateController {
     private(set) var lastPFrameQStep: Int = 0
     private(set) var lastPFrameSAD: Int = 0
     
+    // Reconstruction distortion tracking for quality-consistent QP adjustment.
+    // avgDistortion: EMA of per-pixel reconstruction SAD (target quality level)
+    // lastDistortion: previous frame's per-pixel reconstruction SAD
+    private(set) var avgDistortion: Int = 0
+    private(set) var lastDistortion: Int = 0
+    
     init(maxbitrate: Int, framerate: Int, keyint: Int) {
         self.maxbitrate = maxbitrate
         self.framerate = framerate
@@ -29,7 +35,10 @@ struct RateController {
         self.gopRemainingBits = self.gopTargetBits
         self.gopRemainingFrames = self.keyint
         
-        self.lastPFrameBits = 0
+        // lastPFrameBits / lastPFrameQStep / lastPFrameSAD are intentionally
+        // NOT reset here. Carrying over the previous GOP's last P-frame data
+        // allows the first P-frame of the new GOP to use it as a prediction
+        // reference, preventing the quality discontinuity at GOP boundaries.
         // I-frame bit allocation with keyint-independent quality floor.
         //
         // Problem: with shorter GOPs, the GOP budget shrinks proportionally,
@@ -52,10 +61,6 @@ struct RateController {
     mutating func consumeIFrame(bits: Int, qStep: Int) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
-        
-        self.lastPFrameBits = 0 // Reset
-        self.lastPFrameQStep = qStep
-        self.lastPFrameSAD = 0
     }
     
     @inline(__always)
@@ -98,17 +103,58 @@ struct RateController {
             newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), val)))
         }
         
+        // Distortion feedback: adjust QP based on actual reconstruction quality.
+        // If the previous frame had higher-than-average distortion (poor quality),
+        // reduce QP to improve quality. If it had lower-than-average distortion
+        // (good quality), allow QP to increase.
+        // This is content-adaptive: no fixed parameters, responds to actual quality.
+        // Half-strength blending: apply only 50% of the correction to avoid
+        // over-reacting and causing excessive size increase.
+        if 0 < lastDistortion && 0 < avgDistortion {
+            // fullCorrection = newStep * avgDistortion / lastDistortion
+            // blended = (newStep + fullCorrection) / 2 → 50% correction strength
+            let fullCorrection = (Int64(newStepInt) * Int64(avgDistortion)) / Int64(lastDistortion)
+            let blended = (Int64(newStepInt) + fullCorrection) / 2
+            newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), blended)))
+        }
+        
+        // Adaptive EMA Smoothing: blend new QP with previous QP based on scene stability.
+        // sceneSadRatio = currentSAD / avgPFrameSAD:
+        //   ratio ≈ 1.0: scene is stable → strong smoothing (favor previous QP)
+        //   ratio >> 1.0: scene is changing → weak smoothing (follow new QP)
+        //
+        // alpha = clamp(sceneSadRatio, 0.3, 1.0) in Q16
+        // finalQP = alpha * newQP + (1-alpha) * lastQP
+        //
+        // This has no fixed parameters — the smoothing strength adapts to content.
+        if 0 < lastPFrameQStep && 0 < avgPFrameSAD {
+            let sceneSadRatio16 = (Int64(currentSAD) << 16) / Int64(max(1, avgPFrameSAD))
+            // Clamp to [0.3, 1.0] in Q16: [19661, 65536]
+            let alpha16 = max(19661, min(65536, sceneSadRatio16))
+            let smoothed = (Int64(newStepInt) * alpha16 + Int64(lastPFrameQStep) * (65536 - alpha16)) >> 16
+            newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), smoothed)))
+        }
+        
         let finalStep = max(minStep, min(maxStep, newStepInt))
         return finalStep
     }
     
     @inline(__always)
-    mutating func consumePFrame(bits: Int, qStep: Int, sad: Int) {
+    mutating func consumePFrame(bits: Int, qStep: Int, sad: Int, distortion: Int) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         
         self.lastPFrameBits = bits
         self.lastPFrameQStep = qStep
         self.lastPFrameSAD = sad
+        
+        // Track reconstruction distortion with EMA.
+        // Slow adaptation (7/8 weight on history) to establish a stable target.
+        self.lastDistortion = distortion
+        if self.avgDistortion == 0 {
+            self.avgDistortion = distortion
+        } else {
+            self.avgDistortion = ((self.avgDistortion * 7) + distortion) / 8
+        }
     }
 }

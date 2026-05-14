@@ -229,7 +229,11 @@ actor LayersEncodeActor {
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
             )
             
-            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD)
+            // Compute reconstruction distortion: SAD between original and reconstructed.
+            // Reuses estimateFrameSAD which samples 8 representative blocks.
+            // This feeds the distortion feedback loop in RateController.
+            let reconDistortion = estimateFrameSAD(current: plane, previous: reconstructed)
+            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD, distortion: reconDistortion)
             
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon

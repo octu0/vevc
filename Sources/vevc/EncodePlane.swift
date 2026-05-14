@@ -106,7 +106,6 @@ fileprivate struct SendableInt16Ptr: @unchecked Sendable {
 
 // MARK: - Spatial Adaptive Weight
 
-
 final class ConcurrentBox<T>: @unchecked Sendable {
     var value: T
     init(_ value: T) { self.value = value }
@@ -1349,8 +1348,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
         
-        // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
-
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 2)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
@@ -1369,8 +1366,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
-        
-        // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
         let buf = if isIFrame != true {
