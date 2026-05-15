@@ -101,10 +101,6 @@ SW: Software, HWA: Hardware Acceleration
 ---
 
 
-## Entropy Coding: Interleaved rANS
-
-`vevc` uses **Interleaved 4-way rANS (Asymmetric Numeral Systems)** for entropy coding. rANS provides near-optimal compression and enables SIMD-parallel decoding, unlike CABAC which is inherently serial.
-
 ## Architecture & Internals
 
 For codec researchers and developers, `vevc` features a modern, SIMD-optimized pipeline and a predictable bitstream layout.
@@ -130,7 +126,7 @@ DWT Coefficients
 <details>
 <summary><b>View VEVC Bitstream Data Layout</b> (Click to expand)</summary>
 
-`vevc` encodes video using Temporal GOP (Group of Pictures) of 4 frames, processed through a temporal-spatial wavelet pipeline.
+`vevc` encodes video using Variable GOP (Group of Pictures) with configurable keyframe interval (`-keyint`), processed through a temporal-spatial wavelet pipeline.
 *Note: The encoder detects duplicate input frames (common in telecine content like 24fps in 60fps) and emits `FrameLen=0` instead of encoding redundant data, saving massive bitrate.*
 
 **Bitstream Structure:**
