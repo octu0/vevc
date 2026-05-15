@@ -31,9 +31,14 @@ At decode or delivery time, specific spatial resolutions can be instantly extrac
 | **Medium (Preview)**      | `1` (Layer 0,1)       | 540p          | **O(1) Drop Layer 2 packets**            |
 | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p          | **O(1) Drop Layer 1 & 2 packets**        |
 
-### 2. Wavelet Domain Motion Compensation (Inspired by Dirac)
-Combining Discrete Wavelet Transform (DWT) with motion compensation has historically been a monumental challenge, famously pioneered by the BBC's open video codec **Dirac**. `vevc` revives and modernizes this ambition:
-- **Subband Motion Estimation**: Instead of predicting full-resolution pixel blocks, motion estimation operates directly on reduced-resolution spatial frequency domains (Layer 0 HL, LH, HH). This elegantly avoids traditional DWT shift-variance issues while enabling lightning-fast, sub-millisecond coarse-to-fine searches.
+### 2. Multi-Resolution Motion Compensation
+Building on the spatial scalability of DWT, `vevc` performs **motion estimation once at the base (Layer 0) resolution** and scales the resulting Motion Vectors for each spatial tier:
+- **Layer 0 (Base8, ×1)**: MVs used as-is, with 8×8 Luma / 4×4 Chroma blocks.
+- **Layer 1 (Level16, ×2)**: MVs scaled 2×, with 16×16 Luma / 8×8 Chroma blocks.
+- **Layer 2 (Level32, ×4)**: MVs scaled 4×, with 32×32 Luma / 16×16 Chroma blocks.
+
+This **"Compute Once, Scale Everywhere"** strategy eliminates redundant motion estimation at higher resolutions. Each resolution tier independently performs motion compensation, meaning a server dropping Layer 2 and Layer 1 does not break P-frame prediction—Layer 0 alone is fully self-contained.
+- **Subband Motion Estimation**: Motion estimation operates directly on reduced-resolution spatial frequency domains (Layer 0), combining Diamond Search with half-pixel refinement for sub-millisecond coarse-to-fine searches.
 - **Zero-Data Skip Blocks**: P-frame residuals undergo strict structural threshold tests. Unchanged macroblock coefficients are aggressively nulled out at the encoder, pushing entropy compression to its limits on static backgrounds.
 - **Spatial DWT**: Clean LeGall 5/3 2D-DWT decomposes I-frames and P-frame residuals, completely eliminating the blocking artifacts inherent in traditional DCT-based codecs (like AVC/HEVC).
 
@@ -202,7 +207,7 @@ While `vevc` currently achieves extreme speeds in software via SIMD, its foundat
 - **Parallel-Ready Entropy Coding**: The Interleaved 4-way rANS structure is naturally suited for parallel hardware execution. Hardware implementations can instantiate four independent, lightweight ALUs side-by-side. The O(1) decoding LUTs fit cleanly into tiny on-chip SRAMs (~32KB), breaking the strict serial dependency chains found in traditional arithmetic coders.
 - **Localized SRAM Footprint**: `vevc` strictly confines its spatial DWT operations to independent 32x32 code-blocks. This ensures that the working set (approx. 2KB per block) remains entirely within fast, on-chip L1 scratchpad memory, bypassing the massive line-buffer requirements of traditional full-frame wavelet transforms.
 - **Predictable Data Paths**: With a fixed block hierarchy (32x32 → 16x16 → Base8) and streamlined prediction modes, the datapath is highly deterministic. This allows RTL designers to build deep, efficient, feed-forward pipelines without unpredictable branching or overly complex state machines.
-- **Reduced Memory Bandwidth**: Wavelet Domain Motion Compensation (WDMC) performs motion searches and compensation on reduced-resolution subbands. This inherently reduces the volume of reference pixel data that must be fetched from external DRAM, directly contributing to lower power consumption on mobile devices.
+- **Reduced Memory Bandwidth**: Multi-Resolution Motion Compensation performs motion searches and compensation on the base Layer 0 resolution, then scales MVs for higher layers. This inherently reduces the volume of reference pixel data that must be fetched from external DRAM, directly contributing to lower power consumption on mobile devices.
 
 ### Hybrid Static/Dynamic Frequency Tables
 

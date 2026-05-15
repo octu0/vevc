@@ -58,6 +58,13 @@ If the Status is `0x00` or `0x02`, the following size information is stored next
 > [!TIP]
 > **Scalable Bitstream (Droppable Layers)**
 > The VEVC bitstream is designed for O(1) server-side resolution and bitrate scaling. Because each layer's payload is completely independent in the bitstream, external tools (like `vevc-splitter`) can instantly drop `Layer1` and `Layer2` to reduce bitrate and resolution without re-encoding. This is done by simply setting `Layer1 Size` and/or `Layer2 Size` to `0` in the header, and stripping those bytes from the Frame Payload.
+>
+> **Multi-Resolution Motion Compensation**: Motion Vectors are stored in Layer 0 (Base8) quarter-pixel precision. During decoding, each layer scales the MVs appropriately:
+> - **Layer 0** (Base8): MVs used as-is (×1), applied with 8×8 Luma / 4×4 Chroma block size.
+> - **Layer 1** (Level16): MVs scaled ×2, applied with 16×16 Luma / 8×8 Chroma block size.
+> - **Layer 2** (Level32): MVs scaled ×4, applied with 32×32 Luma / 16×16 Chroma block size.
+>
+> This "Encode Once, Route Anywhere" design means each resolution tier independently performs motion compensation using the same shared MV data, drastically reducing both compute and data overhead.
 
 ### 2.2. Frame Payload
 Data is stored continuously according to the sizes specified in the header.
@@ -70,7 +77,21 @@ Data is stored continuously according to the sizes specified in the header.
 
 ---
 
-## 3. Layer Data Structure
+## 3. Motion Vector Precision
+
+Motion Vectors in VEVC are encoded and stored at **Layer 0 (Base8) quarter-pixel precision**. This means that a single set of MVs is shared across all spatial layers, with each layer applying a scale factor during motion compensation:
+
+| Layer | MV Scale | Luma Block Size | Chroma Block Size | Effective Precision |
+|---|---|---|---|---|
+| Layer 0 (Base8) | ×1 | 8×8 | 4×4 | Quarter-pixel of Base8 |
+| Layer 1 (Level16) | ×2 | 16×16 | 8×8 | Quarter-pixel of Level16 |
+| Layer 2 (Level32) | ×4 | 32×32 | 16×16 | Quarter-pixel of Level32 |
+
+This design eliminates the need for separate MV computation at each resolution, enabling constant-time resolution scaling.
+
+---
+
+## 4. Layer Data Structure
 
 The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each layer retains residual information (entropy-coded DWT subband data) for the Y, Cb, and Cr planes.
 
@@ -95,7 +116,11 @@ The data for each plane consists of the entropy-encoded data of the four DWT sub
 
 ---
 
-## 4. Entropy Coded Data Structure
+> [!NOTE]
+> **Motion Compensation at Decode Time**
+> For P-Frames, each layer's decoded residual data must have motion compensation applied *after* inverse DWT reconstruction. The decoder fetches pixels from the reference frame (scaled to the target layer's resolution) using the scaled MVs, and adds them to the decoded residual to produce the final reconstructed frame. This is performed independently at whatever resolution tier the decoder is targeting (`maxLayer`).
+
+## 5. Entropy Coded Data Structure
 
 The interior of each subband data (`LL Data`, `HL Data`, etc.) is entropy-coded using a combination of Bypass (raw bitstreams) and rANS (Asymmetric Numeral Systems) models.
 

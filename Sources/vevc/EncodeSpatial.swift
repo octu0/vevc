@@ -92,9 +92,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     
-    subtractMotionCompensationPixelsLuma32(plane: &mutPdY, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, roundOffset: roundOffset)
-    subtractMotionCompensationPixelsChroma16(plane: &mutPdCb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
-    subtractMotionCompensationPixelsChroma16(plane: &mutPdCr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
+    // MV は layer0 精度 → layer2(フル解像度) への適用には mvScale=4
+    subtractScaledMotionCompensationLuma(plane: &mutPdY, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+    subtractScaledMotionCompensationChroma(plane: &mutPdCb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    subtractScaledMotionCompensationChroma(plane: &mutPdCr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
     let isPFrame = true
@@ -131,10 +132,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     var mutReconL2Cr = reconL2Cr
         
-    // Reconstruction adds back the reference prediction
-    applyMotionCompensationPixelsLuma32(plane: &mutReconL2Y, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, roundOffset: roundOffset)
-    applyMotionCompensationPixelsChroma16(plane: &mutReconL2Cb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
-    applyMotionCompensationPixelsChroma16(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, roundOffset: roundOffset)
+    // Reconstruction adds back the reference prediction (mvScale=4 for layer2)
+    applyScaledMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+    applyScaledMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    applyScaledMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step), mvs: mvs)
     applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
@@ -188,9 +189,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     
-    subtractBidirectionalMotionCompensationPixelsLuma32(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, roundOffset: roundOffset)
-    subtractBidirectionalMotionCompensationPixelsChroma16(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
-    subtractBidirectionalMotionCompensationPixelsChroma16(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
+    // MV は layer0 精度 → layer2(フル解像度) への適用には mvScale=4
+    subtractScaledBidirectionalMotionCompensationLuma(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+    subtractScaledBidirectionalMotionCompensationChroma(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    subtractScaledBidirectionalMotionCompensationChroma(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
 
     let isPFrame = true
@@ -226,10 +228,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     var mutReconL2Cr = reconL2Cr
     
-    // Reconstruction adds back reference prediction
-    applyBidirectionalMotionCompensationPixelsLuma32(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, roundOffset: roundOffset)
-    applyBidirectionalMotionCompensationPixelsChroma16(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
-    applyBidirectionalMotionCompensationPixelsChroma16(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, roundOffset: roundOffset)
+    // Reconstruction adds back reference prediction (mvScale=4 for layer2)
+    applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+    applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step), mvs: mvs)
     applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
