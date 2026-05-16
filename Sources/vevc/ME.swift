@@ -302,7 +302,7 @@ struct MotionEstimation {
             return (0, 0, zeroSAD)
         }
         
-        let zeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
+        let zeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
         var bestCoarseSAD = zeroSAD + zeroPenalty
         var bestCoarseDx = 0
         var bestCoarseDy = 0
@@ -313,14 +313,14 @@ struct MotionEstimation {
         let maxDx = min(range, width - bx - 8)
         
         if minDy <= maxDy && minDx <= maxDx {
-            var centerX = Int(pmv.dx) / 8
-            var centerY = Int(pmv.dy) / 8
+            var centerX = Int(pmv.dx) / 4
+            var centerY = Int(pmv.dy) / 4
             centerX = max(minDx, min(maxDx, centerX))
             centerY = max(minDy, min(maxDy, centerY))
             
             let pPtr = pBase.advanced(by: (by + centerY) * width + (bx + centerX))
             let pmvSAD = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
-            let pmvPenalty = getMVDPenalty(dx: centerX, dy: centerY, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
+            let pmvPenalty = getMVDPenalty(dx: centerX, dy: centerY, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
             
             if pmvSAD + pmvPenalty < bestCoarseSAD {
                 bestCoarseSAD = pmvSAD + pmvPenalty
@@ -346,7 +346,7 @@ struct MotionEstimation {
                     if dy < minDy { continue }
                     if maxDy < dy { continue }
                     
-                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 8)
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
                     let maxSAD = bestCoarseSAD - penalty
                     if maxSAD < 0 { continue }
                     
@@ -391,7 +391,7 @@ struct MotionEstimation {
                     if dy < minDy { continue }
                     if maxDy < dy { continue }
                     
-                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: Int(pmv.dx) / 16, pmvDy: Int(pmv.dy) / 16, lambda: 8)
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
                     let maxSAD = bestCoarseSAD - penalty
                     if maxSAD < 0 { continue }
                     
@@ -426,7 +426,7 @@ struct MotionEstimation {
             
             if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
             
-            let penalty = getMVDPenalty(dx: fineDx, dy: fineDy, pmvDx: Int(pmv.dx) / 16, pmvDy: Int(pmv.dy) / 16, lambda: 8)
+            let penalty = getMVDPenalty(dx: fineDx, dy: fineDy, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
             let maxSAD = bestFineSAD - penalty
             if maxSAD < 0 { continue }
             
@@ -458,7 +458,7 @@ struct MotionEstimation {
                 let fractY: Int = hpDy & 1
                 
                 let blurPenalty = (fractX + fractY) * 16
-                let penalty = getMVDPenalty(dx: hpDx, dy: hpDy, pmvDx: Int(pmv.dx) / 8, pmvDy: Int(pmv.dy) / 8, lambda: 4) + blurPenalty
+                let penalty = getMVDPenalty(dx: hpDx, dy: hpDy, pmvDx: Int(pmv.dx) / 2, pmvDy: Int(pmv.dy) / 2, lambda: 4) + blurPenalty
                 let maxSAD = bestHpSAD - penalty
                 if maxSAD < 0 { continue }
                 
@@ -498,7 +498,7 @@ struct MotionEstimation {
                 
                 // 四分の一画素のボケペナルティは半画素より軽い
                 let blurPenalty = (remX + remY) * 8
-                let penalty = getMVDPenalty(dx: qpDx, dy: qpDy, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 4) + blurPenalty
+                let penalty = getMVDPenalty(dx: qpDx, dy: qpDy, pmvDx: Int(pmv.dx), pmvDy: Int(pmv.dy), lambda: 4) + blurPenalty
                 let maxSAD = bestQpSAD - penalty
                 if maxSAD < 0 { continue }
                 
@@ -799,7 +799,7 @@ struct MotionEstimation {
                 let baseQy = Int(pmv.dy) * 4
                 
                 var bestSAD = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
-                if bestSAD < 128 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
+                if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
                 
                 // 1. Half-pixel search (step = 2 quarter pixels)
                 var hpBestQx = baseQx
@@ -825,6 +825,8 @@ struct MotionEstimation {
                         hpBestQy = qy
                     }
                 }
+                
+                if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
                 
                 // 2. Quarter-pixel search (step = 1 quarter pixel)
                 var qpBestQx = hpBestQx
@@ -926,42 +928,11 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
                         if dynamicThreshold < sad {
                             ptrMVs[idx] = MotionVector(dx: 0, dy: 0)
                         } else {
-                            // Layer0 MV → Layer2 qpel (×4) を基点に Layer2 サブピクセル refinement
-                            let baseQx = Int(mv.dx) * 4
-                            let baseQy = Int(mv.dy) * 4
-                            let l2Bx = col * 32
-                            let l2By = row * 32
-                            
-                            var bestQx = baseQx
-                            var bestQy = baseQy
-                            var bestSAD = MotionEstimation.computeQuarterPixelSADSubsampled32(
-                                curr: cL2Base, prev: pL2Base,
-                                width: dx, height: dy, bx: l2Bx, by: l2By,
-                                qDx: baseQx, qDy: baseQy
+                            let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                                currPlane: curr.y, prevPlane: prev.y,
+                                width: dx, height: dy, bx: col * 32, by: row * 32, pmv: mv
                             )
-                            
-                            // Layer2 四分の一画素 refinement (±1 in qpel = ±0.25 pixel)
-                            // 半画素は Layer0 ME で既にカバー済み
-                            if 96 < bestSAD {
-                                for oi in 0..<8 {
-                                    let qx = baseQx + meSearchOffsetX[oi]
-                                    let qy = baseQy + meSearchOffsetY[oi]
-                                    let penalty = (abs(meSearchOffsetX[oi]) + abs(meSearchOffsetY[oi])) * 4
-                                    let maxSAD = bestSAD - penalty
-                                    if maxSAD < 0 { continue }
-                                    let s = MotionEstimation.computeQuarterPixelSADSubsampled32(
-                                        curr: cL2Base, prev: pL2Base,
-                                        width: dx, height: dy, bx: l2Bx, by: l2By, qDx: qx, qDy: qy
-                                    )
-                                    if s + penalty < bestSAD {
-                                        bestSAD = s + penalty
-                                        bestQx = qx
-                                        bestQy = qy
-                                    }
-                                }
-                            }
-                            
-                            ptrMVs[idx] = MotionVector(dx: Int16(bestQx), dy: Int16(bestQy))
+                            ptrMVs[idx] = refinedMV
                         }
                         ptrSADs[idx] = sad
                     }
@@ -1115,51 +1086,16 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             // MV を Layer2 qpel に変換して格納
             let dynamicThreshold = max(1024, MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by) * 48)
             
-            let finalSAD = if dir { prevSAD } else { prevSAD }
+            let finalSAD = prevSAD
             if dynamicThreshold < finalSAD {
                 ptrMVs[idx] = MotionVector(dx: 0, dy: 0)
             } else {
-                // Layer0 MV → Layer2 qpel (×4) を基点にサブピクセル refinement
-                let baseQx = Int(bestMV.dx) * 4
-                let baseQy = Int(bestMV.dy) * 4
-                let l2Bx = col * 32
-                let l2By = row * 32
-                
-                curr.y.withUnsafeBufferPointer { cL2Buf in
-                    let refPlane = if dir { next.y } else { prev.y }
-                    refPlane.withUnsafeBufferPointer { pL2Buf in
-                        guard let cL2Base = cL2Buf.baseAddress, let pL2Base = pL2Buf.baseAddress else { return }
-                        
-                        var bestQx = baseQx
-                        var bestQy = baseQy
-                        var bestSAD = MotionEstimation.computeQuarterPixelSADSubsampled32(
-                            curr: cL2Base, prev: pL2Base,
-                            width: dx, height: dy, bx: l2Bx, by: l2By,
-                            qDx: baseQx, qDy: baseQy
-                        )
-                        
-                        // Layer2 四分の一画素 refinement のみ
-                        if 96 < bestSAD {
-                            for oi in 0..<8 {
-                                let qx = baseQx + meSearchOffsetX[oi]
-                                let qy = baseQy + meSearchOffsetY[oi]
-                                let penalty = (abs(meSearchOffsetX[oi]) + abs(meSearchOffsetY[oi])) * 4
-                                if bestSAD - penalty < 0 { continue }
-                                let s = MotionEstimation.computeQuarterPixelSADSubsampled32(
-                                    curr: cL2Base, prev: pL2Base,
-                                    width: dx, height: dy, bx: l2Bx, by: l2By, qDx: qx, qDy: qy
-                                )
-                                if s + penalty < bestSAD {
-                                    bestSAD = s + penalty
-                                    bestQx = qx
-                                    bestQy = qy
-                                }
-                            }
-                        }
-                        
-                        ptrMVs[idx] = MotionVector(dx: Int16(bestQx), dy: Int16(bestQy))
-                    }
-                }
+                let refPlane = if dir { next.y } else { prev.y }
+                let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                    currPlane: curr.y, prevPlane: refPlane,
+                    width: dx, height: dy, bx: col * 32, by: row * 32, pmv: bestMV
+                )
+                ptrMVs[idx] = refinedMV
             }
             ptrSADs[idx] = finalSAD
             ptrRefDirs[idx] = dir

@@ -61,12 +61,11 @@ struct QuantizationTable: Sendable {
         switch layerIndex {
         case 2:
             qLowDivisor = 1
-            // Scale up quantization steps faster for higher frequencies to save bitrate
-            qMidNum = 3; qMidDen = 2          // 1.5
-            qHighNum = 2; qHighDen = 1        // 2.0
-        case 1:
-            qMidNum = 1; qMidDen = 1          // 1.0
+            qMidNum = 5; qMidDen = 4          // 1.25
             qHighNum = 3; qHighDen = 2        // 1.5
+        case 1:
+            qMidNum = 3; qMidDen = 4          // 0.75
+            qHighNum = 5; qHighDen = 4        // 1.25
         default: // layerIndex == 0
             qMidNum = 1; qMidDen = 2          // 0.5
             qHighNum = 1; qHighDen = 1        // 1.0
@@ -87,16 +86,16 @@ struct QuantizationTable: Sendable {
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
             
-            // qMid: Cap at 56 to preserve facial contours and important structural edges
-            let lMid = min(56, max(1, (baseStep * qMidNum) / qMidDen))
+            // qMid: Cap at 48 to preserve facial contours and important structural edges
+            let lMid = min(48, max(1, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
             
-            // qHigh: Cap at 80 to preserve fine details during motion, reducing blurry ghost trails
+            // qHigh: Cap at 64 to preserve fine details during motion, reducing blurry ghost trails
             if layerIndex == 2 {
-                let lHigh = min(80, max(1, (baseStep * qHighNum) / qHighDen))
+                let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
                 self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             } else {
-                let lHigh = min(80, max(1, (baseStep * qHighNum) / qHighDen))
+                let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
                 self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             }
         }
@@ -137,11 +136,11 @@ struct AQTable: Sendable {
         }
         
         self.tables = (
-            makeScaled(8),   // 0.80 - high energy blocks (strong edge/texture protection)
-            makeScaled(9),   // 0.90
+            makeScaled(7),   // 0.70 - high energy blocks (strong edge/texture protection)
+            makeScaled(8),   // 0.85 (85/100 -> simplified to 8.5/10. we can use 8 for 0.8)
             makeScaled(10),  // 1.00 - average blocks (identity)
-            makeScaled(11),  // 1.10
-            makeScaled(12)   // 1.20 - flat blocks (coarser quantization, bit saving)
+            makeScaled(12),  // 1.20
+            makeScaled(14)   // 1.40 - flat blocks (coarser quantization, bit saving)
         )
     }
     
