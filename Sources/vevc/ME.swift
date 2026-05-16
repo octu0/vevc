@@ -616,6 +616,167 @@ struct MotionEstimation {
     }
 
     @inline(__always)
+    static func computeQuarterPixelSADSubsampled32_Safe_NoFIR(
+        curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
+        width: Int, bx: Int, by: Int, intDx: Int, intDy: Int
+    ) -> Int {
+        var sad: Int32 = 0
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let cy = by + ry
+            let rowC = curr.advanced(by: cy * width + bx)
+            let py = by + intDy + ry
+            let r = prev.advanced(by: py * width + bx + intDx)
+            for rx in stride(from: 0, to: 32, by: 2) {
+                sad &+= abs(Int32(rowC[rx]) - Int32(r[rx]))
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
+    static func computeQuarterPixelSADSubsampled32_Safe_FIR_Y0(
+        curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
+        width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
+        cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32
+    ) -> Int {
+        var sad: Int32 = 0
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let cy = by + ry
+            let rowC = curr.advanced(by: cy * width + bx)
+            let py = by + intDy + ry
+            let r0 = prev.advanced(by: py * width + bx + intDx)
+            var rx = 0
+            while rx < 32 {
+                let h0 = cX0 &* Int32(r0[rx - 1]) &+ cX1 &* Int32(r0[rx]) &+ cX2 &* Int32(r0[rx + 1]) &+ cX3 &* Int32(r0[rx + 2])
+                let pVal = (h0 &+ 3) >> 3
+                sad &+= abs(Int32(rowC[rx]) &- pVal)
+                rx &+= 2
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
+    static func computeQuarterPixelSADSubsampled32_Safe_FIR_X0(
+        curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
+        width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
+        cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
+    ) -> Int {
+        var sad: Int32 = 0
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let cy = by + ry
+            let rowC = curr.advanced(by: cy * width + bx)
+            let py = by + intDy + ry
+            let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
+            let r0 = prev.advanced(by: py * width + bx + intDx)
+            let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
+            let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
+            var rx = 0
+            while rx < 32 {
+                let vertSum = cY0 &* Int32(rM1[rx]) &+ cY1 &* Int32(r0[rx]) &+ cY2 &* Int32(rP1[rx]) &+ cY3 &* Int32(rP2[rx])
+                let pVal = (vertSum &+ 3) >> 3
+                sad &+= abs(Int32(rowC[rx]) &- pVal)
+                rx &+= 2
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
+    static func computeQuarterPixelSADSubsampled32_Safe_FIR_XY(
+        curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
+        width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
+        cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32,
+        cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
+    ) -> Int {
+        var sad: Int32 = 0
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let cy = by + ry
+            let rowC = curr.advanced(by: cy * width + bx)
+            let py = by + intDy + ry
+            let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
+            let r0 = prev.advanced(by: py * width + bx + intDx)
+            let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
+            let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
+            var rx = 0
+            while rx < 32 {
+                let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
+                let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
+                let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
+                let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
+                let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
+                let pVal = (refVal &+ 31) >> 6
+                sad &+= abs(Int32(rowC[rx]) &- pVal)
+                rx &+= 2
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
+    static func computeQuarterPixelSADSubsampled32_Unsafe_NoFIR(
+        curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, intDx: Int, intDy: Int
+    ) -> Int {
+        var sad: Int32 = 0
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let cy = min(by + ry, height - 1)
+            let rowC = curr.advanced(by: cy * width)
+            let py = by + intDy + ry
+            let sy0 = max(0, min(py, height - 1))
+            let r = prev.advanced(by: sy0 * width)
+            for rx in stride(from: 0, to: 32, by: 2) {
+                let px = bx + intDx + rx
+                let sx = max(0, min(px, width - 1))
+                let cx = min(bx + rx, width - 1)
+                sad &+= abs(Int32(rowC[cx]) - Int32(r[sx]))
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
+    static func computeQuarterPixelSADSubsampled32_Unsafe_FIR(
+        curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
+        cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32,
+        cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
+    ) -> Int {
+        var sad: Int32 = 0
+        for ry in stride(from: 0, to: 32, by: 4) {
+            let cy = min(by + ry, height - 1)
+            let rowC = curr.advanced(by: cy * width)
+            let py = by + intDy + ry
+            let syM1 = max(0, min(py - 1, height - 1))
+            let sy0  = max(0, min(py, height - 1))
+            let syP1 = max(0, min(py + 1, height - 1))
+            let syP2 = max(0, min(py + 2, height - 1))
+            let rM1 = prev.advanced(by: syM1 * width)
+            let r0  = prev.advanced(by: sy0 * width)
+            let rP1 = prev.advanced(by: syP1 * width)
+            let rP2 = prev.advanced(by: syP2 * width)
+            var rx = 0
+            while rx < 32 {
+                let px = bx &+ intDx &+ rx
+                let cx = min(bx &+ rx, width - 1)
+                let sxM1 = max(0, min(px - 1, width - 1))
+                let sx0  = max(0, min(px, width - 1))
+                let sxP1 = max(0, min(px + 1, width - 1))
+                let sxP2 = max(0, min(px + 2, width - 1))
+                let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
+                let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
+                let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
+                let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
+                let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
+                let pVal = (refVal &+ 31) >> 6
+                sad &+= abs(Int32(rowC[cx]) &- pVal)
+                rx &+= 2
+            }
+        }
+        return Int(sad)
+    }
+
+    @inline(__always)
     static func computeQuarterPixelSADSubsampled32(
         curr: UnsafePointer<Int16>, 
         prev: UnsafePointer<Int16>,
@@ -630,7 +791,6 @@ struct MotionEstimation {
         let fX = FIRLUMACoeffs[fractX]
         let fY = FIRLUMACoeffs[fractY]
         
-        var sad: Int32 = 0
         let safe = (bx + intDx - 1 >= 0) && (by + intDy - 1 >= 0) && (bx + intDx + 32 + 2 < width) && (by + intDy + 32 + 2 < height) && (bx + 32 <= width) && (by + 32 <= height)
         let useFIR = (fractX != 0 || fractY != 0)
         
@@ -639,141 +799,24 @@ struct MotionEstimation {
         
         if safe {
             if useFIR != true {
-                for ry in stride(from: 0, to: 32, by: 4) {
-                    let cy = by + ry
-                    let rowC = curr.advanced(by: cy * width + bx)
-                    
-                    let py = by + intDy + ry
-                    let r = prev.advanced(by: py * width + bx + intDx)
-                    for rx in stride(from: 0, to: 32, by: 2) {
-                        sad &+= abs(Int32(rowC[rx]) - Int32(r[rx]))
-                    }
-                }
+                return computeQuarterPixelSADSubsampled32_Safe_NoFIR(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy)
             } else {
                 switch true {
                 case fractY == 0:
-                    for ry in stride(from: 0, to: 32, by: 4) {
-                        let cy = by + ry
-                        let rowC = curr.advanced(by: cy * width + bx)
-                        
-                        let py = by + intDy + ry
-                        let r0 = prev.advanced(by: py * width + bx + intDx)
-                        
-                        var rx = 0
-                        while rx < 32 {
-                            // fractY==0: vertical FIR coeffs are [0,8,0,0], so vFIR = 8*hFIR
-                            // result = (8 * hFIR + 31) >> 6  ≈  (hFIR + 3) >> 3
-                            let h0 = cX0 &* Int32(r0[rx - 1]) &+ cX1 &* Int32(r0[rx]) &+ cX2 &* Int32(r0[rx + 1]) &+ cX3 &* Int32(r0[rx + 2])
-                            let pVal = (h0 &+ 3) >> 3
-                            sad &+= abs(Int32(rowC[rx]) &- pVal)
-                            rx &+= 2
-                        }
-                    }
+                    return computeQuarterPixelSADSubsampled32_Safe_FIR_Y0(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3)
                 case fractX == 0:
-                    for ry in stride(from: 0, to: 32, by: 4) {
-                        let cy = by + ry
-                        let rowC = curr.advanced(by: cy * width + bx)
-                        
-                        let py = by + intDy + ry
-                        let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
-                        let r0 = prev.advanced(by: py * width + bx + intDx)
-                        let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
-                        let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-                        
-                        var rx = 0
-                        while rx < 32 {
-                            // fractX==0: horizontal FIR coeffs are [0,8,0,0], so hFIR = 8*pixel
-                            // vertFIR = cY0*(8*pM1) + cY1*(8*p0) + cY2*(8*pP1) + cY3*(8*pP2)
-                            //         = 8 * (cY0*pM1 + cY1*p0 + cY2*pP1 + cY3*pP2)
-                            // result  = (8 * vertSum + 31) >> 6  ≈  (vertSum + 3) >> 3
-                            let vertSum = cY0 &* Int32(rM1[rx]) &+ cY1 &* Int32(r0[rx]) &+ cY2 &* Int32(rP1[rx]) &+ cY3 &* Int32(rP2[rx])
-                            let pVal = (vertSum &+ 3) >> 3
-                            sad &+= abs(Int32(rowC[rx]) &- pVal)
-                            rx &+= 2
-                        }
-                    }
+                    return computeQuarterPixelSADSubsampled32_Safe_FIR_X0(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
                 default:
-                    for ry in stride(from: 0, to: 32, by: 4) {
-                        let cy = by + ry
-                        let rowC = curr.advanced(by: cy * width + bx)
-                        
-                        let py = by + intDy + ry
-                        let rM1 = prev.advanced(by: (py - 1) * width + bx + intDx)
-                        let r0 = prev.advanced(by: py * width + bx + intDx)
-                        let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
-                        let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-                        
-                        var rx = 0
-                        while rx < 32 {
-                            let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
-                            let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
-                            let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
-                            let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
-                            
-                            let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                            let pVal = (refVal &+ 31) >> 6
-                            sad &+= abs(Int32(rowC[rx]) &- pVal)
-                            rx &+= 2
-                        }
-                    }
+                    return computeQuarterPixelSADSubsampled32_Safe_FIR_XY(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
                 }
             }
-            return Int(sad)
         }
         
         if useFIR != true {
-            for ry in stride(from: 0, to: 32, by: 4) {
-                let cy = min(by + ry, height - 1)
-                let rowC = curr.advanced(by: cy * width)
-                
-                let py = by + intDy + ry
-                let sy0 = max(0, min(py, height - 1))
-                let r = prev.advanced(by: sy0 * width)
-                for rx in stride(from: 0, to: 32, by: 2) {
-                    let px = bx + intDx + rx
-                    let sx = max(0, min(px, width - 1))
-                    let cx = min(bx + rx, width - 1)
-                    sad &+= abs(Int32(rowC[cx]) - Int32(r[sx]))
-                }
-            }
+            return computeQuarterPixelSADSubsampled32_Unsafe_NoFIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy)
         } else {
-            for ry in stride(from: 0, to: 32, by: 4) {
-                let cy = min(by + ry, height - 1)
-                let rowC = curr.advanced(by: cy * width)
-                
-                let py = by + intDy + ry
-                let syM1 = max(0, min(py - 1, height - 1))
-                let sy0  = max(0, min(py, height - 1))
-                let syP1 = max(0, min(py + 1, height - 1))
-                let syP2 = max(0, min(py + 2, height - 1))
-                let rM1 = prev.advanced(by: syM1 * width)
-                let r0  = prev.advanced(by: sy0 * width)
-                let rP1 = prev.advanced(by: syP1 * width)
-                let rP2 = prev.advanced(by: syP2 * width)
-                
-                var rx = 0
-                while rx < 32 {
-                    let px = bx &+ intDx &+ rx
-                    let cx = min(bx &+ rx, width - 1)
-                    
-                    let sxM1 = max(0, min(px - 1, width - 1))
-                    let sx0  = max(0, min(px, width - 1))
-                    let sxP1 = max(0, min(px + 1, width - 1))
-                    let sxP2 = max(0, min(px + 2, width - 1))
-                    
-                    let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
-                    let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
-                    let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
-                    let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
-                    
-                    let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                    let pVal = (refVal &+ 31) >> 6
-                    sad &+= abs(Int32(rowC[cx]) &- pVal)
-                    rx &+= 2
-                }
-            }
+            return computeQuarterPixelSADSubsampled32_Unsafe_FIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
         }
-        return Int(sad)
     }
 
     static let searchOffsets = [

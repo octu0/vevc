@@ -368,9 +368,11 @@ public struct Decoder: Sendable {
                         
                         let flag = firstByte
                         var chunk: [UInt8] = [flag]
-                        if flag == 0x01 {
+                        let copyFrameFlag: UInt8 = 0x01
+                        
+                        if flag == copyFrameFlag {
                             continuation.yield(chunk)
-                        } else if flag == 0x00 || flag == 0x02 {
+                        } else {
                             let headerBytes = readFully(fileHandle: fileHandle, count: 24)
                             guard headerBytes.count == 24 else { continuation.finish(); return }
                             chunk.append(contentsOf: headerBytes)
@@ -390,9 +392,6 @@ public struct Decoder: Sendable {
                                 chunk.append(contentsOf: payloadBody)
                             }
                             continuation.yield(chunk)
-                        } else {
-                            continuation.finish()
-                            return
                         }
                     }
                     continuation.finish()

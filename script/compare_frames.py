@@ -45,7 +45,7 @@ def main():
     parser.add_argument("input_y4m", help="Path to input .y4m file")
     parser.add_argument("--out_dir", default=".tmp/compare_out", help="Directory to save problem frames (Ghost detected)")
     parser.add_argument("--gop_size", type=int, default=15, help="GOP size for labeling I/P frames")
-    parser.add_argument("--ghost_threshold", type=float, default=30.0, help="Ghost Score threshold to dump images (%)")
+    parser.add_argument("--ghost_threshold", type=float, default=30.0, help="Ghost Score threshold to dump images (%%)")
     parser.add_argument("--keep_tmp", action="store_true", help="Keep temporary files (vevc, y4m, png sequence)")
     
     args = parser.parse_args()

@@ -1125,8 +1125,8 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
     var currentIdx = 0
     last = originalLastVal
 
-    let ptrY0_run = block.rowPointer(y: 0)
-    let diffRunFirst = ptrY0_run[0] &- last
+    let ptrY0Run = block.rowPointer(y: 0)
+    let diffRunFirst = ptrY0Run[0] &- last
     if diffRunFirst == 0 {
         run += 1
     } else {
@@ -1138,7 +1138,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
 
     if currentIdx <= lscpIdx {
         for x in 1..<16 {
-            let diff = ptrY0_run[x] &- ptrY0_run[x - 1]
+            let diff = ptrY0Run[x] &- ptrY0Run[x - 1]
             if diff == 0 {
                 run += 1
             } else {
@@ -1150,7 +1150,7 @@ func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>
             if lscpIdx < currentIdx { break }
         }
     }
-    last = ptrY0_run[15]
+    last = ptrY0Run[15]
 
     if currentIdx <= lscpIdx {
         outerLoop: for y in 1..<16 {
