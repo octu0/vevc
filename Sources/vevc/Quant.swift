@@ -111,8 +111,8 @@ struct QuantizationTable: Sendable {
 /// Selection logic:
 ///   - Measure each block's AC energy (sum of |HL| + |LH| + |HH| coefficients)
 ///   - Compare against the frame-wide average AC energy
-///   - High-energy blocks (edges/textures) → lower qStep (finer quantization)
-///   - Low-energy blocks (flat regions) → higher qStep (coarser quantization)
+///   - High-energy blocks (edges/textures) → higher qStep (coarser quantization, noise is masked)
+///   - Low-energy blocks (flat regions, faces) → lower qStep (finer quantization, prevents visible blockiness)
 ///
 /// qLow is NOT scaled — base frequency quality must remain constant.
 struct AQTable: Sendable {
@@ -148,21 +148,23 @@ struct AQTable: Sendable {
     /// relative to the frame average.
     @inline(__always)
     func select(energy: Int, avgEnergy: Int) -> QuantizationTable {
-        // ratio = avgEnergy / energy (inverted: high energy → low ratio → fine qt)
-        let safeEnergy = max(1, energy)
-        let ratioX10 = (avgEnergy * 10) / safeEnergy
+        // Psycho-visual AQ: ratio = energy / avgEnergy
+        // Flat regions (low energy) get finer quantization (scale < 1.0) because artifacts are highly visible.
+        // Texture/edge regions (high energy) get coarser quantization (scale > 1.0) because texture masks noise.
+        let safeAvg = max(1, avgEnergy)
+        let ratioX10 = (energy * 10) / safeAvg
         
-        // ratioX10 <= 8  → level 0 (scale=0.80) = very high energy (strong edges)
-        // ratioX10 == 9  → level 1 (scale=0.90) = high energy
-        // ratioX10 == 10 → level 2 (scale=1.00) = average
-        // ratioX10 == 11 → level 3 (scale=1.10) = low energy
-        // ratioX10 >= 12 → level 4 (scale=1.20) = flat region
+        // ratioX10 <= 6  → level 0 (scale=0.70) = very flat region (faces, sky)
+        // ratioX10 <= 8  → level 1 (scale=0.85) = flat region
+        // ratioX10 <= 12 → level 2 (scale=1.00) = average
+        // ratioX10 <= 15 → level 3 (scale=1.20) = high energy
+        // ratioX10 > 15  → level 4 (scale=1.40) = very high energy (textures)
         switch true {
-        case ratioX10 < 9:  return tables.0
-        case ratioX10 < 10: return tables.1
-        case ratioX10 < 11: return tables.2
-        case ratioX10 < 12: return tables.3
-        default:            return tables.4
+        case ratioX10 <= 6:  return tables.0
+        case ratioX10 <= 8:  return tables.1
+        case ratioX10 <= 12: return tables.2
+        case ratioX10 <= 15: return tables.3
+        default:             return tables.4
         }
     }
 }

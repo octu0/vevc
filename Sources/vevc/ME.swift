@@ -907,7 +907,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, pool: BlockVie
         sads.withUnsafeMutableBufferPointer { ptrSADs in
             curr.y.withUnsafeBufferPointer { cL2Buf in
                 prev.y.withUnsafeBufferPointer { pL2Buf in
-                    guard let cL2Base = cL2Buf.baseAddress, let pL2Base = pL2Buf.baseAddress else { return }
+                    guard cL2Buf.baseAddress != nil, pL2Buf.baseAddress != nil else { return }
                     
                     for idx in currBlocks8.indices {
                         let col = idx % colCount

@@ -1015,4 +1015,3 @@ func subtractScaledBidirectionalMotionCompensationChroma(plane: inout [Int16], p
         }
     }
 }
-
