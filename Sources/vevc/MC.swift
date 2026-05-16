@@ -198,7 +198,7 @@ fileprivate func subMCBlockLuma32Inner(
             while x < bw {
                 let v0 = cX0 &* Int32(r0[x - 1]) &+ cX1 &* Int32(r0[x]) &+ cX2 &* Int32(r0[x + 1]) &+ cX3 &* Int32(r0[x + 2])
                 let v = Int32(8) &* v0
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &- res
                 x &+= 1
             }
@@ -235,7 +235,7 @@ fileprivate func subMCBlockLuma32Inner(
                 let vP1 = Int32(8) &* Int32(rP1[x])
                 let vP2 = Int32(8) &* Int32(rP2[x])
                 let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &- res
                 x &+= 1
             }
@@ -272,7 +272,7 @@ fileprivate func subMCBlockLuma32Inner(
                 let vP1 = cX0 &* Int32(rP1[x - 1]) &+ cX1 &* Int32(rP1[x]) &+ cX2 &* Int32(rP1[x + 1]) &+ cX3 &* Int32(rP1[x + 2])
                 let vP2 = cX0 &* Int32(rP2[x - 1]) &+ cX1 &* Int32(rP2[x]) &+ cX2 &* Int32(rP2[x + 1]) &+ cX3 &* Int32(rP2[x + 2])
                 let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &- res
                 x &+= 1
             }
@@ -314,7 +314,7 @@ fileprivate func subMCBlockLuma32Edge(
                 let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
                 let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
                 let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &- res
             }
         }
@@ -336,7 +336,7 @@ fileprivate func subMCBlockLuma32Edge(
 fileprivate func subMCBlockLuma32(
     dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
     width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
+    mv: MotionVector, roundOffset: Int, blockSize: Int = 32
 ) {
     if mv.isIntra { return }
     
@@ -347,8 +347,8 @@ fileprivate func subMCBlockLuma32(
     let fractX = (mvDx & 3)
     let fractY = (mvDy & 3)
     
-    let bw = min(32, width - blockX)
-    let bh = min(32, height - blockY)
+    let bw = min(blockSize, width - blockX)
+    let bh = min(blockSize, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
     let safe = (0 <= blockX + shiftX - 1) && (0 <= blockY + shiftY - 1) && (blockX + shiftX + bw + 2 < width) && (blockY + shiftY + bh + 2 < height)
@@ -395,7 +395,7 @@ fileprivate func subMCBlockChroma16Inner(
             }
             while x < bw {
                 let v = wAwC &* Int32(r0[x]) &+ wBwC &* Int32(r0[x + nx]) &+ wAwD &* Int32(r1[x]) &+ wBwD &* Int32(r1[x + nx])
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &- res
                 x &+= 1
             }
@@ -443,7 +443,7 @@ fileprivate func subMCBlockChroma16Edge(
                 let sx0 = max(0, min(cx, width - 1))
                 let sx1 = max(0, min(cx + nx, width - 1))
                 let v = wAwC &* Int32(r0[sx0]) &+ wBwC &* Int32(r0[sx1]) &+ wAwD &* Int32(r1[sx0]) &+ wBwD &* Int32(r1[sx1])
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &- res
             }
         }
@@ -465,7 +465,7 @@ fileprivate func subMCBlockChroma16Edge(
 fileprivate func subMCBlockChroma16(
     dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
     width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
+    mv: MotionVector, roundOffset: Int, blockSize: Int = 16
 ) {
     if mv.isIntra { return }
     
@@ -478,8 +478,8 @@ fileprivate func subMCBlockChroma16(
     let fractX = (roundedMvDx & 7)
     let fractY = (roundedMvDy & 7)
     
-    let bw = min(16, width - blockX)
-    let bh = min(16, height - blockY)
+    let bw = min(blockSize, width - blockX)
+    let bh = min(blockSize, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
     let safe = (0 <= (blockX + shiftX)) && (0 <= (blockY + shiftY)) && (((blockX + shiftX) + bw) + 1 < width) && (((blockY + shiftY) + bh) + 1 < height)    
@@ -540,7 +540,7 @@ fileprivate func addMCBlockLuma32Inner(
             while x < bw {
                 let v0 = cX0 &* Int32(r0[x - 1]) &+ cX1 &* Int32(r0[x]) &+ cX2 &* Int32(r0[x + 1]) &+ cX3 &* Int32(r0[x + 2])
                 let v = Int32(8) &* v0
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &+ res
                 x &+= 1
             }
@@ -579,7 +579,7 @@ fileprivate func addMCBlockLuma32Inner(
                 let vP1 = Int32(8) &* Int32(rP1[x])
                 let vP2 = Int32(8) &* Int32(rP2[x])
                 let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &+ res
                 x &+= 1
             }
@@ -617,7 +617,7 @@ fileprivate func addMCBlockLuma32Inner(
                 let vP1 = cX0 &* Int32(rP1[x - 1]) &+ cX1 &* Int32(rP1[x]) &+ cX2 &* Int32(rP1[x + 1]) &+ cX3 &* Int32(rP1[x + 2])
                 let vP2 = cX0 &* Int32(rP2[x - 1]) &+ cX1 &* Int32(rP2[x]) &+ cX2 &* Int32(rP2[x + 1]) &+ cX3 &* Int32(rP2[x + 2])
                 let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &+ res
                 x &+= 1
             }
@@ -659,7 +659,7 @@ fileprivate func addMCBlockLuma32Edge(
                 let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
                 let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
                 let v = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &+ res
             }
         }
@@ -681,7 +681,7 @@ fileprivate func addMCBlockLuma32Edge(
 fileprivate func addMCBlockLuma32(
     dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
     width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
+    mv: MotionVector, roundOffset: Int, blockSize: Int = 32
 ) {
     if mv.isIntra { return }
     
@@ -692,8 +692,8 @@ fileprivate func addMCBlockLuma32(
     let fractX = (mvDx & 3)
     let fractY = (mvDy & 3)
     
-    let bw = min(32, width - blockX)
-    let bh = min(32, height - blockY)
+    let bw = min(blockSize, width - blockX)
+    let bh = min(blockSize, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
     let safe = (0 <= blockX + shiftX - 1) && (0 <= blockY + shiftY - 1) && (blockX + shiftX + bw + 2 < width) && (blockY + shiftY + bh + 2 < height)
@@ -740,7 +740,7 @@ fileprivate func addMCBlockChroma16Inner(
             }
             while x < bw {
                 let v = wAwC &* Int32(r0[x]) &+ wBwC &* Int32(r0[x + nx]) &+ wAwD &* Int32(r1[x]) &+ wBwD &* Int32(r1[x + nx])
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &+ res
                 x &+= 1
             }
@@ -788,7 +788,7 @@ fileprivate func addMCBlockChroma16Edge(
                 let sx0 = max(0, min(cx, width - 1))
                 let sx1 = max(0, min(cx + nx, width - 1))
                 let v = wAwC &* Int32(r0[sx0]) &+ wBwC &* Int32(r0[sx1]) &+ wAwD &* Int32(r1[sx0]) &+ wBwD &* Int32(r1[sx1])
-                let res = Int16((v &+ 31 &+ Int32(roundOffset)) >> 6)
+                let res = Int16(truncatingIfNeeded: (v &+ 31 &+ Int32(roundOffset)) >> 6)
                 dstPtr[x] = dstPtr[x] &+ res
             }
         }
@@ -810,7 +810,7 @@ fileprivate func addMCBlockChroma16Edge(
 fileprivate func addMCBlockChroma16(
     dstBase: UnsafeMutablePointer<Int16>, srcBase: UnsafePointer<Int16>,
     width: Int, height: Int, blockX: Int, blockY: Int,
-    mv: MotionVector, roundOffset: Int
+    mv: MotionVector, roundOffset: Int, blockSize: Int = 16
 ) {
     if mv.isIntra { return }
     
@@ -823,8 +823,8 @@ fileprivate func addMCBlockChroma16(
     let fractX = (roundedMvDx & 7)
     let fractY = (roundedMvDy & 7)
     
-    let bw = min(16, width - blockX)
-    let bh = min(16, height - blockY)
+    let bw = min(blockSize, width - blockX)
+    let bh = min(blockSize, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
     let nx = if 0 < fractX { 1 } else { 0 }
@@ -866,7 +866,7 @@ func applyScaledMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int16],
                 for col in 0..<colCount {
                     let mvIndex = min(row * colCount + col, mvs.count - 1)
                     let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset)
+                    addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                 }
             }
         }
@@ -884,7 +884,7 @@ func applyScaledMotionCompensationChroma(plane: inout [Int16], prevPlane: [Int16
                 for col in 0..<colCount {
                     let mvIndex = min(row * colCount + col, mvs.count - 1)
                     let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset)
+                    addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                 }
             }
         }
@@ -902,7 +902,7 @@ func subtractScaledMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int1
                 for col in 0..<colCount {
                     let mvIndex = min(row * colCount + col, mvs.count - 1)
                     let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    subMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset)
+                    subMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                 }
             }
         }
@@ -920,7 +920,7 @@ func subtractScaledMotionCompensationChroma(plane: inout [Int16], prevPlane: [In
                 for col in 0..<colCount {
                     let mvIndex = min(row * colCount + col, mvs.count - 1)
                     let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    subMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset)
+                    subMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                 }
             }
         }
@@ -942,7 +942,7 @@ func applyScaledBidirectionalMotionCompensationLuma(plane: inout [Int16], prevPl
                         let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
                         let srcBase = if isBackward { nextBase } else { prevBase }
                         let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                        addMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset)
+                        addMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                     }
                 }
             }
@@ -964,7 +964,7 @@ func applyScaledBidirectionalMotionCompensationChroma(plane: inout [Int16], prev
                         let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
                         let srcBase = if isBackward { nextBase } else { prevBase }
                         let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                        addMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset)
+                        addMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                     }
                 }
             }
@@ -986,7 +986,7 @@ func subtractScaledBidirectionalMotionCompensationLuma(plane: inout [Int16], pre
                         let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
                         let srcBase = if isBackward { nextBase } else { prevBase }
                         let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                        subMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset)
+                        subMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                     }
                 }
             }
@@ -1008,7 +1008,7 @@ func subtractScaledBidirectionalMotionCompensationChroma(plane: inout [Int16], p
                         let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
                         let srcBase = if isBackward { nextBase } else { prevBase }
                         let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                        subMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset)
+                        subMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                     }
                 }
             }

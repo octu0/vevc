@@ -139,6 +139,46 @@
             "target": "vevc-training",
             "configuration": "release",
             "preLaunchTask": "swift: Build Release vevc-training"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug vevc-split",
+            "target": "vevc-split",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vevc-split"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release vevc-split",
+            "target": "vevc-split",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vevc-split"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Debug vevc-player",
+            "target": "vevc-player",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug vevc-player"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:vevc}",
+            "name": "Release vevc-player",
+            "target": "vevc-player",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release vevc-player"
         }
     ]
 }

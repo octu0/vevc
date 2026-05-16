@@ -15,13 +15,17 @@ class PlayerViewModel: ObservableObject {
     var layer1Frames: [CGImage] = []
     var layer2Frames: [CGImage] = []
     
+    // Actual video FPS extracted from the decoded stream
+    var videoFps: Int = 30
+    
     private var timer: Timer?
     
     func play() {
         if layer0Frames.isEmpty { return }
         isPlaying = true
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+        let interval = 1.0 / Double(videoFps)
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
                 if self.isPlaying == false { return }
@@ -47,35 +51,50 @@ class PlayerViewModel: ObservableObject {
         isLoading = true
         statusMessage = "Loading..."
         
-        Task.detached(priority: .userInitiated) {
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self = self else { return }
             do {
-                let fileData: [UInt8]
+                // 1. Obtain VEVC data (encode from y4m or read vevc directly)
+                let vevcData: [UInt8]
                 if url.pathExtension.lowercased() == "y4m" {
                     await MainActor.run { self.statusMessage = "Encoding Y4M to VEVC..." }
-                    fileData = try await self.encodeY4M(url: url)
+                    vevcData = try await Self.encodeY4M(url: url)
                 } else {
                     await MainActor.run { self.statusMessage = "Reading VEVC file..." }
                     let data = try Data(contentsOf: url)
-                    fileData = [UInt8](data)
+                    vevcData = [UInt8](data)
                 }
                 
+                // 2. Split VEVC stream into per-layer variants using the library API
+                await MainActor.run { self.statusMessage = "Splitting Layer 0..." }
+                let layer0Data = try splitVEVCStream(input: vevcData, maxLayer: 0).data
+                
+                await MainActor.run { self.statusMessage = "Splitting Layer 0+1..." }
+                let layer01Data = try splitVEVCStream(input: vevcData, maxLayer: 1).data
+                
+                // 3. Decode each split stream
+                //    (splitter already stripped higher layers, so the decoder processes all available layers)
                 await MainActor.run { self.statusMessage = "Decoding Layer 0..." }
-                let l0 = try await self.decodeVEVC(data: fileData, maxLayer: 0)
+                let l0 = try await Self.decodeVEVC(data: layer0Data)
                 
-                await MainActor.run { self.statusMessage = "Decoding Layer 1..." }
-                let l1 = try await self.decodeVEVC(data: fileData, maxLayer: 1)
+                await MainActor.run { self.statusMessage = "Decoding Layer 0+1..." }
+                let l1 = try await Self.decodeVEVC(data: layer01Data)
                 
-                await MainActor.run { self.statusMessage = "Decoding Layer 2..." }
-                let l2 = try await self.decodeVEVC(data: fileData, maxLayer: 2)
+                await MainActor.run { self.statusMessage = "Decoding Layer 0+1+2..." }
+                let l2 = try await Self.decodeVEVC(data: vevcData)
+                
+                // Extract FPS from decoded frames (use layer2 as canonical source)
+                let detectedFps = l2.fps
                 
                 await MainActor.run {
-                    self.layer0Frames = l0
-                    self.layer1Frames = l1
-                    self.layer2Frames = l2
+                    self.layer0Frames = l0.images
+                    self.layer1Frames = l1.images
+                    self.layer2Frames = l2.images
                     
-                    self.totalFrames = Double(l0.count)
+                    self.videoFps = detectedFps
+                    self.totalFrames = Double(l2.images.count)
                     self.currentFrameIndex = 0.0
-                    self.statusMessage = "Ready"
+                    self.statusMessage = "Ready (\(detectedFps) fps)"
                     self.isLoading = false
                     self.play()
                 }
@@ -88,7 +107,8 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
-    private func encodeY4M(url: URL) async throws -> [UInt8] {
+    // Static method to avoid MainActor isolation issues in Task.detached
+    private static func encodeY4M(url: URL) async throws -> [UInt8] {
         guard let fileHandle = try? FileHandle(forReadingFrom: url) else {
             throw NSError(domain: "Player", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot open file"])
         }
@@ -123,15 +143,20 @@ class PlayerViewModel: ObservableObject {
         return encodedData
     }
     
-    private func decodeVEVC(data: [UInt8], maxLayer: Int) async throws -> [CGImage] {
-        let decoder = Decoder(maxLayer: maxLayer)
+    // Returns decoded images and their FPS
+    private static func decodeVEVC(data: [UInt8]) async throws -> (images: [CGImage], fps: Int) {
+        let decoder = Decoder(maxLayer: 2)
         let images = try await decoder.decode(data: data)
         var cgImages: [CGImage] = []
+        var fps = 30
         for img in images {
+            if let imgFps = img.fps {
+                fps = imgFps
+            }
             let cgImg = try createCGImage(from: img)
             cgImages.append(cgImg)
         }
-        return cgImages
+        return (cgImages, fps)
     }
     
     func currentCGImage(for layer: Int) -> CGImage? {

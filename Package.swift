@@ -77,12 +77,12 @@ var packageTargets: [Target] = [
         path: "Sources/vevc-training"
     ),
     .executableTarget(
-        name: "vevc-macos",
+        name: "vevc-player",
         dependencies: [
             "vevc",
             .product(name: "PNG", package: "swift-png")
         ],
-        path: "Sources/vevc-macos"
+        path: "Sources/vevc-player"
     )
 ]
 

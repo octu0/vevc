@@ -11,10 +11,13 @@ struct ContentView: View {
                 ProgressView(viewModel.statusMessage)
                     .padding()
             } else {
-                HStack(spacing: 16) {
-                    videoPane(title: "Layer 0", layerIndex: 0)
-                    videoPane(title: "Layer 0+1", layerIndex: 1)
-                    videoPane(title: "Layer 0+1+2", layerIndex: 2)
+                VStack(alignment: .leading, spacing: 8) {
+                    // Layer 0: 1x scale (quarter resolution)
+                    videoPane(title: "Layer 0", layerIndex: 0, scaleFactor: 1)
+                    // Layer 0+1: 2x scale (half resolution)
+                    videoPane(title: "Layer 0+1", layerIndex: 1, scaleFactor: 2)
+                    // Layer 0+1+2: 4x scale (full resolution)
+                    videoPane(title: "Layer 0+1+2", layerIndex: 2, scaleFactor: 4)
                 }
                 .padding()
                 
@@ -66,21 +69,28 @@ struct ContentView: View {
     }
     
     @ViewBuilder
-    private func videoPane(title: String, layerIndex: Int) -> some View {
+    private func videoPane(title: String, layerIndex: Int, scaleFactor: Int) -> some View {
         VStack {
             Text(title)
                 .font(.headline)
             
             if let cgImage = viewModel.currentCGImage(for: layerIndex) {
+                let baseWidth = CGFloat(cgImage.width)
+                let baseHeight = CGFloat(cgImage.height)
+                // Display at proportional size relative to layer0 (scaleFactor = 1)
+                // Use a fixed base unit derived from layer0 size to keep ratios consistent
                 Image(cgImage, scale: 1.0, label: Text(title))
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(
+                        width: baseWidth * CGFloat(scaleFactor) / 4.0,
+                        height: baseHeight * CGFloat(scaleFactor) / 4.0
+                    )
                     .background(Color.black)
             } else {
                 Rectangle()
                     .fill(Color.black)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(width: CGFloat(60 * scaleFactor), height: CGFloat(25 * scaleFactor))
             }
         }
     }
