@@ -80,7 +80,7 @@ struct QuantizationTable: Sendable {
             
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
-            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: true)
+            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false)
         } else {
             // qLow: Strictly cap at 16 to completely preserve face gradients and base brightness
             let lLow = min(16, max(1, baseStep / qLowDivisor))
@@ -93,10 +93,10 @@ struct QuantizationTable: Sendable {
             // qHigh: Cap at 64 to preserve fine details during motion, reducing blurry ghost trails
             if layerIndex == 2 {
                 let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false)
             } else {
                 let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false)
             }
         }
     }
