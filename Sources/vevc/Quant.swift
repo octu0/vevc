@@ -61,14 +61,14 @@ struct QuantizationTable: Sendable {
         switch layerIndex {
         case 2:
             qLowDivisor = 1
-            qMidNum = 5; qMidDen = 4          // 1.25
-            qHighNum = 3; qHighDen = 2        // 1.5
-        case 1:
-            qMidNum = 3; qMidDen = 4          // 0.75
+            qMidNum = 1; qMidDen = 1          // 1.0
             qHighNum = 5; qHighDen = 4        // 1.25
+        case 1:
+            qMidNum = 1; qMidDen = 2          // 0.50
+            qHighNum = 1; qHighDen = 1        // 1.00
         default: // layerIndex == 0
             qMidNum = 1; qMidDen = 2          // 0.5
-            qHighNum = 1; qHighDen = 1        // 1.0
+            qHighNum = 3; qHighDen = 4        // 0.75
             qLowDivisor = 8
         }
 
@@ -136,11 +136,11 @@ struct AQTable: Sendable {
         }
         
         self.tables = (
-            makeScaled(7),   // 0.70 - high energy blocks (strong edge/texture protection)
-            makeScaled(8),   // 0.85 (85/100 -> simplified to 8.5/10. we can use 8 for 0.8)
-            makeScaled(10),  // 1.00 - average blocks (identity)
-            makeScaled(12),  // 1.20
-            makeScaled(14)   // 1.40 - flat blocks (coarser quantization, bit saving)
+            makeScaled(7),   // 0.70 - faces/flat regions perfectly protected
+            makeScaled(8),   // 0.80
+            makeScaled(10),  // 1.00 - average blocks
+            makeScaled(11),  // 1.10
+            makeScaled(12)   // 1.20 - high energy textures slightly quantized
         )
     }
     
