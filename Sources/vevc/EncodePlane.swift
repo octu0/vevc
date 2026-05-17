@@ -160,7 +160,7 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, aqTable: AQTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, aqTable: AQTable, sads: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -195,7 +195,12 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
                         dwt2DBlock32(view)
                         
-                        safeEnergyBox.value[blockIdx] = measureACEnergy32(view: view)
+                        let sad = sads?[blockIdx] ?? 1024
+                        if 256 < sad {
+                            safeEnergyBox.value[blockIdx] = measureACEnergy32(view: view)
+                        } else {
+                            safeEnergyBox.value[blockIdx] = -1
+                        }
                         
                         let destStartX = (w / 2)
                         let destStartY = (h / 2)
@@ -241,15 +246,20 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
     }
     let energies = energyBox.value
     var totalEnergy: Int = 0
+    var validBlocks: Int = 0
     for i in 0..<totalBlocks {
-        totalEnergy += energies[i]
+        let e = energies[i]
+        if e != -1 {
+            totalEnergy += e
+            validBlocks += 1
+        }
     }
-    let avgEnergy = max(1, totalEnergy / max(1, totalBlocks))
+    let avgEnergy = max(1, totalEnergy / max(1, validBlocks))
     
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, energies, aqTable] in
+            group.addTask { [blocks, energies, aqTable, sads] in
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     for j in 0..<colCount {
@@ -257,7 +267,15 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
                         if width <= w || height <= h { continue }
                         let blockIdx = (i * colCount) + j
                         let view = blocks[blockIdx]
-                        let blockQt = aqTable.select(energy: energies[blockIdx], avgEnergy: avgEnergy)
+                        let sad = sads?[blockIdx] ?? 0
+                        let energy = energies[blockIdx]
+                        
+                        let blockQt = if energy == -1 {
+                            aqTable.base
+                        } else {
+                            aqTable.select(energy: energy, avgEnergy: avgEnergy, sad: sad)
+                        }
+                        
                         evaluateQuantizeLayer32(view: view, qt: blockQt)
                     }
                 }
@@ -747,24 +765,24 @@ func subtractCoeffsBase32(currBlocks: inout [BlockView], predBlocks: inout [Bloc
 }
 
 @inline(__always)
-func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, aqYTable: AQTable, aqCTable: AQTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, aqYTable: AQTable, qtCTable: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rY, width: dx, height: dy, pool: pool, aqTable: aqYTable)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rY, width: dx, height: dy, pool: pool, aqTable: aqYTable, sads: sads)
         return (subband, blocks, r)
     }()
     
     async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, aqTable: aqCTable)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtCTable)
         return (subband, blocks, r)
     }()
     
     async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, aqTable: aqCTable)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtCTable)
         return (subband, blocks, r)
     }()
 

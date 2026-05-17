@@ -145,14 +145,26 @@ struct AQTable: Sendable {
     }
     
     /// Select the appropriate quantization table based on block AC energy
-    /// relative to the frame average.
+    /// relative to the frame average, and block motion activity (SAD).
     @inline(__always)
-    func select(energy: Int, avgEnergy: Int) -> QuantizationTable {
+    func select(energy: Int, avgEnergy: Int, sad: Int = 0) -> QuantizationTable {
         // Psycho-visual AQ: ratio = energy / avgEnergy
         // Flat regions (low energy) get finer quantization (scale < 1.0) because artifacts are highly visible.
         // Texture/edge regions (high energy) get coarser quantization (scale > 1.0) because texture masks noise.
         let safeAvg = max(1, avgEnergy)
         let ratioX10 = (energy * 10) / safeAvg
+        
+        var adjustedRatio = ratioX10
+        // Motion-Adaptive override:
+        if 512 < sad {
+            if ratioX10 <= 8 {
+                // Flat region with high motion -> lower QP to protect from ghosting/blur
+                adjustedRatio -= 3
+            } else if 12 < ratioX10 {
+                // Texture region with high motion -> increase QP to save bits (noise is masked by motion)
+                adjustedRatio += 4
+            }
+        }
         
         // ratioX10 <= 6  → level 0 (scale=0.70) = very flat region (faces, sky)
         // ratioX10 <= 8  → level 1 (scale=0.85) = flat region
@@ -160,11 +172,11 @@ struct AQTable: Sendable {
         // ratioX10 <= 15 → level 3 (scale=1.20) = high energy
         // ratioX10 > 15  → level 4 (scale=1.40) = very high energy (textures)
         switch true {
-        case ratioX10 <= 6:  return tables.0
-        case ratioX10 <= 8:  return tables.1
-        case ratioX10 <= 12: return tables.2
-        case ratioX10 <= 15: return tables.3
-        default:             return tables.4
+        case adjustedRatio <= 6:  return tables.0
+        case adjustedRatio <= 8:  return tables.1
+        case adjustedRatio <= 12: return tables.2
+        case adjustedRatio <= 15: return tables.3
+        default:                  return tables.4
         }
     }
 }

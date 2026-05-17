@@ -112,6 +112,7 @@ actor LayersEncodeActor {
     
     private var previousInputPlane: PlaneData420?
     private var releasePreviousInput: (@Sendable () -> Void)?
+    private var previousMVs: [MotionVector]?
     
     private var firstReconstructed: PlaneData420?
     private var releaseFirstRecon: (@Sendable () -> Void)?
@@ -159,7 +160,12 @@ actor LayersEncodeActor {
             isSceneChange = (sceneChangeThreshold < sad)
         }
         
-        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceKeyFrame)
+        var forceIFrame = forceKeyFrame
+        if !forceIFrame && rateController.isDriftAccelerating {
+            forceIFrame = true
+        }
+        
+        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceIFrame)
         
         if isIFrame {
             // Rate control
@@ -172,7 +178,7 @@ actor LayersEncodeActor {
             let qtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
             
-            let (bytes, reconstructed, releaseRecon) = try await encodeSpatialLayers(
+            let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, maxbitrate: maxbitrate,
                 qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0
             )
@@ -192,6 +198,8 @@ actor LayersEncodeActor {
             
             previousReconstructed = reconstructed
             releasePreviousRecon = nil
+            
+            previousMVs = mvs
             
             framesSinceKeyframe += 1
             frameIndex += 1
@@ -223,8 +231,8 @@ actor LayersEncodeActor {
             let qtY = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
             
-            let (bytes, reconstructed, releaseRecon) = try await encodeSpatialLayers(
-                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon,
+            let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
+                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
             )
@@ -247,6 +255,7 @@ actor LayersEncodeActor {
             
             previousReconstructed = reconstructed
             releasePreviousRecon = releaseRecon
+            previousMVs = mvs
             
             framesSinceKeyframe += 1
             frameIndex += 1

@@ -20,6 +20,12 @@ struct RateController {
     private(set) var avgDistortion: Int = 0
     private(set) var lastDistortion: Int = 0
     
+    @inline(__always)
+    var isDriftAccelerating: Bool {
+        if avgDistortion == 0 { return false }
+        return lastDistortion > (avgDistortion * 2) && 32 < lastDistortion
+    }
+    
     init(maxbitrate: Int, framerate: Int, keyint: Int) {
         self.maxbitrate = maxbitrate
         self.framerate = framerate
