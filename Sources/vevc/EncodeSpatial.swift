@@ -50,8 +50,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     var mutReconL2Cr = reconL2Cr
         
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step))
-    applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step))
-    applyDeblockingFilter32(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step))
+    applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: [])
+    applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: [])
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
@@ -140,8 +140,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     applyScaledMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: Int(qtY2.step), mvs: mvs)
-    applyDeblockingFilter32(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
-    applyDeblockingFilter32(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
+    applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
+    applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: Int(qtC2.step), mvs: mvs)
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
