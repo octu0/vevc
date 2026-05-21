@@ -347,7 +347,7 @@ struct rANSDecoder {
         self.offset = 0
         self.state = 0
         
-        if count >= 4 {
+        if 4 <= count {
             let b0 = UInt32(base[0])
             let b1 = UInt32(base[1])
             let b2 = UInt32(base[2])
@@ -476,7 +476,7 @@ struct Interleaved4rANSDecoder {
         self.offset = 0
         self.states = (rANSL, rANSL, rANSL, rANSL)
         
-        guard count >= 16 else { return }
+        guard 16 <= count else { return }
         
         @inline(__always)
         func readState(_ off: Int) -> UInt32 {
@@ -621,7 +621,7 @@ struct InterleavedrANSDecoder {
         self.base = base
         self.count = count
         
-        guard count >= 16 else {
+        guard 16 <= count else {
             self.states = SIMD4<UInt32>(repeating: 0)
             self.offsets = SIMD4<Int>(repeating: 0)
             self.limits = SIMD4<Int>(repeating: 0)
@@ -761,10 +761,10 @@ struct BypassWriter {
         guard 0 < count else { return }
         buffer = (buffer << count) | UInt64(value & ((1 << count) - 1))
         bitsInBuffer += count
-        while bitsInBuffer >= 8 {
+        while 8 <= bitsInBuffer {
             bitsInBuffer -= 8
             bytes.append(UInt8(truncatingIfNeeded: buffer >> bitsInBuffer))
-            if bitsInBuffer > 0 {
+            if 0 < bitsInBuffer {
                 buffer &= (1 << bitsInBuffer) - 1
             } else {
                 buffer = 0
@@ -775,10 +775,10 @@ struct BypassWriter {
     @inline(__always)
     mutating func flush() {
         guard 0 < bitsInBuffer else { return }
-        while bitsInBuffer >= 8 {
+        while 8 <= bitsInBuffer {
             bitsInBuffer -= 8
             bytes.append(UInt8(truncatingIfNeeded: buffer >> bitsInBuffer))
-            if bitsInBuffer > 0 {
+            if 0 < bitsInBuffer {
                 buffer &= (1 << bitsInBuffer) - 1
             } else {
                 buffer = 0

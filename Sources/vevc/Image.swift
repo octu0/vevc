@@ -509,7 +509,7 @@ struct Image16: Sendable {
         self.y.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
-            if x >= 0 && yPos >= 0 && (x + size) <= width && (yPos + size) <= height {
+            if 0 <= x && 0 <= yPos && (x + size) <= width && (yPos + size) <= height {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
@@ -541,7 +541,7 @@ struct Image16: Sendable {
         self.cb.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
-            if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
+            if 0 <= x && 0 <= yPos && (x + size) <= cWidth && (yPos + size) <= cHeight {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
@@ -573,7 +573,7 @@ struct Image16: Sendable {
         self.cr.withUnsafeBufferPointer { srcBuf in
             guard let srcBase = srcBuf.baseAddress else { return }
             // Fast path: block entirely within bounds → bulk row copy
-            if x >= 0 && yPos >= 0 && (x + size) <= cWidth && (yPos + size) <= cHeight {
+            if 0 <= x && 0 <= yPos && (x + size) <= cWidth && (yPos + size) <= cHeight {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)

@@ -42,14 +42,14 @@ public struct VEVCFileHeader {
     
     @inline(__always)
     public static func deserialize(from chunk: [UInt8], offset: inout Int) throws -> VEVCFileHeader {
-        guard chunk.count >= offset + 4, chunk[offset] == 0x56, chunk[offset + 1] == 0x45, chunk[offset + 2] == 0x56, chunk[offset + 3] == 0x43 else {
+        guard offset + 4 <= chunk.count, chunk[offset] == 0x56, chunk[offset + 1] == 0x45, chunk[offset + 2] == 0x56, chunk[offset + 3] == 0x43 else {
             throw DecodeError.insufficientDataContext("VEVC Magic NotFound")
         }
         offset += 4
         
         let metadataSize = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
         let payloadEnd = offset + metadataSize
-        guard chunk.count >= payloadEnd else {
+        guard payloadEnd <= chunk.count else {
             throw DecodeError.insufficientDataContext("VEVC FileHeader length overflow")
         }
         

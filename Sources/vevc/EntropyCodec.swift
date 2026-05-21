@@ -398,7 +398,7 @@ public final class ModelTrainer: @unchecked Sendable {
     @inline(__always)
     public func record(run: UInt32, val: Int16, context: UInt8) {
         let ctx = Int(context)
-        guard ctx >= 0 && ctx < 4 else { return }
+        guard 0 <= ctx && ctx < 4 else { return }
         
         let runToken = min(run, 63)
         let valToken = valueTokenize(val).token
@@ -572,7 +572,7 @@ struct EntropyDecoder {
         guard pairIndex < totalPairEntries else { return (0, 0) }
         
         // pairIndex increases monotonically; increment chunk index only at lane boundaries
-        while currentLane < 3 && pairIndex >= chunkStarts[currentLane + 1] {
+        while currentLane < 3 && chunkStarts[currentLane + 1] <= pairIndex {
             currentLane += 1
         }
         let lane = currentLane
