@@ -432,7 +432,7 @@ final class VevcTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
         
         // I-Frame: encode→reconstructを取得
-        let (iBytes, iRecon, releaseI) = try await encodeSpatialLayers(pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
         defer { releaseI() }
         
         // I-Frame: decode
@@ -444,7 +444,7 @@ final class VevcTests: XCTestCase {
         let iPsnr = calculatePSNR(original: img0.yPlane, decoded: iImg.yPlane)
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
         
-        let (pBytes, _, releaseP) = try await encodeSpatialLayers(pd: pd3, pool: pool, predictedPd: iRecon, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (pBytes, _, _, _, releaseP) = try await encodeSpatialLayers(pd: pd3, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
         defer { releaseP() }
         
         // P-Frameのresidualの検証（省略して正常終了とする）

@@ -17,8 +17,8 @@ final class RateControllerTests: XCTestCase {
         XCTAssertEqual(controller.gopRemainingBits, 500_000)
         XCTAssertEqual(controller.gopRemainingFrames, 15)
         
-        // I-Frame gets ~26.3% of GOP budget initially (5 / (keyint + 4))
-        XCTAssertEqual(iFrameTarget, 131_578)
+        // I-Frame gets ~26.3% of GOP budget initially (5 / (keyint + 4)) or absoluteFloor which is 200,000 (maxbitrate * 6 / framerate)
+        XCTAssertEqual(iFrameTarget, 200_000)
         
         // Simulate encoding an I-Frame
         controller.consumeIFrame(bits: 100_000, qStep: 32)

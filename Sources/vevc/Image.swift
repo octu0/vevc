@@ -74,39 +74,36 @@ extension PlaneData420 {
         @inline(__always)
         func convertPlane(src: [Int16], dst: inout [UInt8]) {
             let count = min(src.count, dst.count)
-            src.withUnsafeBufferPointer { srcBuf in
-                dst.withUnsafeMutableBufferPointer { dstBuf in
-                    guard let srcPtr = srcBuf.baseAddress, let dstPtr = dstBuf.baseAddress else { return }
-                    var i = 0
-                    let offset128_16 = SIMD16<Int16>(repeating: 128)
-                    let zero16 = SIMD16<Int16>.zero
-                    let max255_16 = SIMD16<Int16>(repeating: 255)
-                    while i + 16 <= count {
-                        let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                        let clamped = (vals &+ offset128_16).clamped(lowerBound: zero16, upperBound: max255_16)
-                        let narrowed = SIMD16<UInt8>(truncatingIfNeeded: clamped)
-                        UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD16<UInt8>.self)
-                        i += 16
+            withUnsafePointers(src, mut: &dst) { srcPtr, dstPtr in
+                var i = 0
+                let offset128_16 = SIMD16<Int16>(repeating: 128)
+                let zero16 = SIMD16<Int16>.zero
+                let max255_16 = SIMD16<Int16>(repeating: 255)
+                while i + 16 <= count {
+                    let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+                    let clamped = (vals &+ offset128_16).clamped(lowerBound: zero16, upperBound: max255_16)
+                    let narrowed = SIMD16<UInt8>(truncatingIfNeeded: clamped)
+                    UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD16<UInt8>.self)
+                    i += 16
+                }
+                let offset128_8 = SIMD8<Int16>(repeating: 128)
+                let zero8 = SIMD8<Int16>.zero
+                let max255_8 = SIMD8<Int16>(repeating: 255)
+                while i + 8 <= count {
+                    let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<Int16>.self)
+                    let clamped = (vals &+ offset128_8).clamped(lowerBound: zero8, upperBound: max255_8)
+                    let narrowed = SIMD8<UInt8>(truncatingIfNeeded: clamped)
+                    UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
+                    i += 8
+                }
+                while i < count {
+                    let v = srcPtr[i]
+                    switch v {
+                    case ..<(-128): dstPtr[i] = 0
+                    case 128...: dstPtr[i] = 255
+                    default: dstPtr[i] = UInt8(v + 128)
                     }
-                    let offset128_8 = SIMD8<Int16>(repeating: 128)
-                    let zero8 = SIMD8<Int16>.zero
-                    let max255_8 = SIMD8<Int16>(repeating: 255)
-                    while i + 8 <= count {
-                        let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<Int16>.self)
-                        let clamped = (vals &+ offset128_8).clamped(lowerBound: zero8, upperBound: max255_8)
-                        let narrowed = SIMD8<UInt8>(truncatingIfNeeded: clamped)
-                        UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
-                        i += 8
-                    }
-                    while i < count {
-                        let v = srcPtr[i]
-                        switch v {
-                        case ..<(-128): dstPtr[i] = 0
-                        case 128...: dstPtr[i] = 255
-                        default: dstPtr[i] = UInt8(v + 128)
-                        }
-                        i += 1
-                    }
+                    i += 1
                 }
             }
         }
@@ -152,40 +149,36 @@ func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> (PlaneData420, @S
     var cr = pool.getInt16(count: cCount)
     
     if image.ratio == .ratio444 {
-        cb.withUnsafeMutableBufferPointer { dstBuf in
-            image.cbPlane.withUnsafeBufferPointer { srcBuf in
-                for cy in 0..<cHeight {
-                    let py = cy * 2
-                    let srcRowOffset = py * image.width
-                    let dstRowOffset = cy * cWidth
-                    for cx in 0..<cWidth {
-                        let px = cx * 2
-                        let srcOffset = srcRowOffset + px
-                        let dstOffset = dstRowOffset + cx
-                        if srcOffset < srcBuf.count {
-                            dstBuf[dstOffset] = Int16(srcBuf[srcOffset]) - 128
-                        } else {
-                            dstBuf[dstOffset] = 0
-                        }
+        withUnsafePointers(mut: &cb, image.cbPlane) { dstBuf, srcBuf in
+            for cy in 0..<cHeight {
+                let py = cy * 2
+                let srcRowOffset = py * image.width
+                let dstRowOffset = cy * cWidth
+                for cx in 0..<cWidth {
+                    let px = cx * 2
+                    let srcOffset = srcRowOffset + px
+                    let dstOffset = dstRowOffset + cx
+                    if srcOffset < image.cbPlane.count {
+                        dstBuf[dstOffset] = Int16(srcBuf[srcOffset]) - 128
+                    } else {
+                        dstBuf[dstOffset] = 0
                     }
                 }
             }
         }
-        cr.withUnsafeMutableBufferPointer { dstBuf in
-            image.crPlane.withUnsafeBufferPointer { srcBuf in
-                for cy in 0..<cHeight {
-                    let py = cy * 2
-                    let srcRowOffset = py * image.width
-                    let dstRowOffset = cy * cWidth
-                    for cx in 0..<cWidth {
-                        let px = cx * 2
-                        let srcOffset = srcRowOffset + px
-                        let dstOffset = dstRowOffset + cx
-                        if srcOffset < srcBuf.count {
-                            dstBuf[dstOffset] = Int16(srcBuf[srcOffset]) - 128
-                        } else {
-                            dstBuf[dstOffset] = 0
-                        }
+        withUnsafePointers(mut: &cr, image.crPlane) { dstBuf, srcBuf in
+            for cy in 0..<cHeight {
+                let py = cy * 2
+                let srcRowOffset = py * image.width
+                let dstRowOffset = cy * cWidth
+                for cx in 0..<cWidth {
+                    let px = cx * 2
+                    let srcOffset = srcRowOffset + px
+                    let dstOffset = dstRowOffset + cx
+                    if srcOffset < image.crPlane.count {
+                        dstBuf[dstOffset] = Int16(srcBuf[srcOffset]) - 128
+                    } else {
+                        dstBuf[dstOffset] = 0
                     }
                 }
             }
@@ -688,23 +681,19 @@ func isPlaneIdentical(a: PlaneData420, b: PlaneData420) -> Bool {
     guard a.y.count == b.y.count else { return false }
     
     let count = a.y.count
-    return a.y.withUnsafeBufferPointer { aBuf in
-        b.y.withUnsafeBufferPointer { bBuf in
-            guard let aPtr = aBuf.baseAddress, let bPtr = bBuf.baseAddress else { return false }
-            
-            var i = 0
-            while i + 16 <= count {
-                let aSimd = UnsafeRawPointer(aPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                let bSimd = UnsafeRawPointer(bPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                if any(aSimd .!= bSimd) { return false }
-                i += 16
-            }
-            
-            while i < count {
-                if aPtr[i] != bPtr[i] { return false }
-                i += 1
-            }
-            return true
+    return withUnsafePointers(a.y, b.y) { aPtr, bPtr in
+        var i = 0
+        while i + 16 <= count {
+            let aSimd = UnsafeRawPointer(aPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+            let bSimd = UnsafeRawPointer(bPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
+            if any(aSimd .!= bSimd) { return false }
+            i += 16
         }
+        
+        while i < count {
+            if aPtr[i] != bPtr[i] { return false }
+            i += 1
+        }
+        return true
     }
 }

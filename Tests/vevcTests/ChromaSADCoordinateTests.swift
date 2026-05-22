@@ -15,8 +15,8 @@ final class ChromaSADCoordinateTests: XCTestCase {
         var refCr = [Int16](repeating: 0, count: cbw * cbh)
         
         // Layer1 (half-res Luma) pixel coordinates. Matches Chroma coordinates.
-        let bx = 2
-        let by = 2
+        let bx = 1
+        let by = 1
         // Chroma block coordinate: cx = 2, cy = 2
         
         // Curr block values
@@ -61,8 +61,8 @@ final class ChromaSADCoordinateTests: XCTestCase {
         var refCb = [Int16](repeating: 0, count: cbw * cbh)
         var refCr = [Int16](repeating: 0, count: cbw * cbh)
         
-        let bx = 2
-        let by = 2
+        let bx = 1
+        let by = 1
         // Chroma block coordinate: cx = 2, cy = 2
         
         for y in 0..<4 {

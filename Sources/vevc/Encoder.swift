@@ -246,8 +246,8 @@ actor LayersEncodeActor {
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon
             
-            let isPrevFirst = oldRecon.y.withUnsafeBufferPointer { p in
-                firstRecon.y.withUnsafeBufferPointer { f in p.baseAddress == f.baseAddress }
+            let isPrevFirst = withUnsafePointers(oldRecon.y, firstRecon.y) { p, f in
+                p == f
             }
             if isPrevFirst != true {
                 oldRelease?()
@@ -270,11 +270,9 @@ private func estimateFastSAD(a: PlaneData420, b: PlaneData420) -> Int {
     guard a.y.count == b.y.count, 0 < a.y.count else { return 0 }
     let yCount = a.y.count
     var sumY: UInt64 = 0
-    a.y.withUnsafeBufferPointer { aPtr in
-        b.y.withUnsafeBufferPointer { bPtr in
-            for i in stride(from: 0, to: yCount, by: 4) {
-                sumY += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
-            }
+    withUnsafePointers(a.y, b.y) { aPtr, bPtr in
+        for i in stride(from: 0, to: yCount, by: 4) {
+            sumY += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
         }
     }
     let ySAD = Int((sumY * 4) / UInt64(yCount))

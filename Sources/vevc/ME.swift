@@ -530,16 +530,10 @@ struct MotionEstimation {
         tPtr: UnsafeMutablePointer<Int16>,
         width: Int, height: Int, bx: Int, by: Int, range: Int = 4, pmv: MotionVector, roundOffset: Int
     ) -> (MotionVector, Int) {
-        return currPlane.withUnsafeBufferPointer { cBuf in
-            prevPlane.withUnsafeBufferPointer { pBuf in
-                guard let cBase = cBuf.baseAddress, let pBase = pBuf.baseAddress else {
-                    return (MotionVector(dx: 0, dy: 0), 0)
-                }
-
-                fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
-                let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by, range: range, pmv: pmv, roundOffset: roundOffset)
-                return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
-            }
+        return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
+            fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
+            let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by, range: range, pmv: pmv, roundOffset: roundOffset)
+            return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
         }
     }
 
@@ -798,9 +792,7 @@ struct MotionEstimation {
         let cY0 = Int32(fY[0]), cY1 = Int32(fY[1]), cY2 = Int32(fY[2]), cY3 = Int32(fY[3])
         
         if safe {
-            if useFIR != true {
-                return computeQuarterPixelSADSubsampled32_Safe_NoFIR(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy)
-            } else {
+            if useFIR {
                 switch true {
                 case fractY == 0:
                     return computeQuarterPixelSADSubsampled32_Safe_FIR_Y0(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3)
@@ -809,13 +801,15 @@ struct MotionEstimation {
                 default:
                     return computeQuarterPixelSADSubsampled32_Safe_FIR_XY(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
                 }
+            } else {
+                return computeQuarterPixelSADSubsampled32_Safe_NoFIR(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy)
             }
         }
         
-        if useFIR != true {
-            return computeQuarterPixelSADSubsampled32_Unsafe_NoFIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy)
-        } else {
+        if useFIR {
             return computeQuarterPixelSADSubsampled32_Unsafe_FIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
+        } else {
+            return computeQuarterPixelSADSubsampled32_Unsafe_NoFIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy)
         }
     }
 
@@ -830,13 +824,8 @@ struct MotionEstimation {
         prevPlane: [Int16],
         width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
     ) -> (MotionVector, Int) {
-        return currPlane.withUnsafeBufferPointer { cBuf in
-            prevPlane.withUnsafeBufferPointer { pBuf in
-                guard let cBase = cBuf.baseAddress, let pBase = pBuf.baseAddress else {
-                    return (MotionVector(dx: 0, dy: 0), 0)
-                }
-                
-                // pmv is in full units of Luma dx
+        return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
+            // pmv is in full units of Luma dx
                 // We convert it to 1/4 units of Luma dx by multiplying by 4
                 let baseQx = Int(pmv.dx) * 4
                 let baseQy = Int(pmv.dy) * 4
@@ -897,7 +886,6 @@ struct MotionEstimation {
                 }
                 
                 return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
-            }
         }
     }
 }
@@ -946,81 +934,73 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: [Moti
     let oPtr = tmpO.base
     let tPtr = tmpT.base
 
-    mvs.withUnsafeMutableBufferPointer { ptrMVs in
-        sads.withUnsafeMutableBufferPointer { ptrSADs in
-            curr.y.withUnsafeBufferPointer { cL2Buf in
-                prev.y.withUnsafeBufferPointer { pL2Buf in
-                    guard cL2Buf.baseAddress != nil, pL2Buf.baseAddress != nil else { return }
-                    
-                    for idx in currBlocks8.indices {
-                        let col = idx % colCount
-                        let row = idx / colCount
-                        let bx = col * 8
-                        let by = row * 8
-                        let rawPmv = if 0 < col { ptrMVs[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
-                        let pmv = MotionVector(dx: Int16(Int(rawPmv.dx) >> 2), dy: Int16(Int(rawPmv.dy) >> 2))
-                        var (mv, sad) = MotionEstimation.searchPixels(
+    withUnsafePointers(mut: &mvs, mut: &sads, curr.y, prev.y) { ptrMVs, ptrSADs, cL2Buf, pL2Buf in
+        for idx in currBlocks8.indices {
+            let col = idx % colCount
+            let row = idx / colCount
+            let bx = col * 8
+            let by = row * 8
+            let rawPmv = if 0 < col { ptrMVs[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
+            let pmv = MotionVector(dx: Int16(Int(rawPmv.dx) >> 2), dy: Int16(Int(rawPmv.dy) >> 2))
+            var (mv, sad) = MotionEstimation.searchPixels(
+                currPlane: currSub1, prevPlane: prevSub1, 
+                cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv,
+                roundOffset: roundOffset
+            )
+            
+            if 512 < sad, let prevMVs = prevMVs, idx < prevMVs.count {
+                let rawTmv = prevMVs[idx]
+                let tmv = MotionVector(dx: Int16(Int(rawTmv.dx) >> 2), dy: Int16(Int(rawTmv.dy) >> 2))
+                let (tmvMv, tmvSad) = MotionEstimation.searchPixels(
+                    currPlane: currSub1, prevPlane: prevSub1, 
+                    cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: tmv,
+                    roundOffset: roundOffset
+                )
+                if tmvSad < sad {
+                    mv = tmvMv
+                    sad = tmvSad
+                }
+            }
+            
+            var dynamicThreshold = 1024
+            if 1024 < sad {
+                dynamicThreshold = max(1024, MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by) * 48)
+                if dynamicThreshold < sad {
+                    var mvVariance = 0
+                    if 0 < col && 0 < row {
+                        let mvLeft = ptrMVs[idx - 1]
+                        let mvTop = ptrMVs[idx - colCount]
+                        let dxDiff = abs(Int(mvLeft.dx) - Int(mvTop.dx))
+                        let dyDiff = abs(Int(mvLeft.dy) - Int(mvTop.dy))
+                        mvVariance = dxDiff + dyDiff
+                    }
+                    if 32 < mvVariance && (dynamicThreshold * 2) < sad {
+                        let (expMv, expSad) = MotionEstimation.searchPixels(
                             currPlane: currSub1, prevPlane: prevSub1, 
                             cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv,
+                            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12, pmv: mv,
                             roundOffset: roundOffset
                         )
-                        
-                        if 512 < sad, let prevMVs = prevMVs, idx < prevMVs.count {
-                            let rawTmv = prevMVs[idx]
-                            let tmv = MotionVector(dx: Int16(Int(rawTmv.dx) >> 2), dy: Int16(Int(rawTmv.dy) >> 2))
-                            let (tmvMv, tmvSad) = MotionEstimation.searchPixels(
-                                currPlane: currSub1, prevPlane: prevSub1, 
-                                cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                                width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: tmv,
-                                roundOffset: roundOffset
-                            )
-                            if tmvSad < sad {
-                                mv = tmvMv
-                                sad = tmvSad
-                            }
+                        if expSad < sad {
+                            mv = expMv
+                            sad = expSad
                         }
-                        
-                        var dynamicThreshold = 1024
-                        if 1024 < sad {
-                            dynamicThreshold = max(1024, MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by) * 48)
-                            if dynamicThreshold < sad {
-                                var mvVariance = 0
-                                if 0 < col && 0 < row {
-                                    let mvLeft = ptrMVs[idx - 1]
-                                    let mvTop = ptrMVs[idx - colCount]
-                                    let dxDiff = abs(Int(mvLeft.dx) - Int(mvTop.dx))
-                                    let dyDiff = abs(Int(mvLeft.dy) - Int(mvTop.dy))
-                                    mvVariance = dxDiff + dyDiff
-                                }
-                                if 32 < mvVariance && (dynamicThreshold * 2) < sad {
-                                    let (expMv, expSad) = MotionEstimation.searchPixels(
-                                        currPlane: currSub1, prevPlane: prevSub1, 
-                                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12, pmv: mv,
-                                        roundOffset: roundOffset
-                                    )
-                                    if expSad < sad {
-                                        mv = expMv
-                                        sad = expSad
-                                    }
-                                }
-                            }
-                        }
-                        
-                        if dynamicThreshold < sad {
-                            ptrMVs[idx] = MotionVector(dx: 0, dy: 0)
-                        } else {
-                            let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                currPlane: curr.y, prevPlane: prev.y,
-                                width: dx, height: dy, bx: col * 32, by: row * 32, pmv: mv
-                            )
-                            ptrMVs[idx] = refinedMV
-                        }
-                        ptrSADs[idx] = sad
                     }
                 }
             }
+            
+            if dynamicThreshold < sad {
+                ptrMVs[idx] = MotionVector(dx: 0, dy: 0)
+            } else {
+                let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                    currPlane: curr.y, prevPlane: prev.y,
+                    width: dx, height: dy, bx: col * 32, by: row * 32, pmv: mv
+                )
+                ptrMVs[idx] = refinedMV
+            }
+            ptrSADs[idx] = sad
         }
     }
     return (mvs, sads)
