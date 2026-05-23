@@ -823,12 +823,6 @@ struct BypassReader {
         }
     }
     
-    @inline(__always)
-    mutating func skipBit() {
-        ensureBits(1)
-        bitsInBuffer -= 1
-        buffer &= (1 << bitsInBuffer) &- 1
-    }
     
     @inline(__always)
     mutating func readBit() -> Bool {

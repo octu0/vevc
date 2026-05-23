@@ -1,154 +1,3 @@
-@inline(__always)
-func applyMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func applyMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func subtractMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    subMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func subtractMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    subMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func applyBidirectionalMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        nextPlane.withUnsafeBufferPointer { nBuf in
-            plane.withUnsafeMutableBufferPointer { dBuf in
-                guard let prevBase = pBuf.baseAddress, let nextBase = nBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-                for row in 0..<rowCount {
-                    for col in 0..<colCount {
-                        let mvIndex = min(row * colCount + col, mvs.count - 1)
-                        let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
-                        let srcBase = if isBackward { nextBase } else { prevBase }
-                        addMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func applyBidirectionalMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        nextPlane.withUnsafeBufferPointer { nBuf in
-            plane.withUnsafeMutableBufferPointer { dBuf in
-                guard let prevBase = pBuf.baseAddress, let nextBase = nBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-                for row in 0..<rowCount {
-                    for col in 0..<colCount {
-                        let mvIndex = min(row * colCount + col, mvs.count - 1)
-                        let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
-                        let srcBase = if isBackward { nextBase } else { prevBase }
-                        addMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func subtractBidirectionalMotionCompensationPixelsLuma32(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 31) / 32
-    let rowCount = (height + 31) / 32
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        nextPlane.withUnsafeBufferPointer { nBuf in
-            plane.withUnsafeMutableBufferPointer { dBuf in
-                guard let prevBase = pBuf.baseAddress, let nextBase = nBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-                for row in 0..<rowCount {
-                    for col in 0..<colCount {
-                        let mvIndex = min(row * colCount + col, mvs.count - 1)
-                        let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
-                        let srcBase = if isBackward { nextBase } else { prevBase }
-                        subMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 32, blockY: row * 32, mv: mvs[mvIndex], roundOffset: roundOffset)
-                    }
-                }
-            }
-        }
-    }
-}
-
-@inline(__always)
-func subtractBidirectionalMotionCompensationPixelsChroma16(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, roundOffset: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        nextPlane.withUnsafeBufferPointer { nBuf in
-            plane.withUnsafeMutableBufferPointer { dBuf in
-                guard let prevBase = pBuf.baseAddress, let nextBase = nBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-                for row in 0..<rowCount {
-                    for col in 0..<colCount {
-                        let mvIndex = min(row * colCount + col, mvs.count - 1)
-                        let isBackward = if mvIndex < refDirs.count { refDirs[mvIndex] } else { false }
-                        let srcBase = if isBackward { nextBase } else { prevBase }
-                        subMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * 16, blockY: row * 16, mv: mvs[mvIndex], roundOffset: roundOffset)
-                    }
-                }
-            }
-        }
-    }
-}
 
 @inline(__always)
 fileprivate func subMCBlockLuma32Inner(
@@ -500,7 +349,7 @@ fileprivate func addMCBlockLuma32Inner(
     let cY0 = Int32(fY[0]), cY1 = Int32(fY[1]), cY2 = Int32(fY[2]), cY3 = Int32(fY[3])
     let useFIR = (fractX != 0 || fractY != 0)
     switch true {
-    case useFIR != true: do {
+    case useFIR != true:
         for y in 0..<bh {
             let sy = blockY + shiftY + y
             let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
@@ -514,8 +363,8 @@ fileprivate func addMCBlockLuma32Inner(
             }
             while x < bw { dstPtr[x] = dstPtr[x] &+ r[x]; x &+= 1 }
         }
-    }
-    case fractY == 0: do {
+
+    case fractY == 0:
         // why: fractY==0 means vertical FIR coefficients are [0,8,0,0], so vertical FIR = 8*h0
         // Skip 3 out of 4 row loads (rM1, rP1, rP2) and vertical multiply-add
         let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
@@ -543,8 +392,8 @@ fileprivate func addMCBlockLuma32Inner(
                 x &+= 1
             }
         }
-    }
-    case fractX == 0: do {
+
+    case fractX == 0:
         // why: fractX==0 means horizontal FIR coefficients are [0,8,0,0], so horizontal FIR = 8*pixel
         // Skip horizontalFIRLuma8 calls, load pixels directly and apply vertical FIR
         let vcY0 = SIMD8<Int32>(repeating: cY0), vcY1 = SIMD8<Int32>(repeating: cY1)
@@ -582,7 +431,7 @@ fileprivate func addMCBlockLuma32Inner(
                 x &+= 1
             }
         }
-    }
+
     default:
         // Full 2D FIR: both fractX != 0 and fractY != 0
         let vcX0 = SIMD8<Int32>(repeating: cX0), vcX1 = SIMD8<Int32>(repeating: cX1)
@@ -855,15 +704,12 @@ func scaledMV(_ mv: MotionVector, rightShift: Int) -> MotionVector {
 func applyScaledMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, lumaBlockSize: Int, mvShift: Int, roundOffset: Int) {
     let colCount = (width + lumaBlockSize - 1) / lumaBlockSize
     let rowCount = (height + lumaBlockSize - 1) / lumaBlockSize
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
-                }
+    withUnsafePointers(prevPlane, mut: &plane) { prevBase, dstBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
+                addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
             }
         }
     }
@@ -873,15 +719,12 @@ func applyScaledMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int16],
 func applyScaledMotionCompensationChroma(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, chromaBlockSize: Int, mvShift: Int, roundOffset: Int) {
     let colCount = (width + chromaBlockSize - 1) / chromaBlockSize
     let rowCount = (height + chromaBlockSize - 1) / chromaBlockSize
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
-                }
+    withUnsafePointers(prevPlane, mut: &plane) { prevBase, dstBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
+                addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
             }
         }
     }
@@ -891,15 +734,12 @@ func applyScaledMotionCompensationChroma(plane: inout [Int16], prevPlane: [Int16
 func subtractScaledMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, lumaBlockSize: Int, mvShift: Int, roundOffset: Int) {
     let colCount = (width + lumaBlockSize - 1) / lumaBlockSize
     let rowCount = (height + lumaBlockSize - 1) / lumaBlockSize
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    subMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
-                }
+    withUnsafePointers(prevPlane, mut: &plane) { prevBase, dstBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
+                subMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
             }
         }
     }
@@ -909,21 +749,18 @@ func subtractScaledMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int1
 func subtractScaledMotionCompensationChroma(plane: inout [Int16], prevPlane: [Int16], mvs: [MotionVector], width: Int, height: Int, chromaBlockSize: Int, mvShift: Int, roundOffset: Int) {
     let colCount = (width + chromaBlockSize - 1) / chromaBlockSize
     let rowCount = (height + chromaBlockSize - 1) / chromaBlockSize
-    prevPlane.withUnsafeBufferPointer { pBuf in
-        plane.withUnsafeMutableBufferPointer { dBuf in
-            guard let prevBase = pBuf.baseAddress, let dstBase = dBuf.baseAddress else { return }
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, mvs.count - 1)
-                    let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
-                    subMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
-                }
+    withUnsafePointers(prevPlane, mut: &plane) { prevBase, dstBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, mvs.count - 1)
+                let smv = scaledMV(mvs[mvIndex], rightShift: mvShift)
+                subMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
             }
         }
     }
 }
 
-// 双方向版
+// Bidirectional version
 @inline(__always)
 func applyScaledBidirectionalMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: [MotionVector], refDirs: [Bool], width: Int, height: Int, lumaBlockSize: Int, mvShift: Int, roundOffset: Int) {
     let colCount = (width + lumaBlockSize - 1) / lumaBlockSize

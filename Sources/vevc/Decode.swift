@@ -64,79 +64,6 @@ func decodeCoeffRun(decoder: inout EntropyDecoder, context: UInt8) throws -> (In
     return (pair.run, pair.val)
 }
 
-@inline(__always)
-func blockDecode32V(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
-    let hasNonZero = try decoder.decodeBypass()
-    if hasNonZero == 0 {
-        // blocks from pool are guaranteed zero (cleared on put), no explicit zeroing needed
-        return
-    }
-
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-
-    var currentIdx = 0
-    var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 32 + lscpY
-    while currentIdx <= lscpIdx {
-        let startX = currentIdx / 32
-        let startY = currentIdx % 32
-        let isParentZero: Bool
-        if let pb = parentBlock {
-            isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        } else {
-            isParentZero = false
-        }
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
-        prevVal = val
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let x = currentIdx / 32
-            let y = currentIdx % 32
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
-        }
-        currentIdx += 1
-    }
-}
-
-@inline(__always)
-func blockDecode32H(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView?) throws {
-    let hasNonZero = try decoder.decodeBypass()
-    if hasNonZero == 0 {
-        // blocks from pool are guaranteed zero (cleared on put), no explicit zeroing needed
-        return
-    }
-
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
-
-    var currentIdx = 0
-    var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 32 + lscpX
-    while currentIdx <= lscpIdx {
-        let startY = currentIdx / 32
-        let startX = currentIdx % 32
-        let isParentZero: Bool
-        if let pb = parentBlock {
-            isParentZero = pb.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        } else {
-            isParentZero = false
-        }
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
-        prevVal = val
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let y = currentIdx / 32
-            let x = currentIdx % 32
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
-        }
-        currentIdx += 1
-    }
-}
 
 @inline(__always)
 func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
@@ -733,7 +660,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         sub.updateCr(data: &blk, startX: w, startY: h, size: 32)
     }
     
-    // MC: MV は layer0 精度 → layer2(フル解像度) mvScale=4
+    // MC: MV is layer0 precision -> layer2 (full resolution) mvScale=4
     if let tPrev = predictedPd, let mvs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
             applyScaledBidirectionalMotionCompensationLuma(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)

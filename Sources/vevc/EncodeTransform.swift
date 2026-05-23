@@ -70,44 +70,6 @@ func isEffectivelyZero16(data base: UnsafeMutablePointer<Int16>, threshold: Int)
     return true
 }
 
-@inline(__always)
-func isEffectivelyZero8(data base: UnsafeMutablePointer<Int16>, threshold: Int) -> Bool {
-    let th = Int16(threshold)
-    let thPos = SIMD4<Int16>(repeating: th)
-    let thNeg = SIMD4<Int16>(repeating: -th)
-
-    let lowerHalfBase = base + 4 * 8
-    for i in stride(from: 0, to: 32, by: 4) {
-        let vec: SIMD4<Int16> = UnsafeRawPointer(lowerHalfBase + i).loadUnaligned(as: SIMD4<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) {
-            return false 
-        }
-    }
-    for y in 0..<4 {
-        let ptr = base + y * 8 + 4
-        let vec: SIMD4<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
-        let overPos = vec .> thPos
-        let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) {
-            return false
-        }
-    }
-
-    let zeroVec = SIMD4<Int16>(repeating: 0)
-    for i in stride(from: 0, to: 32, by: 4) {
-        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD4<Int16>.self)
-        ptr.pointee = zeroVec
-    }
-    for y in 0..<4 {
-        let ptr = UnsafeMutableRawPointer(base + y * 8 + 4).assumingMemoryBound(to: SIMD4<Int16>.self)
-        ptr.pointee = zeroVec
-    }
-    return true
-}
 
 @inline(__always)
 func checkQuadrants16x16(base: UnsafeMutablePointer<Int16>, stride: Int, q0: inout Bool, q1: inout Bool, q2: inout Bool, q3: inout Bool) {

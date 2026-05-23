@@ -197,53 +197,7 @@ struct MotionEstimation {
         }
     }
 
-    @inline(__always)
-    static func fetchEighthPixelBlock8(plane: UnsafePointer<Int16>, width: Int, height: Int, intX: Int, intY: Int, remX: Int, remY: Int, dest: UnsafeMutablePointer<Int16>, roundOffset: Int) {
-        if remX == 0 && remY == 0 {
-            fetchPixelsBlock8(plane: plane, width: width, height: height, x: intX, y: intY, dest: dest)
-            return
-        }
-        let nextX = if remX == 0 { 0 } else { 1 }
-        let nextY = if remY == 0 { 0 } else { 1 }
-        let wA = 8 - remX
-        let wB = remX
-        let wC = 8 - remY
-        let wD = remY
-        
-        if 0 <= intX && 0 <= intY && ((intX + 8) + nextX) <= width && ((intY + 8) + nextY) <= height {
-            for ry in 0..<8 {
-                let row0 = plane.advanced(by: (intY + ry) * width + intX)
-                let row1 = plane.advanced(by: (intY + ry + nextY) * width + intX)
-                let dst = dest.advanced(by: ry * 8)
-                for rx in 0..<8 {
-                    let v0 = (wA * wC) * Int(row0[rx])
-                    let v1 = (wB * wC) * Int(row0[rx + nextX])
-                    let v2 = (wA * wD) * Int(row1[rx])
-                    let v3 = (wB * wD) * Int(row1[rx + nextX])
-                    let v = (v0 + v1) + (v2 + v3)
-                    dst[rx] = Int16((v + 31 + roundOffset) >> 6)
-                }
-            }
-            return
-        }
-        for ry in 0..<8 {
-            let sy0 = max(0, min(intY + ry, height - 1))
-            let sy1 = max(0, min(intY + ry + nextY, height - 1))
-            let row0 = plane.advanced(by: sy0 * width)
-            let row1 = plane.advanced(by: sy1 * width)
-            let dst = dest.advanced(by: ry * 8)
-            for rx in 0..<8 {
-                let sx0 = max(0, min(intX + rx, width - 1))
-                let sx1 = max(0, min(intX + rx + nextX, width - 1))
-                let v0 = (wA * wC) * Int(row0[sx0])
-                let v1 = (wB * wC) * Int(row0[sx1])
-                let v2 = (wA * wD) * Int(row1[sx0])
-                let v3 = (wB * wD) * Int(row1[sx1])
-                let v = (v0 + v1) + (v2 + v3)
-                dst[rx] = Int16((v + 31 + roundOffset) >> 6)
-            }
-        }
-    }
+
 
     @inline(__always)
     static func compute64PointSADBlocksWithStride(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>, pStride: Int) -> Int {
@@ -268,19 +222,7 @@ struct MotionEstimation {
         return Int(sad)
     }
 
-    @inline(__always)
-    static func compute32PointSADEvenRows(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
-        var sad: Int32 = 0
-        for row in 0..<4 {
-            let offset = row * 16
-            let cRow = cBase.advanced(by: offset)
-            let pRow = pBase.advanced(by: offset)
-            for x in 0..<8 {
-                sad &+= abs(Int32(cRow[x]) - Int32(pRow[x]))
-            }
-        }
-        return Int(sad) * 2
-    }
+
 
     private static let dsLdspX: [Int] = [0, 1, 2, 1, 0, -1, -2, -1]
     private static let dsLdspY: [Int] = [-2, -1, 0, 1, 2, 1, 0, -1]
@@ -479,9 +421,9 @@ struct MotionEstimation {
         }
         
         // Quarter-pixel refinement around best half-pixel position
-        // bestHpDx は半画素単位 → *2 で四分の一画素単位に変換
-        // この探索で奇数値の MV が得られ、Layer2 スケーリング後にも
-        // fractX/Y に非ゼロ値が現れ、FIR 補間が有効になる
+        // bestHpDx is in half-pixel units -> multiply by 2 to convert to quarter-pixel units
+        // This search yields odd-valued MVs, ensuring non-zero fractX/Y values even after Layer2 scaling,
+        // which makes FIR interpolation effective.
         var bestQpDx: Int = bestHpDx * 2
         var bestQpDy: Int = bestHpDy * 2
         var bestQpSAD: Int = bestHpSAD
@@ -496,7 +438,7 @@ struct MotionEstimation {
                 let remX: Int = qpDx & 3
                 let remY: Int = qpDy & 3
                 
-                // 四分の一画素のボケペナルティは半画素より軽い
+                // Quarter-pixel blur penalty is lighter than half-pixel
                 let blurPenalty = (remX + remY) * 8
                 let penalty = getMVDPenalty(dx: qpDx, dy: qpDy, pmvDx: Int(pmv.dx), pmvDy: Int(pmv.dy), lambda: 4) + blurPenalty
                 let maxSAD = bestQpSAD - penalty
@@ -801,16 +743,14 @@ struct MotionEstimation {
                 default:
                     return computeQuarterPixelSADSubsampled32_Safe_FIR_XY(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
                 }
-            } else {
-                return computeQuarterPixelSADSubsampled32_Safe_NoFIR(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy)
             }
+            return computeQuarterPixelSADSubsampled32_Safe_NoFIR(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy)
         }
         
         if useFIR {
             return computeQuarterPixelSADSubsampled32_Unsafe_FIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
-        } else {
-            return computeQuarterPixelSADSubsampled32_Unsafe_NoFIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy)
         }
+        return computeQuarterPixelSADSubsampled32_Unsafe_NoFIR(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, intDx: intDx, intDy: intDy)
     }
 
     static let searchOffsets = [
@@ -1071,8 +1011,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let bx = col * 8
             let by = row * 8
             
-            // ptrMVs は Layer2 qpel で格納されているため、
-            // searchPixels (Layer0 空間で動作) に渡す前に ÷4 して Layer0 qpel に戻す
+            // Since ptrMVs is stored in Layer2 qpel,
+            // divide by 4 to convert back to Layer0 qpel before passing to searchPixels (which operates in Layer0 space)
             let mvA = if 0 < col { ptrMVs[idx - 1] } else { MotionVector(dx: 0, dy: 0) }
             let mvB = if 0 < row { ptrMVs[idx - colCount] } else { MotionVector(dx: 0, dy: 0) }
             let mvC = if 0 < row && col < (colCount - 1) { ptrMVs[idx - colCount + 1] } else { MotionVector(dx: 0, dy: 0) }
@@ -1185,7 +1125,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 }
             }
             
-            // MV を Layer2 qpel に変換して格納
+            // Convert MV to Layer2 qpel and store
             let dynamicThreshold = max(1024, MotionEstimation.extractContrast8x8(plane: currSub1, width: targetWidth, height: targetHeight, bx: bx, by: by) * 48)
             
             let finalSAD = prevSAD
