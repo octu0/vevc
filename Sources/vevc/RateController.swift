@@ -135,9 +135,9 @@ struct RateController {
         // This has no fixed parameters — the smoothing strength adapts to content.
         if 0 < lastPFrameQStep && 0 < avgPFrameSAD {
             let sceneSadRatio16 = (Int64(currentSAD) << 16) / Int64(max(1, avgPFrameSAD))
-            // When transitioning to static scene (sceneSadRatio16 < 0.5), use higher alpha to drop QP faster.
+            // When transitioning to static scene (sceneSadRatio16 < 32768), use higher alpha to drop QP faster.
             let minAlpha16 = if sceneSadRatio16 < 32768 {
-                Int64(26214) // 0.4
+                Int64(29491) // 0.45
             } else {
                 Int64(19661) // 0.3
             }

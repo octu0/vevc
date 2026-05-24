@@ -244,8 +244,7 @@ struct MotionEstimation {
             return (0, 0, zeroSAD)
         }
         
-        let rawZeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
-        let zeroPenalty = min(32, rawZeroPenalty)
+        let zeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
         var bestCoarseSAD = zeroSAD + zeroPenalty
         var bestCoarseDx = 0
         var bestCoarseDy = 0
@@ -388,7 +387,7 @@ struct MotionEstimation {
         var bestHpDy: Int = bestFineDy * 2
         var bestHpSAD: Int = bestFineSAD
         
-        if 256 < bestFineSAD {
+        if 224 < bestFineSAD {
             for oi in 0..<8 {
                 let hx = meSearchOffsetX[oi]
                 let hy = meSearchOffsetY[oi]
@@ -429,7 +428,7 @@ struct MotionEstimation {
         var bestQpDy: Int = bestHpDy * 2
         var bestQpSAD: Int = bestHpSAD
         
-        if 128 < bestHpSAD {
+        if 96 < bestHpSAD {
             for oi in 0..<8 {
                 let qpDx: Int = bestHpDx * 2 + meSearchOffsetX[oi]
                 let qpDy: Int = bestHpDy * 2 + meSearchOffsetY[oi]
@@ -440,8 +439,8 @@ struct MotionEstimation {
                 let remY: Int = qpDy & 3
                 
                 // Quarter-pixel blur penalty is lighter than half-pixel
-                let blurPenalty = (remX + remY) * 8
-                let penalty = getMVDPenalty(dx: qpDx, dy: qpDy, pmvDx: Int(pmv.dx), pmvDy: Int(pmv.dy), lambda: 4) + blurPenalty
+                let blurPenalty = (remX + remY) * 4
+                let penalty = getMVDPenalty(dx: qpDx, dy: qpDy, pmvDx: Int(pmv.dx), pmvDy: Int(pmv.dy), lambda: 3) + blurPenalty
                 let maxSAD = bestQpSAD - penalty
                 if maxSAD < 0 { continue }
                 
@@ -463,7 +462,7 @@ struct MotionEstimation {
         
         let bestMVIsZero = (bestQpDx == 0 && bestQpDy == 0)
         if bestMVIsZero != true {
-            if zeroSAD < 32 || zeroSAD < bestQpSAD + 4 {
+            if zeroSAD < 32 && zeroSAD < bestQpSAD + 2 {
                 return (0, 0, zeroSAD)
             }
         }

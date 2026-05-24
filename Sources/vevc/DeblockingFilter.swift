@@ -36,6 +36,11 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
 /// In-place applies deblocking filter to the reconstructed image (32x32 block resolution), with Intra/Inter boundary enhancement.
 @inline(__always)
 func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: [MotionVector]) {
+    guard !mvs.isEmpty else {
+        applyDeblockingFilter32(plane: &plane, width: width, height: height, qStep: qStep)
+        return
+    }
+    
     plane.withUnsafeMutableBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }
         
@@ -53,54 +58,89 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         let hRem = height - hFast
         let wRem = width - wFast
         
-        // Vertical Edges
-        for col in 1..<colCount {
-            let x = col * 32
-            for row in 0..<rowCount {
-                let y = row * 32
-                let idx = row * colCount + col
-                
-                // Enhance deblocking at motion boundaries:
-                // - Intra/Inter boundary: strongest filtering
-                // - Inter/Inter boundary (both blocks have motion): moderate enhancement
-                // - Intra/Intra boundary: default (minimal)
-                let leftIdx = idx - 1
-                let hasMotionLeft = (leftIdx < mvs.count) && (mvs[leftIdx].isIntra != true)
-                let hasMotionRight = (idx < mvs.count) && (mvs[idx].isIntra != true)
-                let isIntraBoundary = (idx < mvs.count && leftIdx < mvs.count) && (mvs[idx].isIntra != mvs[leftIdx].isIntra)
-                let isMotionBoundary = hasMotionLeft || hasMotionRight
-                let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
-                
-                if y < hFast {
-                    deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
-                } else {
-                    let safeH = min(hRem, height - y)
-                    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+        mvs.withUnsafeBufferPointer { mvBuffer in
+            guard let mvBase = mvBuffer.baseAddress else { return }
+            let mvCount = mvBuffer.count
+            
+            // Vertical Edges
+            for col in 1..<colCount {
+                let x = col * 32
+                for row in 0..<rowCount {
+                    let y = row * 32
+                    let idx = row * colCount + col
+                    
+                    let leftIdx = idx - 1
+                    let mvLeft: MotionVector
+                    if leftIdx < mvCount {
+                        mvLeft = mvBase[leftIdx]
+                    } else {
+                        mvLeft = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let mvRight: MotionVector
+                    if idx < mvCount {
+                        mvRight = mvBase[idx]
+                    } else {
+                        mvRight = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let leftIsIntra = mvLeft.dx == 32767
+                    let rightIsIntra = mvRight.dx == 32767
+                    
+                    let hasMotionLeft = leftIsIntra != true
+                    let hasMotionRight = rightIsIntra != true
+                    let isIntraBoundary = leftIsIntra != rightIsIntra
+                    let isMotionBoundary = hasMotionLeft || hasMotionRight
+                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
+                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    
+                    if y < hFast {
+                        deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                    } else {
+                        let safeH = min(hRem, height - y)
+                        deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                    }
                 }
             }
-        }
-        
-        // Horizontal Edges
-        for row in 1..<rowCount {
-            let y = row * 32
-            for col in 0..<colCount {
-                let x = col * 32
-                let idx = row * colCount + col
-                
-                let topIdx = idx - colCount
-                let hasMotionTop = (0 <= topIdx && topIdx < mvs.count) && (mvs[topIdx].isIntra != true)
-                let hasMotionBottom = (idx < mvs.count) && (mvs[idx].isIntra != true)
-                let isIntraBoundary = (idx < mvs.count && 0 <= topIdx) && (mvs[idx].isIntra != mvs[topIdx].isIntra)
-                let isMotionBoundary = hasMotionTop || hasMotionBottom
-                let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
-                
-                if x < wFast {
-                    deblockFilterHorizontalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
-                } else {
-                    let safeW = min(wRem, width - x)
-                    deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+            
+            // Horizontal Edges
+            for row in 1..<rowCount {
+                let y = row * 32
+                for col in 0..<colCount {
+                    let x = col * 32
+                    let idx = row * colCount + col
+                    
+                    let topIdx = idx - colCount
+                    let mvTop: MotionVector
+                    if topIdx < mvCount {
+                        mvTop = mvBase[topIdx]
+                    } else {
+                        mvTop = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let mvBottom: MotionVector
+                    if idx < mvCount {
+                        mvBottom = mvBase[idx]
+                    } else {
+                        mvBottom = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let topIsIntra = mvTop.dx == 32767
+                    let bottomIsIntra = mvBottom.dx == 32767
+                    
+                    let hasMotionTop = topIsIntra != true
+                    let hasMotionBottom = bottomIsIntra != true
+                    let isIntraBoundary = topIsIntra != bottomIsIntra
+                    let isMotionBoundary = hasMotionTop || hasMotionBottom
+                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
+                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    
+                    if x < wFast {
+                        deblockFilterHorizontalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                    } else {
+                        let safeW = min(wRem, width - x)
+                        deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                    }
                 }
             }
         }
@@ -110,6 +150,11 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
 /// In-place applies deblocking filter to the Chroma plane (16x16 blocks), with Intra/Inter boundary enhancement using Luma MVs.
 @inline(__always)
 func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: [MotionVector]) {
+    guard !mvs.isEmpty else {
+        applyDeblockingFilter16(plane: &plane, width: width, height: height, qStep: qStep)
+        return
+    }
+    
     plane.withUnsafeMutableBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }
         
@@ -121,9 +166,6 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         
         let colCountC = (width + 15) / 16
         let rowCountC = (height + 15) / 16
-        
-        // mvs array is based on 32x32 Luma blocks. 1 Chroma block (16x16) = 1 Luma block (32x32)
-        // so mvs array has exactly colCountC columns.
         let mvColCount = colCountC 
         
         let hFast = (height / 16) * 16
@@ -131,50 +173,89 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         let hRem = height - hFast
         let wRem = width - wFast
         
-        // Vertical Edges
-        for col in 1..<colCountC {
-            let x = col * 16
-            for row in 0..<rowCountC {
-                let y = row * 16
-                let idx = row * mvColCount + col
-                
-                let leftIdx = idx - 1
-                let hasMotionLeft = (leftIdx < mvs.count) && (mvs[leftIdx].isIntra != true)
-                let hasMotionRight = (idx < mvs.count) && (mvs[idx].isIntra != true)
-                let isIntraBoundary = (idx < mvs.count && leftIdx < mvs.count) && (mvs[idx].isIntra != mvs[leftIdx].isIntra)
-                let isMotionBoundary = hasMotionLeft || hasMotionRight
-                let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
-                
-                if y < hFast {
-                    deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
-                } else {
-                    let safeH = min(hRem, height - y)
-                    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+        mvs.withUnsafeBufferPointer { mvBuffer in
+            guard let mvBase = mvBuffer.baseAddress else { return }
+            let mvCount = mvBuffer.count
+            
+            // Vertical Edges
+            for col in 1..<colCountC {
+                let x = col * 16
+                for row in 0..<rowCountC {
+                    let y = row * 16
+                    let idx = row * mvColCount + col
+                    
+                    let leftIdx = idx - 1
+                    let mvLeft: MotionVector
+                    if leftIdx < mvCount {
+                        mvLeft = mvBase[leftIdx]
+                    } else {
+                        mvLeft = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let mvRight: MotionVector
+                    if idx < mvCount {
+                        mvRight = mvBase[idx]
+                    } else {
+                        mvRight = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let leftIsIntra = mvLeft.dx == 32767
+                    let rightIsIntra = mvRight.dx == 32767
+                    
+                    let hasMotionLeft = leftIsIntra != true
+                    let hasMotionRight = rightIsIntra != true
+                    let isIntraBoundary = leftIsIntra != rightIsIntra
+                    let isMotionBoundary = hasMotionLeft || hasMotionRight
+                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
+                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    
+                    if y < hFast {
+                        deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                    } else {
+                        let safeH = min(hRem, height - y)
+                        deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                    }
                 }
             }
-        }
-        
-        // Horizontal Edges
-        for row in 1..<rowCountC {
-            let y = row * 16
-            for col in 0..<colCountC {
-                let x = col * 16
-                let idx = row * mvColCount + col
-                
-                let topIdx = idx - mvColCount
-                let hasMotionTop = (0 <= topIdx && topIdx < mvs.count) && (mvs[topIdx].isIntra != true)
-                let hasMotionBottom = (idx < mvs.count) && (mvs[idx].isIntra != true)
-                let isIntraBoundary = (idx < mvs.count && 0 <= topIdx) && (mvs[idx].isIntra != mvs[topIdx].isIntra)
-                let isMotionBoundary = hasMotionTop || hasMotionBottom
-                let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
-                
-                if x < wFast {
-                    deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
-                } else {
-                    let safeW = min(wRem, width - x)
-                    deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+            
+            // Horizontal Edges
+            for row in 1..<rowCountC {
+                let y = row * 16
+                for col in 0..<colCountC {
+                    let x = col * 16
+                    let idx = row * mvColCount + col
+                    
+                    let topIdx = idx - mvColCount
+                    let mvTop: MotionVector
+                    if topIdx < mvCount {
+                        mvTop = mvBase[topIdx]
+                    } else {
+                        mvTop = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let mvBottom: MotionVector
+                    if idx < mvCount {
+                        mvBottom = mvBase[idx]
+                    } else {
+                        mvBottom = MotionVector(dx: 0, dy: 0)
+                    }
+                    
+                    let topIsIntra = mvTop.dx == 32767
+                    let bottomIsIntra = mvBottom.dx == 32767
+                    
+                    let hasMotionTop = topIsIntra != true
+                    let hasMotionBottom = bottomIsIntra != true
+                    let isIntraBoundary = topIsIntra != bottomIsIntra
+                    let isMotionBoundary = hasMotionTop || hasMotionBottom
+                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
+                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    
+                    if x < wFast {
+                        deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                    } else {
+                        let safeW = min(wRem, width - x)
+                        deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                    }
                 }
             }
         }
@@ -214,22 +295,28 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
 
 @inline(__always)
 private func deblockFilterVerticalEdge16SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
+    var vP1 = SIMD16<Int16>()
     var vP0 = SIMD16<Int16>()
     var vQ0 = SIMD16<Int16>()
+    var vQ1 = SIMD16<Int16>()
     
     var off = (y * width) + x
     for i in 0..<16 {
+        vP1[i] = base[off - 2]
         vP0[i] = base[off - 1]
         vQ0[i] = base[off + 0]
+        vQ1[i] = base[off + 1]
         off += width
     }
     
-    let (nP0, nQ0) = deblockComputeFilter(p0: vP0, q0: vQ0, tc: tc, beta: beta)
+    let (nP1, nP0, nQ0, nQ1) = deblockComputeFilter(p1: vP1, p0: vP0, q0: vQ0, q1: vQ1, tc: tc, beta: beta)
     
     off = (y * width) + x
     for i in 0..<16 {
+        base[off - 2] = nP1[i]
         base[off - 1] = nP0[i]
         base[off + 0] = nQ0[i]
+        base[off + 1] = nQ1[i]
         off += width
     }
 }
@@ -242,25 +329,41 @@ private func deblockFilterVerticalEdge32SIMD(base: UnsafeMutablePointer<Int16>, 
 
 @inline(__always)
 private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+    let betah = beta >> 1
     var offset = y * width + x
     for _ in 0..<count {
+        var p1 = base[offset - 2]
         var p0 = base[offset - 1]
         var q0 = base[offset + 0]
+        var q1 = base[offset + 1]
         
         let delta = Int32(q0) - Int32(p0)
-        let absDelta = if delta < 0 { -1 * delta } else { delta }
+        let absDelta = if delta < 0 { -delta } else { delta }
         if absDelta < beta {
-            var d = (delta + 1) >> 1
-            let t = Int32(tc)
-            if t < d { d = t }
-            if d < (-1 * t) { d = (-1 * t) }
-            
-            let d16 = Int16(d)
-            p0 = p0 &+ d16
-            q0 = q0 &- d16
-            
-            base[offset - 1] = p0
-            base[offset + 0] = q0
+            let deltaP = Int32(p1) - Int32(p0)
+            let deltaQ = Int32(q1) - Int32(q0)
+            let absP = if deltaP < 0 { -deltaP } else { deltaP }
+            let absQ = if deltaQ < 0 { -deltaQ } else { deltaQ }
+            if absP < betah && absQ < betah {
+                var d = (9 * (Int32(q0) - Int32(p0)) - 3 * (Int32(q1) - Int32(p1)) + 8) >> 4
+                let t = Int32(tc)
+                if t < d { d = t }
+                if d < (-1 * t) { d = (-1 * t) }
+                
+                let dHalf = d / 2
+                let d16 = Int16(d)
+                let dh16 = Int16(dHalf)
+                
+                p0 = p0 &+ d16
+                q0 = q0 &- d16
+                p1 = p1 &+ dh16
+                q1 = q1 &- dh16
+                
+                base[offset - 2] = p1
+                base[offset - 1] = p0
+                base[offset + 0] = q0
+                base[offset + 1] = q1
+            }
         }
         offset += width
     }
@@ -268,45 +371,71 @@ private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, 
 
 @inline(__always)
 private func deblockFilterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
+    let offP1 = (y - 2) * width + x
     let offP0 = (y - 1) * width + x
     let offQ0 = (y + 0) * width + x
+    let offQ1 = (y + 1) * width + x
     
+    let p1Ptr = UnsafeRawPointer(base.advanced(by: offP1))
     let p0Ptr = UnsafeRawPointer(base.advanced(by: offP0))
     let q0Ptr = UnsafeRawPointer(base.advanced(by: offQ0))
+    let q1Ptr = UnsafeRawPointer(base.advanced(by: offQ1))
     
+    let p1 = p1Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
     let p0 = p0Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
     let q0 = q0Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
+    let q1 = q1Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
     
-    let (newP0, newQ0) = deblockComputeFilter(p0: p0, q0: q0, tc: tc, beta: beta)
+    let (newP1, newP0, newQ0, newQ1) = deblockComputeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
     
+    let p1MutPtr = UnsafeMutableRawPointer(base.advanced(by: offP1))
     let p0MutPtr = UnsafeMutableRawPointer(base.advanced(by: offP0))
     let q0MutPtr = UnsafeMutableRawPointer(base.advanced(by: offQ0))
+    let q1MutPtr = UnsafeMutableRawPointer(base.advanced(by: offQ1))
     
+    p1MutPtr.storeBytes(of: newP1, toByteOffset: 0, as: SIMD16<Int16>.self)
     p0MutPtr.storeBytes(of: newP0, toByteOffset: 0, as: SIMD16<Int16>.self)
     q0MutPtr.storeBytes(of: newQ0, toByteOffset: 0, as: SIMD16<Int16>.self)
+    q1MutPtr.storeBytes(of: newQ1, toByteOffset: 0, as: SIMD16<Int16>.self)
 }
 
 @inline(__always)
 private func deblockFilterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+    let betah = beta >> 1
     var offset = (y * width) + x
     for _ in 0..<count {
+        var p1 = base[offset - 2 * width]
         var p0 = base[offset - 1 * width]
         var q0 = base[offset + 0 * width]
+        var q1 = base[offset + 1 * width]
         
         let delta = Int32(q0) - Int32(p0)
         let absDelta = if delta < 0 { -1 * delta } else { delta }
         if absDelta < beta {
-            var d = (delta + 1) >> 1
-            let t = Int32(tc)
-            if t < d { d = t }
-            if d < (-1 * t) { d = (-1 * t) }
-            
-            let d16 = Int16(d)
-            p0 = p0 &+ d16
-            q0 = q0 &- d16
-            
-            base[offset - 1 * width] = p0
-            base[offset + 0 * width] = q0
+            let deltaP = Int32(p1) - Int32(p0)
+            let deltaQ = Int32(q1) - Int32(q0)
+            let absP = if deltaP < 0 { -1 * deltaP } else { deltaP }
+            let absQ = if deltaQ < 0 { -1 * deltaQ } else { deltaQ }
+            if absP < betah && absQ < betah {
+                var d = (((9 * (Int32(q0) - Int32(p0))) - (3 * (Int32(q1) - Int32(p1)))) + 8) >> 4
+                let t = Int32(tc)
+                if t < d { d = t }
+                if d < (-1 * t) { d = (-1 * t) }
+                
+                let dHalf = d / 2
+                let d16 = Int16(d)
+                let dh16 = Int16(dHalf)
+                
+                p0 = p0 &+ d16
+                q0 = q0 &- d16
+                p1 = p1 &+ dh16
+                q1 = q1 &- dh16
+                
+                base[offset - 2 * width] = p1
+                base[offset - 1 * width] = p0
+                base[offset + 0 * width] = q0
+                base[offset + 1 * width] = q1
+            }
         }
         offset += 1
     }
@@ -319,27 +448,51 @@ private func deblockFilterHorizontalEdge32SIMD(base: UnsafeMutablePointer<Int16>
 }
 
 @inline(__always)
-private func deblockComputeFilter(p0: SIMD16<Int16>, q0: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>) {
+private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>, SIMD16<Int16>) {
+    // Int16 domain eliminates 4 widen + 2 narrow operations vs Int32
+    // Safe because masked lanes satisfy |delta| < beta ≤ 45, so 9*delta ≤ 405 fits Int16
+    // Unmasked lanes may overflow but are masked away before store
+    let betah = Int16(beta >> 1)
     let beta16 = Int16(beta)
     
-    let diff = q0 &- p0
-    let absDiff = diff.replacing(with: p0 &- q0, where: q0 .< p0)
+    let betaV = SIMD16<Int16>(repeating: beta16)
+    let betahV = SIMD16<Int16>(repeating: betah)
+    let tcV = SIMD16<Int16>(repeating: tc)
+    let ntcV = .zero &- tcV
+    let v9 = SIMD16<Int16>(repeating: 9)
+    let v3 = SIMD16<Int16>(repeating: 3)
+    let v8 = SIMD16<Int16>(repeating: 8)
     
-    let mask = absDiff .< beta16
+    let delta = q0 &- p0
+    let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
     
-    var d = (diff &+ 1) &>> 1
+    let deltaP = p1 &- p0
+    let deltaQ = q1 &- q0
+    let absP = deltaP.replacing(with: .zero &- deltaP, where: deltaP .< 0)
+    let absQ = deltaQ.replacing(with: .zero &- deltaQ, where: deltaQ .< 0)
     
-    let tc16 = SIMD16<Int16>(repeating: tc)
-    let ntc16 = SIMD16<Int16>(repeating: -tc)
-    d.replace(with: tc16, where: d .> tc16)
-    d.replace(with: ntc16, where: d .< ntc16)
+    let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
+    
+    let t1 = q0 &- p0
+    let t2 = q1 &- p1
+    var d = (v9 &* t1 &- v3 &* t2 &+ v8) &>> 4
+    
+    d.replace(with: tcV, where: tcV .< d)
+    d.replace(with: ntcV, where: d .< ntcV)
+    
+    let dHalf = d / 2
     
     var newP0 = p0
     var newQ0 = q0
+    var newP1 = p1
+    var newQ1 = q1
+    
     newP0.replace(with: p0 &+ d, where: mask)
     newQ0.replace(with: q0 &- d, where: mask)
+    newP1.replace(with: p1 &+ dHalf, where: mask)
+    newQ1.replace(with: q1 &- dHalf, where: mask)
     
-    return (newP0, newQ0)
+    return (newP1, newP0, newQ0, newQ1)
 }
 
 // MARK: - Intra/Inter Boundary Blend
