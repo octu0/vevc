@@ -244,7 +244,8 @@ struct MotionEstimation {
             return (0, 0, zeroSAD)
         }
         
-        let zeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
+        let rawZeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: Int(pmv.dx) / 4, pmvDy: Int(pmv.dy) / 4, lambda: 8)
+        let zeroPenalty = min(32, rawZeroPenalty)
         var bestCoarseSAD = zeroSAD + zeroPenalty
         var bestCoarseDx = 0
         var bestCoarseDy = 0
@@ -457,6 +458,13 @@ struct MotionEstimation {
                     bestQpDx = qpDx
                     bestQpDy = qpDy
                 }
+            }
+        }
+        
+        let bestMVIsZero = (bestQpDx == 0 && bestQpDy == 0)
+        if bestMVIsZero != true {
+            if zeroSAD < 32 || zeroSAD < bestQpSAD + 4 {
+                return (0, 0, zeroSAD)
             }
         }
         
