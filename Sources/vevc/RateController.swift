@@ -87,7 +87,8 @@ struct RateController {
         
         // Clamp multiplier to [0.2, 5.0] in Q16: [13107, 327680]
         let clampedMul16 = max(13107, min(327680, multiplier16))
-        let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
+        let rawTargetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
+        let targetFrameBits = (rawTargetFrameBits * 98) / 100
         
         // SSIM Min 0.71, Max 0.99
         let maxStep = max(baseStep * 2, min(512, baseStep * 8))
