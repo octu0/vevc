@@ -87,13 +87,17 @@ struct RateController {
         
         // Clamp multiplier to [0.2, 5.0] in Q16: [13107, 327680]
         let clampedMul16 = max(13107, min(327680, multiplier16))
-        let rawTargetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
-        let targetFrameBits = (rawTargetFrameBits * 98) / 100
+        let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
         
         // SSIM Min 0.71, Max 0.99
         let maxStep = max(baseStep * 2, min(512, baseStep * 8))
         
         var newStepInt = (baseStep * 3) / 2
+        // P-Frame QP floor: baseStep ensures P-Frames never use finer
+        // quantization than the I-Frame. Investigation confirmed that the
+        // actual P-Frame QP (from prediction formula + EMA smoothing) always
+        // exceeds this floor — changing it to baseStep*3/4 or baseStep/2
+        // produced identical output across all bitrates (300-1500kbps).
         let minStep = max(2, baseStep)
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
