@@ -65,4 +65,6 @@ fastlane/test_output
 .vscode/settings.json
 .tmp/
 
+.antigravitycli/*
+
 Tests/vevcSpecV1/testdata/*.y4m
