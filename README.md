@@ -7,7 +7,7 @@
 
 **vevc** is a resolution-scalable, high-speed video codec designed to fundamentally solve the compute bottlenecks of modern adaptive bitrate (ABR) streaming.
 
-Inspired by the spatial scalability philosophy of **JPEG 2000**, `vevc` reimagines this concept for modern video. It extends the high-efficiency image format [veif](https://github.com/octu0/veif) with Temporal DWT, Spatial 2D-DWT, and massively parallel SIMD-optimized entropy coding to achieve hardware-like speeds purely in software.
+Inspired by the spatial scalability philosophy of **JPEG 2000**, `vevc` reimagines this concept for modern video. It extends the high-efficiency image format [veif](https://github.com/octu0/veif) with Motion-Compensated Temporal Prediction, Spatial 2D-DWT, and massively parallel SIMD-optimized entropy coding to achieve hardware-like speeds purely in software.
 
 ![figure0](docs/fig0.jpg)
 
@@ -131,8 +131,8 @@ DWT Coefficients
 <details>
 <summary><b>View VEVC Bitstream Data Layout</b> (Click to expand)</summary>
 
-`vevc` encodes video using Variable GOP (Group of Pictures) with configurable keyframe interval (`-keyint`), processed through a temporal-spatial wavelet pipeline.
-*Note: The encoder detects duplicate input frames (common in telecine content like 24fps in 60fps) and emits `FrameLen=0` instead of encoding redundant data, saving massive bitrate.*
+`vevc` encodes video using Variable GOP (Group of Pictures) with configurable keyframe interval (`-keyint`), processed through a hybrid temporal-prediction and spatial-wavelet pipeline.
+*Note: The encoder detects duplicate input frames (common in telecine content like 24fps in 60fps) and emits `CopyFrame` markers (1 byte) instead of encoding redundant data, saving massive bitrate.*
 
 **Bitstream Structure:**
 
@@ -152,6 +152,10 @@ DWT Coefficients
 +----------------------------+--------------------------------------------+
 | rANS Run 1 (256B)          | rANS Val 1 (256B)                          |
 +----------------------------+--------------------------------------------+
+| rANS Run 2 (256B)          | rANS Val 2 (256B)                          |
++----------------------------+--------------------------------------------+
+| rANS Run 3 (256B)          | rANS Val 3 (256B)                          |
++----------------------------+--------------------------------------------+
 | rANS DPCM Run (256B)       | rANS DPCM Val (256B)                       |
 +----------------------------+--------------------------------------------+
   Color Gamut: 0x01=BT.709, 0x02=BT.2020
@@ -168,7 +172,7 @@ DWT Coefficients
     A delivery server can perform O(1) resolution scaling by simply dropping
     the trailing layer payloads without recalculating sizes.
     +--------------------------------------------------------------------------------------------------+
-    | Status Flags (1B) (0x01: IsCopyFrame, 0x00: Normal)                                              |
+    | Frame Type (1B) (0x00: P-Frame, 0x01: CopyFrame, 0x02: I-Frame)                                  |
     +---- IF NOT CopyFrame ----------------------------------------------------------------------------+
     | MVs Count (4B) | MVs Size (4B)    | RefDir Size (4B)                                             |
     +----------------+------------------+--------------------------------------------------------------+
@@ -176,7 +180,7 @@ DWT Coefficients
     +----------------+------------------+--------------------------------------------------------------+
     | MVs Data Payload (MVs Size bytes)                                                                |
     +--------------------------------------------------------------------------------------------------+
-    | RefDir Data Payload (RefDir Size bytes)   (Only for Bidirectional Frames)                        |
+    | RefDir Data Payload (RefDir Size bytes)   (Only for P-Frames with Bidirectional Prediction)      |
     +--------------------------------------------------------------------------------------------------+
     | Layer 0 Payload (Layer0 Size bytes)       (Base8: Thumbnail)                                     |
     +--------------------------------------------------------------------------------------------------+
@@ -215,8 +219,8 @@ While `vevc` currently achieves extreme speeds in software via SIMD, its foundat
 
 | Condition | Mode | Rationale |
 |-----------|------|----------|
-| Pair count ≥ 500 | **Dynamic** | Data-specific frequency tables provide 15–47% better compression |
-| Pair count < 500 | **Static** | Pre-defined tables avoid ~400B header overhead that would exceed compression gains |
+| Pair count ≥ 100 | **Dynamic** | Data-specific frequency tables provide 15–47% better compression |
+| Pair count < 100 | **Static** | Pre-defined tables avoid ~400B header overhead that would exceed compression gains |
 
 The encoder writes a `staticBit` flag in the stream header so the decoder knows whether to read embedded frequency tables or use the built-in static tables.
 
@@ -227,7 +231,7 @@ The encoder writes a `staticBit` flag in the stream header so the decoder knows 
 - **Zero-Run RLE**: DWT zero coefficients compressed as run-length tokens
 - **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely
 - **Compressed Frequency Tables**: Bitmap-based encoding reduces table size from 32B to ~10B
-- **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 4-byte markers
+- **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 1-byte markers
 
 ---
 
@@ -266,6 +270,7 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
   - `0`: 1/4 size (for rough thumbnails)
   - `1`: 1/2 size (for previews)
   - `2`: Original size (default)
+- `-maxFrames <1|2|4>`: Specifies the maximum number of multi-threaded frames to decode concurrently (default: 4).
 
 ---
 

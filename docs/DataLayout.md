@@ -29,7 +29,7 @@ The metadata payload occupies exactly the number of bytes specified by `Metadata
 | Color Gamut | 1 Byte | Color gamut flag. Currently fixed to `0x01` (BT.709). |
 | Framerate | 2 Bytes (UInt16BE) | Video framerate (e.g., 30, 60). |
 | Timescale | 1 Byte | Currently always `0x00`. |
-| Static rANS Models | 1530 Bytes | 10 pre-trained static rANS models (Run/Val models for normal and DPCM contexts). These models are strictly required to be present in the metadata payload as a fallback baseline. |
+| Static rANS Models | 2560 Bytes | 10 pre-trained static rANS models (Run/Val models for normal and DPCM contexts). These models are strictly required to be present in the metadata payload as a fallback baseline. |
 
 ---
 
