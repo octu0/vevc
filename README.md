@@ -1,5 +1,8 @@
 # vevc
 
+<h1 align="center" style="border-bottom: none">
+    <img src="docs/fig0.jpg" width="300">
+</h1>
 
 > [!IMPORTANT]
 > Work In Progress
@@ -9,8 +12,6 @@
 
 Inspired by the spatial scalability philosophy of **JPEG 2000**, `vevc` reimagines this concept for modern video. It extends the high-efficiency image format [veif](https://github.com/octu0/veif) with Motion-Compensated Temporal Prediction, Spatial 2D-DWT, and massively parallel SIMD-optimized entropy coding to achieve hardware-like speeds purely in software.
 
-![figure0](docs/fig0.jpg)
-
 ## The Vision: Zero-Transcoding Delivery
 
 Modern video delivery platforms suffer from immense server-side CPU loads. To serve diverse clients seamlessly, servers must constantly decode and re-encode a single source stream into multiple resolutions (e.g., 1080p, 720p, 360p).
@@ -19,6 +20,8 @@ Modern video delivery platforms suffer from immense server-side CPU loads. To se
 Because the video is natively encoded into hierarchical spatial frequency layers (DWT subbands), the delivery server **does not need to re-encode anything**. To serve a lower-resolution client, the server simply demuxes and drops the higher-frequency layer packets on the fly. This transforms a CPU-heavy transcoding pipeline into a lightweight network routing task—drastically slashing infrastructure costs.
 
 ## Features
+
+![figure1](docs/fig1.jpg)
 
 ### 1. Extractable Multi-Resolution Design
 At decode or delivery time, specific spatial resolutions can be instantly extracted from a single `.vevc` file. This enables highly efficient video delivery suited to network bandwidth and device capabilities without storing multiple transcoded variants.
