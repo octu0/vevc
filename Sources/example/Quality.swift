@@ -25,7 +25,7 @@ public struct QualityStats: Sendable {
 }
 
 public func calculateQualityStats(metrics: [QualityMetrics]) -> QualityStats? {
-    guard !metrics.isEmpty else { return nil }
+    guard metrics.isEmpty != true else { return nil }
     
     let count = Double(metrics.count)
     var sumPsnr = 0.0
@@ -44,9 +44,9 @@ public func calculateQualityStats(metrics: [QualityMetrics]) -> QualityStats? {
         sumPsnr += m.psnr
         sumSsim += m.ssim
         if m.psnr < minPsnr { minPsnr = m.psnr }
-        if m.psnr > maxPsnr { maxPsnr = m.psnr }
+        if maxPsnr < m.psnr { maxPsnr = m.psnr }
         if m.ssim < minSsim { minSsim = m.ssim }
-        if m.ssim > maxSsim { maxSsim = m.ssim }
+        if maxSsim < m.ssim { maxSsim = m.ssim }
         psnrs.append(m.psnr)
         ssims.append(m.ssim)
     }
@@ -190,7 +190,10 @@ private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: In
             }
         }
     }
-    return blocks == 0 ? 1.0 : ssimSum / Double(blocks)
+    if blocks == 0 {
+        return 1.0
+    }
+    return ssimSum / Double(blocks)
 }
 
 @inline(__always)

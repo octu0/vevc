@@ -23,7 +23,7 @@ struct RateController {
     @inline(__always)
     var isDriftAccelerating: Bool {
         if avgDistortion == 0 { return false }
-        return lastDistortion > (avgDistortion * 2) && 32 < lastDistortion
+        return (avgDistortion * 2) < lastDistortion && 32 < lastDistortion
     }
     
     init(maxbitrate: Int, framerate: Int, keyint: Int) {
@@ -102,8 +102,8 @@ struct RateController {
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
             // The bits should scale with SAD relative to the last frame, NOT the average.
-            let sadRatio16 = (Int64(currentSAD) << 16) / Int64(lastPFrameSAD)
-            let clampedSadRatio16 = max(13107, min(327680, sadRatio16))
+            let SADRatio16 = (Int64(currentSAD) << 16) / Int64(lastPFrameSAD)
+            let clampedSadRatio16 = max(13107, min(327680, SADRatio16))
             let predictedBits64 = (Int64(lastPFrameBits) * clampedSadRatio16) >> 16
             
             // ratio = predictedCurrentBits / targetFrameBits
@@ -139,14 +139,14 @@ struct RateController {
         //
         // This has no fixed parameters — the smoothing strength adapts to content.
         if 0 < lastPFrameQStep && 0 < avgPFrameSAD {
-            let sceneSadRatio16 = (Int64(currentSAD) << 16) / Int64(max(1, avgPFrameSAD))
+            let sceneSADRatio16 = (Int64(currentSAD) << 16) / Int64(max(1, avgPFrameSAD))
             // When transitioning to static scene (sceneSadRatio16 < 32768), use higher alpha to drop QP faster.
-            let minAlpha16 = if sceneSadRatio16 < 32768 {
+            let minAlpha16 = if sceneSADRatio16 < 32768 {
                 Int64(29491) // 0.45
             } else {
                 Int64(19661) // 0.3
             }
-            let alpha16 = max(minAlpha16, min(65536, sceneSadRatio16))
+            let alpha16 = max(minAlpha16, min(65536, sceneSADRatio16))
             let smoothed = (Int64(newStepInt) * alpha16 + Int64(lastPFrameQStep) * (65536 - alpha16)) >> 16
             newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), smoothed)))
         }

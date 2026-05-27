@@ -269,12 +269,12 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         // Flags byte: bit6=isStatic, bit5=isDPCM, bit0=hasTrailingZeros
         // Determine isStatic dynamically: if writeHeaders writes nothing,
         // the model fell back to static tables (hybrid mode).
-        let FLAG_TRAILING_ZEROS: UInt8 = 0x01
-        let FLAG_DPCM: UInt8           = 0x20
-        let FLAG_STATIC: UInt8         = 0x40
+        let flagTrailingZeros: UInt8 = 0x01
+        let flagDPCM: UInt8          = 0x20
+        let flagStatic: UInt8        = 0x40
         
-        let trailBit: UInt8  = if hasTrailingZeros { FLAG_TRAILING_ZEROS } else { 0 }
-        let dpcmBit: UInt8   = if Model.isDPCMMode { FLAG_DPCM } else { 0 }
+        let trailBit: UInt8  = if hasTrailingZeros { flagTrailingZeros } else { 0 }
+        let dpcmBit: UInt8   = if Model.isDPCMMode { flagDPCM } else { 0 }
         
         // Write a placeholder for flags byte, then headers, then fix the flag
         let flagsOffset = out.count
@@ -294,7 +294,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         
         // when pair count is small, static tables produce better compression
         // than writing per-stream frequency headers
-        let staticBit: UInt8 = if Model.isStaticMode || (headerWasWritten != true) { FLAG_STATIC } else { 0 }
+        let staticBit: UInt8 = if Model.isStaticMode || (headerWasWritten != true) { flagStatic } else { 0 }
         out[flagsOffset] = staticBit | dpcmBit | trailBit
         
         // 4-way bypass data
@@ -390,6 +390,7 @@ public final class ModelTrainer: @unchecked Sendable {
         self.valFreqs = Array(repeating: Array(repeating: 0, count: 64), count: 4)
     }
     
+    @inline(__always)
     public func reset() {
         self.runFreqs = Array(repeating: Array(repeating: 0, count: 64), count: 4)
         self.valFreqs = Array(repeating: Array(repeating: 0, count: 64), count: 4)

@@ -30,6 +30,10 @@ var packageTargets: [Target] = [
         dependencies: ["vevc"]
     ),
     .testTarget(
+        name: "vevcPerfTest",
+        dependencies: ["vevc"]
+    ),
+    .testTarget(
         name: "vevcSpecV1",
         dependencies: ["vevc"],
         exclude: ["testdata"]

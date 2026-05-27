@@ -93,17 +93,17 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         // This handles the case where the splitter stripped upper layers.
         if hasLayer1 {
             // Apply MC at layer1 resolution (16x16 blocks, mvShift=1)
-            if let tMvs = mvs, let tPrev = predictedPd {
+            if let tMVs = mvs, let tPrev = predictedPd {
                 let cbDx1 = (l1dx + 1) / 2
                 let cbDy1 = (l1dy + 1) / 2
                 if let tNext = nextPd, let dirs = refDirs {
-                    applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMvs, refDirs: dirs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMvs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMvs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 } else {
-                    applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMvs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMvs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMvs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+                    applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 }
                 applyDeblockingFilter16(plane: &current.y, width: l1dx, height: l1dy, qStep: 1)
                 applyDeblockingFilter16(plane: &current.cb, width: cbDx1, height: cbDy1, qStep: 1)
@@ -111,17 +111,17 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
             }
         } else {
             // Apply MC at layer0 resolution (8x8 blocks, mvShift=2)
-            if let tMvs = mvs, let tPrev = predictedPd {
+            if let tMVs = mvs, let tPrev = predictedPd {
                 let cbDx0 = (l0dx + 1) / 2
                 let cbDy0 = (l0dy + 1) / 2
                 if let tNext = nextPd, let dirs = refDirs {
-                    applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMvs, refDirs: dirs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMvs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMvs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                 } else {
-                    applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMvs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMvs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMvs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+                    applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                 }
                 applyDeblockingFilter32(plane: &current.y, width: l0dx, height: l0dy, qStep: 1)
                 applyDeblockingFilter32(plane: &current.cb, width: cbDx0, height: cbDy0, qStep: 1)

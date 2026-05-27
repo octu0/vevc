@@ -191,10 +191,13 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     let frameBox = FrameBox()
     
     // Encoder/decoder spec to disable HWA
-    let encoderSpec: CFDictionary? = disableHWA ? ([
-        kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
-        kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
-    ] as CFDictionary) : nil
+    var encoderSpec: CFDictionary? = nil
+    if disableHWA {
+        encoderSpec = [
+            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
+            kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
+        ] as CFDictionary
+    }
     
     // 1. Setup Compression Session
     var compressionSessionOut: VTCompressionSession?
@@ -268,7 +271,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     
     // 2. Setup Decompression Session
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil, frameBox.frames) }
+    guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil, frameBox.frames) }
     
     // Need format desc for decompression
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
@@ -281,10 +284,13 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     ]
     
     // Decoder spec to disable HWA
-    let decoderSpec: CFDictionary? = disableHWA ? ([
-        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
-        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
-    ] as CFDictionary) : nil
+    var decoderSpec: CFDictionary? = nil
+    if disableHWA {
+        decoderSpec = [
+            kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
+            kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
+        ] as CFDictionary
+    }
     
     var decompressionSessionOut: VTDecompressionSession?
     let decStatus = VTDecompressionSessionCreate(
@@ -377,10 +383,13 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     let frameBox = FrameBox()
     
     // Encoder/decoder spec to disable HWA
-    let encoderSpec: CFDictionary? = disableHWA ? ([
-        kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
-        kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
-    ] as CFDictionary) : nil
+    var encoderSpec: CFDictionary? = nil
+    if disableHWA {
+        encoderSpec = [
+            kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder: false,
+            kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
+        ] as CFDictionary
+    }
     
     // 1. Setup Compression Session
     var compressionSessionOut: VTCompressionSession?
@@ -465,10 +474,13 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     ]
     
     // Decoder spec to disable HWA
-    let decoderSpec: CFDictionary? = disableHWA ? ([
-        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
-        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
-    ] as CFDictionary) : nil
+    var decoderSpec: CFDictionary? = nil
+    if disableHWA {
+        decoderSpec = [
+            kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
+            kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
+        ] as CFDictionary
+    }
     
     var decompressionSessionOut: VTDecompressionSession?
     let decStatus = VTDecompressionSessionCreate(
@@ -840,7 +852,7 @@ struct CompareApp {
             let warmupImages = Array(localImages[0..<warmupCount])
             print("Warming up (\(warmupCount) frames)...")
             let _ = try await runVEVC(images: warmupImages, config: localConfig)
-            if !localConfig.vevcOnly {
+            if localConfig.vevcOnly != true {
                 let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
                 let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
                 let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
@@ -859,7 +871,7 @@ struct CompareApp {
             var hevcSwResult: CodecResult? = nil
             var mjpegResult: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?)? = nil
             
-            if !localConfig.vevcOnly {
+            if localConfig.vevcOnly != true {
                 print("Running H.264 (VideoToolbox HWA)...")
                 h264Result = try await runH264(images: localImages, config: localConfig, width: localWidth, height: localHeight)
                 
@@ -904,7 +916,7 @@ struct CompareApp {
             var chartResults: [CodecBenchmarkResult] = []
             chartResults.append(printStats(name: "VEVC (Layers)", encTime: vevcResult.encTime, decTime: vevcResult.decTime, compSize: vevcResult.compSize, metrics: vevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
-            if !localConfig.vevcOnly {
+            if localConfig.vevcOnly != true {
                 if let h264Sw = h264SwResult {
                     chartResults.append(printStats(name: "H.264 (SW)", encTime: h264Sw.encTime, decTime: h264Sw.decTime, compSize: h264Sw.compSize, metrics: h264Sw.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
                 }
@@ -944,7 +956,7 @@ struct CompareApp {
                         chartPoints.append(.init(codec: "VEVC (Layers)", bitrate: br, ssim: stats.avgSSIM))
                     }
                     
-                    if !localConfig.vevcOnly {
+                    if localConfig.vevcOnly != true {
                         let h264SwRes = try await runH264(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
                         if let stats = calculateQualityStats(metrics: h264SwRes.metrics ?? []) {
                             chartPoints.append(.init(codec: "H.264 (SW)", bitrate: br, ssim: stats.avgSSIM))
@@ -1013,7 +1025,7 @@ struct CompareApp {
 // MARK: - Frame Extraction Helpers
 
 func extractVTFrames(bitstream: [CMSampleBuffer], disableHWA: Bool, indices: Set<Int>) throws -> [Int: YCbCrImage] {
-    guard !bitstream.isEmpty else { return [:] }
+    guard bitstream.isEmpty != true else { return [:] }
     guard let formatDesc = CMSampleBufferGetFormatDescription(bitstream[0]) else {
         throw NSError(domain: "CMSampleBufferGetFormatDescription (Extract)", code: -1, userInfo: nil)
     }
@@ -1031,10 +1043,13 @@ func extractVTFrames(bitstream: [CMSampleBuffer], disableHWA: Bool, indices: Set
         kCVPixelBufferMetalCompatibilityKey as String: true
     ]
     
-    let decoderSpec: CFDictionary? = disableHWA ? ([
-        kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
-        kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
-    ] as CFDictionary) : nil
+    var decoderSpec: CFDictionary? = nil
+    if disableHWA {
+        decoderSpec = [
+            kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder: false,
+            kVTVideoDecoderSpecification_RequireHardwareAcceleratedVideoDecoder: false
+        ] as CFDictionary
+    }
     
     var decompressionSessionOut: VTDecompressionSession?
     let decStatus = VTDecompressionSessionCreate(
@@ -1102,10 +1117,10 @@ func saveVersusImage(idx: Int, orig: ImageInput, vevcF: YCbCrImage?, h264F: YCbC
         var out = [PNG.RGBA<UInt8>](repeating: .init(0,0,0,255), count: cropW * cropH)
         for y in 0..<cropH {
             let sy = cy + y
-            if sy < 0 || sy >= height { continue }
+            if sy < 0 || height <= sy { continue }
             for x in 0..<cropW {
                 let sx = cx + x
-                if sx < 0 || sx >= width { continue }
+                if sx < 0 || width <= sx { continue }
                 out[y * cropW + x] = rgba[sy * width + sx]
                 out[y * cropW + x].a = 255 // Force opaque
             }
@@ -1132,9 +1147,18 @@ func saveVersusImage(idx: Int, orig: ImageInput, vevcF: YCbCrImage?, h264F: YCbC
         return arr
     }
     
-    let vevcRGBA = vevcF != nil ? toPNGRGBA(vevc.ycbcrToRGBA(img: vevcF!)) : nil
-    let h264RGBA = h264F != nil ? toPNGRGBA(vevc.ycbcrToRGBA(img: h264F!)) : nil
-    let hevcRGBA = hevcF != nil ? toPNGRGBA(vevc.ycbcrToRGBA(img: hevcF!)) : nil
+    var vevcRGBA: [PNG.RGBA<UInt8>]? = nil
+    if let f = vevcF {
+        vevcRGBA = toPNGRGBA(vevc.ycbcrToRGBA(img: f))
+    }
+    var h264RGBA: [PNG.RGBA<UInt8>]? = nil
+    if let f = h264F {
+        h264RGBA = toPNGRGBA(vevc.ycbcrToRGBA(img: f))
+    }
+    var hevcRGBA: [PNG.RGBA<UInt8>]? = nil
+    if let f = hevcF {
+        hevcRGBA = toPNGRGBA(vevc.ycbcrToRGBA(img: f))
+    }
     
     let crops: [(name: String, data: [PNG.RGBA<UInt8>]?)] = [
         ("orig", doCrop(rgba: origRGBA, width: w, height: h)),

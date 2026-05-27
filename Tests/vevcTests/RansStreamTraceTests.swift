@@ -178,16 +178,48 @@ final class RansStreamTraceTests: XCTestCase {
                 switch lane {
                 case 0:
                     decStates.0 = rtInfo.freq * (decStates.0 >> UInt32(rANSScaleBits)) + (decStates.0 & mask) - rtInfo.cumFreq
-                    while decStates.0 < rANSL { decStates.0 = (decStates.0 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.0 < rANSL {
+                        let w = readWord()
+                        decStates.0 = (decStates.0 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 case 1:
                     decStates.1 = rtInfo.freq * (decStates.1 >> UInt32(rANSScaleBits)) + (decStates.1 & mask) - rtInfo.cumFreq
-                    while decStates.1 < rANSL { decStates.1 = (decStates.1 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.1 < rANSL {
+                        let w = readWord()
+                        decStates.1 = (decStates.1 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 case 2:
                     decStates.2 = rtInfo.freq * (decStates.2 >> UInt32(rANSScaleBits)) + (decStates.2 & mask) - rtInfo.cumFreq
-                    while decStates.2 < rANSL { decStates.2 = (decStates.2 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.2 < rANSL {
+                        let w = readWord()
+                        decStates.2 = (decStates.2 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 default:
                     decStates.3 = rtInfo.freq * (decStates.3 >> UInt32(rANSScaleBits)) + (decStates.3 & mask) - rtInfo.cumFreq
-                    while decStates.3 < rANSL { decStates.3 = (decStates.3 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.3 < rANSL {
+                        let w = readWord()
+                        decStates.3 = (decStates.3 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 }
                 
                 // decode val token
@@ -204,16 +236,48 @@ final class RansStreamTraceTests: XCTestCase {
                 switch lane {
                 case 0:
                     decStates.0 = vtInfo.freq * (decStates.0 >> UInt32(rANSScaleBits)) + (decStates.0 & mask) - vtInfo.cumFreq
-                    while decStates.0 < rANSL { decStates.0 = (decStates.0 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.0 < rANSL {
+                        let w = readWord()
+                        decStates.0 = (decStates.0 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 case 1:
                     decStates.1 = vtInfo.freq * (decStates.1 >> UInt32(rANSScaleBits)) + (decStates.1 & mask) - vtInfo.cumFreq
-                    while decStates.1 < rANSL { decStates.1 = (decStates.1 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.1 < rANSL {
+                        let w = readWord()
+                        decStates.1 = (decStates.1 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 case 2:
                     decStates.2 = vtInfo.freq * (decStates.2 >> UInt32(rANSScaleBits)) + (decStates.2 & mask) - vtInfo.cumFreq
-                    while decStates.2 < rANSL { decStates.2 = (decStates.2 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.2 < rANSL {
+                        let w = readWord()
+                        decStates.2 = (decStates.2 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 default:
                     decStates.3 = vtInfo.freq * (decStates.3 >> UInt32(rANSScaleBits)) + (decStates.3 & mask) - vtInfo.cumFreq
-                    while decStates.3 < rANSL { decStates.3 = (decStates.3 << 16) | readWord(); decReadWordsPerLane[lane] += 1 }
+                    while decStates.3 < rANSL {
+                        let w = readWord()
+                        decStates.3 = (decStates.3 << 16) | w
+                        decReadWordsPerLane[lane] += 1
+                        if w == 0 && padded.count <= offset {
+                            XCTFail("Stream exhausted during decode")
+                            break
+                        }
+                    }
                 }
             }
             

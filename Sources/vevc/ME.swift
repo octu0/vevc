@@ -789,8 +789,8 @@ struct MotionEstimation {
                     
                     let intDx = qx >> 2
                     let intDy = qy >> 2
-                    if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
-                    if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
+                    if bx + intDx < -32 || width + 32 < bx + intDx + 32 { continue }
+                    if by + intDy < -32 || height + 32 < by + intDy + 32 { continue }
                     
                     let penalty = (abs(ox) + abs(oy)) * 6
                     let maxSAD = bestSAD - penalty
@@ -816,8 +816,8 @@ struct MotionEstimation {
                     
                     let intDx = qx >> 2
                     let intDy = qy >> 2
-                    if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
-                    if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
+                    if bx + intDx < -32 || width + 32 < bx + intDx + 32 { continue }
+                    if by + intDy < -32 || height + 32 < by + intDy + 32 { continue }
                     
                     let penalty = (abs(ox) + abs(oy)) * 4
                     let maxSAD = bestSAD - penalty
@@ -899,15 +899,15 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: [Moti
             if 512 < sad, let prevMVs = prevMVs, idx < prevMVs.count {
                 let rawTmv = prevMVs[idx]
                 let tmv = MotionVector(dx: Int16(Int(rawTmv.dx) >> 2), dy: Int16(Int(rawTmv.dy) >> 2))
-                let (tmvMv, tmvSad) = MotionEstimation.searchPixels(
+                let (tmvMV, tmvSAD) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: prevSub1, 
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
                     width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: tmv,
                     roundOffset: roundOffset
                 )
-                if tmvSad < sad {
-                    mv = tmvMv
-                    sad = tmvSad
+                if tmvSAD < sad {
+                    mv = tmvMV
+                    sad = tmvSAD
                 }
             }
             
@@ -1037,14 +1037,14 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             if 512 < mutSADPrev, let prevMVs = prevMVs, idx < prevMVs.count {
                 let rawTmv = prevMVs[idx]
                 let tmv = MotionVector(dx: Int16(Int(rawTmv.dx) >> 2), dy: Int16(Int(rawTmv.dy) >> 2))
-                let (tmvMv, tmvSad) = MotionEstimation.searchPixels(
+                let (tmvMV, tmvSAD) = MotionEstimation.searchPixels(
                     currPlane: currSub1, prevPlane: prevSub1,
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
                     width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: tmv, roundOffset: roundOffset
                 )
-                if tmvSad < mutSADPrev {
-                    mvPrev = tmvMv
-                    mutSADPrev = tmvSad
+                if tmvSAD < mutSADPrev {
+                    mvPrev = tmvMV
+                    mutSADPrev = tmvSAD
                 }
             }
             

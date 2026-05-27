@@ -36,7 +36,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
 /// In-place applies deblocking filter to the reconstructed image (32x32 block resolution), with Intra/Inter boundary enhancement.
 @inline(__always)
 func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: [MotionVector]) {
-    guard !mvs.isEmpty else {
+    guard mvs.isEmpty != true else {
         applyDeblockingFilter32(plane: &plane, width: width, height: height, qStep: qStep)
         return
     }
@@ -91,8 +91,8 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     let hasMotionRight = rightIsIntra != true
                     let isIntraBoundary = leftIsIntra != rightIsIntra
                     let isMotionBoundary = hasMotionLeft || hasMotionRight
-                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    let tc = if isIntraBoundary { enhancedTc } else if isMotionBoundary { enhancedTc } else { defaultTc }
+                    let beta = if isIntraBoundary { enhancedBeta } else if isMotionBoundary { enhancedBeta } else { defaultBeta }
                     
                     if y < hFast {
                         deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
@@ -132,8 +132,8 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     let hasMotionBottom = bottomIsIntra != true
                     let isIntraBoundary = topIsIntra != bottomIsIntra
                     let isMotionBoundary = hasMotionTop || hasMotionBottom
-                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    let tc = if isIntraBoundary { enhancedTc } else if isMotionBoundary { enhancedTc } else { defaultTc }
+                    let beta = if isIntraBoundary { enhancedBeta } else if isMotionBoundary { enhancedBeta } else { defaultBeta }
                     
                     if x < wFast {
                         deblockFilterHorizontalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
@@ -150,7 +150,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
 /// In-place applies deblocking filter to the Chroma plane (16x16 blocks), with Intra/Inter boundary enhancement using Luma MVs.
 @inline(__always)
 func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: [MotionVector]) {
-    guard !mvs.isEmpty else {
+    guard mvs.isEmpty != true else {
         applyDeblockingFilter16(plane: &plane, width: width, height: height, qStep: qStep)
         return
     }
@@ -206,8 +206,8 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     let hasMotionRight = rightIsIntra != true
                     let isIntraBoundary = leftIsIntra != rightIsIntra
                     let isMotionBoundary = hasMotionLeft || hasMotionRight
-                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    let tc = if isIntraBoundary { enhancedTc } else if isMotionBoundary { enhancedTc } else { defaultTc }
+                    let beta = if isIntraBoundary { enhancedBeta } else if isMotionBoundary { enhancedBeta } else { defaultBeta }
                     
                     if y < hFast {
                         deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
@@ -247,8 +247,8 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     let hasMotionBottom = bottomIsIntra != true
                     let isIntraBoundary = topIsIntra != bottomIsIntra
                     let isMotionBoundary = hasMotionTop || hasMotionBottom
-                    let tc = isIntraBoundary ? enhancedTc : (isMotionBoundary ? enhancedTc : defaultTc)
-                    let beta = isIntraBoundary ? enhancedBeta : (isMotionBoundary ? enhancedBeta : defaultBeta)
+                    let tc = if isIntraBoundary { enhancedTc } else if isMotionBoundary { enhancedTc } else { defaultTc }
+                    let beta = if isIntraBoundary { enhancedBeta } else if isMotionBoundary { enhancedBeta } else { defaultBeta }
                     
                     if x < wFast {
                         deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
@@ -513,14 +513,14 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: [MotionVector], wi
                     let by = row * 32
                     
                     // Left neighbor
-                    if 0 < col && !mvs[idx - 1].isIntra {
+                    if 0 < col && mvs[idx - 1].isIntra != true {
                         let safeH = min(32, height - by)
                         if 4 <= bx && bx + 3 < width {
                             blendVerticalEdgeLuma32(base: base, width: width, x: bx, y: by, height: safeH)
                         }
                     }
                     // Right neighbor
-                    if col < colCount - 1 && !mvs[idx + 1].isIntra {
+                    if col < colCount - 1 && mvs[idx + 1].isIntra != true {
                         let bxRight = bx + 32
                         if 4 <= bxRight && bxRight + 3 < width {
                             let safeH = min(32, height - by)
@@ -528,14 +528,14 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: [MotionVector], wi
                         }
                     }
                     // Top neighbor
-                    if 0 < row && !mvs[idx - colCount].isIntra {
+                    if 0 < row && mvs[idx - colCount].isIntra != true {
                         let safeW = min(32, width - bx)
                         if 4 <= by && by + 3 < height {
                             blendHorizontalEdgeLuma32(base: base, width: width, x: bx, y: by, widthBlock: safeW)
                         }
                     }
                     // Bottom neighbor
-                    if row < rowCount - 1 && !mvs[idx + colCount].isIntra {
+                    if row < rowCount - 1 && mvs[idx + colCount].isIntra != true {
                         let byBottom = by + 32
                         let safeW = min(32, width - bx)
                         if 4 <= byBottom && byBottom + 3 < height {
@@ -565,14 +565,14 @@ func blendIntraInterBoundaryChroma16(plane: inout [Int16], mvs: [MotionVector], 
                     let by = row * 16
                     
                     // Left neighbor
-                    if 0 < col && !mvs[idx - 1].isIntra {
+                    if 0 < col && mvs[idx - 1].isIntra != true {
                         let safeH = min(16, height - by)
                         if 2 <= bx && bx + 1 < width {
                             blendVerticalEdgeChroma16(base: base, width: width, x: bx, y: by, height: safeH)
                         }
                     }
                     // Right neighbor
-                    if col < colCount - 1 && !mvs[idx + 1].isIntra {
+                    if col < colCount - 1 && mvs[idx + 1].isIntra != true {
                         let bxRight = bx + 16
                         if 2 <= bxRight && bxRight + 1 < width {
                             let safeH = min(16, height - by)
@@ -580,14 +580,14 @@ func blendIntraInterBoundaryChroma16(plane: inout [Int16], mvs: [MotionVector], 
                         }
                     }
                     // Top neighbor
-                    if 0 < row && !mvs[idx - colCount].isIntra {
+                    if 0 < row && mvs[idx - colCount].isIntra != true {
                         let safeW = min(16, width - bx)
                         if 2 <= by && by + 1 < height {
                             blendHorizontalEdgeChroma16(base: base, width: width, x: bx, y: by, widthBlock: safeW)
                         }
                     }
                     // Bottom neighbor
-                    if row < rowCount - 1 && !mvs[idx + colCount].isIntra {
+                    if row < rowCount - 1 && mvs[idx + colCount].isIntra != true {
                         let byBottom = by + 16
                         let safeW = min(16, width - bx)
                         if 2 <= byBottom && byBottom + 1 < height {

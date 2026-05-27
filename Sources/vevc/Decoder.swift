@@ -84,7 +84,7 @@ public actor StreamingDecoderActor {
     
     @inline(__always)
     public func decodeNextFrame(chunk: [UInt8]) async throws -> YCbCrImage? {
-        guard !chunk.isEmpty else { return nil }
+        guard chunk.isEmpty != true else { return nil }
         
         var offset = 0
         let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
@@ -124,7 +124,7 @@ public actor StreamingDecoderActor {
         
         let isPFrame = (previousReconstructed != nil)
         let useBidirectional = isPFrame && firstReconstructed != nil
-        let nextPd: PlaneData420? = useBidirectional ? firstReconstructed : nil
+        let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
         
         let img16 = try await decodeSpatialLayers(
             r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
@@ -200,6 +200,7 @@ public struct Decoder: Sendable {
         return chunkContinuation
     }
 
+    @inline(__always)
     public func decode<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<YCbCrImage, Error> where S.Element == [UInt8] {
         return AsyncThrowingStream { continuation in
             Task {
@@ -282,6 +283,7 @@ public struct Decoder: Sendable {
         }
     }
     
+    @inline(__always)
     public func decode(data: [UInt8]) async throws -> [YCbCrImage] {
         if data.isEmpty { return [] }
         
@@ -321,6 +323,7 @@ public struct Decoder: Sendable {
         return images
     }
 
+    @inline(__always)
     public func decode(chunks: [[UInt8]]) async throws -> [YCbCrImage] {
         let stream = AsyncStream<[UInt8]> { continuation in
             for chunk in chunks {
@@ -335,6 +338,7 @@ public struct Decoder: Sendable {
         return images
     }
     
+    @inline(__always)
     public func decode(fileHandle: FileHandle) -> AsyncThrowingStream<YCbCrImage, Error> {
         let stream = AsyncStream<[UInt8]> { continuation in
             Task {

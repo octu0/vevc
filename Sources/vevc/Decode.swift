@@ -673,7 +673,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         }
     }
 
-    if let mvs = mvs, !mvs.isEmpty {
+    if let mvs = mvs, mvs.isEmpty != true {
         applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step), mvs: mvs)
         applyDeblockingFilterChroma16(plane: &sub.cb, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: mvs)
         applyDeblockingFilterChroma16(plane: &sub.cr, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: mvs)

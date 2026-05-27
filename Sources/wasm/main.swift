@@ -57,7 +57,7 @@ actor FrameInbox<Element: Sendable>: Sendable {
     }
 
     func consume() async -> Element? {
-        if queue.isEmpty == false {
+        if queue.isEmpty != true {
             let f = queue.removeFirst()
             if let (next, cont) = waitingProducers.first {
                 waitingProducers.removeFirst()
@@ -180,15 +180,15 @@ class DecoderSession {
 }
 
 nonisolated(unsafe) var encoderSessions = [Int: EncoderSession]()
-nonisolated(unsafe) var nextEncoderId = 1
+nonisolated(unsafe) var nextEncoderID = 1
 
 nonisolated(unsafe) var decoderSessions = [Int: DecoderSession]()
-nonisolated(unsafe) var nextDecoderId = 1
+nonisolated(unsafe) var nextDecoderID = 1
 
 @JS
 func createEncoder(width: Int, height: Int, maxbitrate: Int, framerate: Int, onChunk: JSObject) -> JSValue {
-    let id = nextEncoderId
-    nextEncoderId += 1
+    let id = nextEncoderID
+    nextEncoderID += 1
     let session = EncoderSession(id: id, width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, onChunk: onChunk)
     encoderSessions[id] = session
     return .number(Double(id))
@@ -236,8 +236,8 @@ func closeEncoder(id: Int) {
 
 @JS
 func createDecoder(onFrame: JSObject) -> JSValue {
-    let id = nextDecoderId
-    nextDecoderId += 1
+    let id = nextDecoderID
+    nextDecoderID += 1
     let session = DecoderSession(id: id, onFrame: onFrame)
     decoderSessions[id] = session
     return .number(Double(id))

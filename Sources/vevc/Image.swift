@@ -66,6 +66,7 @@ extension PlaneData420 {
         self.cr = img16.cr
     }
     
+    @inline(__always)
     func toYCbCr() -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
         if width < 1 || height < 1 { return img }
@@ -76,22 +77,22 @@ extension PlaneData420 {
             let count = min(src.count, dst.count)
             withUnsafePointers(src, mut: &dst) { srcPtr, dstPtr in
                 var i = 0
-                let offset128_16 = SIMD16<Int16>(repeating: 128)
+                let offset128v16 = SIMD16<Int16>(repeating: 128)
                 let zero16 = SIMD16<Int16>.zero
-                let max255_16 = SIMD16<Int16>(repeating: 255)
+                let max255v16 = SIMD16<Int16>(repeating: 255)
                 while i + 16 <= count {
                     let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
-                    let clamped = (vals &+ offset128_16).clamped(lowerBound: zero16, upperBound: max255_16)
+                    let clamped = (vals &+ offset128v16).clamped(lowerBound: zero16, upperBound: max255v16)
                     let narrowed = SIMD16<UInt8>(truncatingIfNeeded: clamped)
                     UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD16<UInt8>.self)
                     i += 16
                 }
-                let offset128_8 = SIMD8<Int16>(repeating: 128)
+                let offset128v8 = SIMD8<Int16>(repeating: 128)
                 let zero8 = SIMD8<Int16>.zero
-                let max255_8 = SIMD8<Int16>(repeating: 255)
+                let max255v8 = SIMD8<Int16>(repeating: 255)
                 while i + 8 <= count {
                     let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<Int16>.self)
-                    let clamped = (vals &+ offset128_8).clamped(lowerBound: zero8, upperBound: max255_8)
+                    let clamped = (vals &+ offset128v8).clamped(lowerBound: zero8, upperBound: max255v8)
                     let narrowed = SIMD8<UInt8>(truncatingIfNeeded: clamped)
                     UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
                     i += 8
@@ -196,8 +197,7 @@ func toPlaneData420(image: YCbCrImage, pool: BlockViewPool) -> (PlaneData420, @S
     return (pd, { [y, cb, cr] in pool.putInt16(y); pool.putInt16(cb); pool.putInt16(cr) })
 }
 
-
-
+@inline(__always)
 func boundaryRepeat(_ width: Int, _ height: Int, _ px: Int, _ py: Int) -> (Int, Int) {
     var x = px
     var y = py
@@ -303,6 +303,7 @@ public struct YCbCrImage: Sendable {
         }
     }
 
+    @inline(__always)
     public func resize(factor: Double) -> YCbCrImage {
         let newWidth = Int(Double(width) * factor)
         let newHeight = Int(Double(height) * factor)
@@ -334,6 +335,7 @@ public struct YCbCrImage: Sendable {
         return dstImg
     }
 
+    @inline(__always)
     private func boxResizePlane(
         src: [UInt8], srcW: Int, srcH: Int, srcStride: Int,
         dst: inout [UInt8], dstW: Int, dstH: Int, dstStride: Int

@@ -37,6 +37,7 @@ public actor VEVCEncoder {
         )
     }
     
+    @inline(__always)
     public func encode(images: [YCbCrImage]) async throws -> [[UInt8]] {
         let stream = AsyncStream<YCbCrImage> { continuation in
             for img in images {
@@ -53,6 +54,7 @@ public actor VEVCEncoder {
     
     /// Encode images and return concatenated byte array.
     /// Convenience for roundtrip tests and simple usage.
+    @inline(__always)
     public func encodeToData(images: [YCbCrImage]) async throws -> [UInt8] {
         let chunks = try await encode(images: images)
         var result: [UInt8] = []
@@ -62,6 +64,7 @@ public actor VEVCEncoder {
         return result
     }
 
+    @inline(__always)
     public func encode(image: YCbCrImage, forceKeyFrame: Bool = false) async throws -> [UInt8] {
         let bytes = try await coreEncoder.encodeFrame(image: image, forceKeyFrame: forceKeyFrame)
         
@@ -77,6 +80,7 @@ public actor VEVCEncoder {
         return result
     }
 
+    @inline(__always)
     public func encode<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<[UInt8], Error> where S.Element == YCbCrImage {
         return AsyncThrowingStream { continuation in
             Task {
@@ -161,7 +165,7 @@ actor LayersEncodeActor {
         }
         
         var forceIFrame = forceKeyFrame
-        if !forceIFrame && rateController.isDriftAccelerating {
+        if forceIFrame != true && rateController.isDriftAccelerating {
             forceIFrame = true
         }
         

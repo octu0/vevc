@@ -28,7 +28,7 @@ class PlayerViewModel: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self = self else { return }
-                if self.isPlaying == false { return }
+                if self.isPlaying != true { return }
                 
                 let nextIndex = Int(self.currentFrameIndex) + 1
                 if nextIndex < Int(self.totalFrames) {

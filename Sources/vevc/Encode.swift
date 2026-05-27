@@ -24,8 +24,8 @@ func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout Entrop
 
 @inline(__always)
 func getContext(prevVal: Int16, isParentZero: Bool) -> UInt8 {
-    let base: UInt8 = isParentZero ? 2 : 0
-    let v: UInt8 = (prevVal == 0) ? 0 : 1
+    let base: UInt8 = if isParentZero { 2 } else { 0 }
+    let v: UInt8 = if prevVal == 0 { 0 } else { 1 }
     return base + v
 }
 

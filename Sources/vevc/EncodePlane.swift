@@ -695,13 +695,13 @@ func subtractCoeffs32(currBlocks: inout [BlockView], predBlocks: inout [BlockVie
             let res = vecC &- vecP
             UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD16<Int16>.self)
         }
-        let ptrC_bot = cBase.advanced(by: 512)
-        let ptrP_bot = pBase.advanced(by: 512)
+        let ptrCBot = cBase.advanced(by: 512)
+        let ptrPBot = pBase.advanced(by: 512)
         for offset in stride(from: 0, to: 512, by: 16) {
-            let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
-            let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+            let vecC = UnsafeRawPointer(ptrCBot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrPBot.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
             let res = vecC &- vecP
-            UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
+            UnsafeMutableRawPointer(ptrCBot.advanced(by: offset)).storeBytes(of: res, as: SIMD16<Int16>.self)
         }
     }
 }
@@ -721,13 +721,13 @@ func subtractCoeffs16(currBlocks: inout [BlockView], predBlocks: inout [BlockVie
             let res = vecC &- vecP
             UnsafeMutableRawPointer(ptrC).storeBytes(of: res, as: SIMD8<Int16>.self)
         }
-        let ptrC_bot = cBase.advanced(by: 128)
-        let ptrP_bot = pBase.advanced(by: 128)
+        let ptrCBot = cBase.advanced(by: 128)
+        let ptrPBot = pBase.advanced(by: 128)
         for offset in stride(from: 0, to: 128, by: 8) {
-            let vecC = UnsafeRawPointer(ptrC_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
-            let vecP = UnsafeRawPointer(ptrP_bot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+            let vecC = UnsafeRawPointer(ptrCBot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+            let vecP = UnsafeRawPointer(ptrPBot.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
             let res = vecC &- vecP
-            UnsafeMutableRawPointer(ptrC_bot.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
+            UnsafeMutableRawPointer(ptrCBot.advanced(by: offset)).storeBytes(of: res, as: SIMD8<Int16>.self)
         }
     }
 }
