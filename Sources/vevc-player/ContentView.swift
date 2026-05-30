@@ -13,13 +13,13 @@ struct ContentView: View {
                     .padding()
                 Spacer()
             } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Layer 0: 1x scale (quarter resolution)
-                    videoPane(title: "Layer 0", layerIndex: 0, scaleFactor: 1)
-                    // Layer 0+1: 2x scale (half resolution)
-                    videoPane(title: "Layer 0+1", layerIndex: 1, scaleFactor: 2)
-                    // Layer 0+1+2: 4x scale (full resolution)
-                    videoPane(title: "Layer 0+1+2", layerIndex: 2, scaleFactor: 4)
+                HStack(alignment: .bottom, spacing: 16) {
+                    // Layer 0: quarter resolution
+                    videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
+                    // Layer 0+1: half resolution
+                    videoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
+                    // Layer 0+1+2: full resolution
+                    videoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
                 }
                 .padding()
             }
@@ -28,13 +28,9 @@ struct ContentView: View {
             
             VStack {
                 if 0.0 < viewModel.totalFrames {
-                    Slider(value: $viewModel.currentFrameIndex, in: 0...max(0, viewModel.totalFrames - 1), step: 1.0) { editing in
-                        if editing {
-                            viewModel.pause()
-                        }
-                    }
-                    
-                    Text("Frame: \(Int(viewModel.currentFrameIndex)) / \(Int(viewModel.totalFrames - 1))")
+                    Text("Frame: \(Int(viewModel.currentFrameIndex))")
+                        .font(.headline)
+                        .padding(.bottom, 4)
                 }
                 
                 HStack {
@@ -80,32 +76,31 @@ struct ContentView: View {
                 .padding()
             }
         }
+        // 1.5x width to accommodate Layer 2 (1.0) + Layer 1 (0.5) + Layer 0 (0.25) horizontally.
+        // We set ideal size so the window can grow with the video content.
         .frame(minWidth: 800, minHeight: 400)
+        .frame(idealWidth: viewModel.videoWidth * 1.75, idealHeight: viewModel.videoHeight + 200)
     }
     
     @ViewBuilder
-    private func videoPane(title: String, layerIndex: Int, scaleFactor: Int) -> some View {
+    private func videoPane(title: String, layerIndex: Int, weight: CGFloat) -> some View {
         VStack {
             Text(title)
                 .font(.headline)
             
             if let cgImage = viewModel.currentCGImage(for: layerIndex) {
-                let baseWidth = CGFloat(cgImage.width)
-                let baseHeight = CGFloat(cgImage.height)
-                // Display at proportional size relative to layer0 (scaleFactor = 1)
-                // Use a fixed base unit derived from layer0 size to keep ratios consistent
                 Image(cgImage, scale: 1.0, label: Text(title))
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    .frame(
-                        width: baseWidth * CGFloat(scaleFactor) / 4.0,
-                        height: baseHeight * CGFloat(scaleFactor) / 4.0
-                    )
+                    // Assign relative layout width based on the layer's expected resolution proportion
+                    // Layer 2 gets weight 4.0, Layer 1 gets 2.0, Layer 0 gets 1.0
+                    .frame(width: viewModel.videoWidth * (weight / 4.0))
                     .background(Color.black)
             } else {
                 Rectangle()
                     .fill(Color.black)
-                    .frame(width: CGFloat(60 * scaleFactor), height: CGFloat(25 * scaleFactor))
+                    .frame(width: viewModel.videoWidth * (weight / 4.0), height: viewModel.videoHeight * (weight / 4.0))
+                    .aspectRatio(contentMode: .fit)
             }
         }
     }
