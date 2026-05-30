@@ -8,8 +8,10 @@ struct ContentView: View {
     var body: some View {
         VStack {
             if viewModel.isLoading {
+                Spacer()
                 ProgressView(viewModel.statusMessage)
                     .padding()
+                Spacer()
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     // Layer 0: 1x scale (quarter resolution)
@@ -20,49 +22,62 @@ struct ContentView: View {
                     videoPane(title: "Layer 0+1+2", layerIndex: 2, scaleFactor: 4)
                 }
                 .padding()
-                
-                VStack {
-                    if 0.0 < viewModel.totalFrames {
-                        Slider(value: $viewModel.currentFrameIndex, in: 0...max(0, viewModel.totalFrames - 1), step: 1.0) { editing in
-                            if editing {
-                                viewModel.pause()
-                            }
+            }
+            
+            Divider()
+            
+            VStack {
+                if 0.0 < viewModel.totalFrames {
+                    Slider(value: $viewModel.currentFrameIndex, in: 0...max(0, viewModel.totalFrames - 1), step: 1.0) { editing in
+                        if editing {
+                            viewModel.pause()
                         }
-                        
-                        Text("Frame: \(Int(viewModel.currentFrameIndex)) / \(Int(viewModel.totalFrames - 1))")
                     }
                     
-                    HStack {
-                        Button("Open File") {
-                            isFilePickerPresented = true
-                        }
-                        .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [UTType.data, UTType.movie, UTType(filenameExtension: "y4m")!, UTType(filenameExtension: "vevc")!]) { result in
-                            switch result {
-                            case .success(let url):
-                                viewModel.loadFile(url: url)
-                            case .failure(let error):
-                                print(error)
-                            }
-                        }
-                        
-                        Spacer()
-                        
-                        Button(action: {
-                            if viewModel.isPlaying {
-                                viewModel.pause()
-                            } else {
-                                viewModel.play()
-                            }
-                        }) {
-                            Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
-                                .font(.title)
-                        }
-                        .disabled(viewModel.totalFrames <= 0.0)
-                        
-                        Spacer()
-                    }
-                    .padding()
+                    Text("Frame: \(Int(viewModel.currentFrameIndex)) / \(Int(viewModel.totalFrames - 1))")
                 }
+                
+                HStack {
+                    HStack(spacing: 8) {
+                        Text("Bitrate: \(viewModel.bitrate) kbps")
+                            .font(.callout)
+                        Slider(value: Binding(
+                            get: { Double(viewModel.bitrate) },
+                            set: { viewModel.bitrate = Int($0) }
+                        ), in: 100...8000)
+                        .frame(width: 150)
+                    }
+                    
+                    Button("Open File") {
+                        isFilePickerPresented = true
+                    }
+                    .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [UTType.data, UTType.movie, UTType(filenameExtension: "y4m")!, UTType(filenameExtension: "vevc")!]) { result in
+                        switch result {
+                        case .success(let url):
+                            viewModel.loadFile(url: url)
+                        case .failure(let error):
+                            print(error)
+                        }
+                    }
+                    .disabled(viewModel.isLoading)
+                    
+                    Spacer()
+                    
+                    Button(action: {
+                        if viewModel.isPlaying {
+                            viewModel.pause()
+                        } else {
+                            viewModel.play()
+                        }
+                    }) {
+                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.title)
+                    }
+                    .disabled(viewModel.totalFrames <= 0.0 || viewModel.isLoading)
+                    
+                    Spacer()
+                }
+                .padding()
             }
         }
         .frame(minWidth: 800, minHeight: 400)

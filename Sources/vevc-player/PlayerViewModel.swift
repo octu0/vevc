@@ -11,6 +11,17 @@ class PlayerViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var statusMessage: String = ""
     
+    @Published var bitrate: Int = 500 {
+        didSet {
+            if bitrate < 100 {
+                bitrate = 100
+            }
+            if 8000 < bitrate {
+                bitrate = 8000
+            }
+        }
+    }
+    
     var layer0Frames: [CGImage] = []
     var layer1Frames: [CGImage] = []
     var layer2Frames: [CGImage] = []
@@ -50,6 +61,7 @@ class PlayerViewModel: ObservableObject {
     func loadFile(url: URL) {
         isLoading = true
         statusMessage = "Loading..."
+        let currentBitrate = bitrate
         
         Task.detached(priority: .userInitiated) { [weak self] in
             guard let self = self else { return }
@@ -58,7 +70,7 @@ class PlayerViewModel: ObservableObject {
                 let vevcData: [UInt8]
                 if url.pathExtension.lowercased() == "y4m" {
                     await MainActor.run { self.statusMessage = "Encoding Y4M to VEVC..." }
-                    vevcData = try await Self.encodeY4M(url: url)
+                    vevcData = try await Self.encodeY4M(url: url, bitrate: currentBitrate)
                 } else {
                     await MainActor.run { self.statusMessage = "Reading VEVC file..." }
                     let data = try Data(contentsOf: url)
@@ -108,7 +120,7 @@ class PlayerViewModel: ObservableObject {
     }
     
     // Static method to avoid MainActor isolation issues in Task.detached
-    private static func encodeY4M(url: URL) async throws -> [UInt8] {
+    private static func encodeY4M(url: URL, bitrate: Int) async throws -> [UInt8] {
         guard let fileHandle = try? FileHandle(forReadingFrom: url) else {
             throw NSError(domain: "Player", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot open file"])
         }
@@ -127,7 +139,7 @@ class PlayerViewModel: ObservableObject {
         let encoder = VEVCEncoder(
             width: y4mReader.width,
             height: y4mReader.height,
-            maxbitrate: 500 * 1000,
+            maxbitrate: bitrate * 1000,
             framerate: fps,
             zeroThreshold: 3,
             keyint: 30,
