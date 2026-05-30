@@ -20,7 +20,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         throw DecodeError.insufficientDataContext("decodeSpatialLayers passed copy frame")
     }
     
-    var mvs: [MotionVector]? = nil
+    var mvs: MotionVectors? = nil
     var refDirs: [Bool]? = nil
     
     if 0 < frameHeader.mvsCount && 0 < frameHeader.mvsSize {

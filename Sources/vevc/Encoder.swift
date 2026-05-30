@@ -116,7 +116,7 @@ actor LayersEncodeActor {
     
     private var previousInputPlane: PlaneData420?
     private var releasePreviousInput: (@Sendable () -> Void)?
-    private var previousMVs: [MotionVector]?
+    private var previousMVs: MotionVectors?
     
     private var firstReconstructed: PlaneData420?
     private var releaseFirstRecon: (@Sendable () -> Void)?

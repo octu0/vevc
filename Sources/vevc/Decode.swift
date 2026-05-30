@@ -585,7 +585,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: [MotionVector]? = nil, refDirs: [Bool]? = nil, roundOffset: Int) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: MotionVectors? = nil, refDirs: [Bool]? = nil, roundOffset: Int) async throws -> Image16 {
     var offset = 0
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))

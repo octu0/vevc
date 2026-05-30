@@ -618,7 +618,7 @@ struct EntropyDecoder {
 // MARK: - Motion Vector rANS Codec
 
 @inline(__always)
-func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
+func encodeMVs(mvs: MotionVectors) -> [UInt8] {
     var tokensDx = [UInt8]()
     var tokensDy = [UInt8]()
     tokensDx.reserveCapacity(mvs.count)
@@ -628,13 +628,13 @@ func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
     var freqsDx = [UInt32](repeating: 0, count: 64)
     var freqsDy = [UInt32](repeating: 0, count: 64)
     
-    for mv in mvs {
-        let tx = valueTokenize(mv.dx)
+    for i in 0..<mvs.count {
+        let tx = valueTokenize(mvs.dx[i])
         tokensDx.append(tx.token)
         freqsDx[Int(tx.token)] += 1
         bypass.writeBits(tx.bypassBits, count: tx.bypassLen)
 
-        let ty = valueTokenize(mv.dy)
+        let ty = valueTokenize(mvs.dy[i])
         tokensDy.append(ty.token)
         freqsDy[Int(ty.token)] += 1
         bypass.writeBits(ty.bypassBits, count: ty.bypassLen)
@@ -672,9 +672,9 @@ func encodeMVs(mvs: [MotionVector]) -> [UInt8] {
 }
 
 @inline(__always)
-func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
-    return try data.withUnsafeBufferPointer { buf -> [MotionVector] in
-        guard let base = buf.baseAddress else { return [] }
+func decodeMVs(data: [UInt8], count: Int) throws -> MotionVectors {
+    return try data.withUnsafeBufferPointer { buf -> MotionVectors in
+        guard let base = buf.baseAddress else { return MotionVectors.empty }
         var offset = 0
         let bufCount = buf.count
         
@@ -692,8 +692,10 @@ func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
         guard offset < bufCount else { throw DecodeError.insufficientData }
         var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
         
-        var mvs = [MotionVector]()
-        mvs.reserveCapacity(count)
+        var mvsDx = [Int16]()
+        var mvsDy = [Int16]()
+        mvsDx.reserveCapacity(count)
+        mvsDy.reserveCapacity(count)
         
         for _ in 0..<count {
             let txCf = dec.getCumulativeFreq()
@@ -712,10 +714,11 @@ func decodeMVs(data: [UInt8], count: Int) throws -> [MotionVector] {
             let dyBv = bypassReader.readBits(count: dyBp)
             let dy = valueDetokenize(token: ty.token, bypassBits: dyBv)
             
-            mvs.append(MotionVector(dx: dx, dy: dy))
+            mvsDx.append(dx)
+            mvsDy.append(dy)
         }
         
-        return mvs
+        return MotionVectors(dx: mvsDx, dy: mvsDy)
     }
 }
 

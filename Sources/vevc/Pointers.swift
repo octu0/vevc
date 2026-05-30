@@ -268,3 +268,19 @@ internal func withUnsafePointers<T1, T2, T3, T4, R>(
         }
     }
 }
+
+@inline(__always)
+internal func withUnsafePointers<T1, T2, T3, T4, R>(
+    mut a: inout [T1], mut b: inout [T2], mut c: inout [T3], mut d: inout [T4],
+    _ body: (UnsafeMutablePointer<T1>, UnsafeMutablePointer<T2>, UnsafeMutablePointer<T3>, UnsafeMutablePointer<T4>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeMutableBufferPointer { pA in
+        try b.withUnsafeMutableBufferPointer { pB in
+            try c.withUnsafeMutableBufferPointer { pC in
+                try d.withUnsafeMutableBufferPointer { pD in
+                    try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!)
+                }
+            }
+        }
+    }
+}

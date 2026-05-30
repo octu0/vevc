@@ -14,9 +14,9 @@ final class IntraInterBlendTests: XCTestCase {
             }
         }
         
-        var mvs = [MotionVector](repeating: MotionVector(dx: 10, dy: 10), count: 2)
-        mvs[0] = MotionVector(dx: 1, dy: 1) // Inter
-        mvs[1] = MotionVector(dx: 32767, dy: 32767) // Intra
+        var mvsDx: [Int16] = [1, 32767]
+        var mvsDy: [Int16] = [1, 32767]
+        let mvs = MotionVectors(dx: mvsDx, dy: mvsDy)
         
         blendIntraInterBoundaryLuma32(plane: &plane, mvs: mvs, width: width, height: height)
         
@@ -49,9 +49,7 @@ final class IntraInterBlendTests: XCTestCase {
             }
         }
         
-        var mvs = [MotionVector](repeating: MotionVector(dx: 10, dy: 10), count: 2)
-        mvs[0] = MotionVector(dx: 1, dy: 1) // Inter
-        mvs[1] = MotionVector(dx: 2, dy: 2) // Inter
+        let mvs = MotionVectors(dx: [1, 2], dy: [1, 2])
         
         blendIntraInterBoundaryLuma32(plane: &plane, mvs: mvs, width: width, height: height)
         
@@ -71,7 +69,7 @@ final class IntraInterBlendTests: XCTestCase {
             }
         }
         
-        let mvs = [MotionVector](repeating: MotionVector(dx: 32767, dy: 32767), count: 2)
+        let mvs = MotionVectors(dx: [32767, 32767], dy: [32767, 32767])
         
         blendIntraInterBoundaryLuma32(plane: &plane, mvs: mvs, width: width, height: height)
         
