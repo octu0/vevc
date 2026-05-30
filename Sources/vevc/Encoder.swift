@@ -414,16 +414,11 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // a stronger structural base for subsequent P-frames to reference.
     let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 85) / (Int64(targetBits) * 100)
 
-    // I-Frame QP floor = 5: ensures P-Frame rate controller stability.
-    // At baseStep=4, maxStep becomes max(8, min(512, 32))=32, narrowing the
-    // P-Frame QP range to [3, 32]. This prevents the rate controller from
-    // raising QP enough to conserve budget during complex scenes.
-    // At 1480→1500kbps, the integer-truncation threshold in predictedStep
-    // shifts from 13603→13787, causing 3→22 GOPs to drop from baseStep=5
-    // to baseStep=4 (cliff-edge discontinuity). This inconsistency causes
-    // 1MB file size jumps and -0.0025 SSIM regression.
-    // Floor of 5 guarantees maxStep>=40 and eliminates the discontinuity.
-    let q = min(256, Int(max(5, predictedStep64)))
+    // I-Frame QP floor = 1: allows near-lossless quality at high bitrates.
+    // The cliff-edge discontinuity at low baseStep (previously requiring
+    // floor=5) is now resolved by RateController.calculatePFrameQStep
+    // guaranteeing maxStep>=40 independently of baseStep.
+    let q = min(256, Int(max(1, predictedStep64)))
     
     return QuantizationTable(baseStep: q)
 }
