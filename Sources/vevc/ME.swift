@@ -805,66 +805,66 @@ struct MotionEstimation {
     ) -> (MotionVector, Int) {
         return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
             // pmv is in full units of Luma dx
-                // We convert it to 1/4 units of Luma dx by multiplying by 4
-                let baseQx = Int(pmv.dx) * 4
-                let baseQy = Int(pmv.dy) * 4
+            // We convert it to 1/4 units of Luma dx by multiplying by 4
+            let baseQx = Int(pmv.dx) * 4
+            let baseQy = Int(pmv.dy) * 4
+            
+            var bestSAD = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
+            if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
+            
+            // 1. Half-pixel search (step = 2 quarter pixels)
+            var hpBestQx = baseQx
+            var hpBestQy = baseQy
+            for (ox, oy) in searchOffsets {
+                let qx = baseQx + ox * 2
+                let qy = baseQy + oy * 2
                 
-                var bestSAD = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
-                if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
+                let intDx = qx >> 2
+                let intDy = qy >> 2
+                if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
+                if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
                 
-                // 1. Half-pixel search (step = 2 quarter pixels)
-                var hpBestQx = baseQx
-                var hpBestQy = baseQy
-                for (ox, oy) in searchOffsets {
-                    let qx = baseQx + ox * 2
-                    let qy = baseQy + oy * 2
-                    
-                    let intDx = qx >> 2
-                    let intDy = qy >> 2
-                    if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
-                    if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
-                    
-                    let penalty = (abs(ox) + abs(oy)) * 6
-                    let maxSAD = bestSAD - penalty
-                    if maxSAD <= 0 { continue }
-                    
-                    let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
-                    let totalSAD = sad + penalty
-                    if totalSAD < bestSAD {
-                        bestSAD = totalSAD
-                        hpBestQx = qx
-                        hpBestQy = qy
-                    }
+                let penalty = (abs(ox) + abs(oy)) * 6
+                let maxSAD = bestSAD - penalty
+                if maxSAD <= 0 { continue }
+                
+                let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+                let totalSAD = sad + penalty
+                if totalSAD < bestSAD {
+                    bestSAD = totalSAD
+                    hpBestQx = qx
+                    hpBestQy = qy
                 }
+            }
+            
+            if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
+            
+            // 2. Quarter-pixel search (step = 1 quarter pixel)
+            var qpBestQx = hpBestQx
+            var qpBestQy = hpBestQy
+            for (ox, oy) in searchOffsets {
+                let qx = hpBestQx + ox
+                let qy = hpBestQy + oy
                 
-                if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
+                let intDx = qx >> 2
+                let intDy = qy >> 2
+                if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
+                if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
                 
-                // 2. Quarter-pixel search (step = 1 quarter pixel)
-                var qpBestQx = hpBestQx
-                var qpBestQy = hpBestQy
-                for (ox, oy) in searchOffsets {
-                    let qx = hpBestQx + ox
-                    let qy = hpBestQy + oy
-                    
-                    let intDx = qx >> 2
-                    let intDy = qy >> 2
-                    if bx + intDx < -32 || bx + intDx + 32 > width + 32 { continue }
-                    if by + intDy < -32 || by + intDy + 32 > height + 32 { continue }
-                    
-                    let penalty = (abs(ox) + abs(oy)) * 4
-                    let maxSAD = bestSAD - penalty
-                    if maxSAD <= 0 { continue }
-                    
-                    let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
-                    let totalSAD = sad + penalty
-                    if totalSAD < bestSAD {
-                        bestSAD = totalSAD
-                        qpBestQx = qx
-                        qpBestQy = qy
-                    }
+                let penalty = (abs(ox) + abs(oy)) * 4
+                let maxSAD = bestSAD - penalty
+                if maxSAD <= 0 { continue }
+                
+                let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+                let totalSAD = sad + penalty
+                if totalSAD < bestSAD {
+                    bestSAD = totalSAD
+                    qpBestQx = qx
+                    qpBestQy = qy
                 }
-                
-                return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
+            }
+            
+            return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
         }
     }
 }
