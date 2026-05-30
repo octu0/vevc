@@ -229,7 +229,6 @@ class PlayerViewModel: ObservableObject {
         
         if chunk.count <= offset { return [] }
         
-        let chunkStart = offset
         let flagByte = chunk[offset]
         guard let fType = VEVCFrameHeader.FrameType(rawValue: flagByte) else {
             throw NSError(domain: "Player", code: 3, userInfo: [NSLocalizedDescriptionKey: "Invalid frame type"])
