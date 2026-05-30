@@ -68,7 +68,7 @@ final class ValueTokenizerTests: XCTestCase {
         
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         
-        var encoder = EntropyEncoder<DynamicEntropyModel>()
+        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)

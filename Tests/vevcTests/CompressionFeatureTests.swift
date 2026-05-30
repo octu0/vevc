@@ -35,7 +35,7 @@ final class CompressionFeatureTests: XCTestCase {
 
     func testLSCPRoundTrip() async throws {
         // We will encode and decode a block with many trailing zeros to test LSCP logic
-        var encoder = EntropyEncoder<DynamicEntropyModel>()
+        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
 
         let size = 8
         var blockData = [Int16](repeating: 0, count: size * size)

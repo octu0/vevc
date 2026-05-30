@@ -144,15 +144,27 @@ This is the standard mode used for the vast majority of blocks.
 - `Flags` (1 Byte):
   - Bit 6 (`0x40`): Indicates the use of Static Tables (decoder uses the models from the file header instead of reading dynamic tables).
   - Bit 5 (`0x20`): Indicates the use of DPCM Tables. When this flag is set, the block exclusively uses the DPCM-specific context models (`dpcmRunModel` and `dpcmValModel`).
+  - Bit 4 (`0x10`): Indicates Merged Context mode. When set, a single rANS model (1 Run + 1 Val table) is used for all contexts instead of 4 separate context-specific models. Only 2 frequency tables follow in the stream instead of 8.
   - Bit 0 (`0x01`): Indicates the presence of Trailing Zeros (zero-runs that extend to the end of the block).
 - `Total Pair Entries` (4 Bytes UInt32BE): Total number of Run/Value pairs.
 - `Chunk Sizes` (4 Bytes x 4 = 16 Bytes): Number of elements per chunk for 4-lane parallel decoding.
 - **Dynamic Frequency Tables (Conditional)**:
-  - Present **only if** Bit 6 of `Flags` is `0` (dynamic tables). Contains compressed frequency tables for Run and Value tokens for each context.
+  - Present **only if** Bit 6 of `Flags` is `0` (dynamic tables).
+  - If Bit 4 (`0x10`, Merged Context) is set: 2 compressed frequency tables (1 Run + 1 Val) follow.
+  - If Bit 4 is `0` (4-context mode): 8 compressed frequency tables (Run + Val for each of the 4 contexts) follow.
 - `Lane Bypass Data` (4 Chunks):
   - Repeated 4 times for each lane: `Bypass Size` (UInt32BE) followed by the `Bypass Data`.
 - `rANS Bitstream` (All remaining bytes):
   - An interleaved 4-way rANS bitstream. This bitstream must be decoded in reverse order from the end.
+
+> [!NOTE]
+> **Cost-Based Model Selection**
+> The encoder uses a cost-based model selection algorithm to choose the optimal model for each subband. For every subband, the encoder estimates the total bit cost (data bits + header overhead) for three options:
+> 1. **Static 4-context**: Uses the pre-trained models from the file header (no header overhead).
+> 2. **Dynamic 4-context**: Builds models from the actual data, writes 8 frequency tables to the stream.
+> 3. **Dynamic merged**: Merges all context statistics into a single model, writes only 2 frequency tables.
+>
+> The option with the lowest estimated total cost is selected. This ensures that dynamic tables are only used when the compression benefit outweighs the header overhead cost.
 
 > [!NOTE]
 > **Tokenization and Exponential-Golomb Encoding**
@@ -167,5 +179,6 @@ This is the standard mode used for the vast majority of blocks.
 > [!NOTE]
 > **DPCM and Context Modeling**
 > VEVC uses multiple probability models (Contexts) depending on the spatial characteristics of the block.
-> - **Normal Mode**: Uses 4 separate Contexts (Context 0-3) based on the surrounding block statistics.
+> - **Normal Mode**: Uses 4 separate Contexts (Context 0-3) based on the surrounding block statistics. The encoder may also select a merged single-context mode when the context-specific distributions are similar enough that the header savings outweigh the compression loss.
 > - **DPCM Mode**: For highly directional textures, a single specialized DPCM context is used to model the prediction residuals. When the DPCM flag (`0x20`) is set, the decoder routes all pairs to the DPCM Run/Val rANS models.
+

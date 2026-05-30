@@ -216,16 +216,17 @@ While `vevc` currently achieves extreme speeds in software via SIMD, its foundat
 - **Predictable Data Paths**: With a fixed block hierarchy (32x32 → 16x16 → Base8) and streamlined prediction modes, the datapath is highly deterministic. This allows RTL designers to build deep, efficient, feed-forward pipelines without unpredictable branching or overly complex state machines.
 - **Reduced Memory Bandwidth**: Multi-Resolution Motion Compensation performs motion searches and compensation on the base Layer 0 resolution, then scales MVs for higher layers. This inherently reduces the volume of reference pixel data that must be fetched from external DRAM, directly contributing to lower power consumption on mobile devices.
 
-### Hybrid Static/Dynamic Frequency Tables
+### Cost-Based Adaptive Frequency Tables
 
-`vevc` uses a hybrid approach for rANS frequency tables, selected per-stream based on data volume:
+`vevc` uses a cost-based adaptive approach for rANS frequency table selection, evaluated per-subband by estimating the total bit cost (data + header overhead) for each option:
 
-| Condition | Mode | Rationale |
-|-----------|------|----------|
-| Pair count ≥ 100 | **Dynamic** | Data-specific frequency tables provide 15–47% better compression |
-| Pair count < 100 | **Static** | Pre-defined tables avoid ~400B header overhead that would exceed compression gains |
+| Mode | Header Cost | When Selected |
+|------|-------------|---------------|
+| **Static 4-context** | 0 bytes | Pre-trained tables already fit the data well |
+| **Dynamic 4-context** | ~48B × 8 tables | Data-specific tables provide enough compression gain to offset header cost |
+| **Dynamic merged** | ~48B × 2 tables | All contexts share similar distributions; merged model reduces header by 75% |
 
-The encoder writes a `staticBit` flag in the stream header so the decoder knows whether to read embedded frequency tables or use the built-in static tables.
+The encoder automatically selects the mode that minimizes total encoded size for each subband block. This replaces the previous fixed-threshold approach with a Shannon entropy-based cost estimation.
 
 ### Optimizations
 

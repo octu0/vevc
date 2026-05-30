@@ -1,104 +1,205 @@
+// MARK: - EntropyModelSelection
+
+/// Result of model selection: contains the chosen models and flags for the encoder/decoder.
+struct EntropyModelSelection {
+    let runModels: [rANSModel]  // always 4 elements (may be identical for merged)
+    let valModels: [rANSModel]  // always 4 elements
+    let isStatic: Bool
+    let isMerged: Bool
+}
+
 // MARK: - EntropyModelProvider
 
 protocol EntropyModelProvider {
-    static var isStaticMode: Bool { get }
     static var isDPCMMode: Bool { get }
-    static func generateModels(
+    static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel])
-    
-    static func writeHeaders(
-        into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
-    )
+    ) -> EntropyModelSelection
 }
+
+// MARK: - Bit Cost Estimation
+
+/// Fast integer log2 approximation in Q8 fixed-point.
+/// Returns log2(x) * 256 for x >= 1, 0 for x <= 0.
+@inline(__always)
+func log2Q8(_ x: Int) -> Int {
+    guard 1 <= x else { return 0 }
+    let bits = Int.bitWidth - 1 - x.leadingZeroBitCount  // floor(log2(x))
+    let base = 1 << bits
+    // Linear interpolation for fractional part: frac = (x - 2^bits) / 2^bits
+    let fracQ8 = ((x - base) << 8) / base
+    return (bits << 8) + fracQ8
+}
+
+/// Estimate the rANS bit cost for encoding tokenCounts with the given model.
+/// Returns cost in Q8 fixed-point (bits * 256).
+/// cost = Σ count(token_i) * log2(rANSScale / freq(token_i))
+///      = Σ count(token_i) * (log2(rANSScale) - log2(freq(token_i)))
+@inline(__always)
+func estimateBitCostQ8(tokenCounts: [Int], model: rANSModel) -> Int {
+    let scaleLog2Q8 = log2Q8(Int(rANSScale))
+    var totalCostQ8: Int = 0
+    for i in 0..<64 {
+        let count = tokenCounts[i]
+        if count == 0 { continue }
+        let freq = Int(model.tokenFreqs[i])
+        let bitsPerSymbolQ8 = scaleLog2Q8 - log2Q8(freq)
+        totalCostQ8 += count * bitsPerSymbolQ8
+    }
+    return totalCostQ8
+}
+
+/// Estimate the byte cost of writing a compressed frequency table header.
+/// Format: bitmap(8B) + UInt16 per non-trivial frequency.
+@inline(__always)
+func headerCostBits(model: rANSModel) -> Int {
+    var nonTrivialCount = 0
+    for i in 0..<64 {
+        if 1 < model.tokenFreqs[i] {
+            nonTrivialCount += 1
+        }
+    }
+    // bitmap: 64 bits + each non-trivial freq: 16 bits
+    return 64 + nonTrivialCount * 16
+}
+
+// MARK: - Model Providers
 
 struct StaticEntropyModel: EntropyModelProvider {
-    static var isStaticMode: Bool { true }
     static var isDPCMMode: Bool { false }
     
     @inline(__always)
-    static func generateModels(
+    static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel]) {
-        return (
-            [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3],
-            [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3]
+    ) -> EntropyModelSelection {
+        return EntropyModelSelection(
+            runModels: [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3],
+            valModels: [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3],
+            isStatic: true,
+            isMerged: false
         )
     }
-    
-    @inline(__always)
-    static func writeHeaders(
-        into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
-    ) {}
 }
 
-struct DynamicEntropyModel: EntropyModelProvider {
-    static var isStaticMode: Bool { false }
+struct AdaptiveEntropyModel: EntropyModelProvider {
     static var isDPCMMode: Bool { false }
     
-    private static let dynamicThreshold: Int = 100
-    
     @inline(__always)
-    static func generateModels(
+    static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel]) {
+    ) -> EntropyModelSelection {
         let totalPairs = runTokenCounts.reduce(0) { $0 + $1.reduce(0, +) }
         
-        if totalPairs < dynamicThreshold {
-            return (
-                [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3],
-                [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3]
+        let staticRunModels = [
+            StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
+            StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
+        ]
+        let staticValModels = [
+            StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
+            StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
+        ]
+        
+        // Too few pairs: static tables are always the best choice (no header overhead)
+        if totalPairs == 0 {
+            return EntropyModelSelection(
+                runModels: staticRunModels, valModels: staticValModels,
+                isStatic: true, isMerged: false
             )
         }
         
-        var runModels = [rANSModel]()
-        var valModels = [rANSModel]()
-        for i in 0..<4 {
+        // --- Option 1: Static 4-context (no header cost) ---
+        var staticCostQ8: Int = 0
+        for c in 0..<4 {
+            staticCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: staticRunModels[c])
+            staticCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[c], model: staticValModels[c])
+        }
+        
+        // --- Option 2: Dynamic 4-context (8 tables header cost) ---
+        var dynRunModels = [rANSModel]()
+        var dynValModels = [rANSModel]()
+        var dynamic4CostQ8: Int = 0
+        var dynamic4HeaderBits: Int = 0
+        dynRunModels.reserveCapacity(4)
+        dynValModels.reserveCapacity(4)
+        for c in 0..<4 {
             var rm = rANSModel()
             var vm = rANSModel()
-            rm.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts[i])
-            vm.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts[i])
-            runModels.append(rm)
-            valModels.append(vm)
+            rm.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts[c])
+            vm.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts[c])
+            dynRunModels.append(rm)
+            dynValModels.append(vm)
+            dynamic4CostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: rm)
+            dynamic4CostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[c], model: vm)
+            dynamic4HeaderBits += headerCostBits(model: rm)
+            dynamic4HeaderBits += headerCostBits(model: vm)
         }
-        return (runModels, valModels)
-    }
-    
-    @inline(__always)
-    static func writeHeaders(
-        into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
-    ) {
-        if runModels[0].tokenFreqs == StaticRANSModels.shared.runModel0.tokenFreqs && valModels[0].tokenFreqs == StaticRANSModels.shared.valModel0.tokenFreqs {
-            return
+        // Add header overhead in Q8
+        dynamic4CostQ8 += dynamic4HeaderBits << 8
+        
+        // --- Option 3: Dynamic merged (2 tables header cost) ---
+        var mergedRunCounts = [Int](repeating: 0, count: 64)
+        var mergedValCounts = [Int](repeating: 0, count: 64)
+        for c in 0..<4 {
+            for t in 0..<64 {
+                mergedRunCounts[t] += runTokenCounts[c][t]
+                mergedValCounts[t] += valTokenCounts[c][t]
+            }
         }
-        for i in 0..<4 {
-            writeCompressedFreqTable(&out, freqs: runModels[i].tokenFreqs)
-            writeCompressedFreqTable(&out, freqs: valModels[i].tokenFreqs)
+        var mergedRunModel = rANSModel()
+        var mergedValModel = rANSModel()
+        mergedRunModel.normalize(sigCounts: [0, 1], tokenCounts: mergedRunCounts)
+        mergedValModel.normalize(sigCounts: [0, 1], tokenCounts: mergedValCounts)
+        
+        var mergedCostQ8: Int = 0
+        // Merged model: all contexts use the same model
+        for c in 0..<4 {
+            mergedCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: mergedRunModel)
+            mergedCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[c], model: mergedValModel)
         }
+        let mergedHeaderBits = headerCostBits(model: mergedRunModel) + headerCostBits(model: mergedValModel)
+        mergedCostQ8 += mergedHeaderBits << 8
+        
+        // --- Choose minimum cost ---
+        let minCost = min(staticCostQ8, min(dynamic4CostQ8, mergedCostQ8))
+        
+        if minCost == staticCostQ8 {
+            return EntropyModelSelection(
+                runModels: staticRunModels, valModels: staticValModels,
+                isStatic: true, isMerged: false
+            )
+        }
+        if minCost == mergedCostQ8 {
+            let mergedRun4 = [mergedRunModel, mergedRunModel, mergedRunModel, mergedRunModel]
+            let mergedVal4 = [mergedValModel, mergedValModel, mergedValModel, mergedValModel]
+            return EntropyModelSelection(
+                runModels: mergedRun4, valModels: mergedVal4,
+                isStatic: false, isMerged: true
+            )
+        }
+        // dynamic 4-context
+        return EntropyModelSelection(
+            runModels: dynRunModels, valModels: dynValModels,
+            isStatic: false, isMerged: false
+        )
     }
 }
 
 struct StaticDPCMEntropyModel: EntropyModelProvider {
-    static var isStaticMode: Bool { true }
     static var isDPCMMode: Bool { true }
     
     @inline(__always)
-    static func generateModels(
+    static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
-    ) -> (runModels: [rANSModel], valModels: [rANSModel]) {
+    ) -> EntropyModelSelection {
         let dpcmRun = StaticRANSModels.shared.dpcmRunModel
         let dpcmVal = StaticRANSModels.shared.dpcmValModel
-        return ([dpcmRun, dpcmRun, dpcmRun, dpcmRun], [dpcmVal, dpcmVal, dpcmVal, dpcmVal])
+        return EntropyModelSelection(
+            runModels: [dpcmRun, dpcmRun, dpcmRun, dpcmRun],
+            valModels: [dpcmVal, dpcmVal, dpcmVal, dpcmVal],
+            isStatic: true,
+            isMerged: false
+        )
     }
-    
-    @inline(__always)
-    static func writeHeaders(
-        into out: inout [UInt8],
-        runModels: [rANSModel], valModels: [rANSModel]
-    ) {}
 }
 
 // MARK: - EntropyEncoder
@@ -260,25 +361,24 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             }
         }
         
-        let models = Model.generateModels(
+        let selection = Model.selectModel(
             runTokenCounts: &runTokenCounts, valTokenCounts: &valTokenCounts
         )
-        let runModels = models.runModels
-        let valModels = models.valModels
+        let runModels = selection.runModels
+        let valModels = selection.valModels
         
-        // Flags byte: bit6=isStatic, bit5=isDPCM, bit0=hasTrailingZeros
-        // Determine isStatic dynamically: if writeHeaders writes nothing,
-        // the model fell back to static tables (hybrid mode).
+        // Flags byte: bit6=isStatic, bit5=isDPCM, bit4=isMerged, bit0=hasTrailingZeros
         let flagTrailingZeros: UInt8 = 0x01
+        let flagMerged: UInt8        = 0x10
         let flagDPCM: UInt8          = 0x20
         let flagStatic: UInt8        = 0x40
         
         let trailBit: UInt8  = if hasTrailingZeros { flagTrailingZeros } else { 0 }
         let dpcmBit: UInt8   = if Model.isDPCMMode { flagDPCM } else { 0 }
+        let staticBit: UInt8 = if selection.isStatic { flagStatic } else { 0 }
+        let mergedBit: UInt8 = if selection.isMerged { flagMerged } else { 0 }
         
-        // Write a placeholder for flags byte, then headers, then fix the flag
-        let flagsOffset = out.count
-        out.append(0) // placeholder
+        out.append(staticBit | dpcmBit | mergedBit | trailBit)
         appendUInt32BE(&out, UInt32(totalPairEntries))
         
         // chunk size (4B × 4)
@@ -288,14 +388,20 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
             appendUInt32BE(&out, UInt32(chunkPairCount + extraTrailing))
         }
         
-        let preHeaderSize = out.count
-        Model.writeHeaders(into: &out, runModels: runModels, valModels: valModels)
-        let headerWasWritten = preHeaderSize < out.count
-        
-        // when pair count is small, static tables produce better compression
-        // than writing per-stream frequency headers
-        let staticBit: UInt8 = if Model.isStaticMode || (headerWasWritten != true) { flagStatic } else { 0 }
-        out[flagsOffset] = staticBit | dpcmBit | trailBit
+        // Write dynamic frequency table headers when not static
+        if selection.isStatic != true {
+            if selection.isMerged {
+                // Merged: 2 tables (run + val for single context)
+                writeCompressedFreqTable(&out, freqs: runModels[0].tokenFreqs)
+                writeCompressedFreqTable(&out, freqs: valModels[0].tokenFreqs)
+            } else {
+                // 4-context: 8 tables (run + val for each context)
+                for i in 0..<4 {
+                    writeCompressedFreqTable(&out, freqs: runModels[i].tokenFreqs)
+                    writeCompressedFreqTable(&out, freqs: valModels[i].tokenFreqs)
+                }
+            }
+        }
         
         // 4-way bypass data
         for lane in 0..<4 {
@@ -502,17 +608,30 @@ struct EntropyDecoder {
         self.chunkStarts = starts
         
         let isDPCMTable = (flags & 0x20) != 0
+        let isMergedContext = (flags & 0x10) != 0
         
-        switch (isStaticTable, isDPCMTable) {
-        case (true, true):
-            let runM = StaticRANSModels.shared.dpcmRunModel
-            let valM = StaticRANSModels.shared.dpcmValModel
+        if isStaticTable {
+            if isDPCMTable {
+                // Static DPCM: single DPCM model for all contexts
+                let runM = StaticRANSModels.shared.dpcmRunModel
+                let valM = StaticRANSModels.shared.dpcmValModel
+                self.runModels = [runM, runM, runM, runM]
+                self.valModels = [valM, valM, valM, valM]
+            } else {
+                // Static 4-context
+                self.runModels = [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3]
+                self.valModels = [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3]
+            }
+        } else if isMergedContext {
+            // Dynamic merged: read 2 tables (run + val), replicate to all 4 contexts
+            let runFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
+            let runM = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runFreqs)
+            let valFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
+            let valM = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valFreqs)
             self.runModels = [runM, runM, runM, runM]
             self.valModels = [valM, valM, valM, valM]
-        case (true, false):
-            self.runModels = [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3]
-            self.valModels = [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3]
-        case (false, _):
+        } else {
+            // Dynamic 4-context: read 8 tables
             var rModels = [rANSModel]()
             var vModels = [rANSModel]()
             for _ in 0..<4 {

@@ -65,8 +65,8 @@ final class DPCMDistributionTests: XCTestCase {
                 evaluateQuantizeBase32(view: blocks[i], qt: qtY)
             }
             
-            // encode with DynamicEntropyModel to get actual pairs
-            var encoder = EntropyEncoder<DynamicEntropyModel>()
+            // encode with AdaptiveEntropyModel to get actual pairs
+            var encoder = EntropyEncoder<AdaptiveEntropyModel>()
             var lastVal: Int16 = 0
             
             for i in blocks.indices {

@@ -392,8 +392,8 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encodersDynamic = SubbandEncoders<DynamicEntropyModel, DynamicEntropyModel>()
-    var encodersStaticLL = SubbandEncoders<StaticDPCMEntropyModel, DynamicEntropyModel>()
+    var encodersDynamic = SubbandEncoders<AdaptiveEntropyModel, AdaptiveEntropyModel>()
+    var encodersStaticLL = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
     var lastVal: Int16 = 0
     
     if let pb = parentBlocks {
@@ -504,8 +504,8 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encodersDynamic = SubbandEncoders<DynamicEntropyModel, DynamicEntropyModel>()
-    var encodersStaticLL = SubbandEncoders<StaticDPCMEntropyModel, DynamicEntropyModel>()
+    var encodersDynamic = SubbandEncoders<AdaptiveEntropyModel, AdaptiveEntropyModel>()
+    var encodersStaticLL = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
     
     if let pb = parentBlocks {
         for (i, task) in tasks {
@@ -565,7 +565,7 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
         return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encoders = SubbandEncoders<StaticDPCMEntropyModel, DynamicEntropyModel>()
+    var encoders = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -617,7 +617,7 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
         return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encoders = SubbandEncoders<DynamicEntropyModel, DynamicEntropyModel>()
+    var encoders = SubbandEncoders<AdaptiveEntropyModel, AdaptiveEntropyModel>()
     
     var nzCur = 0
     let nzCount = nonZeroIndices.count
@@ -692,7 +692,7 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
         return "    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(zeroPermyriad32 / 100).\(zeroPermyriad32 / 10 % 10)%"
     }())
     
-    var encoders = SubbandEncoders<StaticDPCMEntropyModel, DynamicEntropyModel>()
+    var encoders = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {

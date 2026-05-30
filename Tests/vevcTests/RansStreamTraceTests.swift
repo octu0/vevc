@@ -31,7 +31,7 @@ final class RansStreamTraceTests: XCTestCase {
         defer { rel() }
         for i in blocks.indices { evaluateQuantizeLayer32(view: blocks[i], qt: qtY) }
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        var encoder = EntropyEncoder<DynamicEntropyModel>()
+        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }

@@ -6,7 +6,7 @@ final class EntropyCodecTests: XCTestCase {
     
     /// 50個以上のpairsでrANSモードのラウンドトリップ
     func testRansRoundtrip() throws {
-        var encoder = EntropyEncoder<DynamicEntropyModel>()
+        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         
         // 50個のpairを追加（nonZeroCount > 32でrANSモード）
         var expectedPairs: [(run: UInt32, val: Int16)] = []
@@ -47,7 +47,7 @@ final class EntropyCodecTests: XCTestCase {
         }
         
         // 全ブロックをエンコード
-        var encoder = EntropyEncoder<DynamicEntropyModel>()
+        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         for i in 0..<16 {
             blockEncode16V(encoder: &encoder, block: blocks[i])
         }

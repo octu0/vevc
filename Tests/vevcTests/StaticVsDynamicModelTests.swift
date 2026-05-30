@@ -87,7 +87,7 @@ struct StaticVsDynamicModelTests {
         for count in testCounts {
             let pairs = generateHLPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
-            let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
+            let dynamicSize = encodeWithModel(AdaptiveEntropyModel.self, pairs: pairs)
             let diff = staticSize - dynamicSize
             let pct = Double(diff) / Double(staticSize) * 100
             print("  pairs=\(count) static=\(staticSize)B dynamic=\(dynamicSize)B diff=\(diff)B (\(String(format: "%+.1f", pct))%)")
@@ -97,7 +97,7 @@ struct StaticVsDynamicModelTests {
         for count in testCounts {
             let pairs = generateHHPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
-            let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
+            let dynamicSize = encodeWithModel(AdaptiveEntropyModel.self, pairs: pairs)
             let diff = staticSize - dynamicSize
             let pct = Double(diff) / Double(staticSize) * 100
             print("  pairs=\(count) static=\(staticSize)B dynamic=\(dynamicSize)B diff=\(diff)B (\(String(format: "%+.1f", pct))%)")
@@ -107,7 +107,7 @@ struct StaticVsDynamicModelTests {
         for count in testCounts {
             let pairs = generateDPCMPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
-            let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
+            let dynamicSize = encodeWithModel(AdaptiveEntropyModel.self, pairs: pairs)
             let diff = staticSize - dynamicSize
             let pct = Double(diff) / Double(staticSize) * 100
             print("  pairs=\(count) static=\(staticSize)B dynamic=\(dynamicSize)B diff=\(diff)B (\(String(format: "%+.1f", pct))%)")
@@ -125,7 +125,7 @@ struct StaticVsDynamicModelTests {
         ]
 
         for (idx, pairs) in testData.enumerated() {
-            var encoder = EntropyEncoder<DynamicEntropyModel>()
+            var encoder = EntropyEncoder<AdaptiveEntropyModel>()
             encoder.encodeBypass(binVal: 1) // hasNonZero
             encoder.encodeBypass(binVal: 1) // lscpX
             encoder.encodeBypass(binVal: 1) // lscpY
@@ -163,7 +163,7 @@ struct StaticVsDynamicModelTests {
         for count in stride(from: 10, through: 500, by: 10) {
             let pairs = generateHLPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
-            let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
+            let dynamicSize = encodeWithModel(AdaptiveEntropyModel.self, pairs: pairs)
             if dynamicSize <= staticSize && found != true {
                 print("  ★ Breakeven at pairs=\(count): static=\(staticSize)B dynamic=\(dynamicSize)B")
                 found = true
@@ -178,7 +178,7 @@ struct StaticVsDynamicModelTests {
         for count in stride(from: 10, through: 500, by: 10) {
             let pairs = generateHHPairs(count: count)
             let staticSize = encodeWithModel(StaticEntropyModel.self, pairs: pairs)
-            let dynamicSize = encodeWithModel(DynamicEntropyModel.self, pairs: pairs)
+            let dynamicSize = encodeWithModel(AdaptiveEntropyModel.self, pairs: pairs)
             if dynamicSize <= staticSize && found != true {
                 print("  ★ Breakeven at pairs=\(count): static=\(staticSize)B dynamic=\(dynamicSize)B")
                 found = true
