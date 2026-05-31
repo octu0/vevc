@@ -409,10 +409,12 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // estimatedTotalBits = totalSampleBits * (totalPixels / samplePixels)
     // predictedStep = probeStep * estimatedTotalBits * 85 / (targetBits * 100)
     let estimatedTotalBits64 = (Int64(totalSampleBits) * Int64(totalPixels)) / Int64(samplePixels)
-    // I-frame quality bias: 0.85 = 85/100
+    // I-frame quality bias: 0.78 = 78/100
     // A lower factor produces larger (higher quality) I-frames, providing
     // a stronger structural base for subsequent P-frames to reference.
-    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 85) / (Int64(targetBits) * 100)
+    // Reduced from 0.85 to 0.78 to leverage improved entropy coding efficiency
+    // (cost-based adaptive model selection) for better SSIM quality.
+    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 78) / (Int64(targetBits) * 100)
 
     // I-Frame QP floor = 1: allows near-lossless quality at high bitrates.
     // The cliff-edge discontinuity at low baseStep (previously requiring
