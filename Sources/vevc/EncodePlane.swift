@@ -1518,7 +1518,7 @@ func reconstructPlaneBase32(blocks: [BlockView], width: Int, height: Int, qt: Qu
 }
 
 @inline(__always)
-func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, @Sendable () -> Void) {
+func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420?, mvs: MotionVectors? = nil, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1592,9 +1592,15 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     var mutReconCb = reconCb
     var mutReconCr = reconCr
     
-    applyDeblockingFilter32(plane: &mutReconY, width: dx, height: dy, qStep: Int(qtY.step))
-    applyDeblockingFilter32(plane: &mutReconCb, width: cbDx, height: cbDy, qStep: Int(qtC.step))
-    applyDeblockingFilter32(plane: &mutReconCr, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+    if let tMVs = mvs, tMVs.isEmpty != true {
+        applyDeblockingFilter32(plane: &mutReconY, width: dx, height: dy, qStep: Int(qtY.step), mvs: tMVs)
+        applyDeblockingFilterChroma16(plane: &mutReconCb, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: tMVs)
+        applyDeblockingFilterChroma16(plane: &mutReconCr, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: tMVs)
+    } else {
+        applyDeblockingFilter32(plane: &mutReconY, width: dx, height: dy, qStep: Int(qtY.step))
+        applyDeblockingFilter16(plane: &mutReconCb, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+        applyDeblockingFilter16(plane: &mutReconCr, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+    }
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconY, cb: mutReconCb, cr: mutReconCr)
     
