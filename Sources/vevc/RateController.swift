@@ -94,7 +94,7 @@ struct RateController {
         // prevents P-Frames from degrading to bitrate-500 quality (step=40) even
         // though budget is abundant. At baseStep>=5, baseStep*8>=40 so behavior
         // is identical to before.
-        let maxStep = max(2, min(512, baseStep * 4))
+        let maxStep = max(64, min(512, baseStep * 4))
         
         var newStepInt = (baseStep * 3) / 2
         // P-Frame QP floor: baseStep ensures P-Frames never use finer

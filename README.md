@@ -78,10 +78,10 @@ SW: Software, HWA: Hardware Acceleration
 
 *(Crop 400x400 from Tears of Steel 1080p width)*
 
-#### 1. Frame 1542 (VEVC Min SSIM)
+#### 1. Frame 1602 (VEVC Min SSIM)
 | Original | VEVC | H.264(SW) | H.265(SW) |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/versus_vevc_min_frame1542_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1542_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1542_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1542_hevc.png" width="200" /> |
+| <img src="docs/versus_vevc_min_frame1602_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1602_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1602_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1602_hevc.png" width="200" /> |
 
 (CC) Blender Foundation | [mango.blender.org](https://mango.blender.org)
 
@@ -231,6 +231,8 @@ The encoder automatically selects the mode that minimizes total encoded size for
 ### Optimizations
 
 - **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
+- **Headerless 4-way Parallel Boundaries**: Lane bounds (chunk starts) are dynamically reconstructed from the total pair entries, eliminating 16-byte fixed header overhead per subband.
+- **VLQ Bypass Sizes**: Bypass data sizes are stored using Variable Length Quantities (VLQ) instead of fixed 4-byte integers, saving several bytes per subband.
 - **O(1) Token Lookup**: 16384-entry LUT for instant cumulative-frequency → token resolution
 - **Zero-Run RLE**: DWT zero coefficients compressed as run-length tokens
 - **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely

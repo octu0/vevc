@@ -64,14 +64,18 @@ final class RansModelTests: XCTestCase {
         
         // freq table serialize→deserialize
         var runOut = [UInt8]()
-        writeCompressedFreqTableTest(&runOut, freqs: runModel.tokenFreqs)
+        writeCompressedFreqTable(&runOut, freqs: runModel.tokenFreqs)
         var runOffset = 0
-        let runFreqsRestored = try readCompressedFreqTableTest(runOut, at: &runOffset)
+        let runFreqsRestored = try runOut.withUnsafeBufferPointer { buf -> [UInt32] in
+            try EntropyDecoder.readCompressedFreqTable(buf.baseAddress!, at: &runOffset, count: runOut.count)
+        }
         
         var valOut = [UInt8]()
-        writeCompressedFreqTableTest(&valOut, freqs: valModel.tokenFreqs)
+        writeCompressedFreqTable(&valOut, freqs: valModel.tokenFreqs)
         var valOffset = 0
-        let valFreqsRestored = try readCompressedFreqTableTest(valOut, at: &valOffset)
+        let valFreqsRestored = try valOut.withUnsafeBufferPointer { buf -> [UInt32] in
+            try EntropyDecoder.readCompressedFreqTable(buf.baseAddress!, at: &valOffset, count: valOut.count)
+        }
         
         // 比較
         print("=== Run token counts: \(runTokenCounts) ===")
@@ -112,44 +116,5 @@ final class RansModelTests: XCTestCase {
         }
     }
     
-    private func writeCompressedFreqTableTest(_ out: inout [UInt8], freqs: [UInt32]) {
-        var bitmap: UInt64 = 0
-        for i in 0..<64 {
-            if 1 < freqs[i] { bitmap |= UInt64(1) << i }
-        }
-        appendBE64(&out, bitmap)
-        for i in 0..<64 {
-            if (bitmap & (UInt64(1) << i)) != 0 {
-                out.append(UInt8(truncatingIfNeeded: freqs[i] >> 8))
-                out.append(UInt8(truncatingIfNeeded: freqs[i] & 0xFF))
-            }
-        }
-    }
-    
-    private func readCompressedFreqTableTest(_ data: [UInt8], at offset: inout Int) throws -> [UInt32] {
-        guard offset + 8 <= data.count else { throw DecodeError.insufficientData }
-        let bitmap = (UInt64(data[offset]) << 56) | (UInt64(data[offset+1]) << 48) | (UInt64(data[offset+2]) << 40) | (UInt64(data[offset+3]) << 32) |
-                     (UInt64(data[offset+4]) << 24) | (UInt64(data[offset+5]) << 16) | (UInt64(data[offset+6]) << 8) | UInt64(data[offset+7])
-        offset += 8
-        var freqs = [UInt32](repeating: 1, count: 64)
-        for i in 0..<64 {
-            if (bitmap & (UInt64(1) << i)) != 0 {
-                guard offset + 2 <= data.count else { throw DecodeError.insufficientData }
-                freqs[i] = (UInt32(data[offset]) << 8) | UInt32(data[offset + 1])
-                offset += 2
-            }
-        }
-        return freqs
-    }
-    
-    private func appendBE64(_ out: inout [UInt8], _ val: UInt64) {
-        out.append(UInt8((val >> 56) & 0xFF))
-        out.append(UInt8((val >> 48) & 0xFF))
-        out.append(UInt8((val >> 40) & 0xFF))
-        out.append(UInt8((val >> 32) & 0xFF))
-        out.append(UInt8((val >> 24) & 0xFF))
-        out.append(UInt8((val >> 16) & 0xFF))
-        out.append(UInt8((val >> 8) & 0xFF))
-        out.append(UInt8(val & 0xFF))
-    }
+
 }

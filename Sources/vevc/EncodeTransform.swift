@@ -328,7 +328,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands32<MLL: EntropyModelProvider, M: EntropyModelProvider>(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0, mllType: MLL.Type, mType: M.Type) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -392,8 +392,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encodersDynamic = SubbandEncoders<AdaptiveEntropyModel, AdaptiveEntropyModel>()
-    var encodersStaticLL = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
+    var encoders = SubbandEncoders<MLL, M>()
     var lastVal: Int16 = 0
     
     if let pb = parentBlocks {
@@ -404,28 +403,33 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
                 let pSubs = getSubbands16(view: pView)
                 let view = blocks[i]
                 let subs = getSubbands32(view: view)
-                encodeSubbands32WithParent(task: task, encoders: &encodersDynamic, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
+                encodeSubbands32WithParent(task: task, encoders: &encoders, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
             } else {
                 let view = blocks[i]
                 let subs = getSubbands32(view: view)
-                encodeSubbands32WithoutParent(task: task, encoders: &encodersDynamic, subs: subs, lastVal: &lastVal)
+                encodeSubbands32WithoutParent(task: task, encoders: &encoders, subs: subs, lastVal: &lastVal)
             }
         }
-        encodersDynamic.flush()
+        encoders.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encodersDynamic.getData())
+        out.append(contentsOf: encoders.getData())
         return out
     } else {
         for (i, task) in tasks {
             let view = blocks[i]
             let subs = getSubbands32(view: view)
-            encodeSubbands32WithoutParent(task: task, encoders: &encodersStaticLL, subs: subs, lastVal: &lastVal)
+            encodeSubbands32WithoutParent(task: task, encoders: &encoders, subs: subs, lastVal: &lastVal)
         }
-        encodersStaticLL.flush()
+        encoders.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encodersStaticLL.getData())
+        out.append(contentsOf: encoders.getData())
         return out
     }
+}
+
+@inline(__always)
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+    return encodePlaneSubbands32(blocks: &blocks, zeroThreshold: zeroThreshold, parentBlocks: parentBlocks, sads: sads, colCount: colCount, rowCount: rowCount, mllType: AdaptiveDPCMEntropyModel.self, mType: AdaptiveEntropyModel.self)
 }
 
 enum EncodeTask16 {
@@ -434,7 +438,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands16<MLL: EntropyModelProvider, M: EntropyModelProvider>(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0, mllType: MLL.Type, mType: M.Type) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -504,8 +508,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encodersDynamic = SubbandEncoders<AdaptiveEntropyModel, AdaptiveEntropyModel>()
-    var encodersStaticLL = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
+    var encoders = SubbandEncoders<MLL, M>()
     
     if let pb = parentBlocks {
         for (i, task) in tasks {
@@ -515,32 +518,37 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
                 let pSubs = getSubbands8(view: pView)
                 let view = blocks[i]
                 let subs = getSubbands16(view: view)
-                encodeSubbands16WithParent(task: task, encoders: &encodersDynamic, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
+                encodeSubbands16WithParent(task: task, encoders: &encoders, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
             } else {
                 let view = blocks[i]
                 let subs = getSubbands16(view: view)
-                encodeSubbands16WithoutParent(task: task, encoders: &encodersDynamic, subs: subs)
+                encodeSubbands16WithoutParent(task: task, encoders: &encoders, subs: subs)
             }
         }
-        encodersDynamic.flush()
+        encoders.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encodersDynamic.getData())
+        out.append(contentsOf: encoders.getData())
         return out
     } else {
         for (i, task) in tasks {
             let view = blocks[i]
             let subs = getSubbands16(view: view)
-            encodeSubbands16WithoutParent(task: task, encoders: &encodersStaticLL, subs: subs)
+            encodeSubbands16WithoutParent(task: task, encoders: &encoders, subs: subs)
         }
-        encodersStaticLL.flush()
+        encoders.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encodersStaticLL.getData())
+        out.append(contentsOf: encoders.getData())
         return out
     }
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+    return encodePlaneSubbands16(blocks: &blocks, zeroThreshold: zeroThreshold, parentBlocks: parentBlocks, sads: sads, colCount: colCount, rowCount: rowCount, mllType: AdaptiveDPCMEntropyModel.self, mType: AdaptiveEntropyModel.self)
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8<MLL: EntropyModelProvider, M: EntropyModelProvider>(blocks: inout [BlockView], zeroThreshold: Int, mllType: MLL.Type, mType: M.Type) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -565,7 +573,7 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
         return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encoders = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
+    var encoders = SubbandEncoders<MLL, M>()
     var lastVal: Int16 = 0
     
     var nzCur = 0
@@ -592,7 +600,12 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
+    return encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: zeroThreshold, mllType: AdaptiveDPCMEntropyModel.self, mType: AdaptiveEntropyModel.self)
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8PFrame<MLL: EntropyModelProvider, M: EntropyModelProvider>(blocks: inout [BlockView], zeroThreshold: Int, mllType: MLL.Type, mType: M.Type) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -617,7 +630,7 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
         return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
     
-    var encoders = SubbandEncoders<AdaptiveEntropyModel, AdaptiveEntropyModel>()
+    var encoders = SubbandEncoders<MLL, M>()
     
     var nzCur = 0
     let nzCount = nonZeroIndices.count
@@ -638,6 +651,11 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
     var out = bwFlags.bytes
     out.append(contentsOf: encoders.getData())
     return out
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
+    return encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: zeroThreshold, mllType: AdaptiveEntropyModel.self, mType: AdaptiveEntropyModel.self)
 }
 
 enum EncodeTaskBase32 {
@@ -692,7 +710,7 @@ func encodePlaneBaseSubbands32(blocks: inout [BlockView], zeroThreshold: Int) ->
         return "    [BaseSubbands32] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(zeroPermyriad32 / 100).\(zeroPermyriad32 / 10 % 10)%"
     }())
     
-    var encoders = SubbandEncoders<StaticDPCMEntropyModel, AdaptiveEntropyModel>()
+    var encoders = SubbandEncoders<AdaptiveDPCMEntropyModel, AdaptiveEntropyModel>()
     var lastVal: Int16 = 0
     
     for (i, task) in tasks {

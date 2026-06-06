@@ -414,7 +414,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // a stronger structural base for subsequent P-frames to reference.
     // Reduced from 0.85 to 0.78 to leverage improved entropy coding efficiency
     // (cost-based adaptive model selection) for better SSIM quality.
-    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 78) / (Int64(targetBits) * 100)
+    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 120) / (Int64(targetBits) * 100)
 
     // I-Frame QP floor = 1: allows near-lossless quality at high bitrates.
     // The cliff-edge discontinuity at low baseStep (previously requiring

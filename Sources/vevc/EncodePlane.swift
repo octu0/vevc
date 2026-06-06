@@ -870,9 +870,9 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     let colCountC = (cbDx + 31) / 32
     let rowCountC = (cbDy + 31) / 32
     
-    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY)
-    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
-    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
     
     debugLog({
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
@@ -909,9 +909,9 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // Note: SADs are evaluated at 32x32 granularity, so map Layer16 to Layer32 granularity
     // In layered structure, we just pass sads arrays if aligned, or map if necessary.
     // For now, only 32x32 blocks use it cleanly, but if Layer16 needs it:
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY)
-    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
-    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
     
     debugLog({
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
@@ -1389,9 +1389,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, mllType: AdaptiveEntropyModel.self, mType: AdaptiveEntropyModel.self)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, mllType: AdaptiveDPCMEntropyModel.self, mType: AdaptiveEntropyModel.self)
         }
         
         let quantizedBlocks = blocks
@@ -1409,9 +1409,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 2)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticDPCMEntropyModel.self, mType: StaticEntropyModel.self)
         }
         
         let quantizedBlocks = blocks
@@ -1428,9 +1428,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticDPCMEntropyModel.self, mType: StaticEntropyModel.self)
         }
         
         let quantizedBlocks = blocks

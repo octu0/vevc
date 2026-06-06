@@ -50,17 +50,21 @@ func estimateBitCostQ8(tokenCounts: [Int], model: rANSModel) -> Int {
 }
 
 /// Estimate the byte cost of writing a compressed frequency table header.
-/// Format: bitmap(8B) + UInt16 per non-trivial frequency.
+/// Format: bitmap(8B) + VLQ (1B or 2B) per non-trivial frequency.
 @inline(__always)
 func headerCostBits(model: rANSModel) -> Int {
-    var nonTrivialCount = 0
+    var sizeBits = 64
     for i in 0..<64 {
-        if 1 < model.tokenFreqs[i] {
-            nonTrivialCount += 1
+        let freq = model.tokenFreqs[i]
+        if 1 < freq {
+            if freq < 128 {
+                sizeBits += 8
+            } else {
+                sizeBits += 16
+            }
         }
     }
-    // bitmap: 64 bits + each non-trivial freq: 16 bits
-    return 64 + nonTrivialCount * 16
+    return sizeBits
 }
 
 // MARK: - Model Providers
@@ -199,6 +203,60 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
             isStatic: true,
             isMerged: false
         )
+    }
+}
+
+struct AdaptiveDPCMEntropyModel: EntropyModelProvider {
+    static var isDPCMMode: Bool { true }
+    
+    @inline(__always)
+    static func selectModel(
+        runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
+    ) -> EntropyModelSelection {
+        let totalPairs = runTokenCounts.reduce(0) { $0 + $1.reduce(0, +) }
+        
+        let staticRun = StaticRANSModels.shared.dpcmRunModel
+        let staticVal = StaticRANSModels.shared.dpcmValModel
+        
+        let staticRun4 = [staticRun, staticRun, staticRun, staticRun]
+        let staticVal4 = [staticVal, staticVal, staticVal, staticVal]
+        
+        if totalPairs == 0 {
+            return EntropyModelSelection(
+                runModels: staticRun4, valModels: staticVal4,
+                isStatic: true, isMerged: false
+            )
+        }
+        
+        // --- Option 1: Static DPCM (no header) ---
+        let staticCostQ8 = estimateBitCostQ8(tokenCounts: runTokenCounts[0], model: staticRun) +
+                           estimateBitCostQ8(tokenCounts: valTokenCounts[0], model: staticVal)
+        
+        // --- Option 2: Dynamic DPCM (2 tables header cost) ---
+        var dynRun = rANSModel()
+        var dynVal = rANSModel()
+        dynRun.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts[0])
+        dynVal.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts[0])
+        
+        var dynamicCostQ8 = estimateBitCostQ8(tokenCounts: runTokenCounts[0], model: dynRun) +
+                            estimateBitCostQ8(tokenCounts: valTokenCounts[0], model: dynVal)
+        let headerBits = headerCostBits(model: dynRun) + headerCostBits(model: dynVal)
+        dynamicCostQ8 += headerBits << 8
+        
+        // --- Choose minimum cost ---
+        if staticCostQ8 <= dynamicCostQ8 {
+            return EntropyModelSelection(
+                runModels: staticRun4, valModels: staticVal4,
+                isStatic: true, isMerged: false
+            )
+        } else {
+            let dynRun4 = [dynRun, dynRun, dynRun, dynRun]
+            let dynVal4 = [dynVal, dynVal, dynVal, dynVal]
+            return EntropyModelSelection(
+                runModels: dynRun4, valModels: dynVal4,
+                isStatic: false, isMerged: true
+            )
+        }
     }
 }
 
@@ -381,13 +439,6 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         out.append(staticBit | dpcmBit | mergedBit | trailBit)
         appendUInt32BE(&out, UInt32(totalPairEntries))
         
-        // chunk size (4B × 4)
-        for lane in 0..<4 {
-            let chunkPairCount = chunkStarts[lane + 1] - chunkStarts[lane]
-            let extraTrailing = if lane == 3 && hasTrailingZeros { 1 } else { 0 }
-            appendUInt32BE(&out, UInt32(chunkPairCount + extraTrailing))
-        }
-        
         // Write dynamic frequency table headers when not static
         if selection.isStatic != true {
             if selection.isMerged {
@@ -406,7 +457,7 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
         // 4-way bypass data
         for lane in 0..<4 {
             let bpData = chunkBypassWriters[lane].bytes
-            appendUInt32BE(&out, UInt32(bpData.count))
+            writeVLQSize(&out, bpData.count)
             out.append(contentsOf: bpData)
         }
         
@@ -456,6 +507,47 @@ struct EntropyEncoder<Model: EntropyModelProvider> {
 }
 
 @inline(__always)
+internal func writeVLQSize(_ out: inout [UInt8], _ val: Int) {
+    var v = val
+    if v == 0 {
+        out.append(0)
+        return
+    }
+    var temp = [UInt8]()
+    temp.reserveCapacity(10)
+    while v != 0 {
+        temp.append(UInt8(v & 0x7F))
+        v >>= 7
+    }
+    var i = temp.count - 1
+    while i != 0 {
+        out.append(temp[i] | 0x80)
+        i -= 1
+    }
+    out.append(temp[0])
+}
+
+@inline(__always)
+internal func readVLQSize(_ base: UnsafePointer<UInt8>, at offset: inout Int, count: Int) throws -> Int {
+    var val = 0
+    var bytesRead = 0
+    while true {
+        guard offset < count else { throw DecodeError.insufficientData }
+        let b = base[offset]
+        offset += 1
+        
+        val = (val << 7) | Int(b & 0x7F)
+        bytesRead += 1
+        if (b & 0x80) == 0 {
+            break
+        }
+        if 5 < bytesRead {
+            throw DecodeError.invalidBlockData
+        }
+    }
+    return val
+}
+
 internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     var bitmap: UInt64 = 0
     for i in 0..<64 {
@@ -474,8 +566,13 @@ internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     
     for i in 0..<64 {
         if (bitmap & (UInt64(1) << i)) != 0 {
-            out.append(UInt8(truncatingIfNeeded: freqs[i] >> 8))
-            out.append(UInt8(truncatingIfNeeded: freqs[i] & 0xFF))
+            let val = freqs[i]
+            if val < 128 {
+                out.append(UInt8(val))
+            } else {
+                out.append(UInt8((val >> 8) | 0x80))
+                out.append(UInt8(val & 0xFF))
+            }
         }
     }
 }
@@ -595,15 +692,17 @@ struct EntropyDecoder {
         let totalPairEntries = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
         self.totalPairEntries = totalPairEntries
         
-        // chunk size (4 lanes)
-        var chunkSizes = [Int](repeating: 0, count: 4)
-        for lane in 0..<4 {
-            chunkSizes[lane] = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
-        }
-        
+        // chunk size (4 lanes) - dynamically reconstructed from totalPairEntries
+        let totalPairs = hasTrailingZeros ? (totalPairEntries - 1) : totalPairEntries
+        let chunkBase = totalPairs / 4
+        let chunkRemainder = totalPairs % 4
         var starts = [Int](repeating: 0, count: 5)
         for i in 0..<4 {
-            starts[i+1] = starts[i] + chunkSizes[i]
+            let size = (i < chunkRemainder) ? (chunkBase + 1) : chunkBase
+            starts[i+1] = starts[i] + size
+        }
+        if hasTrailingZeros {
+            starts[4] += 1
         }
         self.chunkStarts = starts
         
@@ -648,7 +747,7 @@ struct EntropyDecoder {
         // 4-way bypass data
         var chunkBypassReaders = [BypassReader]()
         for _ in 0..<4 {
-            let bpLen = Int(try readUInt32BEFromPtr(base, offset: &offset, count: count))
+            let bpLen = try readVLQSize(base, at: &offset, count: count)
             guard offset + bpLen <= count else { throw DecodeError.insufficientData }
             chunkBypassReaders.append(BypassReader(base: base.advanced(by: offset), count: bpLen))
             offset += bpLen
@@ -659,6 +758,8 @@ struct EntropyDecoder {
         self.ransDecoder = Interleaved4rANSDecoder(base: base.advanced(by: offset), count: count - offset)
     }
     
+
+
     @inline(__always)
     internal static func readCompressedFreqTable(_ base: UnsafePointer<UInt8>, at offset: inout Int, count: Int) throws -> [UInt32] {
         let bitmap = try readUInt64BEFromPtr(base, offset: &offset, count: count)
@@ -666,7 +767,17 @@ struct EntropyDecoder {
         var freqs = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
             if (bitmap & (UInt64(1) << i)) != 0 {
-                freqs[i] = UInt32(try readUInt16BEFromPtr(base, offset: &offset, count: count))
+                guard offset < count else { throw DecodeError.insufficientData }
+                let b0 = base[offset]
+                offset += 1
+                if (b0 & 0x80) == 0 {
+                    freqs[i] = UInt32(b0)
+                } else {
+                    guard offset < count else { throw DecodeError.insufficientData }
+                    let b1 = base[offset]
+                    offset += 1
+                    freqs[i] = (UInt32(b0 & 0x7F) << 8) | UInt32(b1)
+                }
             }
         }
         return freqs
