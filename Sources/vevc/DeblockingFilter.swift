@@ -8,9 +8,9 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
     plane.withUnsafeMutableBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }
         let rawTc = (qStep / 2) + 3
-        let tc = (qStep <= 1) ? Int16(0) : ((qStep <= 8) ? Int16(rawTc * (qStep - 1) / 7) : Int16(min(15, rawTc)))
+        let tc = (qStep <= 3) ? Int16(0) : ((qStep <= 15) ? Int16((rawTc * (qStep - 3)) / 12) : Int16(min(15, rawTc)))
         let rawBeta = qStep + 6
-        let beta = (qStep <= 1) ? Int32(0) : ((qStep <= 8) ? Int32(rawBeta * (qStep - 1) / 7) : Int32(min(50, rawBeta)))
+        let beta = (qStep <= 3) ? Int32(0) : ((qStep <= 15) ? Int32((rawBeta * (qStep - 3)) / 12) : Int32(min(50, rawBeta)))
         
         let hFast = (height / 32) * 32
         let wFast = (width / 32) * 32
@@ -47,14 +47,14 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         guard let base = buffer.baseAddress else { return }
         
         let rawTc = (qStep / 2) + 3
-        let defaultTc = (qStep <= 1) ? Int16(0) : ((qStep <= 8) ? Int16(rawTc * (qStep - 1) / 7) : Int16(min(15, rawTc)))
+        let defaultTc = (qStep <= 3) ? Int16(0) : ((qStep <= 15) ? Int16((rawTc * (qStep - 3)) / 12) : Int16(min(15, rawTc)))
         let rawBeta = qStep + 6
-        let defaultBeta = (qStep <= 1) ? Int32(0) : ((qStep <= 8) ? Int32(rawBeta * (qStep - 1) / 7) : Int32(min(50, rawBeta)))
+        let defaultBeta = (qStep <= 3) ? Int32(0) : ((qStep <= 15) ? Int32((rawBeta * (qStep - 3)) / 12) : Int32(min(50, rawBeta)))
         
         let rawETc = ((qStep / 2) + 3) * 3 / 2
-        let enhancedTc = (qStep <= 1) ? Int16(0) : ((qStep <= 8) ? Int16(rawETc * (qStep - 1) / 7) : Int16(min(22, rawETc)))
+        let enhancedTc = (qStep <= 3) ? Int16(0) : ((qStep <= 15) ? Int16((rawETc * (qStep - 3)) / 12) : Int16(min(22, rawETc)))
         let rawEBeta = (qStep + 6) * 2
-        let enhancedBeta = (qStep <= 1) ? Int32(0) : ((qStep <= 8) ? Int32(rawEBeta * (qStep - 1) / 7) : Int32(min(100, rawEBeta)))
+        let enhancedBeta = (qStep <= 3) ? Int32(0) : ((qStep <= 15) ? Int32((rawEBeta * (qStep - 3)) / 12) : Int32(min(100, rawEBeta)))
         
         let colCount = (width + 31) / 32
         let rowCount = (height + 31) / 32
@@ -82,7 +82,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     let leftIsIntra = leftDx == 32767
                     let rightIsIntra = rightDx == 32767
                     
-                    let isIntraBoundary = leftIsIntra != rightIsIntra
+                    let isIntraBoundary = leftIsIntra || rightIsIntra
                     let tc = isIntraBoundary ? enhancedTc : defaultTc
                     let beta = isIntraBoundary ? enhancedBeta : defaultBeta
                     
@@ -109,7 +109,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     let topIsIntra = topDx == 32767
                     let bottomIsIntra = bottomDx == 32767
                     
-                    let isIntraBoundary = topIsIntra != bottomIsIntra
+                    let isIntraBoundary = topIsIntra || bottomIsIntra
                     let tc = isIntraBoundary ? enhancedTc : defaultTc
                     let beta = isIntraBoundary ? enhancedBeta : defaultBeta
                     
@@ -135,14 +135,14 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         guard let base = buffer.baseAddress else { return }
         
         let rawTc = (qStep / 2) + 3
-        let defaultTc = (qStep <= 1) ? Int16(0) : ((qStep <= 8) ? Int16(rawTc * (qStep - 1) / 7) : Int16(min(15, rawTc)))
+        let defaultTc = (qStep <= 3) ? Int16(0) : ((qStep <= 15) ? Int16((rawTc * (qStep - 3)) / 12) : Int16(min(15, rawTc)))
         let rawBeta = qStep + 6
-        let defaultBeta = (qStep <= 1) ? Int32(0) : ((qStep <= 8) ? Int32(rawBeta * (qStep - 1) / 7) : Int32(min(50, rawBeta)))
+        let defaultBeta = (qStep <= 3) ? Int32(0) : ((qStep <= 15) ? Int32((rawBeta * (qStep - 3)) / 12) : Int32(min(50, rawBeta)))
         
         let rawETc = ((qStep / 2) + 3) * 3 / 2
-        let enhancedTc = (qStep <= 1) ? Int16(0) : ((qStep <= 8) ? Int16(rawETc * (qStep - 1) / 7) : Int16(min(22, rawETc)))
+        let enhancedTc = (qStep <= 3) ? Int16(0) : ((qStep <= 15) ? Int16((rawETc * (qStep - 3)) / 12) : Int16(min(22, rawETc)))
         let rawEBeta = (qStep + 6) * 2
-        let enhancedBeta = (qStep <= 1) ? Int32(0) : ((qStep <= 8) ? Int32(rawEBeta * (qStep - 1) / 7) : Int32(min(100, rawEBeta)))
+        let enhancedBeta = (qStep <= 3) ? Int32(0) : ((qStep <= 15) ? Int32((rawEBeta * (qStep - 3)) / 12) : Int32(min(100, rawEBeta)))
         
         let colCountC = (width + 15) / 16
         let rowCountC = (height + 15) / 16
@@ -171,7 +171,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     let leftIsIntra = leftDx == 32767
                     let rightIsIntra = rightDx == 32767
                     
-                    let isIntraBoundary = leftIsIntra != rightIsIntra
+                    let isIntraBoundary = leftIsIntra || rightIsIntra
                     let tc = isIntraBoundary ? enhancedTc : defaultTc
                     let beta = isIntraBoundary ? enhancedBeta : defaultBeta
                     
@@ -198,7 +198,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     let topIsIntra = topDx == 32767
                     let bottomIsIntra = bottomDx == 32767
                     
-                    let isIntraBoundary = topIsIntra != bottomIsIntra
+                    let isIntraBoundary = topIsIntra || bottomIsIntra
                     let tc = isIntraBoundary ? enhancedTc : defaultTc
                     let beta = isIntraBoundary ? enhancedBeta : defaultBeta
                     
@@ -221,9 +221,9 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
     plane.withUnsafeMutableBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }
         let rawTc = (qStep / 2) + 3
-        let tc = (qStep <= 1) ? Int16(0) : ((qStep <= 8) ? Int16(rawTc * (qStep - 1) / 7) : Int16(min(15, rawTc)))
+        let tc = (qStep <= 3) ? Int16(0) : ((qStep <= 15) ? Int16((rawTc * (qStep - 3)) / 12) : Int16(min(15, rawTc)))
         let rawBeta = qStep + 6
-        let beta = (qStep <= 1) ? Int32(0) : ((qStep <= 8) ? Int32(rawBeta * (qStep - 1) / 7) : Int32(min(50, rawBeta)))
+        let beta = (qStep <= 3) ? Int32(0) : ((qStep <= 15) ? Int32((rawBeta * (qStep - 3)) / 12) : Int32(min(50, rawBeta)))
         
         let hFast = (height / 16) * 16
         let wFast = (width / 16) * 16
@@ -250,15 +250,7 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
 
 @inline(__always)
 private func deblockFilterVerticalEdge16SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    // Early skip: check representative samples (first and middle rows)
-    // If both samples have |q0-p0| >= beta, the entire 16-row edge is likely unfiltered
     let off0 = (y * width) + x
-    let off8 = off0 + (width * 8)
-    let delta0 = abs(Int32(base[off0]) - Int32(base[off0 - 1]))
-    let delta8 = abs(Int32(base[off8]) - Int32(base[off8 - 1]))
-    if beta <= delta0 && beta <= delta8 {
-        return
-    }
     
     var vP1 = SIMD16<Int16>()
     var vP0 = SIMD16<Int16>()
@@ -327,15 +319,8 @@ private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, 
 
 @inline(__always)
 private func deblockFilterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    // Early skip: check representative samples (first and middle columns)
-    // If both samples have |q0-p0| >= beta, the entire 16-column edge is likely unfiltered
     let offP0 = (y - 1) * width + x
     let offQ0 = (y + 0) * width + x
-    let delta0 = abs(Int32(base[offQ0]) - Int32(base[offP0]))
-    let delta8 = abs(Int32(base[offQ0 + 8]) - Int32(base[offP0 + 8]))
-    if beta <= delta0 && beta <= delta8 {
-        return
-    }
     
     let offP1 = (y - 2) * width + x
     let offQ1 = (y + 1) * width + x
