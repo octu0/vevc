@@ -942,9 +942,9 @@ struct CompareApp {
             }
             
             if localConfig.outputBitrates {
-                print("\n--- Running Bitrate Sweep (300 - 1500) ---")
+                print("\n--- Running Bitrate Sweep (300 - 5000) ---")
                 var chartPoints: [BitrateSsimPoint] = []
-                let bitrates = Array(stride(from: 300, through: 1500, by: 100))
+                let bitrates = Array(stride(from: 300, through: 3000, by: 500))
                 
                 for br in bitrates {
                     var sweepConfig = localConfig

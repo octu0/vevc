@@ -91,10 +91,9 @@ struct RateController {
         
         // maxStep scales proportionally to baseStep: P-Frame worst-case quality
         // tracks I-Frame quality level. At high bitrates (low baseStep), this
-        // prevents P-Frames from degrading to bitrate-500 quality (step=40) even
-        // though budget is abundant. At baseStep>=5, baseStep*8>=40 so behavior
-        // is identical to before.
-        let maxStep = max(64, min(512, baseStep * 4))
+        // prevents P-Frames from degrading to poor quality even if bits are tight.
+        // Allowing maxStep to drop below 64 prevents the SSIM inversion bug.
+        let maxStep = max(baseStep * 2, min(512, baseStep * 4))
         
         var newStepInt = (baseStep * 3) / 2
         // P-Frame QP floor: baseStep ensures P-Frames never use finer

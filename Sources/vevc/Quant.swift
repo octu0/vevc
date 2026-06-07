@@ -80,7 +80,7 @@ struct QuantizationTable: Sendable {
             
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
-            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false)
+            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: true)
         } else {
             // qLow: Strictly cap at 16 to completely preserve face gradients and base brightness
             let lLow = min(16, max(1, baseStep / qLowDivisor))
@@ -93,10 +93,10 @@ struct QuantizationTable: Sendable {
             // qHigh: Cap at 64 to preserve fine details during motion, reducing blurry ghost trails
             if layerIndex == 2 {
                 let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false)
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             } else {
                 let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false)
+                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
             }
         }
     }
@@ -542,15 +542,7 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
                 let idx = x + i
                 let val = Int32(ptr[idx])
                 let res = val &* step
-                let offset: Int32
-                if 0 < val {
-                    offset = step / 2
-                } else if val < 0 {
-                    offset = -step / 2
-                } else {
-                    offset = 0
-                }
-                ptr[idx] = Int16(clamping: res + offset)
+                ptr[idx] = Int16(clamping: res)
             }
             x += 16
         }
@@ -559,15 +551,7 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
                 let idx = x + i
                 let val = Int32(ptr[idx])
                 let res = val &* step
-                let offset: Int32
-                if 0 < val {
-                    offset = step / 2
-                } else if val < 0 {
-                    offset = -step / 2
-                } else {
-                    offset = 0
-                }
-                ptr[idx] = Int16(clamping: res + offset)
+                ptr[idx] = Int16(clamping: res)
             }
             x += 8
         }
@@ -576,30 +560,14 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
                 let idx = x + i
                 let val = Int32(ptr[idx])
                 let res = val &* step
-                let offset: Int32
-                if 0 < val {
-                    offset = step / 2
-                } else if val < 0 {
-                    offset = -step / 2
-                } else {
-                    offset = 0
-                }
-                ptr[idx] = Int16(clamping: res + offset)
+                ptr[idx] = Int16(clamping: res)
             }
             x += 4
         }
         while x < width {
             let val = Int32(ptr[x])
             let res = val &* step
-            let offset: Int32
-            if 0 < val {
-                offset = step / 2
-            } else if val < 0 {
-                offset = -step / 2
-            } else {
-                offset = 0
-            }
-            ptr[x] = Int16(clamping: res + offset)
+            ptr[x] = Int16(clamping: res)
             x += 1
         }
     }
@@ -755,15 +723,7 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
                 let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
                 let val = Int32(Int16(bitPattern: decodedUInt))
                 let res = val &* step
-                let offset: Int32
-                if 0 < val {
-                    offset = step / 2
-                } else if val < 0 {
-                    offset = -step / 2
-                } else {
-                    offset = 0
-                }
-                ptr[idx] = Int16(clamping: res + offset)
+                ptr[idx] = Int16(clamping: res)
             }
             x += 16
         }
@@ -774,15 +734,7 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
                 let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
                 let val = Int32(Int16(bitPattern: decodedUInt))
                 let res = val &* step
-                let offset: Int32
-                if 0 < val {
-                    offset = step / 2
-                } else if val < 0 {
-                    offset = -step / 2
-                } else {
-                    offset = 0
-                }
-                ptr[idx] = Int16(clamping: res + offset)
+                ptr[idx] = Int16(clamping: res)
             }
             x += 8
         }
@@ -793,15 +745,7 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
                 let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
                 let val = Int32(Int16(bitPattern: decodedUInt))
                 let res = val &* step
-                let offset: Int32
-                if 0 < val {
-                    offset = step / 2
-                } else if val < 0 {
-                    offset = -step / 2
-                } else {
-                    offset = 0
-                }
-                ptr[idx] = Int16(clamping: res + offset)
+                ptr[idx] = Int16(clamping: res)
             }
             x += 4
         }
@@ -810,15 +754,7 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
             let decodedUInt = ((uVal &>> 1) ^ (0 &- (uVal & 1)))
             let val = Int32(Int16(bitPattern: decodedUInt))
             let res = val &* step
-            let offset: Int32
-            if 0 < val {
-                offset = step / 2
-            } else if val < 0 {
-                offset = -step / 2
-            } else {
-                offset = 0
-            }
-            ptr[x] = Int16(clamping: res + offset)
+            ptr[x] = Int16(clamping: res)
             x += 1
         }
     }
