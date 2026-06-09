@@ -2,7 +2,7 @@ import XCTest
 @testable import vevc
 
 final class ParallelCodecTests: XCTestCase {
-    
+
     // Helper to calculate PSNR
     private func calculatePSNR(original: [UInt8], decoded: [UInt8]) -> Double {
         let count = min(original.count, decoded.count)
@@ -57,8 +57,9 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 1. Parallel Encoding Test
-        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 4, sceneChangeThreshold: 100, maxConcurrency: 2)
-        
+        let encoder = VEVCEncoder(
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 4, sceneChangeThreshold: 100, maxConcurrency: 2)
+
         var chunks: [[UInt8]] = []
         let chunkStream = await encoder.encode(stream: frameStream)
         for try await chunk in chunkStream {
@@ -66,7 +67,7 @@ final class ParallelCodecTests: XCTestCase {
         }
         // Temporal encoding: 10 frames -> 1 VEVC Header + 10 Frames = 11 chunks -> wait, they are combined in the first yield, so 10 chunks total
         XCTAssertEqual(chunks.count, 10, "10 frames should produce 10 chunks (Header is combined with first frame).")
-        
+
         // Emulate streaming bitstream chunks
         let encodedStream = AsyncStream<[UInt8]> { continuation in
             for chunk in chunks {
@@ -82,14 +83,14 @@ final class ParallelCodecTests: XCTestCase {
         for try await img in imageStream {
             decodedImages.append(img)
         }
-        
+
         XCTAssertEqual(decodedImages.count, frameCount, "Should output exactly one decoded image per frame.")
 
         // 3. Verify quality/correctness
         for i in 0..<frameCount {
             XCTAssertEqual(decodedImages[i].width, width)
             XCTAssertEqual(decodedImages[i].height, height)
-            
+
             let psnr = calculatePSNR(original: images[i].yPlane, decoded: decodedImages[i].yPlane)
             // Expect reasonable PSNR even with multiple GOPs compressed in parallel
             XCTAssertGreaterThan(psnr, 25.0, "Frame \(i) PSNR (\(psnr)dB) is too low.")

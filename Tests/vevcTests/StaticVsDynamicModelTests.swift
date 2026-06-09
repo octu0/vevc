@@ -23,8 +23,8 @@ struct StaticVsDynamicModelTests {
         var pairs: [(run: UInt32, val: Int16)] = []
         pairs.reserveCapacity(count)
         for i in 0..<count {
-            let run: UInt32 = UInt32(i % 5) // runs 0-4
-            let val: Int16 = Int16(1 + (i % 6)) // values 1-6
+            let run: UInt32 = UInt32(i % 5)  // runs 0-4
+            let val: Int16 = Int16(1 + (i % 6))  // values 1-6
             pairs.append((run: run, val: (i % 3 == 0) ? -val : val))
         }
         return pairs
@@ -36,8 +36,8 @@ struct StaticVsDynamicModelTests {
         var pairs: [(run: UInt32, val: Int16)] = []
         pairs.reserveCapacity(count)
         for i in 0..<count {
-            let run: UInt32 = UInt32(5 + (i % 12)) // runs 5-16 (very sparse)
-            let val: Int16 = (i % 2 == 0) ? 1 : -1 // almost exclusively ±1
+            let run: UInt32 = UInt32(5 + (i % 12))  // runs 5-16 (very sparse)
+            let val: Int16 = (i % 2 == 0) ? 1 : -1  // almost exclusively ±1
             pairs.append((run: run, val: val))
         }
         return pairs
@@ -48,8 +48,8 @@ struct StaticVsDynamicModelTests {
         var pairs: [(run: UInt32, val: Int16)] = []
         pairs.reserveCapacity(count)
         for i in 0..<count {
-            let run: UInt32 = (i % 8 == 0) ? 1 : 0 // mostly run=0
-            let val: Int16 = (i % 2 == 0) ? 1 : -1 // ±1
+            let run: UInt32 = (i % 8 == 0) ? 1 : 0  // mostly run=0
+            let val: Int16 = (i % 2 == 0) ? 1 : -1  // ±1
             pairs.append((run: run, val: val))
         }
         return pairs
@@ -62,9 +62,9 @@ struct StaticVsDynamicModelTests {
         trailingZeros: UInt32 = 0
     ) -> Int {
         var encoder = EntropyEncoder<M>()
-        encoder.encodeBypass(binVal: 1) // hasNonZero
-        encoder.encodeBypass(binVal: 1) // lscpX
-        encoder.encodeBypass(binVal: 1) // lscpY
+        encoder.encodeBypass(binVal: 1)  // hasNonZero
+        encoder.encodeBypass(binVal: 1)  // lscpX
+        encoder.encodeBypass(binVal: 1)  // lscpY
         for pair in pairs {
             encoder.addPair(run: pair.run, val: pair.val, context: 0)
         }
@@ -126,9 +126,9 @@ struct StaticVsDynamicModelTests {
 
         for (idx, pairs) in testData.enumerated() {
             var encoder = EntropyEncoder<AdaptiveEntropyModel>()
-            encoder.encodeBypass(binVal: 1) // hasNonZero
-            encoder.encodeBypass(binVal: 1) // lscpX
-            encoder.encodeBypass(binVal: 1) // lscpY
+            encoder.encodeBypass(binVal: 1)  // hasNonZero
+            encoder.encodeBypass(binVal: 1)  // lscpX
+            encoder.encodeBypass(binVal: 1)  // lscpY
             for pair in pairs {
                 encoder.addPair(run: pair.run, val: pair.val, context: 0)
             }
@@ -139,15 +139,17 @@ struct StaticVsDynamicModelTests {
                 var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
                 let hasNonZero = try decoder.decodeBypass()
                 #expect(hasNonZero == 1)
-                let _ = try decoder.decodeBypass() // lscpX
-                let _ = try decoder.decodeBypass() // lscpY
-                
+                let _ = try decoder.decodeBypass()  // lscpX
+                let _ = try decoder.decodeBypass()  // lscpY
+
                 for (pIdx, original) in pairs.enumerated() {
                     let decoded = decoder.readPair(context: 0)
-                    #expect(decoded.run == Int(original.run),
-                           "Dataset \(idx) pair \(pIdx): run mismatch expected=\(String(original.run)) got=\(String(decoded.run))")
-                    #expect(decoded.val == original.val,
-                           "Dataset \(idx) pair \(pIdx): val mismatch expected=\(String(original.val)) got=\(String(decoded.val))")
+                    #expect(
+                        decoded.run == Int(original.run),
+                        "Dataset \(idx) pair \(pIdx): run mismatch expected=\(String(original.run)) got=\(String(decoded.run))")
+                    #expect(
+                        decoded.val == original.val,
+                        "Dataset \(idx) pair \(pIdx): val mismatch expected=\(String(original.val)) got=\(String(decoded.val))")
                 }
             }
         }

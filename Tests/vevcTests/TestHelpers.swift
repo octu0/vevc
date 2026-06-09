@@ -37,7 +37,6 @@ func invDwt2d(_ block: BlockView, size: Int) {
     }
 }
 
-
 func blockEncode(encoder: inout EntropyEncoder<AdaptiveEntropyModel>, block: BlockView, size: Int) {
     switch size {
     case 16: blockEncode16V(encoder: &encoder, block: block)

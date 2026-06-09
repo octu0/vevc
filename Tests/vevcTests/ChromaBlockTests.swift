@@ -249,7 +249,7 @@ final class ChromaBlockTests: XCTestCase {
                 }
             }
             dwt2DBlock8(view)
-        
+
             // 量子化
             evaluateQuantizeBase8(view: block, qt: qt)
 
@@ -266,7 +266,7 @@ final class ChromaBlockTests: XCTestCase {
             dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
             dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
             inverseDWT2DBlock8(view)
-        
+
             // MSE計算
             var mse: Double = 0
             view = block
@@ -277,15 +277,15 @@ final class ChromaBlockTests: XCTestCase {
                     mse += diff * diff
                 }
             }
-                    mse /= Double(blockSize * blockSize)
+            mse /= Double(blockSize * blockSize)
             distortions.append((step: step, mse: mse))
         }
 
         // クロマ用ステップ(step*3等)の歪みが輝度用(step)に比べてどの程度大きいか確認
         // step=16でのMSEとstep=24でのMSE比較
         let mseLuma = distortions.first(where: { $0.step == 16 })?.mse ?? 0
-        let mseChrCurrent = distortions.first(where: { $0.step == 32 })?.mse ?? 0 // 現在: step*2
-        let mseChrProposed = distortions.first(where: { $0.step == 24 })?.mse ?? 0 // 提案: step*1.5
+        let mseChrCurrent = distortions.first(where: { $0.step == 32 })?.mse ?? 0  // 現在: step*2
+        let mseChrProposed = distortions.first(where: { $0.step == 24 })?.mse ?? 0  // 提案: step*1.5
 
         // 提案版（step=4）は現行（step=6）より歪みが小さいことを確認
         XCTAssertLessThan(mseChrProposed, mseChrCurrent, "提案クロマステップ(step=24)は現行(step=32)より歪みが小さいべき")
@@ -305,4 +305,3 @@ private struct LCG {
         return state
     }
 }
-

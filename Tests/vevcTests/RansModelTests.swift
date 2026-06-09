@@ -3,14 +3,14 @@ import XCTest
 
 /// rANSModel のnormalize vs readback テスト
 final class RansModelTests: XCTestCase {
-    
+
     /// normalize後のtokenFreqsと、writeCompressedFreqTable→readCompressedFreqTableで復元したtokenFreqsを比較
     func testFreqTableRoundtrip() async throws {
         let pool = BlockViewPool()
         // 実DWTデータのtoken分布を再現
         var runTokenCounts = [Int](repeating: 0, count: 64)
         var valTokenCounts = [Int](repeating: 0, count: 64)
-        
+
         // 実際のDWTデータからblock encodeしたpairsのtoken分布
         let width = 128
         let height = 128
@@ -35,7 +35,7 @@ final class RansModelTests: XCTestCase {
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }
         for i in blocks.indices { evaluateQuantizeLayer32(view: blocks[i], qt: qtY) }
-        
+
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         for i in blocks.indices {
@@ -46,8 +46,8 @@ final class RansModelTests: XCTestCase {
             blockEncode16V(encoder: &encoder, block: subs.hl)
             blockEncode16H(encoder: &encoder, block: subs.lh)
             blockEncode16H(encoder: &encoder, block: subs.hh)
-                }
-        
+        }
+
         // pairs からrunTokenCountsとvalTokenCountsを計算
         for pair in encoder.pairs {
             let rt = valueTokenizeUnsigned(pair.run)
@@ -55,13 +55,13 @@ final class RansModelTests: XCTestCase {
             let vt = valueTokenize(pair.val)
             valTokenCounts[Int(vt.token)] += 1
         }
-        
+
         // normalize
         var runModel = rANSModel()
         runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
         var valModel = rANSModel()
         valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
-        
+
         // freq table serialize→deserialize
         var runOut = [UInt8]()
         writeCompressedFreqTable(&runOut, freqs: runModel.tokenFreqs)
@@ -69,19 +69,19 @@ final class RansModelTests: XCTestCase {
         let runFreqsRestored = try runOut.withUnsafeBufferPointer { buf -> [UInt32] in
             try EntropyDecoder.readCompressedFreqTable(buf.baseAddress!, at: &runOffset, count: runOut.count)
         }
-        
+
         var valOut = [UInt8]()
         writeCompressedFreqTable(&valOut, freqs: valModel.tokenFreqs)
         var valOffset = 0
         let valFreqsRestored = try valOut.withUnsafeBufferPointer { buf -> [UInt32] in
             try EntropyDecoder.readCompressedFreqTable(buf.baseAddress!, at: &valOffset, count: valOut.count)
         }
-        
+
         // 比較
         print("=== Run token counts: \(runTokenCounts) ===")
         print("=== Run tokenFreqs: \(runModel.tokenFreqs) ===")
         print("=== Run freqsRestored: \(runFreqsRestored) ===")
-        
+
         var runSum: UInt32 = 0
         var resRunSum: UInt32 = 0
         for i in 0..<64 {
@@ -92,7 +92,7 @@ final class RansModelTests: XCTestCase {
         print("=== Run freq sum: \(runSum) restored sum: \(resRunSum) rANSScale=\(rANSScale) ===")
         XCTAssertEqual(runSum, rANSScale, "Run freq sum != rANSScale")
         XCTAssertEqual(resRunSum, rANSScale, "Restored run freq sum != rANSScale")
-        
+
         print("=== Val token counts: \(valTokenCounts) ===")
         print("=== Val tokenFreqs: \(valModel.tokenFreqs) ===")
         var valSum: UInt32 = 0
@@ -104,17 +104,16 @@ final class RansModelTests: XCTestCase {
         }
         print("=== Val freq sum: \(valSum) restored sum: \(resValSum) ===")
         XCTAssertEqual(valSum, rANSScale, "Val freq sum != rANSScale")
-        
+
         // LUT 検証
         let restoredRunModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runFreqsRestored)
         let restoredValModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valFreqsRestored)
-        
+
         // cumFreqs 比較
         for i in 0..<64 {
             XCTAssertEqual(runModel.tokenCumFreqs[i], restoredRunModel.tokenCumFreqs[i], "Run cumFreq[\(i)]")
             XCTAssertEqual(valModel.tokenCumFreqs[i], restoredValModel.tokenCumFreqs[i], "Val cumFreq[\(i)]")
         }
     }
-    
 
 }

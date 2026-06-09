@@ -3,7 +3,7 @@ import XCTest
 
 /// blockEncode→blockDecodeのラウンドトリップを直接テスト
 final class BlockRoundtripTests: XCTestCase {
-    
+
     /// blockEncode16→blockDecode16 ラウンドトリップ（量子化済みデータ）
     func testBlockEncode16Roundtrip() throws {
         // 量子化後のSignedMappingデータを模擬（-50〜50の範囲のランダムな値）
@@ -15,19 +15,19 @@ final class BlockRoundtripTests: XCTestCase {
         temp256.withUnsafeBufferPointer { src in
             block.base.update(from: src.baseAddress!, count: 256)
         }
-        
+
         // エンコード前のデータを保存
         let originalData = Array(UnsafeBufferPointer(start: block.base, count: 256))
-        
+
         // blockEncode16
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         blockEncode16V(encoder: &encoder, block: block)
         encoder.flush()
         let encoded = encoder.getData()
-        
+
         // blockEncode16のゼロクリア修正後のデータ
         let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
-        
+
         // blockDecode16
         let decBlock = BlockView.allocate(width: 16, height: 16)
         defer { decBlock.deallocate() }
@@ -37,10 +37,12 @@ final class BlockRoundtripTests: XCTestCase {
         }
         // エンコード後のデータとデコード後のデータを比較
         for i in 0..<256 {
-            XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/16) x:\(i%16): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
+            XCTAssertEqual(
+                afterEncodeData[i], decBlock.base[i],
+                "idx=\(i) y:\(i/16) x:\(i%16): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
         }
     }
-    
+
     /// blockEncode8→blockDecode8 ラウンドトリップ
     func testBlockEncode8Roundtrip() throws {
         let block = BlockView.allocate(width: 8, height: 8)
@@ -51,16 +53,16 @@ final class BlockRoundtripTests: XCTestCase {
         temp64.withUnsafeBufferPointer { src in
             block.base.update(from: src.baseAddress!, count: 64)
         }
-        
+
         let originalData = Array(UnsafeBufferPointer(start: block.base, count: 64))
-        
+
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         blockEncode8V(encoder: &encoder, block: block)
         encoder.flush()
         let encoded = encoder.getData()
-        
+
         let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 64))
-        
+
         let decBlock = BlockView.allocate(width: 8, height: 8)
         defer { decBlock.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
@@ -68,10 +70,12 @@ final class BlockRoundtripTests: XCTestCase {
             try! blockDecode8V(decoder: &decoder, block: decBlock)
         }
         for i in 0..<64 {
-            XCTAssertEqual(afterEncodeData[i], decBlock.base[i], "idx=\(i) y:\(i/8) x:\(i%8): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
+            XCTAssertEqual(
+                afterEncodeData[i], decBlock.base[i],
+                "idx=\(i) y:\(i/8) x:\(i%8): encAfter=\(afterEncodeData[i]) dec=\(decBlock.base[i]) original=\(originalData[i])")
         }
     }
-    
+
     /// blockEncode16 ゼロクリアデバッグ: lscp超がクリアされるか確認
     func testBlockEncode16ZeroClear() throws {
         let block = BlockView.allocate(width: 16, height: 16)
@@ -90,15 +94,15 @@ final class BlockRoundtripTests: XCTestCase {
                 }
             }
         }
-        
+
         let beforeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
-        
+
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         blockEncode16V(encoder: &encoder, block: block)
-            
+
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
         let afterData = Array(UnsafeBufferPointer(start: block.base, count: 256))
-        
+
         // (5,5)以降のデータがゼロかチェック
         for y in 0..<16 {
             for x in 0..<16 {
@@ -109,7 +113,7 @@ final class BlockRoundtripTests: XCTestCase {
             }
         }
     }
-    
+
     /// stride=32のBlockView（実際の32x32ブロック内サブバンド）でblockEncode16→blockDecode16ラウンドトリップ
     func testBlockEncode16RoundtripStride32() throws {
         let block32 = BlockView.allocate(width: 32, height: 32)
@@ -122,14 +126,14 @@ final class BlockRoundtripTests: XCTestCase {
                 ptr[x] = Int16(clamping: (y * 16 + x) &* 7 % 41 - 20)
             }
         }
-            
+
         // エンコード (stride=32)
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         hlView = BlockView(base: block32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
         blockEncode16V(encoder: &encoder, block: hlView)
         encoder.flush()
         let encoded = encoder.getData()
-        
+
         // エンコード後のHLサブバンドデータ
         var encAfterHL = [Int16](repeating: 0, count: 256)
         hlView = BlockView(base: block32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
@@ -139,8 +143,8 @@ final class BlockRoundtripTests: XCTestCase {
                 encAfterHL[y * 16 + x] = ptr[x]
             }
         }
-            
-        // デコード (stride=32)  
+
+        // デコード (stride=32)
         let decBlock32 = BlockView.allocate(width: 32, height: 32)
         defer { decBlock32.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
@@ -148,7 +152,7 @@ final class BlockRoundtripTests: XCTestCase {
             hlView = BlockView(base: decBlock32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
             try! blockDecode16V(decoder: &decoder, block: hlView)
         }
-            
+
         // デコード後のHLデータ
         var decHL = [Int16](repeating: 0, count: 256)
         hlView = BlockView(base: decBlock32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
@@ -158,7 +162,7 @@ final class BlockRoundtripTests: XCTestCase {
                 decHL[y * 16 + x] = ptr[x]
             }
         }
-            
+
         // 比較
         var diffCount = 0
         for i in 0..<256 {

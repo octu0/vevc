@@ -80,10 +80,11 @@ struct CopyFrameTests {
         let headerOverhead = 1600
         let idenPayload = max(1, identicalSize - headerOverhead)
         let diffPayload = max(1, differentSize - headerOverhead)
-        
+
         #expect(identicalSize < differentSize, "Identical frames should produce less data")
-        #expect(Double(idenPayload) < Double(diffPayload) * 0.5,
-               "Identical payload should be at least 50% smaller (got: \(idenPayload) vs \(diffPayload))")
+        #expect(
+            Double(idenPayload) < Double(diffPayload) * 0.5,
+            "Identical payload should be at least 50% smaller (got: \(idenPayload) vs \(diffPayload))")
     }
 
     // MARK: - Test: Roundtrip with copy frames produces correct output
@@ -152,8 +153,9 @@ struct CopyFrameTests {
             let encoded = try await countEncoder.encodeToData(images: images)
 
             let decoded = try await Decoder().decode(data: encoded)
-            #expect(decoded.count == count,
-                   "GOP with \(count) identical frames should decode to \(count) frames, got \(decoded.count)")
+            #expect(
+                decoded.count == count,
+                "GOP with \(count) identical frames should decode to \(count) frames, got \(decoded.count)")
         }
     }
 }

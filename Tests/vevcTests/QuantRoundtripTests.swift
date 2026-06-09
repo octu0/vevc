@@ -18,43 +18,44 @@ final class QuantRoundtripTests: XCTestCase {
             42, -42, 99, -99, 11, -11, 22, -22,
             33, -33, 44, -44, 55, -55, 66, -66,
             77, -77, 88, -88, 0, 0, 0, 0,
-            1, 2, 3, 4, -4, -3, -2, -1
+            1, 2, 3, 4, -4, -3, -2, -1,
         ]
         XCTAssertEqual(testValues.count, size * size)
-        
+
         let qt = QuantizationTable(baseStep: 1)
-        
+
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
         // テスト値をコピー
         for i in 0..<(size * size) {
             block.base[i] = testValues[i]
         }
-        
+
         // 量子化（SignedMapping = ジグザグエンコード付き）
         quantizeSIMDSignedMapping(block, q: qt.qLow)
-            
+
         // ジグザグエンコード後の値を保存
         let quantized = Array(UnsafeBufferPointer(start: block.base, count: size * size))
-        
+
         // 逆量子化（SignedMapping = ジグザグデコード付き）
         dequantizeSIMDSignedMapping(block, q: qt.qLow)
-            
+
         // 元の値と比較
         for i in 0..<(size * size) {
             let original = testValues[i]
             let restored = block.base[i]
             let zigzag = quantized[i]
-            XCTAssertEqual(original, restored, 
+            XCTAssertEqual(
+                original, restored,
                 "位置[\(i/size),\(i%size)]: 元=\(original), zigzag=\(zigzag), 復元=\(restored)")
         }
     }
-    
+
     /// 16x16ブロックでSignedMappingのラウンドトリップ
     func testSignedMappingRoundTrip16x16_Step1() {
         let size = 16
         let qt = QuantizationTable(baseStep: 1)
-        
+
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
         // 正と負の両方を含むテストパターン
@@ -67,32 +68,32 @@ final class QuantRoundtripTests: XCTestCase {
                 case 1:
                     v = -1 * Int16(y * 6 + 1)  // -1..-97
                 default:
-                    v = Int16(x + y)       // 0..+30
+                    v = Int16(x + y)  // 0..+30
                 }
                 block.base[y * size + x] = v
             }
         }
         let original = Array(UnsafeBufferPointer(start: block.base, count: size * size))
-        
+
         quantizeSIMDSignedMapping(block, q: qt.qLow)
         dequantizeSIMDSignedMapping(block, q: qt.qLow)
-            
+
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             if original[i] != block.base[i] {
                 mismatches.append((i, original[i], block.base[i]))
             }
         }
-        XCTAssertTrue(mismatches.isEmpty, 
-            "16x16 step=1 ミスマッチ \(mismatches.count)個: " + 
-            mismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
+        XCTAssertTrue(
+            mismatches.isEmpty,
+            "16x16 step=1 ミスマッチ \(mismatches.count)個: " + mismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
     }
-    
-    /// 32x32ブロックでSignedMappingのラウンドトリップ 
+
+    /// 32x32ブロックでSignedMappingのラウンドトリップ
     func testSignedMappingRoundTrip32x32_Step1() {
         let size = 32
         let qt = QuantizationTable(baseStep: 1)
-        
+
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
         for y in 0..<size {
@@ -102,26 +103,26 @@ final class QuantRoundtripTests: XCTestCase {
             }
         }
         let original = Array(UnsafeBufferPointer(start: block.base, count: size * size))
-        
+
         quantizeSIMDSignedMapping(block, q: qt.qLow)
         dequantizeSIMDSignedMapping(block, q: qt.qLow)
-            
+
         var mismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             if original[i] != block.base[i] {
                 mismatches.append((i, original[i], block.base[i]))
             }
         }
-        XCTAssertTrue(mismatches.isEmpty, 
-            "32x32 step=1 ミスマッチ \(mismatches.count)個: " + 
-            mismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
+        XCTAssertTrue(
+            mismatches.isEmpty,
+            "32x32 step=1 ミスマッチ \(mismatches.count)個: " + mismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
     }
-    
+
     /// step=2でのSignedMappingラウンドトリップ（量子化損失はあるが符号は保持されるべき）
     func testSignedMappingRoundTrip_Step2_SignPreserved() {
         let size = 8
-        let qt = QuantizationTable(baseStep: 2) // qLow.step=2
-        
+        let qt = QuantizationTable(baseStep: 2)  // qLow.step=2
+
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
         let testValues: [Int16] = [
@@ -132,15 +133,15 @@ final class QuantRoundtripTests: XCTestCase {
             3, -3, 7, -7, 11, -11, 13, -13,
             17, -17, 19, -19, 23, -23, 29, -29,
             31, -31, 37, -37, 41, -41, 43, -43,
-            47, -47, 53, -53, 59, -59, 61, -61
+            47, -47, 53, -53, 59, -59, 61, -61,
         ]
         for i in 0..<(size * size) {
             block.base[i] = testValues[i]
         }
-        
+
         quantizeSIMDSignedMapping(block, q: qt.qLow)
         dequantizeSIMDSignedMapping(block, q: qt.qLow)
-            
+
         var signMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
@@ -154,16 +155,16 @@ final class QuantRoundtripTests: XCTestCase {
                 }
             }
         }
-        XCTAssertTrue(signMismatches.isEmpty, 
-            "step=2で符号反転: " + 
-            signMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
+        XCTAssertTrue(
+            signMismatches.isEmpty,
+            "step=2で符号反転: " + signMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
     }
-    
+
     /// Mid/High量子化のSignedMappingラウンドトリップもテスト
     func testMidHighSignedMappingRoundTrip() {
         let size = 8
-        let qt = QuantizationTable(baseStep: 1) // qMid.step=2, qHigh.step=4
-        
+        let qt = QuantizationTable(baseStep: 1)  // qMid.step=2, qHigh.step=4
+
         let testValues: [Int16] = [
             10, -10, 20, -20, 30, -30, 0, 0,
             5, -5, 15, -15, 25, -25, 35, -35,
@@ -172,16 +173,16 @@ final class QuantRoundtripTests: XCTestCase {
             1, -1, 2, -2, 3, -3, 4, -4,
             5, -5, 6, -6, 7, -7, 8, -8,
             9, -9, 10, -10, 11, -11, 12, -12,
-            13, -13, 14, -14, 15, -15, 16, -16
+            13, -13, 14, -14, 15, -15, 16, -16,
         ]
-        
+
         // Mid test
         let blockMid = BlockView.allocate(width: size, height: size)
         defer { blockMid.deallocate() }
         for i in 0..<(size * size) { blockMid.base[i] = testValues[i] }
         quantizeSIMDSignedMapping(blockMid, q: qt.qMid)
         dequantizeSIMDSignedMapping(blockMid, q: qt.qMid)
-        
+
         var midSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
@@ -192,17 +193,17 @@ final class QuantRoundtripTests: XCTestCase {
                 }
             }
         }
-        XCTAssertTrue(midSignMismatches.isEmpty,
-            "Mid SignedMapping 符号反転: " + 
-            midSignMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
-        
+        XCTAssertTrue(
+            midSignMismatches.isEmpty,
+            "Mid SignedMapping 符号反転: " + midSignMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
+
         // High test
         let blockHigh = BlockView.allocate(width: size, height: size)
         defer { blockHigh.deallocate() }
         for i in 0..<(size * size) { blockHigh.base[i] = testValues[i] }
         quantizeSIMDSignedMapping(blockHigh, q: qt.qHigh)
         dequantizeSIMDSignedMapping(blockHigh, q: qt.qHigh)
-        
+
         var highSignMismatches: [(Int, Int16, Int16)] = []
         for i in 0..<(size * size) {
             let orig = testValues[i]
@@ -213,8 +214,8 @@ final class QuantRoundtripTests: XCTestCase {
                 }
             }
         }
-        XCTAssertTrue(highSignMismatches.isEmpty,
-            "High SignedMapping 符号反転: " + 
-            highSignMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
+        XCTAssertTrue(
+            highSignMismatches.isEmpty,
+            "High SignedMapping 符号反転: " + highSignMismatches.prefix(10).map { "[\($0.0)]: \($0.1)→\($0.2)" }.joined(separator: ", "))
     }
 }

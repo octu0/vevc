@@ -3,12 +3,12 @@ import XCTest
 
 /// エンコーダとデコーダのブロック配列データを直接比較
 final class BlockDataCompareTests: XCTestCase {
-    
+
     /// encodePlaneLayer32 が返す blocks (HL/LH/HH) と decodePlaneSubbands32 が返す blocks を直接比較
     func testLayer32BlocksMatch() async throws {
         let width = 640
         let height = 480
-        
+
         var img = YCbCrImage(width: width, height: height)
         for y in 0..<height {
             for x in 0..<width {
@@ -25,45 +25,47 @@ final class BlockDataCompareTests: XCTestCase {
                 img.crPlane[cy * cWidth + cx] = UInt8(clamping: 128 + (cx - cy + 256) % 20 - 10)
             }
         }
-        
+
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         let qtC = QuantizationTable(baseStep: 6)
         let pool = BlockViewPool()
-        
-        // エンコーダ: Layer32 のバイト + blocks を取得
-        var (_, encYBlocks, encCbBlocks, encCrBlocks, rel) = try await preparePlaneLayer32(pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
-        defer { rel() }
-        let layer2Bytes = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
 
-        
+        // エンコーダ: Layer32 のバイト + blocks を取得
+        var (_, encYBlocks, encCbBlocks, encCrBlocks, rel) = try await preparePlaneLayer32(
+            pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        defer { rel() }
+        let layer2Bytes = entropyEncodeLayer32(
+            dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks,
+            parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+
         // デコーダ: 同じバイトからblocks をデコード
         // decodePlaneSubbands32 は decodePlaneSubbands32(data:blockCount:) で直接呼べる
         // ただしLayer32ヘッダを解析してdataを取り出す必要がある
         var offset = 0
-        let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset)) // qtY step
-        let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset)) // qtC step
-        
+        let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset))  // qtY step
+        let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset))  // qtC step
+
         let bufYLen = Int(try readUInt32BEFromBytes(Array(layer2Bytes), offset: &offset))
         let bufY = Array(layer2Bytes[offset..<(offset + bufYLen)])
-        
+
         let rowCountY = (height + 32 - 1) / 32
         let colCountY = (width + 32 - 1) / 32
         let decYBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
-        
+
         // encYBlocks vs decYBlocks のHL/LH/HHサブバンドを比較
         XCTAssertEqual(encYBlocks.count, decYBlocks.count, "blocks count mismatch: enc=\(encYBlocks.count) dec=\(decYBlocks.count)")
-        
+
         var totalDiffHL = 0
         var totalDiffLH = 0
         var totalDiffHH = 0
         var maxDiffHL = 0
         var firstDiffBlockHL = -1
-        
+
         for i in 0..<min(encYBlocks.count, decYBlocks.count) {
             let encBlk = encYBlocks[i]
             let decBlk = decYBlocks[i]
-            
+
             let encView = encBlk
             let decView = decBlk
             let half = 16
@@ -96,8 +98,8 @@ final class BlockDataCompareTests: XCTestCase {
                     if encPtr[x] != decPtr[x] { totalDiffHH += 1 }
                 }
             }
-                        }
-        
+        }
+
         XCTAssertEqual(totalDiffHL, 0, "Layer32 Y HL不一致: \(totalDiffHL) pixels, maxDiff=\(maxDiffHL), firstBlock=\(firstDiffBlockHL)")
         XCTAssertEqual(totalDiffLH, 0, "Layer32 Y LH不一致: \(totalDiffLH) pixels")
         XCTAssertEqual(totalDiffHH, 0, "Layer32 Y HH不一致: \(totalDiffHH) pixels")

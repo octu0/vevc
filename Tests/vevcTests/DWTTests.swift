@@ -3,9 +3,8 @@ import XCTest
 
 final class DWTTests: XCTestCase {
 
-
     func testLift53Lossless() {
-        let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
+        let sizes: [Int] = [8, 16, 32]  // SIMD and scalar sizes
 
         for size in sizes {
             var data = [Int16](repeating: 0, count: size)
@@ -36,7 +35,7 @@ final class DWTTests: XCTestCase {
     }
 
     func testDWT2DLossless() {
-        let sizes: [Int] = [8, 16, 32] // SIMD and scalar sizes
+        let sizes: [Int] = [8, 16, 32]  // SIMD and scalar sizes
 
         for size in sizes {
             let block = BlockView.allocate(width: size, height: size)
@@ -62,41 +61,41 @@ final class DWTTests: XCTestCase {
             default:
                 XCTFail("Unsupported size: \(size)")
             }
-        
+
             XCTAssertEqual(Array(UnsafeBufferPointer(start: block.base, count: size * size)), originalData, "Failed for block size \(size)")
         }
     }
-    
+
     #if arch(arm64) || arch(x86_64) || arch(wasm32)
-    func testLift53SIMDLossless() {
-        let sizes: [Int] = [8, 16, 32]
+        func testLift53SIMDLossless() {
+            let sizes: [Int] = [8, 16, 32]
 
-        for size in sizes {
-            var data = [Int16](repeating: 0, count: size)
-            for i in 0..<size {
-                data[i + 0] = Int16.random(in: (-1 * 1000)...1000)
-            }
-
-            let original = data
-
-            data.withUnsafeMutableBufferPointer { ptr in
-                switch size {
-                case 8:
-                    lift53Block8(ptr, stride: 1)
-                    inverseLift53Block8(ptr, stride: 1)
-                case 16:
-                    lift53Block16(ptr, stride: 1)
-                    inverseLift53Block16(ptr, stride: 1)
-                case 32:
-                    lift53Block32(ptr, stride: 1)
-                    inverseLift53Block32(ptr, stride: 1)
-                default:
-                    XCTFail("Unsupported size: \(size)")
+            for size in sizes {
+                var data = [Int16](repeating: 0, count: size)
+                for i in 0..<size {
+                    data[i + 0] = Int16.random(in: (-1 * 1000)...1000)
                 }
-            }
 
-            XCTAssertEqual(data, original, "SIMD failed for size \(size)")
+                let original = data
+
+                data.withUnsafeMutableBufferPointer { ptr in
+                    switch size {
+                    case 8:
+                        lift53Block8(ptr, stride: 1)
+                        inverseLift53Block8(ptr, stride: 1)
+                    case 16:
+                        lift53Block16(ptr, stride: 1)
+                        inverseLift53Block16(ptr, stride: 1)
+                    case 32:
+                        lift53Block32(ptr, stride: 1)
+                        inverseLift53Block32(ptr, stride: 1)
+                    default:
+                        XCTFail("Unsupported size: \(size)")
+                    }
+                }
+
+                XCTAssertEqual(data, original, "SIMD failed for size \(size)")
+            }
         }
-    }
     #endif
 }

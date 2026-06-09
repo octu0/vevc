@@ -3,7 +3,7 @@ import XCTest
 
 /// 4-way rANS エンコーダ/デコーダの各laneのstream消費量を直接比較
 final class RansStreamTraceTests: XCTestCase {
-    
+
     func testStreamConsumptionPerLane() async throws {
         let pool = BlockViewPool()
         // 実DWTデータのpairsを生成
@@ -40,13 +40,13 @@ final class RansStreamTraceTests: XCTestCase {
             blockEncode16V(encoder: &encoder, block: subs.hl)
             blockEncode16H(encoder: &encoder, block: subs.lh)
             blockEncode16H(encoder: &encoder, block: subs.hh)
-                }
-        
+        }
+
         let pairs = encoder.pairs
         let pairCount = pairs.count
-        
+
         print("=== Total pairs: \(pairCount) ===")
-        
+
         // --- エンコーダ側：各laneのstream.count変化を追跡 ---
         let chunkBase = pairCount / 4
         let chunkRemainder = pairCount % 4
@@ -54,14 +54,14 @@ final class RansStreamTraceTests: XCTestCase {
         for i in 0..<4 {
             chunkStarts[i + 1] = chunkStarts[i] + chunkBase + (i < chunkRemainder ? 1 : 0)
         }
-        
+
         // tokenization
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
         var runTokenCounts = [Int](repeating: 0, count: 64)
         var valTokenCounts = [Int](repeating: 0, count: 64)
-        
+
         for lane in 0..<4 {
             let start = chunkStarts[lane]
             let end = chunkStarts[lane + 1]
@@ -78,48 +78,48 @@ final class RansStreamTraceTests: XCTestCase {
             }
         }
         for lane in 0..<4 { chunkBypassWriters[lane].flush() }
-        
+
         var runModel = rANSModel()
         runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
         var valModel = rANSModel()
         valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
-        
+
         // エンコード with stream tracking
         var enc = Interleaved4rANSEncoder()
         var encStreamCountPerLane = [Int](repeating: 0, count: 4)
-        
+
         for lane in stride(from: 3, through: 0, by: -1) {
             let streamCountBefore = enc.stream.count
-            
+
             let runTokens = chunkRunTokens[lane]
             let valTokens = chunkValTokens[lane]
             let pairEnd = valTokens.count
-            
+
             for i in stride(from: pairEnd - 1, through: 0, by: -1) {
                 let vt = valTokens[i]
                 enc.encodeSymbol(lane: lane, cumFreq: valModel.tokenCumFreqs[Int(vt)], freq: valModel.tokenFreqs[Int(vt)])
                 let rt = runTokens[i]
                 enc.encodeSymbol(lane: lane, cumFreq: runModel.tokenCumFreqs[Int(rt)], freq: runModel.tokenFreqs[Int(rt)])
             }
-            
+
             encStreamCountPerLane[lane] = enc.stream.count - streamCountBefore
         }
-        
+
         enc.flush()  // adds 8 words (4 lanes * 2 words)
         let bitstream = enc.getBitstream()
-        
+
         print("=== Encoder stream per lane: \(encStreamCountPerLane) ===")
         print("=== Total stream words: \(enc.stream.count) (overflow: \(enc.stream.count - 8)) ===")
         print("=== Bitstream bytes: \(bitstream.count) ===")
-        
+
         // --- デコーダ側：各laneのreadWord回数を追跡 ---
         // Interleaved4rANSDecoderを直接使わず、advanceSymbolの各ステップでoffset変化を追跡
-        
+
         var decStates: (UInt32, UInt32, UInt32, UInt32) = (0, 0, 0, 0)
         var padded = bitstream
         padded.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0])
         var offset = 0
-        
+
         // state読み込み
         func readWord() -> UInt32 {
             if offset + 1 < padded.count {
@@ -130,7 +130,7 @@ final class RansStreamTraceTests: XCTestCase {
             }
             return 0
         }
-        
+
         func readState(_ off: Int) -> UInt32 {
             let b0 = UInt32(padded[off])
             let b1 = UInt32(padded[off + 1])
@@ -138,31 +138,31 @@ final class RansStreamTraceTests: XCTestCase {
             let b3 = UInt32(padded[off + 3])
             return ((b0 << 8) | b1) << 16 | ((b2 << 8) | b3)
         }
-        
+
         decStates.0 = readState(0)
         decStates.1 = readState(4)
         decStates.2 = readState(8)
         decStates.3 = readState(12)
         offset = 16
-        
+
         print("=== Decoder initial states: \(decStates) ===")
         print("=== Encoder final states: \(enc.states) ===")
         XCTAssertEqual(decStates.0, enc.states.0, "state.0")
         XCTAssertEqual(decStates.1, enc.states.1, "state.1")
         XCTAssertEqual(decStates.2, enc.states.2, "state.2")
         XCTAssertEqual(decStates.3, enc.states.3, "state.3")
-        
+
         var decReadWordsPerLane = [Int](repeating: 0, count: 4)
         let mask = rANSScale - 1
-        
+
         // 復元されたtokenFreqsとcumFreqsでモデル再構築
         let decRunModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runModel.tokenFreqs)
         let decValModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valModel.tokenFreqs)
-        
+
         for lane in 0..<4 {
             let chunkSize = chunkStarts[lane + 1] - chunkStarts[lane]
             let offsetBefore = offset
-            
+
             for _ in 0..<chunkSize {
                 // decode run token
                 let cfRun: UInt32
@@ -173,7 +173,7 @@ final class RansStreamTraceTests: XCTestCase {
                 default: cfRun = decStates.3 & mask
                 }
                 let rtInfo = decRunModel.findToken(cf: cfRun)
-                
+
                 // advance run
                 switch lane {
                 case 0:
@@ -221,7 +221,7 @@ final class RansStreamTraceTests: XCTestCase {
                         }
                     }
                 }
-                
+
                 // decode val token
                 let cfVal: UInt32
                 switch lane {
@@ -231,7 +231,7 @@ final class RansStreamTraceTests: XCTestCase {
                 default: cfVal = decStates.3 & mask
                 }
                 let vtInfo = decValModel.findToken(cf: cfVal)
-                
+
                 // advance val
                 switch lane {
                 case 0:
@@ -280,16 +280,17 @@ final class RansStreamTraceTests: XCTestCase {
                     }
                 }
             }
-            
+
             let offsetAfter = offset
             let bytesConsumed = offsetAfter - offsetBefore
             print("=== Lane[\(lane)]: readWords=\(decReadWordsPerLane[lane]) bytesConsumed=\(bytesConsumed) encStreamWords=\(encStreamCountPerLane[lane]) ===")
         }
-        
-        // 各laneのreadWords と encStreamCountを比較  
+
+        // 各laneのreadWords と encStreamCountを比較
         for lane in 0..<4 {
-            XCTAssertEqual(decReadWordsPerLane[lane], encStreamCountPerLane[lane], 
-                          "Lane[\(lane)] stream mismatch: dec.readWords=\(decReadWordsPerLane[lane]) enc.streamWords=\(encStreamCountPerLane[lane])")
+            XCTAssertEqual(
+                decReadWordsPerLane[lane], encStreamCountPerLane[lane],
+                "Lane[\(lane)] stream mismatch: dec.readWords=\(decReadWordsPerLane[lane]) enc.streamWords=\(encStreamCountPerLane[lane])")
         }
     }
 }

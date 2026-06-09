@@ -2,9 +2,9 @@ import XCTest
 @testable import vevc
 
 final class VevcTests: XCTestCase {
-    
+
     // MARK: - PSNR計算ヘルパー
-    
+
     /// 2つのUInt8配列間のPSNRを計算する
     private func calculatePSNR(original: [UInt8], decoded: [UInt8]) -> Double {
         let count = min(original.count, decoded.count)
@@ -15,10 +15,10 @@ final class VevcTests: XCTestCase {
             mse += diff * diff
         }
         mse /= Double(count)
-        if mse < 0.0001 { return 100.0 } // ほぼ完全一致
+        if mse < 0.0001 { return 100.0 }  // ほぼ完全一致
         return 10.0 * log10(255.0 * 255.0 / mse)
     }
-    
+
     /// テスト用のグラデーション画像を生成する
     private func generateGradientImage(width: Int, height: Int, seed: Int = 0) -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
@@ -37,7 +37,7 @@ final class VevcTests: XCTestCase {
         }
         return img
     }
-    
+
     // MARK: - 既存テスト
 
     func testEncodeDecodeRoundTrip() async throws {
@@ -51,7 +51,7 @@ final class VevcTests: XCTestCase {
                 img1.crPlane[(y / 2) * 32 + (x / 2)] = 128
             }
         }
-        
+
         var img2 = YCbCrImage(width: 64, height: 64)
         for y in 0..<64 {
             for x in 0..<64 {
@@ -62,25 +62,25 @@ final class VevcTests: XCTestCase {
                 img2.crPlane[(y / 2) * 32 + (x / 2)] = 128
             }
         }
-        
+
         let images = [img1, img2]
-        
+
         let encoder = VEVCEncoder(width: 64, height: 64, maxbitrate: 1000 * 1024)
         let encoded = try await encoder.encodeToData(images: images)
         XCTAssertFalse(encoded.isEmpty)
-        
+
         let decoded = try await Decoder().decode(data: encoded)
         XCTAssertEqual(decoded.count, 2)
         XCTAssertEqual(decoded[0].width, 64)
         XCTAssertEqual(decoded[0].height, 64)
         XCTAssertEqual(decoded[1].width, 64)
         XCTAssertEqual(decoded[1].height, 64)
-        
+
         // Ensure the base frame is preserved
         XCTAssertEqual(decoded[0].yPlane[0], 0, accuracy: 15)
-        XCTAssertEqual(decoded[0].yPlane[64*63+63], 126, accuracy: 15)
-        
-        // Ensure difference frame contains high/mid frequency components but note that large static color shifts (+10) 
+        XCTAssertEqual(decoded[0].yPlane[64 * 63 + 63], 126, accuracy: 15)
+
+        // Ensure difference frame contains high/mid frequency components but note that large static color shifts (+10)
         // will be dropped from the difference frame due to LL subband omission.
         // decoded[1].yPlane[0] will be closer to 0 than 10 because +10 shift is low-frequency LL.
         // We will assert that it decodes without crashing and maintains relative detail correctness without strict exact matching of DC offset.
@@ -88,16 +88,16 @@ final class VevcTests: XCTestCase {
     }
     func testDecodeBoundsCheck() async throws {
         let pool = BlockViewPool()
-        // Construct a malformed input: 
+        // Construct a malformed input:
         // 3 bytes "VEL" + 1 byte GOP + 6 * 2 bytes GMV = 16 bytes header
         // Then readPlane() expects 4 bytes length.
         // Total 20 bytes.
-        var malformed: [UInt8] = [0x56, 0x45, 0x4C, 0x01] // VEL, GOP=1
-        malformed += [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] // 6 GMVs (all 0)
-        
+        var malformed: [UInt8] = [0x56, 0x45, 0x4C, 0x01]  // VEL, GOP=1
+        malformed += [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]  // 6 GMVs (all 0)
+
         // Plane length field: say 100 bytes, but actual data ends here.
-        malformed += [0, 0, 0, 100] 
-        
+        malformed += [0, 0, 0, 100]
+
         do {
             _ = try await vevc.decodeSpatialLayers(r: malformed, pool: pool, maxLayer: 2, dx: 64, dy: 64, roundOffset: 0)
             XCTFail("Should have thrown DecodeError.insufficientData")
@@ -115,30 +115,30 @@ final class VevcTests: XCTestCase {
             XCTFail("Threw wrong error: \(error)")
         }
     }
-    
+
     // MARK: - 大きな画像での品質テスト
-    
+
     /// I-Frameのみ: 640x480の画像1枚のエンコード→デコードでPSNRが25dB以上
     func testLargeImageIFrameQuality() async throws {
         let width = 640
         let height = 480
         let img = generateGradientImage(width: width, height: height, seed: 42)
-        
+
         let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024)
         let encoded = try await encoder.encodeToData(images: [img])
         XCTAssertFalse(encoded.isEmpty, "エンコード結果が空")
-        
+
         let decoded = try await Decoder().decode(data: encoded)
         XCTAssertEqual(decoded.count, 1, "デコード結果のフレーム数が1でない")
         XCTAssertEqual(decoded[0].width, width)
         XCTAssertEqual(decoded[0].height, height)
-        
+
         let psnrY = calculatePSNR(original: img.yPlane, decoded: decoded[0].yPlane)
         XCTAssertGreaterThan(psnrY, 25.0, "I-Frame Y-PSNR(\(String(format: "%.1f", psnrY))dB)が25dBを下回っている: ノイズが発生している可能性")
-        
+
         let psnrCb = calculatePSNR(original: img.cbPlane, decoded: decoded[0].cbPlane)
         XCTAssertGreaterThan(psnrCb, 20.0, "I-Frame Cb-PSNR(\(String(format: "%.1f", psnrCb))dB)が20dBを下回っている")
-        
+
         let psnrCr = calculatePSNR(original: img.crPlane, decoded: decoded[0].crPlane)
         XCTAssertGreaterThan(psnrCr, 20.0, "I-Frame Cr-PSNR(\(String(format: "%.1f", psnrCr))dB)が20dBを下回っている")
     }
@@ -148,33 +148,32 @@ final class VevcTests: XCTestCase {
         let width = 1920
         let height = 1080
         let frameCount = 4
-        
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+
+        let encoder = LayersEncodeActor(
+            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = StreamingDecoderActor(width: width, height: height)
-        
+
         for i in 0..<frameCount {
             let img = generateGradientImage(width: width, height: height, seed: i * 5)
             let chunk = try await encoder.encodeFrame(image: img)
             XCTAssertFalse(chunk.isEmpty, "フレーム\(i): エンコード結果が空")
-            
+
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
             XCTAssertEqual(decodedImg.width, width)
             XCTAssertEqual(decodedImg.height, height)
-            
+
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
             let frameType = (i == 0) ? "I" : "P"
             XCTAssertGreaterThan(psnrY, 20.0, "フレーム\(i)(\(frameType)-Frame) Y-PSNR(\(String(format: "%.1f", psnrY))dB)が20dBを下回っている")
         }
     }
 
-
-    
     /// P-Frame最小再現テスト: 同一画像の繰り返しではP-Frameの品質劣化は発生しないことを確認
     func testIdenticalFramesPFrameQuality() async throws {
         let width = 640
         let height = 480
         let frameCount = 5
-        
+
         // 複雑なパターンの固定画像
         var baseImg = YCbCrImage(width: width, height: height)
         for y in 0..<height {
@@ -192,29 +191,31 @@ final class VevcTests: XCTestCase {
                 baseImg.crPlane[idx] = 128
             }
         }
-        
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+
+        let encoder = LayersEncodeActor(
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = StreamingDecoderActor(width: width, height: height)
-        
+
         for i in 0..<frameCount {
             let chunk = try await encoder.encodeFrame(image: baseImg)
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
-            
+
             let psnrY = calculatePSNR(original: baseImg.yPlane, decoded: decodedImg.yPlane)
             let frameType = (i == 0) ? "I" : "P"
             XCTAssertGreaterThan(psnrY, 24.0, "同一画像の\(frameType)-Frame(\(i)) Y-PSNR(\(String(format: "%.1f", psnrY))dB)が24.0dBを下回っている")
         }
     }
-    
+
     /// P-Frame品質テスト: 小さな変化のみのP-Frame
     func testSmallChangePFrameQuality() async throws {
         let width = 640
         let height = 480
         let frameCount = 5
-        
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+
+        let encoder = LayersEncodeActor(
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
         let decoder = StreamingDecoderActor(width: width, height: height)
-        
+
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)
             for y in 0..<height {
@@ -233,23 +234,23 @@ final class VevcTests: XCTestCase {
                     img.crPlane[idx] = 128
                 }
             }
-            
+
             let chunk = try await encoder.encodeFrame(image: img)
             let decodedImg = try await decoder.decodeNextFrame(chunk: chunk)!
-            
+
             let psnrY = calculatePSNR(original: img.yPlane, decoded: decodedImg.yPlane)
             let frameType = (i == 0) ? "I" : "P"
             XCTAssertGreaterThan(psnrY, 20.0, "微小変化\(frameType)-Frame(\(i)) Y-PSNR(\(String(format: "%.1f", psnrY))dB)が20dBを下回っている")
         }
     }
-    
+
     /// 低レベルテスト: encodeSpatialLayers→decodeSpatialLayersの直接呼び出しでP-Frame品質を確認
     /// 量子化ステップを1（最小）に設定し、量子化による劣化を排除して処理フローの正しさのみを検証
     func testSpatialLayersDirectPFrame() async throws {
         let pool = BlockViewPool()
         let width = 640
         let height = 480
-        
+
         // フレーム0とフレーム1の画像を生成（大きな変化あり）
         func makeImage(seed: Int) -> YCbCrImage {
             var img = YCbCrImage(width: width, height: height)
@@ -281,36 +282,36 @@ final class VevcTests: XCTestCase {
             }
             return img
         }
-        
-        let img0 = makeImage(seed: 0) // I-Frame
-        let img3 = makeImage(seed: 3) // P-Frame（テストで14.4dBだったフレーム）
-        
+
+        let img0 = makeImage(seed: 0)  // I-Frame
+        let img3 = makeImage(seed: 3)  // P-Frame（テストで14.4dBだったフレーム）
+
         let pd0 = toPlaneData420(image: img0, pool: BlockViewPool()).0
         let pd3 = toPlaneData420(image: img3, pool: BlockViewPool()).0
-        
-        let qtY = QuantizationTable(baseStep: 1) // 最小量子化ステップ
+
+        let qtY = QuantizationTable(baseStep: 1)  // 最小量子化ステップ
         let qtC = QuantizationTable(baseStep: 1)
-        
+
         // I-Frame: encode→reconstructを取得
-        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(
+            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
         defer { releaseI() }
-        
+
         // I-Frame: decode
         let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
         let iPd = PlaneData420(img16: iDecoded)
-        
+
         // I-Frame品質確認
         let iImg = iPd.toYCbCr()
         let iPsnr = calculatePSNR(original: img0.yPlane, decoded: iImg.yPlane)
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
-        
-        let (pBytes, _, _, _, releaseP) = try await encodeSpatialLayers(pd: pd3, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+
+        let (pBytes, _, _, _, releaseP) = try await encodeSpatialLayers(
+            pd: pd3, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
         defer { releaseP() }
-        
+
         // P-Frameのresidualの検証（省略して正常終了とする）
         XCTAssertFalse(pBytes.isEmpty)
     }
-    
 
 }
-

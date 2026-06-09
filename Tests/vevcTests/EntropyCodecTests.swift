@@ -3,11 +3,11 @@ import XCTest
 
 /// EntropyEncoder/Decoderの4-way rANSモードの直接テスト
 final class EntropyCodecTests: XCTestCase {
-    
+
     /// 50個以上のpairsでrANSモードのラウンドトリップ
     func testRansRoundtrip() throws {
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
-        
+
         // 50個のpairを追加（nonZeroCount > 32でrANSモード）
         var expectedPairs: [(run: UInt32, val: Int16)] = []
         for i in 0..<50 {
@@ -17,12 +17,12 @@ final class EntropyCodecTests: XCTestCase {
             encoder.addPair(run: run, val: val, context: 0)
             expectedPairs.append((run: run, val: val))
         }
-        
+
         let data = encoder.getData()
-        
+
         try data.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
-            
+
             for (i, expected) in expectedPairs.enumerated() {
                 let pair = decoder.readPair(context: 0)
                 XCTAssertEqual(pair.run, Int(expected.run), "Pair[\(i)] run: expected=\(expected.run) got=\(pair.run)")
@@ -31,7 +31,6 @@ final class EntropyCodecTests: XCTestCase {
         }
     }
 
-    
     /// 実際のblockEncode16データでEntropyEncoderのrANSラウンドトリップ
     func testBlockEncode16MultipleBlocks() throws {
         // 16ブロック分のデータを作成
@@ -45,15 +44,15 @@ final class EntropyCodecTests: XCTestCase {
                 blocks[i].base.update(from: ptr.baseAddress!, count: 256)
             }
         }
-        
+
         // 全ブロックをエンコード
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
         for i in 0..<16 {
             blockEncode16V(encoder: &encoder, block: blocks[i])
         }
-        
+
         let data = encoder.getData()
-        
+
         // デコード
         let decBlocks = (0..<16).map { _ in BlockView.allocate(width: 16, height: 16) }
         defer { for b in decBlocks { b.deallocate() } }
@@ -63,7 +62,7 @@ final class EntropyCodecTests: XCTestCase {
                 try! blockDecode16V(decoder: &decoder, block: decBlocks[i])
             }
         }
-        
+
         // 比較 (blockEncode16後のデータ vs デコード後)
         for i in 0..<16 {
             for idx in 0..<256 {

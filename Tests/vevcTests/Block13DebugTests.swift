@@ -3,11 +3,11 @@ import XCTest
 
 /// 128x128 block13 の不一致を詳細分析するテスト
 final class Block13DebugTests: XCTestCase {
-    
+
     func testBlock13Detail() async throws {
         let width = 128
         let height = 128
-        
+
         var img = YCbCrImage(width: width, height: height)
         for y in 0..<height {
             for x in 0..<width {
@@ -24,20 +24,20 @@ final class Block13DebugTests: XCTestCase {
                 img.crPlane[cy * cW + cx] = 128
             }
         }
-        
+
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
-        
+
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
-        
+
         // エンコード前の各ブロックのisZero/split判定を確認
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        
+
         var blockInfos: [(isZero: Bool, forceSplit: Bool)] = []
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
@@ -47,33 +47,33 @@ final class Block13DebugTests: XCTestCase {
             }
             blockInfos.append((isZero: isZero, forceSplit: forceSplit))
         }
-        
+
         print("=== Block Info ===")
         for (i, info) in blockInfos.enumerated() {
             print("  block[\(i)]: isZero=\(info.isZero) forceSplit=\(info.forceSplit)")
         }
-        
+
         // isEffectivelyZeroチェックがblockのデータを変更するため、元のブロックを再作成
         var (blocks2, _, rel2) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel2() }
         for i in blocks2.indices {
             evaluateQuantizeLayer32(view: blocks2[i], qt: qtY)
         }
-        
+
         // encodePlaneSubbands32
         let data = encodePlaneSubbands32(blocks: &blocks2, zeroThreshold: safeThreshold, parentBlocks: nil)
-        
-        // decodePlaneSubbands32  
+
+        // decodePlaneSubbands32
         let decBlocks = try decodePlaneSubbands32(data: data, pool: pool, blockCount: blocks2.count)
-        
+
         // block 13 の詳細比較
         for bi in [12, 13, 14] {
             let encBlk = blocks2[bi]
             let decBlk = decBlocks[bi]
-            
+
             var diffHL = 0, diffLH = 0, diffHH = 0
             var firstDiffDetail = ""
-            
+
             let encView = encBlk
             let decView = decBlk
             // HL
@@ -105,14 +105,14 @@ final class Block13DebugTests: XCTestCase {
                     if ev != dv { diffHH += 1 }
                 }
             }
-                            
+
             print("=== Block[\(bi)] ===")
             print("  HL diff: \(diffHL), LH diff: \(diffLH), HH diff: \(diffHH)")
             if firstDiffDetail.isEmpty != true {
                 print("  First diff: \(firstDiffDetail)")
             }
         }
-        
+
         // 全ブロックの不一致カウント
         var failBlocks: [Int] = []
         for bi in 0..<blocks2.count {
@@ -128,11 +128,11 @@ final class Block13DebugTests: XCTestCase {
                     if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { hasDiff = true }
                 }
             }
-                            if hasDiff { failBlocks.append(bi) }
+            if hasDiff { failBlocks.append(bi) }
         }
-        
+
         print("=== Total fail blocks: \(failBlocks) ===")
-        
+
         XCTAssertEqual(failBlocks.count, 0, "Fail blocks: \(failBlocks)")
     }
 }

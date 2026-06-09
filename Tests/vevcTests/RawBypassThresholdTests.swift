@@ -25,8 +25,8 @@ struct RawBypassThresholdTests {
         // Write a dummy hasNonZero bypass bit to match real encoding pattern
         encoder.encodeBypass(binVal: 1)
         // Write dummy LSCP coordinates
-        encoder.encodeBypass(binVal: 1) // exp-golomb for lscpX=0
-        encoder.encodeBypass(binVal: 1) // exp-golomb for lscpY=0
+        encoder.encodeBypass(binVal: 1)  // exp-golomb for lscpX=0
+        encoder.encodeBypass(binVal: 1)  // exp-golomb for lscpY=0
 
         for pair in pairs {
             encoder.addPair(run: pair.run, val: pair.val, context: 0)
@@ -45,9 +45,9 @@ struct RawBypassThresholdTests {
         pairs.reserveCapacity(count)
         // Mimic real distribution: mostly run=0 with small values
         for i in 0..<count {
-            let run: UInt32 = (i % 3 == 0) ? 1 : 0 // ~33% have run=1, rest run=0
+            let run: UInt32 = (i % 3 == 0) ? 1 : 0  // ~33% have run=1, rest run=0
             let valAbs: Int16 = Int16(1 + (i % 4))  // values 1-4
-            let val: Int16 = (i % 5 == 0) ? -valAbs : valAbs // ~20% negative
+            let val: Int16 = (i % 5 == 0) ? -valAbs : valAbs  // ~20% negative
             pairs.append((run: run, val: val))
         }
         return pairs
@@ -58,8 +58,8 @@ struct RawBypassThresholdTests {
         var pairs: [(run: UInt32, val: Int16)] = []
         pairs.reserveCapacity(count)
         for i in 0..<count {
-            let run: UInt32 = UInt32(3 + (i % 8)) // runs 3-10
-            let val: Int16 = (i % 2 == 0) ? 1 : -1 // mostly ±1
+            let run: UInt32 = UInt32(3 + (i % 8))  // runs 3-10
+            let val: Int16 = (i % 2 == 0) ? 1 : -1  // mostly ±1
             pairs.append((run: run, val: val))
         }
         return pairs
@@ -79,9 +79,9 @@ struct RawBypassThresholdTests {
         let data = encoder.getData()
 
         // getData() structure: [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
-        let offset = 0 // bypassLen is at the beginning before Z-order
-        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
-        let modeByteOffset = offset + 4 + bypassLen + 4 // skip bypassLen(4) + bypassData + coeffCount(4)
+        let offset = 0  // bypassLen is at the beginning before Z-order
+        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16 | UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3]))
+        let modeByteOffset = offset + 4 + bypassLen + 4  // skip bypassLen(4) + bypassData + coeffCount(4)
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         #expect(data[modeByteOffset] == 0x80, "Should be raw bypass mode (0x80) for \(pairs.count) pairs")
     }
@@ -96,8 +96,8 @@ struct RawBypassThresholdTests {
         encoder.flush()
         let data = encoder.getData()
 
-        let offset = 0 // bypassLen is at the beginning before Z-order
-        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset+1]) << 16 | UInt32(data[offset+2]) << 8 | UInt32(data[offset+3]))
+        let offset = 0  // bypassLen is at the beginning before Z-order
+        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16 | UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3]))
         let modeByteOffset = offset + 4 + bypassLen + 4
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         let modeByte = data[modeByteOffset]
@@ -124,13 +124,15 @@ struct RawBypassThresholdTests {
         // Verify monotonic relationship: more pairs should generally produce more data
         // (unless rANS compression ratio improves with more data, which is expected)
         for i in 1..<results.count {
-            let prevBpp = Double(results[i-1].size * 8) / Double(results[i-1].count)
+            let prevBpp = Double(results[i - 1].size * 8) / Double(results[i - 1].count)
             let currBpp = Double(results[i].size * 8) / Double(results[i].count)
             // rANS should have better bits-per-pair for larger counts
             // The crossover point is where rANS starts having lower bpp than raw bypass
-            if 32 < results[i].count && results[i-1].count <= 32 {
+            if 32 < results[i].count && results[i - 1].count <= 32 {
                 // This is the boundary where mode switches from raw to rANS
-                print("  Crossover: count=\(results[i-1].count) bpp=\(String(format: "%.2f", prevBpp)) (raw) -> count=\(results[i].count) bpp=\(String(format: "%.2f", currBpp)) (rANS)")
+                print(
+                    "  Crossover: count=\(results[i-1].count) bpp=\(String(format: "%.2f", prevBpp)) (raw) -> count=\(results[i].count) bpp=\(String(format: "%.2f", currBpp)) (rANS)"
+                )
             }
         }
 
@@ -168,9 +170,9 @@ struct RawBypassThresholdTests {
 
             // Encode
             var encoder = EntropyEncoder<StaticEntropyModel>()
-            encoder.encodeBypass(binVal: 1) // hasNonZero
-            encoder.encodeBypass(binVal: 1) // lscpX exp-golomb terminator
-            encoder.encodeBypass(binVal: 1) // lscpY exp-golomb terminator
+            encoder.encodeBypass(binVal: 1)  // hasNonZero
+            encoder.encodeBypass(binVal: 1)  // lscpX exp-golomb terminator
+            encoder.encodeBypass(binVal: 1)  // lscpY exp-golomb terminator
             for pair in originalPairs {
                 encoder.addPair(run: pair.run, val: pair.val, context: 0)
             }
@@ -182,16 +184,18 @@ struct RawBypassThresholdTests {
                 var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
                 let hasNonZero = try decoder.decodeBypass()
                 #expect(hasNonZero == 1, "hasNonZero should be 1")
-            let _ = try decoder.decodeBypass() // lscpX
-            let _ = try decoder.decodeBypass() // lscpY
+                let _ = try decoder.decodeBypass()  // lscpX
+                let _ = try decoder.decodeBypass()  // lscpY
 
-            for (idx, original) in originalPairs.enumerated() {
-                let decoded = decoder.readPair(context: 0)
-                #expect(decoded.run == Int(original.run),
-                       "Roundtrip mismatch at pair \(idx)/\(count): run expected=\(String(original.run)) got=\(String(decoded.run))")
-                #expect(decoded.val == original.val,
-                       "Roundtrip mismatch at pair \(idx)/\(count): val expected=\(String(original.val)) got=\(String(decoded.val))")
-            }
+                for (idx, original) in originalPairs.enumerated() {
+                    let decoded = decoder.readPair(context: 0)
+                    #expect(
+                        decoded.run == Int(original.run),
+                        "Roundtrip mismatch at pair \(idx)/\(count): run expected=\(String(original.run)) got=\(String(decoded.run))")
+                    #expect(
+                        decoded.val == original.val,
+                        "Roundtrip mismatch at pair \(idx)/\(count): val expected=\(String(original.val)) got=\(String(decoded.val))")
+                }
             }
         }
     }

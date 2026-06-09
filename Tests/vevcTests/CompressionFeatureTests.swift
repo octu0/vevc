@@ -52,20 +52,20 @@ final class CompressionFeatureTests: XCTestCase {
                 ptr[x] = blockData[y * size + x]
             }
         }
-    
+
         blockEncode(encoder: &encoder, block: block, size: size)
         encoder.flush()
 
         let encodedData = encoder.getData()
-        
+
         let outBlock = BlockView.allocate(width: size, height: size)
         defer { outBlock.deallocate() }
-        
+
         try encodedData.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             try blockDecode(decoder: &decoder, block: outBlock, size: size)
         }
-    
+
         for y in 0..<size {
             let ptr = outBlock.rowPointer(y: y)
             for x in 0..<size {

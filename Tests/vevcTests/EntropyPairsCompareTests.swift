@@ -3,11 +3,11 @@ import XCTest
 
 /// EntropyEncoder/Decoder のpairsを128x128 PD420データで直接比較
 final class EntropyPairsCompareTests: XCTestCase {
-    
+
     func testEntropyPairsRoundtrip_128x128() async throws {
         let width = 128
         let height = 128
-        
+
         var img = YCbCrImage(width: width, height: height)
         for y in 0..<height {
             for x in 0..<width {
@@ -24,23 +24,23 @@ final class EntropyPairsCompareTests: XCTestCase {
                 img.crPlane[cy * cW + cx] = 128
             }
         }
-        
+
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
         let qtY = QuantizationTable(baseStep: 2)
         let pool = BlockViewPool()
-        
+
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }
         for i in blocks.indices {
             evaluateQuantizeLayer32(view: blocks[i], qt: qtY)
         }
-        
+
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        
+
         // encodePlaneSubbands32 と同じフラグ判定を行い、encode16タスクを構築
         var bwFlags = BypassWriter()
         var tasks: [(Int, EncodeTask32)] = []
-        
+
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero {
@@ -54,16 +54,20 @@ final class EntropyPairsCompareTests: XCTestCase {
                 clearBlockRegion(base: hlView.base, width: hlView.width, height: hlView.height, stride: hlView.stride)
                 clearBlockRegion(base: lhView.base, width: lhView.width, height: lhView.height, stride: lhView.stride)
                 clearBlockRegion(base: hhView.base, width: hhView.width, height: hhView.height, stride: hhView.stride)
-                        } else {
+            } else {
                 bwFlags.writeBit(false)
-                
+
                 let forceSplit = shouldSplit32WithoutLL(data: blocks[i].base)
                 if forceSplit {
                     bwFlags.writeBit(true)
-                    bwFlags.writeBit(false); bwFlags.writeBit(false)
-                    bwFlags.writeBit(false); bwFlags.writeBit(false)
-                    bwFlags.writeBit(false); bwFlags.writeBit(false)
-                    bwFlags.writeBit(false); bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
+                    bwFlags.writeBit(false)
                     tasks.append((i, .split8(true, true, true, true)))
                 } else {
                     bwFlags.writeBit(false)
@@ -72,10 +76,10 @@ final class EntropyPairsCompareTests: XCTestCase {
             }
         }
         bwFlags.flush()
-        
+
         // エンコーダ: EntropyEncoderを直接使って blockEncode16 を呼ぶ
         var encoder = EntropyEncoder<AdaptiveEntropyModel>()
-        
+
         for (i, task) in tasks {
             let view = blocks[i]
             let subs = getSubbands32(view: view)
@@ -107,16 +111,16 @@ final class EntropyPairsCompareTests: XCTestCase {
                 }
             }
         }
-        
+
         // エンコーダのpairとbypassを保存
         let encPairs = encoder.pairs
         encoder.flush()
         let encBypassBytes = encoder.bypassWriter.bytes
         let encCoeffCount = encoder.coeffCount
-        
+
         // getData()でバイト列を取得
         let entropyData = encoder.getData()
-        
+
         // デコーダでpairsを復元
         try entropyData.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
@@ -125,16 +129,16 @@ final class EntropyPairsCompareTests: XCTestCase {
                 let pair = decoder.readPair(context: encoder.pairs[i].context)
                 decPairs.append(pair)
             }
-            
+
             print("=== EntropyEncoder pairs count: \(encPairs.count) ===")
             print("=== EntropyDecoder pairs count: \(decPairs.count) ===")
             print("=== coeffCount: \(encCoeffCount) ===")
             print("=== encBypassBytes: \(encBypassBytes.count) ===")
             print("=== entropyData: \(entropyData.count) bytes ===")
-            
+
             // pairs数の比較
             XCTAssertEqual(encPairs.count, decPairs.count, "pairs count mismatch: enc=\(encPairs.count) dec=\(decPairs.count)")
-            
+
             // 各pairの比較
             var firstDiff = -1
             for i in 0..<min(encPairs.count, decPairs.count) {
@@ -145,15 +149,15 @@ final class EntropyPairsCompareTests: XCTestCase {
                     }
                 }
             }
-            
+
             XCTAssertEqual(firstDiff, -1, "Pairs differ starting at index \(firstDiff)")
         }
-        
+
         // bypassのデコード比較（blockDecode16内のdecodeBypass呼び出しを再現）
         let decBlocks = (0..<blocks.count).map { _ in BlockView.allocate(width: 32, height: 32) }
         try entropyData.withUnsafeBufferPointer { ptr in
             var decoder2 = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
-            
+
             for (i, task) in tasks {
                 let view = decBlocks[i]
                 let subs = getSubbands32(view: view)
@@ -201,7 +205,7 @@ final class EntropyPairsCompareTests: XCTestCase {
                 }
             }
         }
-        
+
         // HL/LH/HH比較
         var totalDiff = 0
         var firstDiffBlock = -1
@@ -212,13 +216,16 @@ final class EntropyPairsCompareTests: XCTestCase {
             let decView = decBlk
             for y in 0..<16 {
                 for x in 0..<16 {
-                    if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] { totalDiff += 1; if firstDiffBlock < 0 { firstDiffBlock = bi } }
+                    if encView.base.advanced(by: y * 32 + 16)[x] != decView.base.advanced(by: y * 32 + 16)[x] {
+                        totalDiff += 1
+                        if firstDiffBlock < 0 { firstDiffBlock = bi }
+                    }
                     if encView.base.advanced(by: (y + 16) * 32)[x] != decView.base.advanced(by: (y + 16) * 32)[x] { totalDiff += 1 }
                     if encView.base.advanced(by: (y + 16) * 32 + 16)[x] != decView.base.advanced(by: (y + 16) * 32 + 16)[x] { totalDiff += 1 }
                 }
             }
         }
-        
+
         if 0 < totalDiff {
             XCTFail("Direct entropy roundtrip: totalDiff=\(totalDiff) firstDiffBlock=\(firstDiffBlock)")
         }

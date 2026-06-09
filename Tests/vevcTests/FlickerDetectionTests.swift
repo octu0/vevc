@@ -75,7 +75,7 @@ final class FlickerDetectionTests: XCTestCase {
         for y in 0..<height {
             for x in 0..<width {
                 let srcX = (x + shift) % width
-                let val = UInt8((srcX * 200) / width + 28) // 28..228の範囲
+                let val = UInt8((srcX * 200) / width + 28)  // 28..228の範囲
                 img.yPlane[y * width + x] = val
             }
         }
@@ -153,7 +153,7 @@ final class FlickerDetectionTests: XCTestCase {
         let ssimRange = maxSSIM - minSSIM
 
         // P-frameのサイズ変動
-        let pFrameSizes = Array(frameSizes.dropFirst()) // 最初のI-frameを除く
+        let pFrameSizes = Array(frameSizes.dropFirst())  // 最初のI-frameを除く
         let meanSize = Double(pFrameSizes.reduce(0, +)) / Double(pFrameSizes.count)
         var sizeVariance: Double = 0
         for size in pFrameSizes {
