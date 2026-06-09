@@ -1,5 +1,3 @@
-import Foundation
-
 @inline(__always)
 internal func withUnsafePointers<T, R>(
     mut a: inout [T], mut b: inout [T], mut c: inout [T],

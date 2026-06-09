@@ -1,5 +1,3 @@
-import Foundation
-
 // 14-bit scale balances precision vs compression efficiency
 let rANSScaleBits: UInt32 = 14
 let rANSScale: UInt32 = 1 << rANSScaleBits
@@ -287,7 +285,6 @@ internal func deserializeRANSModel(from chunk: [UInt8], offset: inout Int) -> rA
 }
 
 // MARK: - rANS Encoder
-
 
 struct rANSEncoder {
     private(set) var state: UInt32
@@ -608,7 +605,6 @@ struct InterleavedrANSEncoder {
 
 // MARK: - 4-way Interleaved rANS SIMD Decoder
 
-
 struct InterleavedrANSDecoder {
     private(set) var states: SIMD4<UInt32>
     
@@ -727,7 +723,6 @@ struct InterleavedrANSDecoder {
         }
     }
 }
-
 
 struct BypassWriter {
     private(set) var bytes: [UInt8]

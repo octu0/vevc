@@ -1,68 +1,37 @@
 import Foundation
 
-
-
 actor ConcurrencyLimiter {
 
     private var permits: Int
 
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
-    
-
     init(limit: Int) {
-
         self.permits = limit
-
     }
 
-    
-
     @inline(__always)
-
     func wait() async {
-
         if 0 < permits {
-
             permits -= 1
-
         } else {
-
             await withCheckedContinuation { continuation in
-
                 waiters.append(continuation)
-
             }
-
         }
-
     }
-
-    
 
     @inline(__always)
-
     func signal() {
-
         let isEmpty = waiters.isEmpty
-
         if isEmpty != true {
-
             let next = waiters.removeFirst()
-
             next.resume()
-
         } else {
-
             permits += 1
-
         }
-
     }
-
 }
-
-
 
 public actor StreamingDecoderActor {
     let maxLayer: Int
@@ -420,4 +389,3 @@ public struct Decoder: Sendable {
         return result
     }
 }
-

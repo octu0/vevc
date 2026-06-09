@@ -1,5 +1,3 @@
-import Foundation
-
 struct RateController {
     let maxbitrate: Int
     let framerate: Int

@@ -15,7 +15,7 @@ struct Quantizer: Sendable {
     ///     Common values: -6554 (-0.10), -3277 (-0.05), 0 (none).
     init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0) {
         self.step = Int16(step)
-        // why: reciprocal in Q16 fixed-point converts division to multiply+shift
+        // reciprocal in Q16 fixed-point converts division to multiply+shift
         // Optimize by approximating division: val / step ≈ (val * mul) >> 16
         self.mul = Int32((1 << 16) / step)
         var b: Int32 = 0
@@ -28,8 +28,6 @@ struct Quantizer: Sendable {
         self.bias = b
     }
 }
-
-// why: dead-zone bias is skipped in favor of roundToNearest for better SSIM scaling at high bitrates
 
 struct QuantizationTable: Sendable {
     let step: Int16

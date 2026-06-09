@@ -1,7 +1,3 @@
-// MARK: - Encode Plane Arrays
-
-import Foundation
-
 // MARK: - AC Energy Measurement for Adaptive Quantization
 
 /// Measures the AC energy of a DWT-transformed 32x32 block.

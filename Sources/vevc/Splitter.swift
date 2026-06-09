@@ -1,5 +1,3 @@
-import Foundation
-
 /// Result of a VEVC stream split operation.
 public struct SplitterResult: Sendable {
     public let data: [UInt8]
