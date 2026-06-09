@@ -39,8 +39,10 @@ func lift53Block4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     let highShifted = SIMD2<Int16>(high[0], high[0])
     low &+= (highShifted &+ high &+ 2) &>> 2
 
-    buffer[0 * stride] = low[0]; buffer[1 * stride] = low[1]
-    buffer[2 * stride] = high[0]; buffer[3 * stride] = high[1]
+    buffer[0 * stride] = low[0]
+    buffer[1 * stride] = low[1]
+    buffer[2 * stride] = high[0]
+    buffer[3 * stride] = high[1]
 }
 
 @inline(__always)
@@ -54,8 +56,10 @@ func inverseLift53Block4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: In
     let lowShifted = SIMD2<Int16>(low[1], low[1])
     high &+= (low &+ lowShifted) &>> 1
 
-    buffer[0 * stride] = low[0]; buffer[1 * stride] = high[0]
-    buffer[2 * stride] = low[1]; buffer[3 * stride] = high[1]
+    buffer[0 * stride] = low[0]
+    buffer[1 * stride] = high[0]
+    buffer[2 * stride] = low[1]
+    buffer[3 * stride] = high[1]
 }
 
 // stride=1 optimized: contiguous SIMD load/store
@@ -214,36 +218,44 @@ private func transpose8x8InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: 
     // Interleave r0,r1 -> columns 0-1 fixed
     t0 = SIMD8(r0[0], r1[0], r0[2], r1[2], r0[4], r1[4], r0[6], r1[6])
     t1 = SIMD8(r0[1], r1[1], r0[3], r1[3], r0[5], r1[5], r0[7], r1[7])
-    r0 = t0; r1 = t1
+    r0 = t0
+    r1 = t1
 
     t0 = SIMD8(r2[0], r3[0], r2[2], r3[2], r2[4], r3[4], r2[6], r3[6])
     t1 = SIMD8(r2[1], r3[1], r2[3], r3[3], r2[5], r3[5], r2[7], r3[7])
-    r2 = t0; r3 = t1
+    r2 = t0
+    r3 = t1
 
     t0 = SIMD8(r4[0], r5[0], r4[2], r5[2], r4[4], r5[4], r4[6], r5[6])
     t1 = SIMD8(r4[1], r5[1], r4[3], r5[3], r4[5], r5[5], r4[7], r5[7])
-    r4 = t0; r5 = t1
+    r4 = t0
+    r5 = t1
 
     t0 = SIMD8(r6[0], r7[0], r6[2], r7[2], r6[4], r7[4], r6[6], r7[6])
     t1 = SIMD8(r6[1], r7[1], r6[3], r7[3], r6[5], r7[5], r6[7], r7[7])
-    r6 = t0; r7 = t1
+    r6 = t0
+    r7 = t1
 
     // Phase 2: Interleave quads (4x4 blocks)
     t0 = SIMD8(r0[0], r0[1], r2[0], r2[1], r0[4], r0[5], r2[4], r2[5])
     t1 = SIMD8(r0[2], r0[3], r2[2], r2[3], r0[6], r0[7], r2[6], r2[7])
-    let q0 = t0; let q2 = t1
+    let q0 = t0
+    let q2 = t1
 
     t0 = SIMD8(r1[0], r1[1], r3[0], r3[1], r1[4], r1[5], r3[4], r3[5])
     t1 = SIMD8(r1[2], r1[3], r3[2], r3[3], r1[6], r1[7], r3[6], r3[7])
-    let q1 = t0; let q3 = t1
+    let q1 = t0
+    let q3 = t1
 
     t0 = SIMD8(r4[0], r4[1], r6[0], r6[1], r4[4], r4[5], r6[4], r6[5])
     t1 = SIMD8(r4[2], r4[3], r6[2], r6[3], r4[6], r4[7], r6[6], r6[7])
-    let q4 = t0; let q6 = t1
+    let q4 = t0
+    let q6 = t1
 
     t0 = SIMD8(r5[0], r5[1], r7[0], r7[1], r5[4], r5[5], r7[4], r7[5])
     t1 = SIMD8(r5[2], r5[3], r7[2], r7[3], r5[6], r5[7], r7[6], r7[7])
-    let q5 = t0; let q7 = t1
+    let q5 = t0
+    let q7 = t1
 
     // Phase 3: Interleave octets (8x8 final)
     let f0 = SIMD8(q0[0], q0[1], q0[2], q0[3], q4[0], q4[1], q4[2], q4[3])
@@ -273,10 +285,10 @@ private func transpose8x8InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: 
 @inline(__always)
 private func transpose16x16InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
     // Transpose 4 quadrants independently
-    transpose8x8InPlace(base, stride: s)                          // TL
-    transpose8x8InPlace(base + 8, stride: s)                      // TR
-    transpose8x8InPlace(base + 8 * s, stride: s)                  // BL
-    transpose8x8InPlace(base + 8 * s + 8, stride: s)              // BR
+    transpose8x8InPlace(base, stride: s)  // TL
+    transpose8x8InPlace(base + 8, stride: s)  // TR
+    transpose8x8InPlace(base + 8 * s, stride: s)  // BL
+    transpose8x8InPlace(base + 8 * s + 8, stride: s)  // BR
 
     // Swap TR (base+8) and BL (base+8*s)
     for y in 0..<8 {
@@ -296,10 +308,10 @@ private func transpose16x16InPlace(_ base: UnsafeMutablePointer<Int16>, stride s
 @inline(__always)
 private func transpose32x32InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
     // Transpose 4 quadrants independently
-    transpose16x16InPlace(base, stride: s)                         // TL
-    transpose16x16InPlace(base + 16, stride: s)                    // TR
-    transpose16x16InPlace(base + 16 * s, stride: s)                // BL
-    transpose16x16InPlace(base + 16 * s + 16, stride: s)           // BR
+    transpose16x16InPlace(base, stride: s)  // TL
+    transpose16x16InPlace(base + 16, stride: s)  // TR
+    transpose16x16InPlace(base + 16 * s, stride: s)  // BL
+    transpose16x16InPlace(base + 16 * s + 16, stride: s)  // BR
 
     // Swap TR (base+16) and BL (base+16*s) using SIMD16 for full-width operations
     for y in 0..<16 {

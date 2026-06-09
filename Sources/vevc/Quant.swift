@@ -5,7 +5,7 @@ struct Quantizer: Sendable {
     let mul: Int32
     let bias: Int32
     let shift: Int16 = 16
-    
+
     /// - Parameters:
     ///   - step: Quantization step size.
     ///   - roundToNearest: If true, sets bias to 1<<15 for round-to-nearest behavior.
@@ -35,12 +35,12 @@ struct QuantizationTable: Sendable {
     public let qLow: Quantizer
     public let qMid: Quantizer
     public let qHigh: Quantizer
-    
+
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
         let s = max(1, min(baseStep, 32767))
         self.step = Int16(s)
         self.isChroma = isChroma
-        
+
         // CSF-based perceptual quantization
         // DWT subbands map to spatial frequency bands:
         //   Layer 0 (Base8)  = lowest freq  → high CSF sensitivity → fine quantization
@@ -50,23 +50,29 @@ struct QuantizationTable: Sendable {
         //
         // Scale factors are expressed as integer ratios (numerator, denominator)
         // to avoid floating-point computation entirely.
-        var qMidNum = 4       // HL/LH scale numerator   (4/4 = 1.0)
-        var qMidDen = 4       // HL/LH scale denominator
-        var qHighNum = 6      // HH scale numerator      (6/4 = 1.5)
-        var qHighDen = 4      // HH scale denominator
+        var qMidNum = 4  // HL/LH scale numerator   (4/4 = 1.0)
+        var qMidDen = 4  // HL/LH scale denominator
+        var qHighNum = 6  // HH scale numerator      (6/4 = 1.5)
+        var qHighDen = 4  // HH scale denominator
         var qLowDivisor = 6
 
         switch layerIndex {
         case 2:
             qLowDivisor = 1
-            qMidNum = 1; qMidDen = 1          // 1.0
-            qHighNum = 5; qHighDen = 4        // 1.25
+            qMidNum = 1
+            qMidDen = 1  // 1.0
+            qHighNum = 5
+            qHighDen = 4  // 1.25
         case 1:
-            qMidNum = 1; qMidDen = 2          // 0.50
-            qHighNum = 1; qHighDen = 1        // 1.00
-        default: // layerIndex == 0
-            qMidNum = 1; qMidDen = 2          // 0.5
-            qHighNum = 3; qHighDen = 4        // 0.75
+            qMidNum = 1
+            qMidDen = 2  // 0.50
+            qHighNum = 1
+            qHighDen = 1  // 1.00
+        default:  // layerIndex == 0
+            qMidNum = 1
+            qMidDen = 2  // 0.5
+            qHighNum = 3
+            qHighDen = 4  // 0.75
             qLowDivisor = 8
         }
 
@@ -75,7 +81,7 @@ struct QuantizationTable: Sendable {
             let cLow = min(16, max(1, baseStep / 8))
             let cMid = min(24, max(1, (baseStep * qMidNum) / qMidDen))
             let cHigh = min(48, max(1, (baseStep * qHighNum) / qHighDen))
-            
+
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
             self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: true)
@@ -83,11 +89,11 @@ struct QuantizationTable: Sendable {
             // qLow: Strictly cap at 16 to completely preserve face gradients and base brightness
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
-            
+
             // qMid: Cap at 48 to preserve facial contours and important structural edges
             let lMid = min(48, max(1, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
-            
+
             // qHigh: Cap at 64 to preserve fine details during motion, reducing blurry ghost trails
             if layerIndex == 2 {
                 let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
@@ -120,28 +126,28 @@ struct AQTable: Sendable {
     /// Wider range prioritizes noise reduction in edge/texture regions at the cost of
     /// slightly larger file size. Applied to both I-frames and P-frames.
     let tables: (QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable)
-    
+
     /// Unmodified table at level 2.
     var base: QuantizationTable { tables.2 }
-    
+
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
         let scaleDen = 10
-        
+
         @inline(__always)
         func makeScaled(_ num: Int) -> QuantizationTable {
             let scaledStep = max(1, (baseStep * num) / scaleDen)
             return QuantizationTable(baseStep: scaledStep, isChroma: isChroma, layerIndex: layerIndex)
         }
-        
+
         self.tables = (
-            makeScaled(7),   // 0.70 - faces/flat regions perfectly protected
-            makeScaled(8),   // 0.80
+            makeScaled(7),  // 0.70 - faces/flat regions perfectly protected
+            makeScaled(8),  // 0.80
             makeScaled(10),  // 1.00 - average blocks
             makeScaled(11),  // 1.10
-            makeScaled(12)   // 1.20 - high energy textures slightly quantized
+            makeScaled(12)  // 1.20 - high energy textures slightly quantized
         )
     }
-    
+
     /// Select the appropriate quantization table based on block AC energy
     /// relative to the frame average, and block motion activity (SAD).
     @inline(__always)
@@ -151,7 +157,7 @@ struct AQTable: Sendable {
         // Texture/edge regions (high energy) get coarser quantization (scale > 1.0) because texture masks noise.
         let safeAvg = max(1, avgEnergy)
         let ratioX10 = (energy * 10) / safeAvg
-        
+
         var adjustedRatio = ratioX10
         // Motion-Adaptive override:
         if 512 < sad {
@@ -163,29 +169,28 @@ struct AQTable: Sendable {
                 adjustedRatio += 4
             }
         }
-        
+
         // ratioX10 <= 6  → level 0 (scale=0.70) = very flat region (faces, sky)
         // ratioX10 <= 8  → level 1 (scale=0.85) = flat region
         // ratioX10 <= 12 → level 2 (scale=1.00) = average
         // ratioX10 <= 15 → level 3 (scale=1.20) = high energy
         // ratioX10 > 15  → level 4 (scale=1.40) = very high energy (textures)
         switch true {
-        case adjustedRatio <= 6:  return tables.0
-        case adjustedRatio <= 8:  return tables.1
+        case adjustedRatio <= 6: return tables.0
+        case adjustedRatio <= 8: return tables.1
         case adjustedRatio <= 12: return tables.2
         case adjustedRatio <= 15: return tables.3
-        default:                  return tables.4
+        default: return tables.4
         }
     }
 }
-
 
 // MARK: - Quantization SIMD
 
 @inline(__always)
 internal func quantizeSIMD(_ block: BlockView, q: Quantizer) {
     switch block.width {
-    case 8:  quantizeSIMD8(block, q: q)
+    case 8: quantizeSIMD8(block, q: q)
     case 16: quantizeSIMD16(block, q: q)
     case 32: quantizeSIMD32(block, q: q)
     default: quantizeSIMDGeneric(block, q: q)
@@ -325,7 +330,7 @@ internal func quantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
 @inline(__always)
 internal func quantizeSIMDSignedMapping(_ block: BlockView, q: Quantizer) {
     switch block.width {
-    case 8:  quantizeSIMDSignedMapping8(block, q: q)
+    case 8: quantizeSIMDSignedMapping8(block, q: q)
     case 16: quantizeSIMDSignedMapping16(block, q: q)
     case 32: quantizeSIMDSignedMapping32(block, q: q)
     default: quantizeSIMDSignedMappingGeneric(block, q: q)
@@ -475,8 +480,8 @@ internal func quantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantizer)
 @inline(__always)
 internal func dequantizeSIMD(_ block: BlockView, q: Quantizer) {
     switch block.width {
-    case 4:  dequantizeSIMD4(block, q: q)
-    case 8:  dequantizeSIMD8(block, q: q)
+    case 4: dequantizeSIMD4(block, q: q)
+    case 8: dequantizeSIMD8(block, q: q)
     case 16: dequantizeSIMD16(block, q: q)
     case 32: dequantizeSIMD32(block, q: q)
     default: dequantizeSIMDGeneric(block, q: q)
@@ -574,8 +579,8 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
 @inline(__always)
 internal func dequantizeSIMDSignedMapping(_ block: BlockView, q: Quantizer) {
     switch block.width {
-    case 4:  dequantizeSIMDSignedMapping4(block, q: q)
-    case 8:  dequantizeSIMDSignedMapping8(block, q: q)
+    case 4: dequantizeSIMDSignedMapping4(block, q: q)
+    case 8: dequantizeSIMDSignedMapping8(block, q: q)
     case 16: dequantizeSIMDSignedMapping16(block, q: q)
     case 32: dequantizeSIMDSignedMapping32(block, q: q)
     default: dequantizeSIMDSignedMappingGeneric(block, q: q)
@@ -665,7 +670,7 @@ internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
         let decodedUInt1 = ((v1 &>> 1) ^ (.zero &- (v1 & 1)))
         let v16_0 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt0)
         let v16_1 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt1)
-        
+
         let a0 = Int16(clamping: Int32(v16_0[0]) &* step)
         let a1 = Int16(clamping: Int32(v16_0[1]) &* step)
         let a2 = Int16(clamping: Int32(v16_0[2]) &* step)
@@ -683,7 +688,7 @@ internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
         let a14 = Int16(clamping: Int32(v16_0[14]) &* step)
         let a15 = Int16(clamping: Int32(v16_0[15]) &* step)
         let res16_0 = SIMD16<Int16>(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15)
-        
+
         let b0 = Int16(clamping: Int32(v16_1[0]) &* step)
         let b1 = Int16(clamping: Int32(v16_1[1]) &* step)
         let b2 = Int16(clamping: Int32(v16_1[2]) &* step)

@@ -1,3 +1,7 @@
+.PHONY: lint
+lint:
+	swift-format lint -r -p Sources Tests
+
 .PHONY: wasm
 wasm:
 	WASM_BUILD=1 swift package --swift-sdk swift-6.2.3-RELEASE_wasm -c release -Xswiftc -no-whole-module-optimization plugin --allow-writing-to-package-directory js --use-cdn --product wasm

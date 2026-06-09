@@ -10,13 +10,11 @@
   "lineBreakBeforeEachArgument": false,
   "maximumBlankLines": 1,
   "rules": {
-    "indent": {
-      "indentSwitchCaseLabels": false,
-      "DoNotUseSemicolons": true,
-      "OmitExplicitReturns": true,
-      "NoParensAroundConditions": true,
-      "UseSingleLinePropertyGetter": true,
-      "UseEarlyExits": true
-    }
+    "indentSwitchCaseLabels": false,
+    "DoNotUseSemicolons": true,
+    "OmitExplicitReturns": true,
+    "NoParensAroundConditions": true,
+    "UseSingleLinePropertyGetter": true,
+    "UseEarlyExits": true
   }
 }
