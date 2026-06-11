@@ -86,23 +86,23 @@ final class SpecV1FormatTests: XCTestCase {
                 // IsCopyFrame
                 // No payload sizes, just the flag
                 frameCount += 1
-            } else if status == 0x00 || status == 0x02 {
-                // Normal or B-Frame
-                _ = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
+            } else {
+                let frameTypeBits = status & 0x0F
+                let hasRefDir = (status & 0x10) != 0
+                XCTAssertTrue(frameTypeBits == 0x00 || frameTypeBits == 0x02, "Frame type must be pFrame or iFrame, got \(frameTypeBits)")
+                
+                // Normal or B-Frame: 4 x UInt32BE = 16 bytes
                 let mvsSize = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
-                let refDirSize = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 let layer0Size = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 let layer1Size = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 let layer2Size = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 
-                let totalPayload = mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
+                let refDirBytes = if hasRefDir { (deriveMVCount(width: width, height: height) + 7) / 8 } else { 0 }
+                let totalPayload = mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
                 XCTAssertLessThanOrEqual(offset + totalPayload, bytes.count, "Payload exceeds bitstream size")
                 
                 offset += totalPayload
                 frameCount += 1
-            } else {
-                XCTFail("Unknown frame status flag: \(status) at offset \(offset-1)")
-                break
             }
         }
         

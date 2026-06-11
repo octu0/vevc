@@ -866,9 +866,9 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     let colCountC = (cbDx + 31) / 32
     let rowCountC = (cbDy + 31) / 32
     
-    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
-    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
-    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY)
+    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
+    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
     
     debugLog({
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
@@ -878,13 +878,13 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
-    appendUInt32BE(&out, UInt32(bufY.count))
+    writeVLQSize(&out, bufY.count)
     out.append(contentsOf: bufY)
     
-    appendUInt32BE(&out, UInt32(bufCb.count))
+    writeVLQSize(&out, bufCb.count)
     out.append(contentsOf: bufCb)
     
-    appendUInt32BE(&out, UInt32(bufCr.count))
+    writeVLQSize(&out, bufCr.count)
     out.append(contentsOf: bufCr)
     
     return out
@@ -905,9 +905,9 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // Note: SADs are evaluated at 32x32 granularity, so map Layer16 to Layer32 granularity
     // In layered structure, we just pass sads arrays if aligned, or map if necessary.
     // For now, only 32x32 blocks use it cleanly, but if Layer16 needs it:
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
-    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
-    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY)
+    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
+    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
     
     debugLog({
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
@@ -917,13 +917,13 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
-    appendUInt32BE(&out, UInt32(bufY.count))
+    writeVLQSize(&out, bufY.count)
     out.append(contentsOf: bufY)
     
-    appendUInt32BE(&out, UInt32(bufCb.count))
+    writeVLQSize(&out, bufCb.count)
     out.append(contentsOf: bufCb)
     
-    appendUInt32BE(&out, UInt32(bufCr.count))
+    writeVLQSize(&out, bufCr.count)
     out.append(contentsOf: bufCr)
     
     return out
@@ -1385,9 +1385,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, mllType: AdaptiveEntropyModel.self, mType: AdaptiveEntropyModel.self)
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, mllType: AdaptiveDPCMEntropyModel.self, mType: AdaptiveEntropyModel.self)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         }
         
         let quantizedBlocks = blocks
@@ -1405,9 +1405,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 2)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticDPCMEntropyModel.self, mType: StaticEntropyModel.self)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         }
         
         let quantizedBlocks = blocks
@@ -1424,9 +1424,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticEntropyModel.self, mType: StaticEntropyModel.self)
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, mllType: StaticDPCMEntropyModel.self, mType: StaticEntropyModel.self)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
         }
         
         let quantizedBlocks = blocks
@@ -1448,13 +1448,13 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
-    appendUInt32BE(&out, UInt32(bufY.count))
+    writeVLQSize(&out, bufY.count)
     out.append(contentsOf: bufY)
     
-    appendUInt32BE(&out, UInt32(bufCb.count))
+    writeVLQSize(&out, bufCb.count)
     out.append(contentsOf: bufCb)
     
-    appendUInt32BE(&out, UInt32(bufCr.count))
+    writeVLQSize(&out, bufCr.count)
     out.append(contentsOf: bufCr)
     
     return (out, reconstructed, base8YBlocks, base8CbBlocks, base8CrBlocks, {
@@ -1608,13 +1608,13 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
     appendUInt16BE(&out, UInt16(qtY.step))
     appendUInt16BE(&out, UInt16(qtC.step))
     
-    appendUInt32BE(&out, UInt32(bufY.count))
+    writeVLQSize(&out, bufY.count)
     out.append(contentsOf: bufY)
     
-    appendUInt32BE(&out, UInt32(bufCb.count))
+    writeVLQSize(&out, bufCb.count)
     out.append(contentsOf: bufCb)
     
-    appendUInt32BE(&out, UInt32(bufCr.count))
+    writeVLQSize(&out, bufCr.count)
     out.append(contentsOf: bufCr)
     let cR2Y = releaseL2Y; let cR2Cb = releaseL2Cb; let cR2Cr = releaseL2Cr
     return (out, reconstructed, { cR2Y(); cR2Cb(); cR2Cr() })

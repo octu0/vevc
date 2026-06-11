@@ -6,7 +6,7 @@ public enum EncodeError: Error {
 }
 
 @inline(__always)
-func encodeExpGolomb<M: EntropyModelProvider>(val: UInt32, encoder: inout EntropyEncoder<M>) {
+func encodeExpGolomb(val: UInt32, encoder: inout EntropyEncoder) {
     var q = val
     var bits = 0
     while 0 < q {
@@ -31,20 +31,16 @@ func getContext(prevVal: Int16, isParentZero: Bool) -> UInt8 {
 
 @inline(__always)
 func getDPCMContext(prevVal: Int16) -> UInt8 {
-    let absVal = prevVal.magnitude
-    if absVal == 0 { return 0 }
-    if absVal == 1 { return 1 }
-    if absVal <= 3 { return 2 }
-    return 3
+    return kDPCMContext
 }
 
 @inline(__always)
-func encodeCoeffRun<M: EntropyModelProvider>(val: Int16, encoder: inout EntropyEncoder<M>, run: Int, context: UInt8) {
+func encodeCoeffRun(val: Int16, encoder: inout EntropyEncoder, run: Int, context: UInt8) {
     encoder.addPair(run: UInt32(run), val: val, context: context)
 }
 
 @inline(__always)
-func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
+func blockEncode16V(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -103,7 +99,7 @@ func blockEncode16V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
 }
 
 @inline(__always)
-func blockEncode16VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView) {
+func blockEncode16VWithParent(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -171,7 +167,7 @@ func blockEncode16VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnc
 }
 
 @inline(__always)
-func blockEncode16H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
+func blockEncode16H(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -247,7 +243,7 @@ func blockEncode16H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, b
 }
 
 @inline(__always)
-func blockEncode16HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView) {
+func blockEncode16HWithParent(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
@@ -332,7 +328,7 @@ func blockEncode16HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnc
 }
 
 @inline(__always)
-func blockEncode8V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
+func blockEncode8V(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -390,7 +386,7 @@ func blockEncode8V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
 }
 
 @inline(__always)
-func blockEncode8VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView) {
+func blockEncode8VWithParent(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -455,7 +451,7 @@ func blockEncode8VWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
 }
 
 @inline(__always)
-func blockEncode8H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
+func blockEncode8H(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -531,7 +527,7 @@ func blockEncode8H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
 }
 
 @inline(__always)
-func blockEncode8HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView) {
+func blockEncode8HWithParent(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -614,7 +610,7 @@ func blockEncode8HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEnco
 }
 
 @inline(__always)
-func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
+func blockEncode4V(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -671,7 +667,7 @@ func blockEncode4V<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
 }
 
 @inline(__always)
-func blockEncode4H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView) {
+func blockEncode4H(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -733,7 +729,7 @@ func blockEncode4H<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, bl
 }
 
 @inline(__always)
-func blockEncode4HWithParent<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, parentBlock: BlockView) {
+func blockEncode4HWithParent(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
@@ -857,7 +853,7 @@ func diffMED(_ x: SIMD4<Int16>, _ a: SIMD4<Int16>, _ b: SIMD4<Int16>, _ c: SIMD4
 }
 
 @inline(__always)
-func blockEncodeDPCM4<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     let ptr0 = block.rowPointer(y: 0)
     let ptr1 = block.rowPointer(y: 1)
     let ptr2 = block.rowPointer(y: 2)
@@ -981,7 +977,7 @@ func blockEncodeDPCMErrorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> 
 }
 
 @inline(__always)
-func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     withUnsafeTemporaryAllocation(of: Int16.self, capacity: 64) { ptrErr in
         guard let baseErr = ptrErr.baseAddress else { return }
         
@@ -1070,7 +1066,7 @@ func blockEncodeDPCM8<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>,
 }
 
 @inline(__always)
-func blockEncodeDPCM16<M: EntropyModelProvider>(encoder: inout EntropyEncoder<M>, block: BlockView, lastVal: inout Int16) {
+func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     let originalLastVal = lastVal
     var lscpIdx = -1
     var last: Int16 = originalLastVal

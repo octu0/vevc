@@ -51,12 +51,15 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 32 / 2
     
+    var lastVal: Int16 = 0
+    
     for (i, task) in tasks {
         let view = blocks[i]
+        let llBase = view.base
         let hlBase = view.base.advanced(by: half)
         let lhBase = view.base.advanced(by: half * 32)
         let hhBase = view.base.advanced(by: half * 32 + half)
@@ -65,46 +68,57 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
         case .skip:
             break
         case .decode16:
+            let llView = BlockView(base: llBase, width: half, height: half, stride: 32)
+            try blockDecodeDPCM16(decoder: &decoder, block: llView, lastVal: &lastVal)
+            
             let hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
-            try blockDecode16V(decoder: &decoders.hl, block: hlView)
+            try blockDecode16V(decoder: &decoder, block: hlView)
             
             let lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
-            try blockDecode16H(decoder: &decoders.lh, block: lhView)
+            try blockDecode16H(decoder: &decoder, block: lhView)
             
             let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
-            try blockDecode16H(decoder: &decoders.hh, block: hhView)
+            try blockDecode16H(decoder: &decoder, block: hhView)
         case .split8(let tl, let tr, let bl, let br):
             if tl {
+                let ll = BlockView(base: llBase, width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
             if tr {
+                let ll = BlockView(base: llBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
             if bl {
+                let ll = BlockView(base: llBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
             if br {
+                let ll = BlockView(base: llBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
         }
     }
@@ -166,9 +180,11 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 32 / 2
+    
+    var lastVal: Int16 = 0
     
     for (i, task) in tasks {
         if i < parentBlocks.count {
@@ -186,13 +202,13 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                 break
             case .decode16:
                 let hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
-                try blockDecode16VWithParentBlock(decoder: &decoders.hl, block: hlView, parentBlock: parentHL)
+                try blockDecode16VWithParentBlock(decoder: &decoder, block: hlView, parentBlock: parentHL)
                 
                 let lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
-                try blockDecode16HWithParentBlock(decoder: &decoders.lh, block: lhView, parentBlock: parentLH)
+                try blockDecode16HWithParentBlock(decoder: &decoder, block: lhView, parentBlock: parentLH)
                 
                 let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
-                try blockDecode16HWithParentBlock(decoder: &decoders.hh, block: hhView, parentBlock: parentHH)
+                try blockDecode16HWithParentBlock(decoder: &decoder, block: hhView, parentBlock: parentHH)
             case .split8(let tl, let tr, let bl, let br):
                 if tl {
                     let pbHL = BlockView(base: parentHL.base, width: 4, height: 4, stride: parentHL.stride)
@@ -201,9 +217,9 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
                 if tr {
                     let pbHL = BlockView(base: parentHL.base.advanced(by: 4), width: 4, height: 4, stride: parentHL.stride)
@@ -212,9 +228,9 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
                 if bl {
                     let pbHL = BlockView(base: parentHL.base.advanced(by: 4 * parentHL.stride), width: 4, height: 4, stride: parentHL.stride)
@@ -223,9 +239,9 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
                 if br {
                     let pbHL = BlockView(base: parentHL.base.advanced(by: 4 * parentHL.stride + 4), width: 4, height: 4, stride: parentHL.stride)
@@ -234,9 +250,73 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                     let hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode8HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode8HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
+                }
+            }
+        } else {
+            let view = blocks[i]
+            let llBase = view.base
+            let hlBase = view.base.advanced(by: half)
+            let lhBase = view.base.advanced(by: half * 32)
+            let hhBase = view.base.advanced(by: half * 32 + half)
+            
+            switch task {
+            case .skip:
+                break
+            case .decode16:
+                let llView = BlockView(base: llBase, width: half, height: half, stride: 32)
+                try blockDecodeDPCM16(decoder: &decoder, block: llView, lastVal: &lastVal)
+                
+                let hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
+                try blockDecode16V(decoder: &decoder, block: hlView)
+                
+                let lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
+                try blockDecode16H(decoder: &decoder, block: lhView)
+                
+                let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
+                try blockDecode16H(decoder: &decoder, block: hhView)
+            case .split8(let tl, let tr, let bl, let br):
+                if tl {
+                    let ll = BlockView(base: llBase, width: 8, height: 8, stride: 32)
+                    let hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
+                    let lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
+                    let hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                    try blockDecode8H(decoder: &decoder, block: hl)
+                    try blockDecode8H(decoder: &decoder, block: lh)
+                    try blockDecode8H(decoder: &decoder, block: hh)
+                }
+                if tr {
+                    let ll = BlockView(base: llBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    let hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    let lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    let hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                    try blockDecode8H(decoder: &decoder, block: hl)
+                    try blockDecode8H(decoder: &decoder, block: lh)
+                    try blockDecode8H(decoder: &decoder, block: hh)
+                }
+                if bl {
+                    let ll = BlockView(base: llBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    let hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    let lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    let hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                    try blockDecode8H(decoder: &decoder, block: hl)
+                    try blockDecode8H(decoder: &decoder, block: lh)
+                    try blockDecode8H(decoder: &decoder, block: hh)
+                }
+                if br {
+                    let ll = BlockView(base: llBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    let hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    let lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    let hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
+                    try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                    try blockDecode8H(decoder: &decoder, block: hl)
+                    try blockDecode8H(decoder: &decoder, block: lh)
+                    try blockDecode8H(decoder: &decoder, block: hh)
                 }
             }
         }
@@ -308,7 +388,7 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 16 / 2
 
@@ -323,45 +403,45 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
             break
         case .decode8:
             let hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
-            try blockDecode8V(decoder: &decoders.hl, block: hlView)
+            try blockDecode8V(decoder: &decoder, block: hlView)
             
             let lhView = BlockView(base: lhBase, width: half, height: half, stride: 16)
-            try blockDecode8H(decoder: &decoders.lh, block: lhView)
+            try blockDecode8H(decoder: &decoder, block: lhView)
             
             let hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
-            try blockDecode8H(decoder: &decoders.hh, block: hhView)
+            try blockDecode8H(decoder: &decoder, block: hhView)
         case .split4(let tl, let tr, let bl, let br):
             if tl {
                 let hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
                 let lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
                 let hh = BlockView(base: hhBase, width: 4, height: 4, stride: 16)
-                try blockDecode4H(decoder: &decoders.hl, block: hl)
-                try blockDecode4H(decoder: &decoders.lh, block: lh)
-                try blockDecode4H(decoder: &decoders.hh, block: hh)
+                try blockDecode4H(decoder: &decoder, block: hl)
+                try blockDecode4H(decoder: &decoder, block: lh)
+                try blockDecode4H(decoder: &decoder, block: hh)
             }
             if tr {
                 let hl = BlockView(base: hlBase.advanced(by: 4), width: 4, height: 4, stride: 16)
                 let lh = BlockView(base: lhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
                 let hh = BlockView(base: hhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
-                try blockDecode4H(decoder: &decoders.hl, block: hl)
-                try blockDecode4H(decoder: &decoders.lh, block: lh)
-                try blockDecode4H(decoder: &decoders.hh, block: hh)
+                try blockDecode4H(decoder: &decoder, block: hl)
+                try blockDecode4H(decoder: &decoder, block: lh)
+                try blockDecode4H(decoder: &decoder, block: hh)
             }
             if bl {
                 let hl = BlockView(base: hlBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                 let lh = BlockView(base: lhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                 let hh = BlockView(base: hhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                try blockDecode4H(decoder: &decoders.hl, block: hl)
-                try blockDecode4H(decoder: &decoders.lh, block: lh)
-                try blockDecode4H(decoder: &decoders.hh, block: hh)
+                try blockDecode4H(decoder: &decoder, block: hl)
+                try blockDecode4H(decoder: &decoder, block: lh)
+                try blockDecode4H(decoder: &decoder, block: hh)
             }
             if br {
                 let hl = BlockView(base: hlBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                 let lh = BlockView(base: lhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                 let hh = BlockView(base: hhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                try blockDecode4H(decoder: &decoders.hl, block: hl)
-                try blockDecode4H(decoder: &decoders.lh, block: lh)
-                try blockDecode4H(decoder: &decoders.hh, block: hh)
+                try blockDecode4H(decoder: &decoder, block: hl)
+                try blockDecode4H(decoder: &decoder, block: lh)
+                try blockDecode4H(decoder: &decoder, block: hh)
             }
         }
     }
@@ -426,7 +506,7 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 16 / 2
 
@@ -446,13 +526,13 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                 break
             case .decode8:
                 let hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
-                try blockDecode8VWithParentBlock(decoder: &decoders.hl, block: hlView, parentBlock: parentHL)
+                try blockDecode8VWithParentBlock(decoder: &decoder, block: hlView, parentBlock: parentHL)
                 
                 let lhView = BlockView(base: lhBase, width: half, height: half, stride: 16)
-                try blockDecode8HWithParentBlock(decoder: &decoders.lh, block: lhView, parentBlock: parentLH)
+                try blockDecode8HWithParentBlock(decoder: &decoder, block: lhView, parentBlock: parentLH)
                 
                 let hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
-                try blockDecode8HWithParentBlock(decoder: &decoders.hh, block: hhView, parentBlock: parentHH)
+                try blockDecode8HWithParentBlock(decoder: &decoder, block: hhView, parentBlock: parentHH)
             case .split4(let tl, let tr, let bl, let br):
                 if tl {
                     let pbHL = BlockView(base: parentHL.base, width: 2, height: 2, stride: parentHL.stride)
@@ -461,9 +541,9 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: hhBase, width: 4, height: 4, stride: 16)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
                 if tr {
                     let pbHL = BlockView(base: parentHL.base.advanced(by: 2), width: 2, height: 2, stride: parentHL.stride)
@@ -472,9 +552,9 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase.advanced(by: 4), width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: lhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: hhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
                 if bl {
                     let pbHL = BlockView(base: parentHL.base.advanced(by: 2 * parentHL.stride), width: 2, height: 2, stride: parentHL.stride)
@@ -483,9 +563,9 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: lhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: hhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
                 }
                 if br {
                     let pbHL = BlockView(base: parentHL.base.advanced(by: 2 * parentHL.stride + 2), width: 2, height: 2, stride: parentHL.stride)
@@ -494,9 +574,61 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                     let hl = BlockView(base: hlBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: lhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
                     let hh = BlockView(base: hhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hl, block: hl, parentBlock: pbHL)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.lh, block: lh, parentBlock: pbLH)
-                    try blockDecode4HWithParentBlock(decoder: &decoders.hh, block: hh, parentBlock: pbHH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hl, parentBlock: pbHL)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: lh, parentBlock: pbLH)
+                    try blockDecode4HWithParentBlock(decoder: &decoder, block: hh, parentBlock: pbHH)
+                }
+            }
+        } else {
+            let view = blocks[i]
+            let hlBase = view.base.advanced(by: half)
+            let lhBase = view.base.advanced(by: half * 16)
+            let hhBase = view.base.advanced(by: half * 16 + half)
+            
+            switch task {
+            case .skip:
+                break
+            case .decode8:
+                let hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
+                try blockDecode8V(decoder: &decoder, block: hlView)
+                
+                let lhView = BlockView(base: lhBase, width: half, height: half, stride: 16)
+                try blockDecode8H(decoder: &decoder, block: lhView)
+                
+                let hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
+                try blockDecode8H(decoder: &decoder, block: hhView)
+            case .split4(let tl, let tr, let bl, let br):
+                if tl {
+                    let hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
+                    let lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
+                    let hh = BlockView(base: hhBase, width: 4, height: 4, stride: 16)
+                    try blockDecode4H(decoder: &decoder, block: hl)
+                    try blockDecode4H(decoder: &decoder, block: lh)
+                    try blockDecode4H(decoder: &decoder, block: hh)
+                }
+                if tr {
+                    let hl = BlockView(base: hlBase.advanced(by: 4), width: 4, height: 4, stride: 16)
+                    let lh = BlockView(base: lhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
+                    let hh = BlockView(base: hhBase.advanced(by: 4), width: 4, height: 4, stride: 16)
+                    try blockDecode4H(decoder: &decoder, block: hl)
+                    try blockDecode4H(decoder: &decoder, block: lh)
+                    try blockDecode4H(decoder: &decoder, block: hh)
+                }
+                if bl {
+                    let hl = BlockView(base: hlBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                    let lh = BlockView(base: lhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                    let hh = BlockView(base: hhBase.advanced(by: 4 * 16), width: 4, height: 4, stride: 16)
+                    try blockDecode4H(decoder: &decoder, block: hl)
+                    try blockDecode4H(decoder: &decoder, block: lh)
+                    try blockDecode4H(decoder: &decoder, block: hh)
+                }
+                if br {
+                    let hl = BlockView(base: hlBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                    let lh = BlockView(base: lhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                    let hh = BlockView(base: hhBase.advanced(by: 4 * 16 + 4), width: 4, height: 4, stride: 16)
+                    try blockDecode4H(decoder: &decoder, block: hl)
+                    try blockDecode4H(decoder: &decoder, block: lh)
+                    try blockDecode4H(decoder: &decoder, block: hh)
                 }
             }
         }
@@ -536,20 +668,20 @@ fileprivate func decodePlaneSubbands8BlockView(buf: UnsafeBufferPointer<UInt8>, 
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 8 / 2
 
     for i in nonZeroIndices {
         let view = blocks[i]
         let hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 8)
-        try blockDecode4V(decoder: &decoders.hl, block: hlView)
+        try blockDecode4V(decoder: &decoder, block: hlView)
         
         let lhView = BlockView(base: view.base.advanced(by: half * 8), width: half, height: half, stride: 8)
-        try blockDecode4H(decoder: &decoders.lh, block: lhView)
+        try blockDecode4H(decoder: &decoder, block: lhView)
         
         let hhView = BlockView(base: view.base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-        try blockDecode4H(decoder: &decoders.hh, block: hhView)
+        try blockDecode4H(decoder: &decoder, block: hhView)
     }
 
     return blocks
@@ -586,7 +718,7 @@ fileprivate func decodePlaneSubbands8BlockViewWithParentImage(buf: UnsafeBufferP
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 8 / 2
 
@@ -606,13 +738,13 @@ fileprivate func decodePlaneSubbands8BlockViewWithParentImage(buf: UnsafeBufferP
         let parentBlock = parentBlock2D
         let view = blocks[i]
         let hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 8)
-        try blockDecode4VWithParentBlock(decoder: &decoders.hl, block: hlView, parentBlock: parentBlock)
+        try blockDecode4VWithParentBlock(decoder: &decoder, block: hlView, parentBlock: parentBlock)
         
         let lhView = BlockView(base: view.base.advanced(by: half * 8), width: half, height: half, stride: 8)
-        try blockDecode4HWithParentBlock(decoder: &decoders.lh, block: lhView, parentBlock: parentBlock)
+        try blockDecode4HWithParentBlock(decoder: &decoder, block: lhView, parentBlock: parentBlock)
         
         let hhView = BlockView(base: view.base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-        try blockDecode4HWithParentBlock(decoder: &decoders.hh, block: hhView, parentBlock: parentBlock)
+        try blockDecode4HWithParentBlock(decoder: &decoder, block: hhView, parentBlock: parentBlock)
         pool.put(parentBlock2D)
     }
 
@@ -650,7 +782,7 @@ fileprivate func decodePlaneBaseSubbands8BlockView(buf: UnsafeBufferPointer<UInt
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 8 / 2
 
@@ -663,19 +795,19 @@ fileprivate func decodePlaneBaseSubbands8BlockView(buf: UnsafeBufferPointer<UInt
             let view = blocks[i]
             let llView = BlockView(base: view.base, width: half, height: half, stride: 8)
             if isIFrame {
-                try blockDecodeDPCM4(decoder: &decoders.ll, block: llView, lastVal: &lastVal)
+                try blockDecodeDPCM4(decoder: &decoder, block: llView, lastVal: &lastVal)
             } else {
-                try blockDecode4H(decoder: &decoders.ll, block: llView)
+                try blockDecode4H(decoder: &decoder, block: llView)
             }
             
             let hlView = BlockView(base: view.base.advanced(by: half), width: half, height: half, stride: 8)
-            try blockDecode4V(decoder: &decoders.hl, block: hlView)
+            try blockDecode4V(decoder: &decoder, block: hlView)
             
             let lhView = BlockView(base: view.base.advanced(by: half * 8), width: half, height: half, stride: 8)
-            try blockDecode4H(decoder: &decoders.lh, block: lhView)
+            try blockDecode4H(decoder: &decoder, block: lhView)
             
             let hhView = BlockView(base: view.base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-            try blockDecode4H(decoder: &decoders.hh, block: hhView)
+            try blockDecode4H(decoder: &decoder, block: hhView)
         } else {
             if isIFrame { lastVal = 0 }
         }
@@ -747,7 +879,7 @@ fileprivate func decodePlaneBaseSubbands32BlockView(buf: UnsafeBufferPointer<UIn
     let consumed = brFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
     
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     
     let half = 32 / 2
 
@@ -764,16 +896,16 @@ fileprivate func decodePlaneBaseSubbands32BlockView(buf: UnsafeBufferPointer<UIn
             lastVal = 0
         case .decode16:
             let llView = BlockView(base: llBase, width: half, height: half, stride: 32)
-            try blockDecodeDPCM16(decoder: &decoders.ll, block: llView, lastVal: &lastVal)
+            try blockDecodeDPCM16(decoder: &decoder, block: llView, lastVal: &lastVal)
             
             let hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
-            try blockDecode16V(decoder: &decoders.hl, block: hlView)
+            try blockDecode16V(decoder: &decoder, block: hlView)
             
             let lhView = BlockView(base: lhBase, width: half, height: half, stride: 32)
-            try blockDecode16H(decoder: &decoders.lh, block: lhView)
+            try blockDecode16H(decoder: &decoder, block: lhView)
             
             let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
-            try blockDecode16H(decoder: &decoders.hh, block: hhView)
+            try blockDecode16H(decoder: &decoder, block: hhView)
             
         case .split8(let tl, let tr, let bl, let br):
             if tl {
@@ -781,40 +913,40 @@ fileprivate func decodePlaneBaseSubbands32BlockView(buf: UnsafeBufferPointer<UIn
                 let hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase, width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase, width: 8, height: 8, stride: 32)
-                try blockDecodeDPCM8(decoder: &decoders.ll, block: ll, lastVal: &lastVal)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
             if tr {
                 let ll = BlockView(base: llBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase.advanced(by: 8), width: 8, height: 8, stride: 32)
-                try blockDecodeDPCM8(decoder: &decoders.ll, block: ll, lastVal: &lastVal)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
             if bl {
                 let ll = BlockView(base: llBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase.advanced(by: 8 * 32), width: 8, height: 8, stride: 32)
-                try blockDecodeDPCM8(decoder: &decoders.ll, block: ll, lastVal: &lastVal)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
             if br {
                 let ll = BlockView(base: llBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let lh = BlockView(base: lhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
                 let hh = BlockView(base: hhBase.advanced(by: 8 * 32 + 8), width: 8, height: 8, stride: 32)
-                try blockDecodeDPCM8(decoder: &decoders.ll, block: ll, lastVal: &lastVal)
-                try blockDecode8H(decoder: &decoders.hl, block: hl)
-                try blockDecode8H(decoder: &decoders.lh, block: lh)
-                try blockDecode8H(decoder: &decoders.hh, block: hh)
+                try blockDecodeDPCM8(decoder: &decoder, block: ll, lastVal: &lastVal)
+                try blockDecode8H(decoder: &decoder, block: hl)
+                try blockDecode8H(decoder: &decoder, block: lh)
+                try blockDecode8H(decoder: &decoder, block: hh)
             }
         }
     }
@@ -849,7 +981,7 @@ fileprivate func decodeCascadedPlaneSubbands32BlockView(buf: UnsafeBufferPointer
     
     let consumed = bwFlags.consumedBytes
     guard consumed <= count else { throw DecodeError.insufficientData }
-    var decoders = try SubbandDecoders(base: base, count: count, startOffset: consumed)
+    var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
     var lastVal: Int16 = 0
     
     for (i, skip) in tasks {
@@ -873,20 +1005,20 @@ fileprivate func decodeCascadedPlaneSubbands32BlockView(buf: UnsafeBufferPointer
         let hh3 = BlockView(base: view.base.advanced(by: 4 * view.stride + 4), width: 4, height: 4, stride: view.stride)
         
         let m_ll3 = ll3, m_hl3 = hl3, m_lh3 = lh3, m_hh3 = hh3
-        try blockDecodeDPCM4(decoder: &decoders.ll, block: m_ll3, lastVal: &lastVal)
-        try blockDecode4H(decoder: &decoders.hl, block: m_hl3)
-        try blockDecode4H(decoder: &decoders.lh, block: m_lh3)
-        try blockDecode4H(decoder: &decoders.hh, block: m_hh3)
+        try blockDecodeDPCM4(decoder: &decoder, block: m_ll3, lastVal: &lastVal)
+        try blockDecode4H(decoder: &decoder, block: m_hl3)
+        try blockDecode4H(decoder: &decoder, block: m_lh3)
+        try blockDecode4H(decoder: &decoder, block: m_hh3)
         
         let m_hl2 = hl2, m_lh2 = lh2, m_hh2 = hh2
-        try blockDecode8H(decoder: &decoders.hl, block: m_hl2)
-        try blockDecode8H(decoder: &decoders.lh, block: m_lh2)
-        try blockDecode8H(decoder: &decoders.hh, block: m_hh2)
+        try blockDecode8H(decoder: &decoder, block: m_hl2)
+        try blockDecode8H(decoder: &decoder, block: m_lh2)
+        try blockDecode8H(decoder: &decoder, block: m_hh2)
         
         let m_hl1 = hl1, m_lh1 = lh1, m_hh1 = hh1
-        try blockDecode16H(decoder: &decoders.hl, block: m_hl1)
-        try blockDecode16H(decoder: &decoders.lh, block: m_lh1)
-        try blockDecode16H(decoder: &decoders.hh, block: m_hh1)
+        try blockDecode16H(decoder: &decoder, block: m_hl1)
+        try blockDecode16H(decoder: &decoder, block: m_lh1)
+        try blockDecode16H(decoder: &decoder, block: m_hh1)
     }
 }
 

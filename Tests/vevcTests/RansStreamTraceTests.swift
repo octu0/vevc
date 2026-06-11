@@ -31,7 +31,7 @@ final class RansStreamTraceTests: XCTestCase {
         defer { rel() }
         for i in blocks.indices { evaluateQuantizeLayer32(view: blocks[i], qt: qtY) }
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
@@ -80,9 +80,9 @@ final class RansStreamTraceTests: XCTestCase {
         for lane in 0..<4 { chunkBypassWriters[lane].flush() }
 
         var runModel = rANSModel()
-        runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
+        runModel.normalize(tokenCounts: runTokenCounts)
         var valModel = rANSModel()
-        valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
+        valModel.normalize(tokenCounts: valTokenCounts)
 
         // エンコード with stream tracking
         var enc = Interleaved4rANSEncoder()
@@ -156,8 +156,8 @@ final class RansStreamTraceTests: XCTestCase {
         let mask = rANSScale - 1
 
         // 復元されたtokenFreqsとcumFreqsでモデル再構築
-        let decRunModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runModel.tokenFreqs)
-        let decValModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valModel.tokenFreqs)
+        let decRunModel = rANSModel(tokenFreqs: runModel.tokenFreqs)
+        let decValModel = rANSModel(tokenFreqs: valModel.tokenFreqs)
 
         for lane in 0..<4 {
             let chunkSize = chunkStarts[lane + 1] - chunkStarts[lane]

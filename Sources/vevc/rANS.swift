@@ -36,14 +36,25 @@ internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
             freqs[maxIdx] += (rANSScale - sum)
         }
         if rANSScale < sum {
-            let diff = sum - rANSScale
-            if diff < freqs[maxIdx] {
-                freqs[maxIdx] -= diff
+            var diff = sum - rANSScale
+            while 0 < diff {
+                var currentMaxIdx = 0
+                var currentMaxVal = freqs[0]
+                for i in 1..<64 {
+                    if currentMaxVal < freqs[i] {
+                        currentMaxVal = freqs[i]
+                        currentMaxIdx = i
+                    }
+                }
+                // freq <= 1 cannot be reduced further without causing division by zero during decode
+                if currentMaxVal <= 1 { break }
+                freqs[currentMaxIdx] -= 1
+                diff -= 1
             }
         }
     }
     
-    return rANSModel(sigFreq: rANSScale / 2, tokenFreqs: freqs)
+    return rANSModel(tokenFreqs: freqs)
 }
 
 final class StaticRANSModels: @unchecked Sendable {
@@ -132,21 +143,18 @@ final class StaticRANSModels: @unchecked Sendable {
 // why: LUT reverse-lookup reduces symbol search from O(log n) binary search to O(1)
 
 struct rANSModel {
-    private(set) var sigFreq: UInt32
     private(set) var tokenFreqs: [UInt32]
     private(set) var tokenCumFreqs: [UInt32]
     private(set) var tokenLUT: [UInt8]
     
     init() {
-        self.sigFreq = rANSScale / 2
         self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)
         self.tokenCumFreqs = (0..<64).map { UInt32($0) * (rANSScale / 64) }
         self.tokenLUT = [UInt8](repeating: 0, count: Int(rANSScale))
         buildLUT()
     }
     
-    init(sigFreq: UInt32, tokenFreqs: [UInt32]) {
-        self.sigFreq = sigFreq
+    init(tokenFreqs: [UInt32]) {
         self.tokenFreqs = tokenFreqs
         self.tokenCumFreqs = [UInt32](repeating: 0, count: 64)
         var sum: UInt32 = 0
@@ -173,14 +181,7 @@ struct rANSModel {
     }
     
     @inline(__always)
-    mutating func normalize(sigCounts: [Int], tokenCounts: [Int]) {
-        let totalSig = sigCounts[0] + sigCounts[1]
-        if totalSig == 0 {
-            self.sigFreq = rANSScale / 2
-        } else {
-            let f = UInt32((Int(rANSScale) * sigCounts[1]) / totalSig)
-            self.sigFreq = max(1, min(rANSScale - 1, f))
-        }
+    mutating func normalize(tokenCounts: [Int]) {
         
         let totalTokens = tokenCounts.reduce(0, +)
         if totalTokens == 0 {
@@ -251,37 +252,6 @@ struct rANSModel {
         let sym = Int(tokenLUT[Int(cf)])
         return (UInt8(sym), tokenFreqs[sym], tokenCumFreqs[sym])
     }
-}
-
-// MARK: - rANS Model Serialization helpers
-
-@inline(__always)
-internal func serializeRANSModel(_ rANS: rANSModel) -> [UInt8] {
-    var out: [UInt8] = []
-    out.reserveCapacity(256)
-    for freq in rANS.tokenFreqs {
-        out.append(UInt8((freq >> 24) & 0xFF))
-        out.append(UInt8((freq >> 16) & 0xFF))
-        out.append(UInt8((freq >> 8) & 0xFF))
-        out.append(UInt8(freq & 0xFF))
-    }
-    return out
-}
-
-@inline(__always)
-internal func deserializeRANSModel(from chunk: [UInt8], offset: inout Int) -> rANSModel {
-    var freqs = [UInt32](repeating: 0, count: 64)
-    for i in 0..<64 {
-        let b0 = UInt32(chunk[offset])
-        let b1 = UInt32(chunk[offset+1])
-        let b2 = UInt32(chunk[offset+2])
-        let b3 = UInt32(chunk[offset+3])
-        offset += 4
-        freqs[i] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-    }
-    // rANSModel's sum may not be exactly rANSScale if we blindly use freqs without rebuilding
-    // Actually, freqs *were* written off a valid rANSModel, but to ensure lookup table is built:
-    return buildStaticModel(rawFreqs: freqs)
 }
 
 // MARK: - rANS Encoder
@@ -537,192 +507,6 @@ struct Interleaved4rANSDecoder {
     }
 }
 
-// MARK: - 4-way Interleaved rANS Encoder
-
-struct InterleavedrANSEncoder {
-    private(set) var states: [UInt32]
-    private(set) var streams: [[UInt16]]
-    
-    init() {
-        self.states = [rANSL, rANSL, rANSL, rANSL]
-        self.streams = [
-            [UInt16](), [UInt16](), [UInt16](), [UInt16]()
-        ]
-        for i in 0..<4 {
-            self.streams[i].reserveCapacity(1024)
-        }
-    }
-    
-    @inline(__always)
-    mutating func encodeSymbol(lane: Int, cumFreq: UInt32, freq: UInt32) {
-        var state = states[lane]
-        let xMax = rANSXMax * freq
-        
-        while xMax <= state {
-            streams[lane].append(UInt16(truncatingIfNeeded: state))
-            state >>= 16
-        }
-        
-        state = ((state / freq) << rANSScaleBits) + (state % freq) + cumFreq
-        states[lane] = state
-    }
-    
-    @inline(__always)
-    mutating func flush() {
-        for lane in 0..<4 {
-            streams[lane].append(UInt16(truncatingIfNeeded: states[lane]))
-            streams[lane].append(UInt16(truncatingIfNeeded: states[lane] >> 16))
-        }
-    }
-    
-    @inline(__always)
-    func getBitstream() -> [UInt8] {
-        var bytes = [UInt8]()
-        
-        var lengths = [Int](repeating: 0, count: 4)
-        for i in 0..<4 {
-            lengths[i] = streams[i].count * 2
-        }
-        
-        for len in lengths {
-            let l = UInt32(len)
-            bytes.append(UInt8(truncatingIfNeeded: l >> 24))
-            bytes.append(UInt8(truncatingIfNeeded: (l >> 16) & 0xFF))
-            bytes.append(UInt8(truncatingIfNeeded: (l >> 8) & 0xFF))
-            bytes.append(UInt8(truncatingIfNeeded: l & 0xFF))
-        }
-        
-        for lane in 0..<4 {
-            for word in streams[lane].reversed() {
-                bytes.append(UInt8(truncatingIfNeeded: word >> 8))
-                bytes.append(UInt8(truncatingIfNeeded: word & 0xFF))
-            }
-        }
-        
-        return bytes
-    }
-}
-
-// MARK: - 4-way Interleaved rANS SIMD Decoder
-
-struct InterleavedrANSDecoder {
-    private(set) var states: SIMD4<UInt32>
-    
-    private let base: UnsafePointer<UInt8>
-    private let count: Int
-    private var offsets: SIMD4<Int>
-    private let limits: SIMD4<Int>
-    
-    init(base: UnsafePointer<UInt8>, count: Int) {
-        self.base = base
-        self.count = count
-        
-        guard 16 <= count else {
-            self.states = SIMD4<UInt32>(repeating: 0)
-            self.offsets = SIMD4<Int>(repeating: 0)
-            self.limits = SIMD4<Int>(repeating: 0)
-            return
-        }
-        
-        var lens = SIMD4<Int>(repeating: 0)
-        var offset = 0
-        
-        @inline(__always)
-        func readUInt32() -> UInt32 {
-            if offset + 3 < count {
-                let b0 = UInt32(base[offset])
-                let b1 = UInt32(base[offset+1])
-                let b2 = UInt32(base[offset+2])
-                let b3 = UInt32(base[offset+3])
-                offset += 4
-                return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-            }
-            return 0
-        }
-        
-        for i in 0..<4 {
-            lens[i] = Int(readUInt32())
-        }
-        
-        var currentOffset = 16
-        var initOffsets = SIMD4<Int>(repeating: 0)
-        var initLimits = SIMD4<Int>(repeating: 0)
-        var initStates = SIMD4<UInt32>(repeating: 0)
-        
-        for i in 0..<4 {
-            let limit = currentOffset + lens[i]
-            if currentOffset + 4 <= limit && limit <= count {
-                let w1 = (UInt32(base[currentOffset]) << 8) | UInt32(base[currentOffset + 1])
-                let w0 = (UInt32(base[currentOffset + 2]) << 8) | UInt32(base[currentOffset + 3])
-                initStates[i] = (w1 << 16) | w0
-                
-                initOffsets[i] = currentOffset + 4
-            } else {
-                initStates[i] = 0
-                initOffsets[i] = limit
-            }
-            initLimits[i] = min(limit, count)
-            currentOffset = limit
-        }
-        
-        self.offsets = initOffsets
-        self.limits = initLimits
-        self.states = initStates
-    }
-    
-    @inline(__always)
-    func getCumulativeFreqs() -> SIMD4<UInt32> {
-        let mask = SIMD4<UInt32>(repeating: rANSScale - 1)
-        return states & mask
-    }
-    
-    @inline(__always)
-    mutating func advanceSymbols(cumFreqs: SIMD4<UInt32>, freqs: SIMD4<UInt32>, activeMask: SIMD4<UInt32> = SIMD4<UInt32>(repeating: 0xFFFFFFFF)) {
-        let mask = SIMD4<UInt32>(repeating: rANSScale - 1)
-        let nextStates = freqs &* (states &>> rANSScaleBits) &+ (states & mask) &- cumFreqs
-        
-        let boolMask = activeMask .== SIMD4<UInt32>(repeating: 0xFFFFFFFF)
-        states.replace(with: nextStates, where: boolMask)
-        
-        // why: renormalize lanes where state fell below rANSL;
-        // at most 2 passes needed to restore all lanes
-        let th = SIMD4<UInt32>(repeating: rANSL)
-        
-        // first renormalization pass (sufficient for most cases)
-        var renormMask = (states .< th) .& boolMask
-        if any(renormMask) {
-            for lane in 0..<4 {
-                if renormMask[lane] {
-                    let off = offsets[lane]
-                    if off + 1 < limits[lane] {
-                        let word = (UInt32(base[off]) << 8) | UInt32(base[off + 1])
-                        offsets[lane] = off + 2
-                        states[lane] = (states[lane] &<< 16) | word
-                    } else {
-                        states[lane] = states[lane] &<< 16
-                    }
-                }
-            }
-        }
-        
-        // second renormalization pass (rare case)
-        renormMask = (states .< th) .& boolMask
-        if any(renormMask) {
-            for lane in 0..<4 {
-                if renormMask[lane] {
-                    let off = offsets[lane]
-                    if off + 1 < limits[lane] {
-                        let word = (UInt32(base[off]) << 8) | UInt32(base[off + 1])
-                        offsets[lane] = off + 2
-                        states[lane] = (states[lane] &<< 16) | word
-                    } else {
-                        states[lane] = states[lane] &<< 16
-                    }
-                }
-            }
-        }
-    }
-}
 
 struct BypassWriter {
     private(set) var bytes: [UInt8]

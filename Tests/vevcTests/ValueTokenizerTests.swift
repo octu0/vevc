@@ -68,7 +68,7 @@ final class ValueTokenizerTests: XCTestCase {
 
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
 
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
 
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
@@ -84,7 +84,7 @@ final class ValueTokenizerTests: XCTestCase {
         print("=== Encoder: pairs=\(encoder.pairs.count) coeffCount=\(encoder.coeffCount) trailingZeros=\(encoder.trailingZeros) ===")
 
         let encPairs = encoder.pairs
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
         var decPairs: [(run: Int, val: Int16)] = []
 
         try data.withUnsafeBufferPointer { ptr in

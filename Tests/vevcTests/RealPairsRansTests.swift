@@ -37,7 +37,7 @@ final class RealPairsRansTests: XCTestCase {
 
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
 
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
@@ -60,12 +60,12 @@ final class RealPairsRansTests: XCTestCase {
         print("=== Real pairs count: \(realPairs.count) ===")
 
         // 新しいエンコーダに同じpairsを追加
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         for pair in realPairs {
             encoder.addPair(run: pair.run, val: pair.val, context: pair.context)
         }
 
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
         var decPairs: [(run: Int, val: Int16)] = []
         try data.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)

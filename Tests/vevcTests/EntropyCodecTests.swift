@@ -6,7 +6,7 @@ final class EntropyCodecTests: XCTestCase {
 
     /// 50個以上のpairsでrANSモードのラウンドトリップ
     func testRansRoundtrip() throws {
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
 
         // 50個のpairを追加（nonZeroCount > 32でrANSモード）
         var expectedPairs: [(run: UInt32, val: Int16)] = []
@@ -18,7 +18,7 @@ final class EntropyCodecTests: XCTestCase {
             expectedPairs.append((run: run, val: val))
         }
 
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
 
         try data.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
@@ -46,12 +46,12 @@ final class EntropyCodecTests: XCTestCase {
         }
 
         // 全ブロックをエンコード
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         for i in 0..<16 {
             blockEncode16V(encoder: &encoder, block: blocks[i])
         }
 
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
 
         // デコード
         let decBlocks = (0..<16).map { _ in BlockView.allocate(width: 16, height: 16) }

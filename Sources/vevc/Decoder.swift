@@ -259,18 +259,26 @@ public struct Decoder: Sendable {
         var offset = 0
         var chunks: [[UInt8]] = []
         var headerChunk: [UInt8]? = nil
+        var effectiveWidth = 0
+        var effectiveHeight = 0
         
         while offset < data.count {
             if offset + 4 <= data.count && data[offset] == 0x56 && data[offset+1] == 0x45 && data[offset+2] == 0x56 && data[offset+3] == 0x43 {
                 let headerStart = offset
                 offset += 4
                 let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
+                let metaStart = offset
+                // Extract width/height from metadata: profile(1B) + width(2B) + height(2B)
+                if 5 <= metadataSize {
+                    effectiveWidth = Int(UInt16(data[metaStart + 1]) << 8 | UInt16(data[metaStart + 2]))
+                    effectiveHeight = Int(UInt16(data[metaStart + 3]) << 8 | UInt16(data[metaStart + 4]))
+                }
                 offset += metadataSize
                 headerChunk = Array(data[headerStart..<offset])
             } else {
                 let chunkStart = offset
                 let frameHeader = try VEVCFrameHeader.deserialize(from: data, offset: &offset)
-                offset += frameHeader.payloadSize
+                offset += frameHeader.payloadSize(width: effectiveWidth, height: effectiveHeight)
                 let chunkEnd = offset
                 chunks.append(Array(data[chunkStart..<chunkEnd]))
             }
@@ -312,6 +320,9 @@ public struct Decoder: Sendable {
         let stream = AsyncStream<[UInt8]> { continuation in
             Task {
                 do {
+                    var effectiveWidth = 0
+                    var effectiveHeight = 0
+                    
                     while true {
                         let firstByteData = readFully(fileHandle: fileHandle, count: 1)
                         if firstByteData.isEmpty { break }
@@ -328,6 +339,13 @@ public struct Decoder: Sendable {
                                 let metadataSize = Int(try readUInt16BEFromBytes([UInt8](metaSizeData), offset: &msOffset))
                                 let metaData = readFully(fileHandle: fileHandle, count: metadataSize)
                                 guard metaData.count == metadataSize else { continuation.finish(); return }
+                                
+                                // Extract width/height from metadata: profile(1B) + width(2B) + height(2B)
+                                let metaBytes = [UInt8](metaData)
+                                if 5 <= metaBytes.count {
+                                    effectiveWidth = Int(UInt16(metaBytes[1]) << 8 | UInt16(metaBytes[2]))
+                                    effectiveHeight = Int(UInt16(metaBytes[3]) << 8 | UInt16(metaBytes[4]))
+                                }
                                 
                                 var headerChunk: [UInt8] = [0x56, 0x45, 0x56, 0x43]
                                 headerChunk.append(contentsOf: metaSizeData)
@@ -346,19 +364,19 @@ public struct Decoder: Sendable {
                         if flag == copyFrameFlag {
                             continuation.yield(chunk)
                         } else {
-                            let headerBytes = readFully(fileHandle: fileHandle, count: 24)
-                            guard headerBytes.count == 24 else { continuation.finish(); return }
+                            let headerBytes = readFully(fileHandle: fileHandle, count: 16)
+                            guard headerBytes.count == 16 else { continuation.finish(); return }
                             chunk.append(contentsOf: headerBytes)
                             
                             var hsOffset = 0
-                            _ = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let mvsSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
-                            let refDirSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer0Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer1Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer2Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             
-                            let payloadSize = mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
+                            let hasRefDir = (flag & 0x10) != 0
+                            let refDirBytes = if hasRefDir { (deriveMVCount(width: effectiveWidth, height: effectiveHeight) + 7) / 8 } else { 0 }
+                            let payloadSize = mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
                             if 0 < payloadSize {
                                 let payloadBody = readFully(fileHandle: fileHandle, count: payloadSize)
                                 guard payloadBody.count == payloadSize else { continuation.finish(); return }

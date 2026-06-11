@@ -24,16 +24,9 @@ public struct VEVCFileHeader {
         appendUInt16BE(&payload, UInt16(framerate))
         payload.append(timescale)
         
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel0))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel0))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel1))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel1))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel2))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel2))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.runModel3))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.valModel3))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmRunModel))
-        payload.append(contentsOf: serializeRANSModel(StaticRANSModels.shared.dpcmValModel))
+        // Table Flag: 0x00 = use built-in static tables (no table data follows)
+        //             0x01 = custom tables follow in compressed format (reserved for future)
+        payload.append(0x00)
         
         appendUInt16BE(&out, UInt16(payload.count))
         out.append(contentsOf: payload)
@@ -69,20 +62,18 @@ public struct VEVCFileHeader {
         _ = chunk[offset] // Timescale
         offset += 1
         
-        guard offset + 2560 <= payloadEnd else {
-            throw DecodeError.insufficientDataContext("VEVC FileHeader static rANS models missing or truncated")
+        guard offset < payloadEnd else {
+            throw DecodeError.insufficientDataContext("VEVC FileHeader Table Flag missing")
         }
         
-        StaticRANSModels.shared.runModel0 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.valModel0 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.runModel1 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.valModel1 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.runModel2 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.valModel2 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.runModel3 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.valModel3 = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.dpcmRunModel = deserializeRANSModel(from: chunk, offset: &offset)
-        StaticRANSModels.shared.dpcmValModel = deserializeRANSModel(from: chunk, offset: &offset)
+        let tableFlag = chunk[offset]
+        offset += 1
+        
+        if tableFlag == 0x00 {
+            // Built-in static tables: no table data to read, StaticRANSModels keeps defaults
+        } else {
+            throw DecodeError.insufficientDataContext("VEVC FileHeader unsupported Table Flag: \(tableFlag)")
+        }
         
         offset = payloadEnd
         return VEVCFileHeader(width: w, height: h, framerate: fps)
@@ -97,18 +88,16 @@ public struct VEVCFrameHeader {
     }
     
     public let frameType: FrameType
-    public let mvsCount: Int
+    public let hasRefDir: Bool
     public let mvsSize: Int
-    public let refDirSize: Int
     public let layer0Size: Int
     public let layer1Size: Int
     public let layer2Size: Int
     
-    public init(frameType: FrameType, mvsCount: Int = 0, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
+    public init(frameType: FrameType, hasRefDir: Bool = false, mvsSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
         self.frameType = frameType
-        self.mvsCount = mvsCount
+        self.hasRefDir = hasRefDir
         self.mvsSize = mvsSize
-        self.refDirSize = refDirSize
         self.layer0Size = layer0Size
         self.layer1Size = layer1Size
         self.layer2Size = layer2Size
@@ -124,20 +113,22 @@ public struct VEVCFrameHeader {
         return frameType == .iFrame
     }
     
+    /// Compute payload size including derived refDirSize.
+    /// width/height are needed to derive mvsCount → refDirSize.
     @inline(__always)
-    public var payloadSize: Int {
+    public func payloadSize(width: Int, height: Int) -> Int {
         if frameType == .copyFrame { return 0 }
-        return mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
+        let refDirBytes = if hasRefDir { (deriveMVCount(width: width, height: height) + 7) / 8 } else { 0 }
+        return mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
     }
     
     @inline(__always)
     public func serialize() -> [UInt8] {
         var out = [UInt8]()
-        out.append(frameType.rawValue)
+        let flag = frameType.rawValue | (hasRefDir ? 0x10 : 0x00)
+        out.append(flag)
         if frameType != .copyFrame {
-            appendUInt32BE(&out, UInt32(mvsCount))
             appendUInt32BE(&out, UInt32(mvsSize))
-            appendUInt32BE(&out, UInt32(refDirSize))
             appendUInt32BE(&out, UInt32(layer0Size))
             appendUInt32BE(&out, UInt32(layer1Size))
             appendUInt32BE(&out, UInt32(layer2Size))
@@ -151,7 +142,10 @@ public struct VEVCFrameHeader {
         let flag = r[offset]
         offset += 1
         
-        guard let fType = FrameType(rawValue: flag) else {
+        let frameTypeBits = flag & 0x0F
+        let hasRefDir = (flag & 0x10) != 0
+        
+        guard let fType = FrameType(rawValue: frameTypeBits) else {
             throw BinaryError.insufficientData(message: "VEVCFrameHeader invalid frameType \(flag)")
         }
         
@@ -159,13 +153,25 @@ public struct VEVCFrameHeader {
             return VEVCFrameHeader(frameType: .copyFrame)
         }
         
-        let mvsCount = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let mvsSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
-        let refDirSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer0Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer1Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer2Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         
-        return VEVCFrameHeader(frameType: fType, mvsCount: mvsCount, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, mvsSize: mvsSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
+}
+
+/// Derive MV block count from frame dimensions.
+/// MV grid is 8x8 blocks at the **Base8 (L0) resolution**, which is the LL subband after 2 DWT stages.
+/// L0 dimensions: l0dx = ((dx+1)/2+1)/2, l0dy = ((dy+1)/2+1)/2
+@inline(__always)
+public func deriveMVCount(width: Int, height: Int) -> Int {
+    let l1dx = (width + 1) / 2
+    let l1dy = (height + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+    let cols = (l0dx + 7) / 8
+    let rows = (l0dy + 7) / 8
+    return cols * rows
 }

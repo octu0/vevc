@@ -1,4 +1,4 @@
-# VEVC Data Layout Specification (v1)
+# VEVC Data Layout Specification (v2)
 
 This document provides a detailed explanation of the internal structure and format specifications of the VEVC (Video Encoding with Visual Clarity) encoded bitstream. 
 
@@ -29,7 +29,7 @@ The metadata payload occupies exactly the number of bytes specified by `Metadata
 | Color Gamut | 1 Byte | Color gamut flag. Currently fixed to `0x01` (BT.709). |
 | Framerate | 2 Bytes (UInt16BE) | Video framerate (e.g., 30, 60). |
 | Timescale | 1 Byte | Currently always `0x00`. |
-| Static rANS Models | 2560 Bytes | 10 pre-trained static rANS models (Run/Val models for normal and DPCM contexts). These models are strictly required to be present in the metadata payload as a fallback baseline. |
+| Table Flag | 1 Byte | `0x00`: Use built-in static tables (no table data follows). `0x01`: Custom learned tables follow in compressed format (reserved for future use). When `0x00`, the decoder uses the hardcoded `StaticRANSModels` as the fallback baseline. |
 
 ---
 
@@ -39,21 +39,28 @@ Immediately following the File Metadata, "Frame Packets" are stored sequentially
 
 | Frame Status (1 Byte) | Frame Type | Has Payload? |
 |---|---|---|
-| `0x00` | **P-Frame** (Predicted) | Yes |
+| `0x00` | **P-Frame** (Predicted, forward-only) | Yes |
 | `0x01` | **Copy-Frame** (Skip) | **No** (Directly copies the previously reconstructed frame) |
 | `0x02` | **I-Frame** (Keyframe) | Yes |
+| `0x10` | **P-Frame** (Bidirectional, with RefDir) | Yes |
+
+> [!NOTE]
+> The Frame Status byte encodes both the frame type (lower 4 bits) and the `hasRefDir` flag (bit 4, `0x10`). When bit 4 is set, the frame includes a Reference Direction bitset in the payload. This flag is only meaningful for P-Frames (`0x00`), yielding `0x10` for bidirectional P-Frames.
 
 ### 2.1. Frame Header (For I-Frames and P-Frames)
-If the Status is `0x00` or `0x02`, the following size information is stored next. These dictate the bounds of the payloads that follow.
+If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow.
 
 | Field Name | Size | Description |
 |---|---|---|
-| MVs Count | 4 Bytes (UInt32BE) | Number of Motion Vectors. Usually 0 for I-Frames. |
 | MVs Size | 4 Bytes (UInt32BE) | Byte size of the following MV Data payload. |
-| RefDir Size | 4 Bytes (UInt32BE) | Byte size of the Reference Direction flags payload. |
 | Layer0 Size | 4 Bytes (UInt32BE) | Byte size of the Base Layer (8x8) payload. |
 | Layer1 Size | 4 Bytes (UInt32BE) | Byte size of Enhancement Layer 1 (16x16) payload. |
 | Layer2 Size | 4 Bytes (UInt32BE) | Byte size of Enhancement Layer 2 (32x32) payload. |
+
+> [!IMPORTANT]
+> **Derived Fields (not stored in header)**:
+> - **MVs Count**: Derived from frame dimensions: `ceil(width / 8) × ceil(height / 8)`. Width and height are available from the File Metadata.
+> - **RefDir Size**: Derived from MVs Count: `ceil(mvsCount / 8)`. Only present when the `hasRefDir` flag (bit 4 of Frame Status) is set.
 
 > [!TIP]
 > **Scalable Bitstream (Droppable Layers)**
@@ -67,10 +74,10 @@ If the Status is `0x00` or `0x02`, the following size information is stored next
 > This "Encode Once, Route Anywhere" design means each resolution tier independently performs motion compensation using the same shared MV data, drastically reducing both compute and data overhead.
 
 ### 2.2. Frame Payload
-Data is stored continuously according to the sizes specified in the header.
+Data is stored continuously according to the sizes specified (or derived from) the header.
 
 1. **MV Data** (`MVs Size` bytes)
-2. **RefDir Data** (`RefDir Size` bytes): A bitset of flags used for bidirectional prediction.
+2. **RefDir Data** (`ceil(mvsCount / 8)` bytes, only present when `hasRefDir` is set): A bitset of flags used for bidirectional prediction.
 3. **Layer0 Data** (`Layer0 Size` bytes)
 4. **Layer1 Data** (`Layer1 Size` bytes)
 5. **Layer2 Data** (`Layer2 Size` bytes)
@@ -107,12 +114,14 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 | **Cr Payload Data** | (Cr Payload Size bytes) | |
 
 ### 3.1. Plane Payload (Y / Cb / Cr)
-The data for each plane consists of the entropy-encoded data of the four DWT subbands (LL, HL, LH, HH) concatenated sequentially.
+The data for each plane consists of a single **unified entropy stream** that encodes all four DWT subbands (LL, HL, LH, HH) together using 5 rANS contexts.
 
-1. `LL Size` (UInt32BE) + `LL Data`
-2. `HL Size` (UInt32BE) + `HL Data`
-3. `LH Size` (UInt32BE) + `LH Data`
-4. `HH Size` (UInt32BE) + `HH Data`
+The payload consists of:
+1. **Block Flags** (variable, bypass bitstream): Per-block zero/split decision flags.
+2. **Unified Entropy Data**: A single `EntropyEncoder` output containing interleaved LL (DPCM, context 4) and HL/LH/HH (AC, contexts 0-3) coefficients.
+
+> [!NOTE]
+> In previous versions, each subband had its own `[Size (4B)][Data]` pair, totaling 16 bytes of size prefixes per plane. The unified stream eliminates this overhead entirely.
 
 ---
 
@@ -122,36 +131,36 @@ The data for each plane consists of the entropy-encoded data of the four DWT sub
 
 ## 5. Entropy Coded Data Structure
 
-The interior of each subband data (`LL Data`, `HL Data`, etc.) is entropy-coded using a combination of Bypass (raw bitstreams) and rANS (Asymmetric Numeral Systems) models.
+The unified entropy stream is coded using a combination of Bypass (raw bitstreams) and rANS (Asymmetric Numeral Systems) models.
 
 | Field Name | Size | Description |
 |---|---|---|
-| Metadata Bypass Size | 4 Bytes (UInt32BE) | Size of the Bypass data. |
+| Metadata Bypass Size | VLQ | Size of the Bypass data. |
 | Metadata Bypass Data | (Variable) | The raw Bypass bitstream. |
-| Coefficient Count | 4 Bytes (UInt32BE) | Total number of coefficients to be decoded. |
+| Coefficient Count | VLQ | Total number of coefficients to be decoded. |
 
-If `Coefficient Count` is 0, the data for this subband terminates here. If it is 1 or greater, it is followed by one of the formats below.
+If `Coefficient Count` is 0, the data terminates here. If it is 1 or greater, it is followed by one of the formats below.
 
 ### 4.1. Raw Mode (Uncompressed / Low Pair Count)
 This format is used when the number of coefficients is very small (<= 32 pairs).
 - `Flags` (1 Byte): Value is exactly `0x80`.
-- `Raw Data Size` (4 Bytes UInt32BE)
+- `Raw Data Size` (VLQ)
 - `Raw Data` (Bypass Bitstream of `Raw Data Size` bytes)
   - Zero-runs and coefficient tokens are written directly bit-by-bit.
 
 ### 4.2. rANS Mode
 This is the standard mode used for the vast majority of blocks.
 - `Flags` (1 Byte):
-  - Bit 6 (`0x40`): Indicates the use of Static Tables (decoder uses the models from the file header instead of reading dynamic tables).
-  - Bit 5 (`0x20`): Indicates the use of DPCM Tables. When this flag is set, the block exclusively uses the DPCM-specific context models (`dpcmRunModel` and `dpcmValModel`).
-  - Bit 4 (`0x10`): Indicates Merged Context mode. When set, a single rANS model (1 Run + 1 Val table) is used for all contexts instead of 4 separate context-specific models. Only 2 frequency tables follow in the stream instead of 8.
+  - Bit 6 (`0x40`): Indicates the use of Static Tables (decoder uses the built-in models instead of reading dynamic tables).
+  - Bit 5 (`0x20`): Reserved (must be 0).
+  - Bit 4 (`0x10`): Indicates Merged Context mode. When set, a single rANS model (1 Run + 1 Val table) is used for all 5 contexts instead of separate context-specific models. Only 2 frequency tables follow in the stream instead of 10.
   - Bit 0 (`0x01`): Indicates the presence of Trailing Zeros (zero-runs that extend to the end of the block).
-- `Total Pair Entries` (4 Bytes UInt32BE): Total number of Run/Value pairs.
+- `Total Pair Entries` (VLQ): Total number of Run/Value pairs.
   - *Note: The 4-lane elements boundaries (chunk starts) are dynamically reconstructed from this value by the decoder using integer division and modulo (`Total Pair Entries / 4`), eliminating fixed header overhead.*
 - **Dynamic Frequency Tables (Conditional)**:
   - Present **only if** Bit 6 of `Flags` is `0` (dynamic tables).
   - If Bit 4 (`0x10`, Merged Context) is set: 2 compressed frequency tables (1 Run + 1 Val) follow.
-  - If Bit 4 is `0` (4-context mode): 8 compressed frequency tables (Run + Val for each of the 4 contexts) follow.
+  - If Bit 4 is `0` (5-context mode): 10 compressed frequency tables (Run + Val for each of the 5 contexts) follow.
 - `Lane Bypass Data` (4 Chunks):
   - Repeated 4 times for each lane: `Bypass Size` (VLQ) followed by the `Bypass Data`.
 - `rANS Bitstream` (All remaining bytes):
@@ -159,9 +168,9 @@ This is the standard mode used for the vast majority of blocks.
 
 > [!NOTE]
 > **Cost-Based Model Selection**
-> The encoder uses a cost-based model selection algorithm to choose the optimal model for each subband. For every subband, the encoder estimates the total bit cost (data bits + header overhead) for three options:
-> 1. **Static 4-context**: Uses the pre-trained models from the file header (no header overhead).
-> 2. **Dynamic 4-context**: Builds models from the actual data, writes 8 frequency tables to the stream.
+> The encoder uses a cost-based model selection algorithm to choose the optimal model for each plane's unified stream. The encoder estimates the total bit cost (data bits + header overhead) for three options:
+> 1. **Static 5-context**: Uses the built-in models (no header overhead). Contexts 0-3 use AC models, context 4 uses the DPCM model.
+> 2. **Dynamic 5-context**: Builds models from the actual data, writes 10 frequency tables to the stream.
 > 3. **Dynamic merged**: Merges all context statistics into a single model, writes only 2 frequency tables.
 >
 > The option with the lowest estimated total cost is selected. This ensures that dynamic tables are only used when the compression benefit outweighs the header overhead cost.
@@ -177,8 +186,10 @@ This is the standard mode used for the vast majority of blocks.
 > This hybrid approach ensures that the highly-probable small values are densely packed into the rANS models, while large outliers do not inflate the frequency tables.
 
 > [!NOTE]
-> **DPCM and Context Modeling**
-> VEVC uses multiple probability models (Contexts) depending on the spatial characteristics of the block.
-> - **Normal Mode**: Uses 4 separate Contexts (Context 0-3) based on the surrounding block statistics. The encoder may also select a merged single-context mode when the context-specific distributions are similar enough that the header savings outweigh the compression loss.
-> - **DPCM Mode**: For highly directional textures, a single specialized DPCM context is used to model the prediction residuals. When the DPCM flag (`0x20`) is set, the decoder routes all pairs to the DPCM Run/Val rANS models.
+> **Context Modeling (5 Contexts)**
+> VEVC uses 5 probability model contexts within each unified stream:
+> - **Context 0-3 (AC)**: Used for HL, LH, HH subband coefficients. The context index is selected based on surrounding block statistics (parent zero, previous value magnitude).
+> - **Context 4 (DPCM)**: Used exclusively for LL subband coefficients, which are DPCM-encoded (differential pulse-code modulation). This context captures the prediction residual distribution.
+>
+> The encoder may also select a merged single-context mode when the context-specific distributions are similar enough that the header savings outweigh the compression loss.
 

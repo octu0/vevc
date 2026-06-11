@@ -3,226 +3,89 @@ import XCTest
 
 final class InterleavedrANSTests: XCTestCase {
 
-    struct EncodedData {
-        let isSignificant: Bool
-        let token: UInt8
-        let bypassBits: UInt32
-        let bypassLen: Int
-    }
-
+    /// Interleaved4rANSEncoder/Decoder のラウンドトリップテスト
+    /// エンコード/デコード順序:
+    ///   エンコード: lane 3→0, 各lane内で逆順 (backward rANS)
+    ///   デコード: lane 0→3, 各lane内で順に1シンボルずつ交互 (interleaved)
     func testInterleavedrANSEncodeDecodeAndPerformance() {
         var rng = SystemRandomNumberGenerator()
 
-        let count = 8192 * 4  // 約32K係数
-        var testData = [Int16]()
-        testData.reserveCapacity(count)
+        let pairCount = 4096
+        // run/val ペアを生成
+        var runTokens = [UInt8](repeating: 0, count: pairCount)
+        var valTokens = [UInt8](repeating: 0, count: pairCount)
+        var runTokenCounts = [Int](repeating: 0, count: 64)
+        var valTokenCounts = [Int](repeating: 0, count: 64)
 
-        // ヘビーテール分布を模倣
-        for _ in 0..<count {
+        for i in 0..<pairCount {
             let p = Int.random(in: 0..<100, using: &rng)
+            let val: Int16
             switch true {
             case p < 80:
-                testData.append(0)
-            case p < 98:
-                testData.append(Int16.random(in: -3...3, using: &rng))
+                val = Int16.random(in: -3...3, using: &rng)
             default:
-                testData.append(Int16.random(in: -255...255, using: &rng))
+                val = Int16.random(in: -64...64, using: &rng)
             }
+            let run = UInt32.random(in: 0...15, using: &rng)
+
+            let rt = valueTokenizeUnsigned(run)
+            let vt = valueTokenize(val)
+            runTokens[i] = rt.token
+            valTokens[i] = vt.token
+            runTokenCounts[Int(rt.token)] += 1
+            valTokenCounts[Int(vt.token)] += 1
         }
 
-        var tokens = [EncodedData]()
-        tokens.reserveCapacity(count)
+        var runModel = rANSModel()
+        runModel.normalize(tokenCounts: runTokenCounts)
+        var valModel = rANSModel()
+        valModel.normalize(tokenCounts: valTokenCounts)
 
-        var sigCounts: [Int] = [0, 0]
-        var tokenCounts: [Int] = Array(repeating: 0, count: 64)
-
-        for val in testData {
-            let isSig = val != 0
-            if isSig {
-                let t = valueTokenize(val)
-                tokens.append(EncodedData(isSignificant: true, token: t.token, bypassBits: t.bypassBits, bypassLen: t.bypassLen))
-                sigCounts[1] += 1
-                tokenCounts[Int(t.token)] += 1
-            } else {
-                tokens.append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
-                sigCounts[0] += 1
-            }
+        // ---- エンコード ----
+        // Interleaved4rANS: 4レーンに均等分割してエンコード
+        let chunkBase = pairCount / 4
+        let chunkRemainder = pairCount % 4
+        var chunkStarts = [Int](repeating: 0, count: 5)
+        for i in 0..<4 {
+            chunkStarts[i + 1] = chunkStarts[i] + chunkBase + (i < chunkRemainder ? 1 : 0)
         }
 
-        var model = rANSModel()
-        model.normalize(sigCounts: sigCounts, tokenCounts: tokenCounts)
+        var enc = Interleaved4rANSEncoder()
 
-        // ---- 4-way Encode ----
-        var encoder = InterleavedrANSEncoder()
-        var bypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-
-        let chunkSize = count / 4
-
-        // Backward rANS
-        for lane in 0..<4 {
-            let start = lane * chunkSize
-            let end = start + chunkSize
+        // Backward encode: lane 3→0, each lane backward
+        for lane in stride(from: 3, through: 0, by: -1) {
+            let start = chunkStarts[lane]
+            let end = chunkStarts[lane + 1]
             for i in stride(from: end - 1, through: start, by: -1) {
-                let t = tokens[i]
-                if t.isSignificant {
-                    let freq = model.tokenFreqs[Int(t.token)]
-                    let cumFreq = model.tokenCumFreqs[Int(t.token)]
-                    encoder.encodeSymbol(lane: lane, cumFreq: cumFreq, freq: freq)
-                    encoder.encodeSymbol(lane: lane, cumFreq: 0, freq: model.sigFreq)
-                } else {
-                    encoder.encodeSymbol(lane: lane, cumFreq: model.sigFreq, freq: rANSScale - model.sigFreq)
-                }
+                // val first (will be decoded second), then run (decoded first)
+                let vt = valTokens[i]
+                enc.encodeSymbol(lane: lane, cumFreq: valModel.tokenCumFreqs[Int(vt)], freq: valModel.tokenFreqs[Int(vt)])
+                let rt = runTokens[i]
+                enc.encodeSymbol(lane: lane, cumFreq: runModel.tokenCumFreqs[Int(rt)], freq: runModel.tokenFreqs[Int(rt)])
             }
         }
-        encoder.flush()
+        enc.flush()
+        let bitstream = enc.getBitstream()
 
-        // Forward Bypass
-        // Bypassデータは順方向に書き込んでおき、デコード後に順方向のまま取り出して、
-        // 逆順で得られたrANSのデコード結果配列（restoredByLane）を反転させた後で結合する。
-        for lane in 0..<4 {
-            let start = lane * chunkSize
-            let end = start + chunkSize
-            for i in start..<end {
-                let t = tokens[i]
-                if t.isSignificant {
-                    bypassWriters[lane].writeBits(t.bypassBits, count: t.bypassLen)
-                }
-            }
-            bypassWriters[lane].flush()
-        }
+        // ---- デコード ----
+        bitstream.withUnsafeBufferPointer { buf in
+            var dec = Interleaved4rANSDecoder(base: buf.baseAddress!, count: buf.count)
 
-        let ransStream = encoder.getBitstream()
-        let bypassStreams = bypassWriters.map { $0.bytes }
+            for lane in 0..<4 {
+                let start = chunkStarts[lane]
+                let end = chunkStarts[lane + 1]
+                for i in start..<end {
+                    // Decode run token
+                    let cfRun = dec.getCumulativeFreq(lane: lane)
+                    let rtInfo = runModel.findToken(cf: cfRun)
+                    dec.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+                    XCTAssertEqual(runTokens[i], rtInfo.token, "Run token mismatch at pair \(i) lane \(lane)")
 
-        // ---- 4-way Decode ----
-        // To safely use UnsafePointers without extensions, we use withUnsafeBufferPointer on each
-        ransStream.withUnsafeBufferPointer { ransBuf in
-            bypassStreams[0].withUnsafeBufferPointer { bp0Buf in
-                bypassStreams[1].withUnsafeBufferPointer { bp1Buf in
-                    bypassStreams[2].withUnsafeBufferPointer { bp2Buf in
-                        bypassStreams[3].withUnsafeBufferPointer { bp3Buf in
-
-                            var bypassReaders = [
-                                BypassReader(base: bp0Buf.baseAddress!, count: bp0Buf.count),
-                                BypassReader(base: bp1Buf.baseAddress!, count: bp1Buf.count),
-                                BypassReader(base: bp2Buf.baseAddress!, count: bp2Buf.count),
-                                BypassReader(base: bp3Buf.baseAddress!, count: bp3Buf.count),
-                            ]
-                            let sigFreqVec = SIMD4<UInt32>(repeating: model.sigFreq)
-                            let invSigFreqVec = SIMD4<UInt32>(repeating: rANSScale - model.sigFreq)
-                            let zeroVec = SIMD4<UInt32>(repeating: 0)
-
-                            var finalDecodingResult = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
-
-                            var decoder = InterleavedrANSDecoder(base: ransBuf.baseAddress!, count: ransBuf.count)
-                            var rANSDecodedByLane = [[(isSignificant: Bool, token: UInt8)]](repeating: [], count: 4)
-                            for i in 0..<4 {
-                                rANSDecodedByLane[i].reserveCapacity(chunkSize)
-                            }
-
-                            // Decoding loop (LIFO Order)
-                            for _ in 0..<chunkSize {
-                                let cfs = decoder.getCumulativeFreqs()
-                                var isSigs = [Bool](repeating: false, count: 4)
-
-                                var sigAdvanceCumFreq = SIMD4<UInt32>(repeating: 0)
-                                var sigAdvanceFreq = SIMD4<UInt32>(repeating: 0)
-
-                                for lane in 0..<4 {
-                                    if cfs[lane] < model.sigFreq {
-                                        isSigs[lane] = true
-                                        sigAdvanceFreq[lane] = sigFreqVec[lane]
-                                        sigAdvanceCumFreq[lane] = zeroVec[lane]
-                                    } else {
-                                        isSigs[lane] = false
-                                        sigAdvanceFreq[lane] = invSigFreqVec[lane]
-                                        sigAdvanceCumFreq[lane] = sigFreqVec[lane]
-                                    }
-                                }
-
-                                decoder.advanceSymbols(cumFreqs: sigAdvanceCumFreq, freqs: sigAdvanceFreq)
-
-                                let cfTokens = decoder.getCumulativeFreqs()
-                                var tokenAdvanceCumFreq = SIMD4<UInt32>(repeating: 0)
-                                var tokenAdvanceFreq = SIMD4<UInt32>(repeating: 0)
-                                var readToken = [UInt8](repeating: 0, count: 4)
-
-                                var advanceMask = SIMD4<UInt32>(repeating: 0)
-                                for lane in 0..<4 {
-                                    if isSigs[lane] {
-                                        let tInfo = model.findToken(cf: cfTokens[lane])
-                                        readToken[lane] = tInfo.token
-                                        tokenAdvanceCumFreq[lane] = tInfo.cumFreq
-                                        tokenAdvanceFreq[lane] = tInfo.freq
-                                        advanceMask[lane] = 0xFFFFFFFF
-                                    }
-                                }
-
-                                decoder.advanceSymbols(cumFreqs: tokenAdvanceCumFreq, freqs: tokenAdvanceFreq, activeMask: advanceMask)
-
-                                // Read bypass ではなくまずは rANS 結果のみ保存
-                                for lane in 0..<4 {
-                                    rANSDecodedByLane[lane].append((isSignificant: isSigs[lane], token: readToken[lane]))
-                                }
-                            }
-                            finalDecodingResult = rANSDecodedByLane
-
-                            // Assemble and read Bypass in Forward Order
-                            var restoredByLane = [[EncodedData]](repeating: [], count: 4)
-                            for i in 0..<4 {
-                                restoredByLane[i].reserveCapacity(chunkSize)
-                            }
-
-                            for lane in 0..<4 {
-                                // エンコードがBackwardなので、デコード結果(rANSDecodedByLane)はForwardで返ってくる
-                                let forwardLaneTokens = finalDecodingResult[lane]
-
-                                for t in forwardLaneTokens {
-                                    if t.isSignificant {
-                                        let bypassLen = valueBypassLength(for: t.token)
-                                        let bypassBits = bypassReaders[lane].readBits(count: bypassLen)
-                                        restoredByLane[lane].append(
-                                            EncodedData(isSignificant: true, token: t.token, bypassBits: bypassBits, bypassLen: bypassLen))
-                                    } else {
-                                        restoredByLane[lane].append(EncodedData(isSignificant: false, token: 0, bypassBits: 0, bypassLen: 0))
-                                    }
-                                }
-                            }
-
-                            // Assemble and verify
-                            // tokens is sequential [0..<count]
-                            var allTokensMatches = true
-                            for lane in 0..<4 {
-                                let start = lane * chunkSize
-                                // restoredByLane[lane] は既に Forward 順序に直っているためそのまま比較
-                                for i in 0..<chunkSize {
-                                    let orig = tokens[start + i]
-                                    let rest = restoredByLane[lane][i]
-
-                                    if orig.isSignificant != rest.isSignificant {
-                                        XCTFail("Mismatch at lane \(lane) offset \(i): Expected sig \(orig.isSignificant), got \(rest.isSignificant)")
-                                        allTokensMatches = false
-                                        break
-                                    }
-                                    if orig.isSignificant {
-                                        if orig.token != rest.token {
-                                            XCTFail("Mismatch at lane \(lane) offset \(i): Expected token \(orig.token), got \(rest.token)")
-                                            allTokensMatches = false
-                                            break
-                                        }
-                                        if orig.bypassBits != rest.bypassBits {
-                                            XCTFail("Mismatch at lane \(lane) offset \(i): Expected bypass \(orig.bypassBits), got \(rest.bypassBits)")
-                                            allTokensMatches = false
-                                            break
-                                        }
-                                    }
-                                }
-                                if allTokensMatches != true {
-                                    break
-                                }
-                            }
-                        }
-                    }
+                    // Decode val token
+                    let cfVal = dec.getCumulativeFreq(lane: lane)
+                    let vtInfo = valModel.findToken(cf: cfVal)
+                    dec.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
+                    XCTAssertEqual(valTokens[i], vtInfo.token, "Val token mismatch at pair \(i) lane \(lane)")
                 }
             }
         }

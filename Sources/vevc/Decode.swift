@@ -590,17 +590,17 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
-    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockData }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
-    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufCbLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer32 Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)") }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
-    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufCrLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer32 Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)") }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
@@ -692,17 +692,17 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
-    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer16 Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)") }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
-    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufCbLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer16 Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)") }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
-    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufCrLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Layer16 Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)") }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen
@@ -771,17 +771,17 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
     let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
     let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
     
-    let bufYLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufYLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Base8 Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)") }
     let bufY = Array(r[offset..<(offset + bufYLen)])
     offset += bufYLen
     
-    let bufCbLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufCbLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufCbLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Base8 Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)") }
     let bufCb = Array(r[offset..<(offset + bufCbLen)])
     offset += bufCbLen
     
-    let bufCrLen = Int(try readUInt32BEFromBytes(r, offset: &offset))
+    let bufCrLen = try readVLQSizeFromBytes(r, offset: &offset)
     guard (offset + bufCrLen) <= r.count else { throw DecodeError.invalidBlockDataContext("Base8 Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)") }
     let bufCr = Array(r[offset..<(offset + bufCrLen)])
     offset += bufCrLen

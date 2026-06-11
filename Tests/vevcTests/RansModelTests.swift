@@ -37,7 +37,7 @@ final class RansModelTests: XCTestCase {
         for i in blocks.indices { evaluateQuantizeLayer32(view: blocks[i], qt: qtY) }
 
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         for i in blocks.indices {
             let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: safeThreshold)
             if isZero { continue }
@@ -58,9 +58,9 @@ final class RansModelTests: XCTestCase {
 
         // normalize
         var runModel = rANSModel()
-        runModel.normalize(sigCounts: [0, 1], tokenCounts: runTokenCounts)
+        runModel.normalize(tokenCounts: runTokenCounts)
         var valModel = rANSModel()
-        valModel.normalize(sigCounts: [0, 1], tokenCounts: valTokenCounts)
+        valModel.normalize(tokenCounts: valTokenCounts)
 
         // freq table serialize→deserialize
         var runOut = [UInt8]()
@@ -106,8 +106,8 @@ final class RansModelTests: XCTestCase {
         XCTAssertEqual(valSum, rANSScale, "Val freq sum != rANSScale")
 
         // LUT 検証
-        let restoredRunModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: runFreqsRestored)
-        let restoredValModel = rANSModel(sigFreq: rANSScale / 2, tokenFreqs: valFreqsRestored)
+        let restoredRunModel = rANSModel(tokenFreqs: runFreqsRestored)
+        let restoredValModel = rANSModel(tokenFreqs: valFreqsRestored)
 
         // cumFreqs 比較
         for i in 0..<64 {

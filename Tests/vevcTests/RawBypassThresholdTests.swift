@@ -20,7 +20,7 @@ struct RawBypassThresholdTests {
     /// Encode pairs using the current EntropyEncoder (static model) to get the actual output size.
     /// Returns the total byte count of the entropy-encoded data.
     private func encodePairsToSize(pairs: [(run: UInt32, val: Int16)], trailingZeros: UInt32 = 0) -> Int {
-        var encoder = EntropyEncoder<StaticEntropyModel>()
+        var encoder = EntropyEncoder()
 
         // Write a dummy hasNonZero bypass bit to match real encoding pattern
         encoder.encodeBypass(binVal: 1)
@@ -35,7 +35,7 @@ struct RawBypassThresholdTests {
             encoder.addTrailingZeros(trailingZeros)
         }
         encoder.flush()
-        return encoder.getData().count
+        return encoder.getData(selectModel: StaticEntropyModel.selectModel).count
     }
 
     /// Generate realistic DWT coefficient pairs that mimic the distribution
@@ -69,36 +69,40 @@ struct RawBypassThresholdTests {
 
     /// Intent: Verify that the current implementation uses raw bypass mode (0x80 flag)
     /// when the pair count is <= 32. This establishes the baseline behavior.
-    @Test func rawBypassModeIsUsedForSmallPairCount() {
+    @Test func rawBypassModeIsUsedForSmallPairCount() throws {
         let pairs = generateRealisticPairs(count: 10)
-        var encoder = EntropyEncoder<StaticEntropyModel>()
+        var encoder = EntropyEncoder()
         for pair in pairs {
             encoder.addPair(run: pair.run, val: pair.val, context: 0)
         }
         encoder.flush()
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
 
-        // getData() structure: [bypassLen(4B)] [bypassData] [coeffCount(4B)] [mode(1B)] ...
-        let offset = 0  // bypassLen is at the beginning before Z-order
-        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16 | UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3]))
-        let modeByteOffset = offset + 4 + bypassLen + 4  // skip bypassLen(4) + bypassData + coeffCount(4)
+        // getData() structure: [bypassLen(VLQ)] [bypassData] [coeffCount(VLQ)] [mode(1B)] ...
+        var offset = 0
+        let bypassLen = try readVLQSizeFromBytes(Array(data), offset: &offset)
+        offset += bypassLen  // skip bypassData
+        let _ = try readVLQSizeFromBytes(Array(data), offset: &offset)  // skip coeffCount
+        let modeByteOffset = offset
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         #expect(data[modeByteOffset] == 0x80, "Should be raw bypass mode (0x80) for \(pairs.count) pairs")
     }
 
     /// Intent: Verify that rANS mode (not raw bypass) is used when pair count > 32.
-    @Test func ransModelIsUsedForLargePairCount() {
+    @Test func ransModelIsUsedForLargePairCount() throws {
         let pairs = generateRealisticPairs(count: 64)
-        var encoder = EntropyEncoder<StaticEntropyModel>()
+        var encoder = EntropyEncoder()
         for pair in pairs {
             encoder.addPair(run: pair.run, val: pair.val, context: 0)
         }
         encoder.flush()
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
 
-        let offset = 0  // bypassLen is at the beginning before Z-order
-        let bypassLen = Int(UInt32(data[offset]) << 24 | UInt32(data[offset + 1]) << 16 | UInt32(data[offset + 2]) << 8 | UInt32(data[offset + 3]))
-        let modeByteOffset = offset + 4 + bypassLen + 4
+        var offset = 0
+        let bypassLen = try readVLQSizeFromBytes(Array(data), offset: &offset)
+        offset += bypassLen  // skip bypassData
+        let _ = try readVLQSizeFromBytes(Array(data), offset: &offset)  // skip coeffCount
+        let modeByteOffset = offset
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         let modeByte = data[modeByteOffset]
         #expect(modeByte != 0x80, "Should NOT be raw bypass mode for \(pairs.count) pairs")
@@ -169,7 +173,7 @@ struct RawBypassThresholdTests {
             let originalPairs = generateRealisticPairs(count: count)
 
             // Encode
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 1)  // hasNonZero
             encoder.encodeBypass(binVal: 1)  // lscpX exp-golomb terminator
             encoder.encodeBypass(binVal: 1)  // lscpY exp-golomb terminator
@@ -177,7 +181,7 @@ struct RawBypassThresholdTests {
                 encoder.addPair(run: pair.run, val: pair.val, context: 0)
             }
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
 
             // Decode
             try data.withUnsafeBufferPointer { ptr in

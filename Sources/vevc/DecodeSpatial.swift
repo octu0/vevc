@@ -23,22 +23,25 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     var mvs: MotionVectors? = nil
     var refDirs: [Bool]? = nil
     
-    if 0 < frameHeader.mvsCount && 0 < frameHeader.mvsSize {
+    let mvsCount = deriveMVCount(width: dx, height: dy)
+    
+    if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
         guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: frameHeader.mvsCount)
+        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount)
         offset += frameHeader.mvsSize
     }
     
     // Direction flag only exists for bidirectional prediction frames.
     // Indicates whether each block uses forward (prev) or backward (next) reference.
-    if 0 < frameHeader.mvsCount && nextPd != nil && 0 < frameHeader.refDirSize {
-        guard (offset + frameHeader.refDirSize) <= r.count else { throw DecodeError.insufficientData }
-        let refDirBuf = Array(r[offset..<(offset + frameHeader.refDirSize)])
-        offset += frameHeader.refDirSize
+    if frameHeader.hasRefDir && nextPd != nil {
+        let refDirByteCount = (mvsCount + 7) / 8
+        guard (offset + refDirByteCount) <= r.count else { throw DecodeError.insufficientData }
+        let refDirBuf = Array(r[offset..<(offset + refDirByteCount)])
+        offset += refDirByteCount
         
         var dirs = [Bool]()
-        dirs.reserveCapacity(frameHeader.mvsCount)
-        for i in 0..<frameHeader.mvsCount {
+        dirs.reserveCapacity(mvsCount)
+        for i in 0..<mvsCount {
             let byteIdx = i / 8
             let bitIdx = i % 8
             let isBackward = (byteIdx < refDirBuf.count) && ((refDirBuf[byteIdx] & UInt8(1 << bitIdx)) != 0)
@@ -52,7 +55,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     offset += frameHeader.layer0Size
     
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: (frameHeader.mvsCount == 0))
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame)
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks

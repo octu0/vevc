@@ -27,33 +27,33 @@ struct DataSizeBreakdownTests {
     @Test func perBlockOverhead4x4() {
         // Scenario 1: Single non-zero coefficient at (0,0) = minimum data
         do {
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 1)  // hasNonZero = true
             encoder.encodeBypass(binVal: 1)  // lscpX = 0 (exp-golomb: 1-bit terminator)
             encoder.encodeBypass(binVal: 1)  // lscpY = 0
             encoder.addPair(run: 0, val: 1, context: 0)
             encoder.addTrailingZeros(15)
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
             print("  4x4 single-coeff-at-0,0: \(data.count)B")
         }
 
         // Scenario 2: Single non-zero coefficient at (3,3) = maximum LSCP cost
         do {
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 1)  // hasNonZero
             // lscpX = 3: exp-golomb(3) = 0b0_1_00 = 4 bits (0, 1-bit, then 2 data bits)
             // But in our encoding, we use encodeExpGolomb differently
             // Let's just measure the full block
             encoder.addPair(run: 15, val: 1, context: 0)  // run=15 to reach (3,3) in 4x4
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
             print("  4x4 single-coeff-at-3,3: \(data.count)B")
         }
 
         // Scenario 3: All 16 coefficients non-zero (dense block)
         do {
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 1)  // hasNonZero
             encoder.encodeBypass(binVal: 1)  // lscpX = 3
             encoder.encodeBypass(binVal: 1)  // lscpY = 3
@@ -61,13 +61,13 @@ struct DataSizeBreakdownTests {
                 encoder.addPair(run: 0, val: 1, context: 0)
             }
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
             print("  4x4 all-nonzero (val=1): \(data.count)B")
         }
 
         // Scenario 4: All 16 coefficients non-zero with realistic values
         do {
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 1)  // hasNonZero
             encoder.encodeBypass(binVal: 1)  // lscpX
             encoder.encodeBypass(binVal: 1)  // lscpY
@@ -85,16 +85,16 @@ struct DataSizeBreakdownTests {
                 encoder.addTrailingZeros(run)
             }
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
             print("  4x4 realistic-dwt-coeffs: \(data.count)B (non-zero pairs: \(vals.filter { $0 != 0 }.count))")
         }
 
         // Scenario 5: Empty block (all zero)
         do {
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 0)  // hasNonZero = false
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
             print("  4x4 all-zero: \(data.count)B")
         }
     }
@@ -107,7 +107,7 @@ struct DataSizeBreakdownTests {
         let blockCounts = [10, 50, 100, 200, 500]
 
         for count in blockCounts {
-            var encoder = EntropyEncoder<StaticEntropyModel>()
+            var encoder = EntropyEncoder()
             // Simulate encoding N 4x4 blocks with typical DWT coefficients
             for _ in 0..<count {
                 encoder.encodeBypass(binVal: 1)  // hasNonZero
@@ -120,7 +120,7 @@ struct DataSizeBreakdownTests {
                 encoder.addTrailingZeros(12)  // rest are zero
             }
             encoder.flush()
-            let data = encoder.getData()
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
             let bytesPerBlock = Double(data.count) / Double(count)
             print("  blocks=\(count) total=\(data.count)B bytes/block=\(String(format: "%.1f", bytesPerBlock))")
         }
@@ -133,7 +133,7 @@ struct DataSizeBreakdownTests {
     /// This tells us where optimization efforts should focus.
     @Test func bypassVsRansDataRatio() {
         // Encode 200 blocks with typical data
-        var encoder = EntropyEncoder<StaticEntropyModel>()
+        var encoder = EntropyEncoder()
         for _ in 0..<200 {
             encoder.encodeBypass(binVal: 1)  // hasNonZero
             encoder.encodeBypass(binVal: 1)  // lscpX
@@ -144,7 +144,7 @@ struct DataSizeBreakdownTests {
             encoder.addTrailingZeros(12)
         }
         encoder.flush()
-        let data = encoder.getData()
+        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
 
         // Parse the structure to find the bypass/rANS split
         let bypassLen = Int(UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3]))
@@ -175,7 +175,7 @@ struct DataSizeBreakdownTests {
         let zeroRate = 0.10  // 10% zero for I-frame base (from debug log: 0%)
         let nonZeroBlocks = Int(Double(totalBlocks) * (1.0 - zeroRate))
 
-        var encoder = EntropyEncoder<StaticDPCMEntropyModel>()
+        var encoder = EntropyEncoder()
 
         // Encode LL subbands (DPCM)
         for _ in 0..<nonZeroBlocks {
@@ -188,9 +188,9 @@ struct DataSizeBreakdownTests {
             }
         }
         encoder.flush()
-        let llData = encoder.getData()
+        let llData = encoder.getData(selectModel: StaticDPCMEntropyModel.selectModel)
 
-        var encoder2 = EntropyEncoder<StaticEntropyModel>()
+        var encoder2 = EntropyEncoder()
 
         // Encode HL+LH+HH subbands (3 subbands × nonZeroBlocks blocks)
         for _ in 0..<(nonZeroBlocks * 3) {
@@ -203,7 +203,7 @@ struct DataSizeBreakdownTests {
             encoder2.addTrailingZeros(12)
         }
         encoder2.flush()
-        let subbandData = encoder2.getData()
+        let subbandData = encoder2.getData(selectModel: StaticEntropyModel.selectModel)
 
         print("  Estimated LL (DPCM): \(llData.count)B for \(nonZeroBlocks) blocks")
         print("  Estimated HL+LH+HH: \(subbandData.count)B for \(nonZeroBlocks * 3) blocks")

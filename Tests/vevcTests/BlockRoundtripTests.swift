@@ -20,10 +20,10 @@ final class BlockRoundtripTests: XCTestCase {
         let originalData = Array(UnsafeBufferPointer(start: block.base, count: 256))
 
         // blockEncode16
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         blockEncode16V(encoder: &encoder, block: block)
         encoder.flush()
-        let encoded = encoder.getData()
+        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
 
         // blockEncode16のゼロクリア修正後のデータ
         let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
@@ -56,10 +56,10 @@ final class BlockRoundtripTests: XCTestCase {
 
         let originalData = Array(UnsafeBufferPointer(start: block.base, count: 64))
 
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         blockEncode8V(encoder: &encoder, block: block)
         encoder.flush()
-        let encoded = encoder.getData()
+        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
 
         let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 64))
 
@@ -97,7 +97,7 @@ final class BlockRoundtripTests: XCTestCase {
 
         let beforeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
 
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         blockEncode16V(encoder: &encoder, block: block)
 
         // afterEncodeでは(5,5)以降のデータがゼロにクリアされているはず
@@ -128,11 +128,11 @@ final class BlockRoundtripTests: XCTestCase {
         }
 
         // エンコード (stride=32)
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
         hlView = BlockView(base: block32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
         blockEncode16V(encoder: &encoder, block: hlView)
         encoder.flush()
-        let encoded = encoder.getData()
+        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
 
         // エンコード後のHLサブバンドデータ
         var encAfterHL = [Int16](repeating: 0, count: 256)

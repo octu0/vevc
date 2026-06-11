@@ -75,7 +75,7 @@ final class DPCMDistributionTests: XCTestCase {
             }
 
             // encode with AdaptiveEntropyModel to get actual pairs
-            var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+            var encoder = EntropyEncoder()
             var lastVal: Int16 = 0
 
             for i in blocks.indices {

@@ -49,7 +49,7 @@ This **"Compute Once, Scale Everywhere"** strategy eliminates redundant motion e
 Where legacy wavelet codecs (like JPEG 2000's EBCOT) and modern DCT codecs (with CABAC) suffer from strictly serial bottlenecks, `vevc` is fundamentally architected for modern multi-core, SIMD-rich processors:
 - **Multi-Threaded Pipeline**: Temporal subband frames and spatial code-blocks are completely decoupled. This data-agnostic structure allows the encoder and decoder to aggressively distribute workloads across multiple CPU threads without complex synchronization locks.
 - **Vectorized Core Loops**: Spatial DWT lifting, plane matching, sub-pixel shifting, and residual calculations are strictly unrolled and fully vectorized using `SIMD8` and `SIMD16` for maximum ALU utilization.
-- **Parallel Entropy Coding**: Bypassing the serial nature of traditional arithmetic coding, `vevc` employs a 4-way **Interleaved rANS (Asymmetric Numeral Systems)** coder. This guarantees high compression ratios while enabling simultaneous, multi-lane decoding.
+- **Parallel Entropy Coding**: Bypassing the serial nature of traditional arithmetic coding, `vevc` employs a 4-way **Interleaved rANS (Asymmetric Numeral Systems)** coder with a unified 5-context model per plane. This guarantees high compression ratios while enabling simultaneous, multi-lane decoding.
 ---
 
 ## Performance
@@ -123,10 +123,10 @@ DWT Coefficients
   (run, value) pairs ──┤
        │               └─── rANS Mode  
        ▼                      │
-  ValueTokenizer              ├── runModel (zero-run tokens)
-  token + bypass bits         ├── valModel (value tokens)
-       │                      └── 4-way Interleaved stream
-       ▼
+   ValueTokenizer              ├── runModel (zero-run tokens)
+   token + bypass bits         ├── valModel (value tokens)
+        │                      ├── 5 contexts (AC×4 + DPCM)
+        ▼                      └── 4-way Interleaved stream
   Interleaved 4-way rANS Encoder
   (4 independent states, shared stream)
 ```
@@ -151,16 +151,8 @@ DWT Coefficients
 +------------+-------+-----+------------------+----------+----------------+
 | Width (2B) | Height (2B) | Color Gamut (1B) | FPS (2B) | Timescale (1B) |
 +------------+-------------+------------------+----------+----------------+
-| rANS Run 0 (256B)          | rANS Val 0 (256B)                          |
-+----------------------------+--------------------------------------------+
-| rANS Run 1 (256B)          | rANS Val 1 (256B)                          |
-+----------------------------+--------------------------------------------+
-| rANS Run 2 (256B)          | rANS Val 2 (256B)                          |
-+----------------------------+--------------------------------------------+
-| rANS Run 3 (256B)          | rANS Val 3 (256B)                          |
-+----------------------------+--------------------------------------------+
-| rANS DPCM Run (256B)       | rANS DPCM Val (256B)                       |
-+----------------------------+--------------------------------------------+
+| Table Flag (1B): 0x00=built-in, 0x01=custom tables follow               |
++--------------------------------------------------------------------------+
   Color Gamut: 0x01=BT.709, 0x02=BT.2020
   Timescale:   0x00=1000ms, 0x01=90000hz
 
@@ -231,8 +223,10 @@ The encoder automatically selects the mode that minimizes total encoded size for
 ### Optimizations
 
 - **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
+- **Unified 5-Context Stream**: LL (DPCM) and HL/LH/HH (AC) subbands share a single per-plane entropy stream with 5 contexts, eliminating 12 bytes of per-subband size prefixes
 - **Headerless 4-way Parallel Boundaries**: Lane bounds (chunk starts) are dynamically reconstructed from the total pair entries, eliminating 16-byte fixed header overhead per subband.
-- **VLQ Bypass Sizes**: Bypass data sizes are stored using Variable Length Quantities (VLQ) instead of fixed 4-byte integers, saving several bytes per subband.
+- **VLQ Internal Fields**: Bypass sizes, coefficient counts, and pair entries are stored using Variable Length Quantities (VLQ) instead of fixed 4-byte integers
+- **Built-in Static Tables**: File header uses a 1-byte Table Flag instead of embedding 2560 bytes of raw frequency tables
 - **O(1) Token Lookup**: 16384-entry LUT for instant cumulative-frequency → token resolution
 - **Zero-Run RLE**: DWT zero coefficients compressed as run-length tokens
 - **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely

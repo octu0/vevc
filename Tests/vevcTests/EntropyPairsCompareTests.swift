@@ -78,7 +78,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         bwFlags.flush()
 
         // エンコーダ: EntropyEncoderを直接使って blockEncode16 を呼ぶ
-        var encoder = EntropyEncoder<AdaptiveEntropyModel>()
+        var encoder = EntropyEncoder()
 
         for (i, task) in tasks {
             let view = blocks[i]
@@ -119,7 +119,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         let encCoeffCount = encoder.coeffCount
 
         // getData()でバイト列を取得
-        let entropyData = encoder.getData()
+        let entropyData = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
 
         // デコーダでpairsを復元
         try entropyData.withUnsafeBufferPointer { ptr in

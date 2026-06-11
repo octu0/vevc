@@ -230,7 +230,9 @@ class PlayerViewModel: ObservableObject {
         if chunk.count <= offset { return [] }
         
         let flagByte = chunk[offset]
-        guard let fType = VEVCFrameHeader.FrameType(rawValue: flagByte) else {
+        let frameTypeBits = flagByte & 0x0F
+        let hasRefDir = (flagByte & 0x10) != 0
+        guard let fType = VEVCFrameHeader.FrameType(rawValue: frameTypeBits) else {
             throw NSError(domain: "Player", code: 3, userInfo: [NSLocalizedDescriptionKey: "Invalid frame type"])
         }
         
@@ -238,7 +240,7 @@ class PlayerViewModel: ObservableObject {
             return [flagByte]
         }
         
-        guard offset + 25 <= chunk.count else {
+        guard offset + 17 <= chunk.count else {
             throw NSError(domain: "Player", code: 4, userInfo: [NSLocalizedDescriptionKey: "Chunk too small"])
         }
         
@@ -247,21 +249,18 @@ class PlayerViewModel: ObservableObject {
             return Int(UInt32(chunk[base]) << 24 | UInt32(chunk[base+1]) << 16 | UInt32(chunk[base+2]) << 8 | UInt32(chunk[base+3]))
         }
         
-        let mvsCount  = readU32(offset + 1)
-        let mvsSize   = readU32(offset + 5)
-        let refDirSize = readU32(offset + 9)
-        let layer0Size = readU32(offset + 13)
-        let layer1Size = readU32(offset + 17)
-        let layer2Size = readU32(offset + 21)
+        let mvsSize   = readU32(offset + 1)
+        let layer0Size = readU32(offset + 5)
+        let layer1Size = readU32(offset + 9)
+        let layer2Size = readU32(offset + 13)
         
         let newLayer1Size = if 1 <= maxLayer { layer1Size } else { 0 }
         let newLayer2Size = if 2 <= maxLayer { layer2Size } else { 0 }
         
         let newHeader = VEVCFrameHeader(
             frameType: fType,
-            mvsCount: mvsCount,
+            hasRefDir: hasRefDir,
             mvsSize: mvsSize,
-            refDirSize: refDirSize,
             layer0Size: layer0Size,
             layer1Size: newLayer1Size,
             layer2Size: newLayer2Size
@@ -270,14 +269,28 @@ class PlayerViewModel: ObservableObject {
         var output = [UInt8]()
         output.append(contentsOf: newHeader.serialize())
         
-        var payloadOffset = offset + 25
+        var payloadOffset = offset + 17
         if 0 < mvsSize {
             output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + mvsSize])
             payloadOffset += mvsSize
         }
-        if 0 < refDirSize {
-            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + refDirSize])
-            payloadOffset += refDirSize
+        // refDir is not stored in header but derived from dimensions
+        // We need to know width/height to derive refDirSize, but in splitFrameChunk we just pass through
+        // The refDir bytes are after MV data in the payload
+        if hasRefDir {
+            // We don't have width/height here, so we need to scan the metadata from the original chunk
+            // However, splitFrameChunk is called after header parsing, so we can compute from the full stream context
+            // For now, the chunk already has the correct payload layout - just pass it through
+            // The refDir size can be computed from the earlier parsed width/height
+            // Since this is only called from streamY4M and streamVEVC which have width/height,
+            // we'll derive it from the encoder's known dimensions
+            // But this function doesn't have access to width/height...
+            // Simple solution: read remaining bytes = total chunk size - header - mvs - layers
+            let remainingBeforeLayers = chunk.count - payloadOffset - layer0Size - layer1Size - layer2Size
+            if 0 < remainingBeforeLayers {
+                output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + remainingBeforeLayers])
+                payloadOffset += remainingBeforeLayers
+            }
         }
         if 0 < layer0Size {
             output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + layer0Size])
@@ -358,7 +371,11 @@ class PlayerViewModel: ObservableObject {
                     let _ = frameHeader // read header
                     
                     if 0 < frameHeader.mvsSize { offset += frameHeader.mvsSize }
-                    if 0 < frameHeader.refDirSize { offset += frameHeader.refDirSize }
+                    // Derive refDirSize from dimensions
+                    if frameHeader.hasRefDir {
+                        let refDirBytes = (deriveMVCount(width: width, height: height) + 7) / 8
+                        offset += refDirBytes
+                    }
                     if 0 < frameHeader.layer0Size { offset += frameHeader.layer0Size }
                     if 0 < frameHeader.layer1Size { offset += frameHeader.layer1Size }
                     if 0 < frameHeader.layer2Size { offset += frameHeader.layer2Size }
