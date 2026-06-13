@@ -154,11 +154,11 @@ struct rANSModel {
     private(set) var tokenCumFreqs: [UInt32]
     private(set) var tokenLUT: [UInt8]
     
-    init() {
+    init(buildLUT: Bool = true) {
         self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)
         self.tokenCumFreqs = (0..<64).map { UInt32($0) * (rANSScale / 64) }
-        self.tokenLUT = [UInt8](repeating: 0, count: Int(rANSScale))
-        buildLUT()
+        self.tokenLUT = buildLUT ? [UInt8](repeating: 0, count: Int(rANSScale)) : []
+        if buildLUT { self.buildLUT() }
     }
     
     init(tokenFreqs: [UInt32]) {
@@ -175,6 +175,7 @@ struct rANSModel {
     
     @inline(__always)
     private mutating func buildLUT() {
+        guard tokenLUT.isEmpty != true else { return }
         tokenLUT.withUnsafeMutableBufferPointer { ptr in
             for sym in 0..<64 {
                 let start = Int(tokenCumFreqs[sym])

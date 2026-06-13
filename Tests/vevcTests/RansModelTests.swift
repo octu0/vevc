@@ -116,4 +116,30 @@ final class RansModelTests: XCTestCase {
         }
     }
 
+    func testBuildLUTFalse() {
+        let mTrue = rANSModel(buildLUT: true)
+        let mFalse = rANSModel(buildLUT: false)
+
+        XCTAssertEqual(mTrue.tokenFreqs, mFalse.tokenFreqs)
+        XCTAssertEqual(mTrue.tokenCumFreqs, mFalse.tokenCumFreqs)
+        
+        XCTAssertFalse(mTrue.tokenLUT.isEmpty)
+        XCTAssertTrue(mFalse.tokenLUT.isEmpty)
+        
+        var m1 = rANSModel(buildLUT: true)
+        var m2 = rANSModel(buildLUT: false)
+        
+        var tokenCounts = [Int](repeating: 0, count: 64)
+        tokenCounts[0] = 100
+        tokenCounts[1] = 50
+        
+        m1.normalize(tokenCounts: tokenCounts)
+        m2.normalize(tokenCounts: tokenCounts)
+        
+        XCTAssertEqual(m1.tokenFreqs, m2.tokenFreqs)
+        XCTAssertEqual(m1.tokenCumFreqs, m2.tokenCumFreqs)
+        
+        XCTAssertFalse(m1.tokenLUT.isEmpty)
+        XCTAssertTrue(m2.tokenLUT.isEmpty)
+    }
 }

@@ -264,8 +264,8 @@ func unifiedSelectModel(
     dynRunModels.reserveCapacity(kEntropyContextCount)
     dynValModels.reserveCapacity(kEntropyContextCount)
     for c in 0..<kEntropyContextCount {
-        var rm = rANSModel()
-        var vm = rANSModel()
+        var rm = rANSModel(buildLUT: false)
+        var vm = rANSModel(buildLUT: false)
         rm.normalize(tokenCounts: runTokenCounts[c])
         vm.normalize(tokenCounts: valTokenCounts[c])
         dynRunModels.append(rm)
@@ -286,8 +286,8 @@ func unifiedSelectModel(
             mergedValCounts[t] += valTokenCounts[c][t]
         }
     }
-    var mergedRunModel = rANSModel()
-    var mergedValModel = rANSModel()
+    var mergedRunModel = rANSModel(buildLUT: false)
+    var mergedValModel = rANSModel(buildLUT: false)
     mergedRunModel.normalize(tokenCounts: mergedRunCounts)
     mergedValModel.normalize(tokenCounts: mergedValCounts)
 
@@ -950,10 +950,10 @@ func encodeMVs(mvs: MotionVectors) -> [UInt8] {
     }
     bypass.flush()
     
-    var modelDx = rANSModel()
+    var modelDx = rANSModel(buildLUT: false)
     modelDx.normalize(tokenCounts: freqsDx.map(Int.init))
     
-    var modelDy = rANSModel()
+    var modelDy = rANSModel(buildLUT: false)
     modelDy.normalize(tokenCounts: freqsDy.map(Int.init))
     
     var enc = rANSEncoder()

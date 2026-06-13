@@ -1,3 +1,4 @@
+import Foundation
 // MARK: - VEVCEncoder
 
 public actor VEVCEncoder {
@@ -412,7 +413,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int) -> Quantizat
     // I-frame quality bias: 0.78 = 78/100
     // A lower factor produces larger (higher quality) I-frames, providing
     // a stronger structural base for subsequent P-frames to reference.
-    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * 78) / (Int64(targetBits) * 100)
+    let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * Int64(EncoderTuning.shared.iFrameQuantizationScale)) / (Int64(targetBits) * 100)
 
     // I-Frame QP floor = 1: allows near-lossless quality at high bitrates.
     // The cliff-edge discontinuity at low baseStep (previously requiring
@@ -534,3 +535,33 @@ private func estimateRiceBits4(block: BlockView) -> Int {
     return bodyBits + headerBits
 }
 
+public struct EncoderTuning: @unchecked Sendable {
+    public static let shared = EncoderTuning()
+
+    public let l0LumaThresholdPFrame: Int
+    public let l0ChromaThresholdScale: Int
+    public let iFrameQuantizationScale: Int
+    public let l16LumaThreshold: Int
+    public let l32LumaThreshold: Int
+    
+    public init(
+        l0LumaThresholdPFrame: Int = 4,
+        l0ChromaThresholdScale: Int = 8,
+        iFrameQuantizationScale: Int = 100,
+        l16LumaThreshold: Int = 3,
+        l32LumaThreshold: Int = 4
+    ) {
+        self.l0LumaThresholdPFrame = Self.envInt(key: "VEVC_TUNE_L0_LUMA", defaultValue: l0LumaThresholdPFrame)
+        self.l0ChromaThresholdScale = Self.envInt(key: "VEVC_TUNE_L0_CHROMA", defaultValue: l0ChromaThresholdScale)
+        self.iFrameQuantizationScale = Self.envInt(key: "VEVC_TUNE_IFRAME_SCALE", defaultValue: iFrameQuantizationScale)
+        self.l16LumaThreshold = Self.envInt(key: "VEVC_TUNE_L16_LUMA", defaultValue: l16LumaThreshold)
+        self.l32LumaThreshold = Self.envInt(key: "VEVC_TUNE_L32_LUMA", defaultValue: l32LumaThreshold)
+    }
+    
+    private static func envInt(key: String, defaultValue: Int) -> Int {
+        if let valStr = ProcessInfo.processInfo.environment[key], let val = Int(valStr) {
+            return val
+        }
+        return defaultValue
+    }
+}
