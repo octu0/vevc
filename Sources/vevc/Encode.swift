@@ -6,23 +6,6 @@ public enum EncodeError: Error {
 }
 
 @inline(__always)
-func encodeExpGolomb(val: UInt32, encoder: inout EntropyEncoder) {
-    var q = val
-    var bits = 0
-    while 0 < q {
-        bits += 1
-        q >>= 1
-    }
-    for _ in 0..<bits {
-        encoder.encodeBypass(binVal: 0)
-    }
-    encoder.encodeBypass(binVal: 1)
-    for i in stride(from: bits - 1, through: 0, by: -1) {
-        encoder.encodeBypass(binVal: UInt8((val >> i) & 1))
-    }
-}
-
-@inline(__always)
 func getContext(prevVal: Int16, isParentZero: Bool) -> UInt8 {
     let base: UInt8 = if isParentZero { 2 } else { 0 }
     let v: UInt8 = if prevVal == 0 { 0 } else { 1 }
@@ -67,8 +50,8 @@ func blockEncode16V(encoder: inout EntropyEncoder, block: BlockView) {
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -126,8 +109,8 @@ func blockEncode16VWithParent(encoder: inout EntropyEncoder, block: BlockView, p
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -210,8 +193,8 @@ func blockEncode16H(encoder: inout EntropyEncoder, block: BlockView) {
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -286,8 +269,8 @@ func blockEncode16HWithParent(encoder: inout EntropyEncoder, block: BlockView, p
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -355,8 +338,8 @@ func blockEncode8V(encoder: inout EntropyEncoder, block: BlockView) {
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -413,8 +396,8 @@ func blockEncode8VWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -494,8 +477,8 @@ func blockEncode8H(encoder: inout EntropyEncoder, block: BlockView) {
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -570,8 +553,8 @@ func blockEncode8HWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -636,8 +619,8 @@ func blockEncode4V(encoder: inout EntropyEncoder, block: BlockView) {
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -697,8 +680,8 @@ func blockEncode4H(encoder: inout EntropyEncoder, block: BlockView) {
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -759,8 +742,8 @@ func blockEncode4HWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
     }
     encoder.encodeBypass(binVal: 1)
 
-    encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-    encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     var run = 0
     var prevVal: Int16 = 0
@@ -915,8 +898,8 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
         encoder.encodeBypass(binVal: 1)
         let lscpX = lscpIdx % 4
         let lscpY = lscpIdx / 4
-        encodeExpGolomb(val: UInt32(lscpX), encoder: &encoder)
-        encodeExpGolomb(val: UInt32(lscpY), encoder: &encoder)
+        encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+        encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
         var run = 0
         var prevVal: Int16 = 0
@@ -1020,8 +1003,8 @@ func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
         encoder.encodeBypass(binVal: 1)
         let lscpX = UInt32(lscpIdx % 8)
         let lscpY = UInt32(lscpIdx / 8)
-        encodeExpGolomb(val: lscpX, encoder: &encoder)
-        encodeExpGolomb(val: lscpY, encoder: &encoder)
+        encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+        encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
         
         lastVal = last
         
@@ -1111,8 +1094,8 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
     encoder.encodeBypass(binVal: 1)
     let lscpX = UInt32(lscpIdx % 16)
     let lscpY = UInt32(lscpIdx / 16)
-    encodeExpGolomb(val: lscpX, encoder: &encoder)
-    encodeExpGolomb(val: lscpY, encoder: &encoder)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+    encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
     lastVal = last
 

@@ -43,20 +43,6 @@ func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
     return Int16(truncatingIfNeeded: ia + ib - ic)
 }
 
-@inline(__always)
-func decodeExpGolomb(decoder: inout EntropyDecoder) throws -> UInt32 {
-    var bits = 0
-    while try decoder.decodeBypass() == 0 {
-        bits += 1
-    }
-    guard 0 < bits else { return 0 }
-    if 31 < bits { return 0 } // guard
-    var val: UInt32 = 0
-    for i in stride(from: bits - 1, through: 0, by: -1) {
-        val |= UInt32(try decoder.decodeBypass()) << i
-    }
-    return val
-}
 
 @inline(__always)
 func decodeCoeffRun(decoder: inout EntropyDecoder, context: UInt8) throws -> (Int, Int16) {
@@ -72,8 +58,8 @@ func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -102,8 +88,8 @@ func blockDecode16VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -134,8 +120,8 @@ func blockDecode16H(decoder: inout EntropyDecoder, block: BlockView) throws {
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -164,8 +150,8 @@ func blockDecode16HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -196,8 +182,8 @@ func blockDecode8V(decoder: inout EntropyDecoder, block: BlockView) throws {
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
 
     var currentIdx = 0
     var prevVal: Int16 = 0
@@ -225,8 +211,8 @@ func blockDecode8VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
 
     var currentIdx = 0
     var prevVal: Int16 = 0
@@ -256,8 +242,8 @@ func blockDecode8H(decoder: inout EntropyDecoder, block: BlockView) throws {
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
 
     var currentIdx = 0
     var prevVal: Int16 = 0
@@ -285,8 +271,8 @@ func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
 
     var currentIdx = 0
     var prevVal: Int16 = 0
@@ -316,8 +302,8 @@ func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -346,8 +332,8 @@ func blockDecode4VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -378,8 +364,8 @@ func blockDecode4H(decoder: inout EntropyDecoder, block: BlockView) throws {
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -408,8 +394,8 @@ func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
         return
     }
 
-    let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-    let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
     guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
@@ -438,8 +424,8 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
-        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+        let lscpX = Int(decoder.readPair(context: 5).run)
+        let lscpY = Int(decoder.readPair(context: 5).run)
         guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("DPCM4 lscp out of range: (\(lscpX), \(lscpY))") }
         lscpIdx = lscpY * 4 + lscpX
     }
@@ -493,8 +479,8 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
-        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+        let lscpX = Int(decoder.readPair(context: 5).run)
+        let lscpY = Int(decoder.readPair(context: 5).run)
         guard lscpX < 8 && lscpY < 8 else { throw DecodeError.invalidBlockDataContext("DPCM8 lscp out of range: (\(lscpX), \(lscpY))") }
         lscpIdx = lscpY * 8 + lscpX
     }
@@ -540,8 +526,8 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
-        let lscpX = Int(try decodeExpGolomb(decoder: &decoder))
-        let lscpY = Int(try decodeExpGolomb(decoder: &decoder))
+        let lscpX = Int(decoder.readPair(context: 5).run)
+        let lscpY = Int(decoder.readPair(context: 5).run)
         guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
         lscpIdx = lscpY * 16 + lscpX
     }

@@ -32,8 +32,12 @@ final class BlockRoundtripTests: XCTestCase {
         let decBlock = BlockView.allocate(width: 16, height: 16)
         defer { decBlock.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
+            print("DEBUG: Init Decoder with count \(ptr.count)")
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            print("DEBUG: Calling blockDecode16V")
+            fflush(stdout)
             try! blockDecode16V(decoder: &decoder, block: decBlock)
+            print("DEBUG: blockDecode16V Done")
         }
         // エンコード後のデータとデコード後のデータを比較
         for i in 0..<256 {

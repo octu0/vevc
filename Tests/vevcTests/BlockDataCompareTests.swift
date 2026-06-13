@@ -46,7 +46,7 @@ final class BlockDataCompareTests: XCTestCase {
         let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset))  // qtY step
         let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset))  // qtC step
 
-        let bufYLen = Int(try readUInt32BEFromBytes(Array(layer2Bytes), offset: &offset))
+        let bufYLen = try readVLQSizeFromBytes(Array(layer2Bytes), offset: &offset)
         let bufY = Array(layer2Bytes[offset..<(offset + bufYLen)])
 
         let rowCountY = (height + 32 - 1) / 32

@@ -3,7 +3,7 @@
 /// Number of rANS contexts in the unified entropy stream.
 /// Contexts 0-3: AC coefficients (HL/LH/HH subbands, context selected by getContext())
 /// Context 4:    DPCM coefficients (LL subband)
-let kEntropyContextCount = 5
+let kEntropyContextCount = 6
 let kDPCMContext: UInt8 = 4
 
 // MARK: - EntropyModelSelection
@@ -83,8 +83,8 @@ struct StaticEntropyModel: EntropyModelProvider {
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
     ) -> EntropyModelSelection {
         return EntropyModelSelection(
-            runModels: [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3],
-            valModels: [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3],
+            runModels: [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3, StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel],
+            valModels: [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3, StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel],
             isStatic: true,
             isMerged: false
         )
@@ -102,10 +102,12 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         let staticRunModels = [
             StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
             StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
+            StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel,
         ]
         let staticValModels = [
             StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
             StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
+            StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
         ]
         
         // Too few pairs: static tables are always the best choice (no header overhead)
@@ -128,9 +130,9 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         var dynValModels = [rANSModel]()
         var dynamic4CostQ8: Int = 0
         var dynamic4HeaderBits: Int = 0
-        dynRunModels.reserveCapacity(4)
-        dynValModels.reserveCapacity(4)
-        for c in 0..<4 {
+        dynRunModels.reserveCapacity(kEntropyContextCount)
+        dynValModels.reserveCapacity(kEntropyContextCount)
+        for c in 0..<kEntropyContextCount {
             var rm = rANSModel()
             var vm = rANSModel()
             rm.normalize(tokenCounts: runTokenCounts[c])
@@ -178,14 +180,14 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
             )
         }
         if minCost == mergedCostQ8 {
-            let mergedRun4 = [mergedRunModel, mergedRunModel, mergedRunModel, mergedRunModel]
-            let mergedVal4 = [mergedValModel, mergedValModel, mergedValModel, mergedValModel]
+            let mergedRun6 = [rANSModel](repeating: mergedRunModel, count: kEntropyContextCount)
+            let mergedVal6 = [rANSModel](repeating: mergedValModel, count: kEntropyContextCount)
             return EntropyModelSelection(
-                runModels: mergedRun4, valModels: mergedVal4,
+                runModels: mergedRun6, valModels: mergedVal6,
                 isStatic: false, isMerged: true
             )
         }
-        // dynamic 4-context
+        // dynamic 4-context fallback padded to 6
         return EntropyModelSelection(
             runModels: dynRunModels, valModels: dynValModels,
             isStatic: false, isMerged: false
@@ -202,8 +204,8 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
         let dpcmRun = StaticRANSModels.shared.dpcmRunModel
         let dpcmVal = StaticRANSModels.shared.dpcmValModel
         return EntropyModelSelection(
-            runModels: [dpcmRun, dpcmRun, dpcmRun, dpcmRun],
-            valModels: [dpcmVal, dpcmVal, dpcmVal, dpcmVal],
+            runModels: [dpcmRun, dpcmRun, dpcmRun, dpcmRun, dpcmRun, dpcmRun],
+            valModels: [dpcmVal, dpcmVal, dpcmVal, dpcmVal, dpcmVal, dpcmVal],
             isStatic: true,
             isMerged: false
         )
@@ -232,17 +234,18 @@ func unifiedSelectModel(
     ]
     let staticDPCMRun = StaticRANSModels.shared.dpcmRunModel
     let staticDPCMVal = StaticRANSModels.shared.dpcmValModel
+    let staticLSCPRun = StaticRANSModels.shared.lscpRunModel
 
     let totalPairs = runTokenCounts.reduce(0) { $0 + $1.reduce(0, +) }
     if totalPairs == 0 {
         return EntropyModelSelection(
-            runModels: staticACRunModels + [staticDPCMRun],
-            valModels: staticACValModels + [staticDPCMVal],
+            runModels: staticACRunModels + [staticDPCMRun, staticLSCPRun],
+            valModels: staticACValModels + [staticDPCMVal, staticDPCMVal],
             isStatic: true, isMerged: false
         )
     }
 
-    // --- Option 1: Static 5-context (no header cost) ---
+    // --- Option 1: Static 6-context (no header cost) ---
     var staticCostQ8: Int = 0
     for c in 0..<4 {
         staticCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: staticACRunModels[c])
@@ -250,6 +253,8 @@ func unifiedSelectModel(
     }
     staticCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[4], model: staticDPCMRun)
     staticCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[4], model: staticDPCMVal)
+    staticCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[5], model: staticLSCPRun)
+    staticCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[5], model: staticDPCMVal)
 
     // --- Option 2: Dynamic 5-context (10 tables header cost) ---
     var dynRunModels = [rANSModel]()
@@ -299,8 +304,8 @@ func unifiedSelectModel(
 
     if minCost == staticCostQ8 {
         return EntropyModelSelection(
-            runModels: staticACRunModels + [staticDPCMRun],
-            valModels: staticACValModels + [staticDPCMVal],
+            runModels: staticACRunModels + [staticDPCMRun, staticLSCPRun],
+            valModels: staticACValModels + [staticDPCMVal, staticDPCMVal],
             isStatic: true, isMerged: false
         )
     }
@@ -784,16 +789,16 @@ struct EntropyDecoder {
         let isMergedContext = (flags & 0x10) != 0
         
         if isStaticTable {
-            // Static 5-context: AC models for ctx 0-3, DPCM model for ctx 4
+            // Static 6-context: AC models for ctx 0-3, DPCM model for ctx 4, LSCP for ctx 5
             self.runModels = [
                 StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
                 StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
-                StaticRANSModels.shared.dpcmRunModel,
+                StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel,
             ]
             self.valModels = [
                 StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
                 StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
-                StaticRANSModels.shared.dpcmValModel,
+                StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
             ]
         } else if isMergedContext {
             // Dynamic merged: read 2 tables (run + val), replicate to all 5 contexts
