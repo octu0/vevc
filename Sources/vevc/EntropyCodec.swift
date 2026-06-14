@@ -628,6 +628,7 @@ internal func readVLQSizeFromBytes(_ r: [UInt8], offset: inout Int) throws -> In
     return val
 }
 
+@inline(__always)
 internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     var bitmap: UInt64 = 0
     for i in 0..<64 {
@@ -773,12 +774,12 @@ struct EntropyDecoder {
         self.totalPairEntries = totalPairEntries
         
         // chunk size (4 lanes) - dynamically reconstructed from totalPairEntries
-        let totalPairs = hasTrailingZeros ? (totalPairEntries - 1) : totalPairEntries
+        let totalPairs = if hasTrailingZeros { totalPairEntries - 1 } else { totalPairEntries }
         let chunkBase = totalPairs / 4
         let chunkRemainder = totalPairs % 4
         var starts = [Int](repeating: 0, count: 5)
         for i in 0..<4 {
-            let size = (i < chunkRemainder) ? (chunkBase + 1) : chunkBase
+            let size = if i < chunkRemainder { chunkBase + 1 } else { chunkBase }
             starts[i+1] = starts[i] + size
         }
         if hasTrailingZeros {

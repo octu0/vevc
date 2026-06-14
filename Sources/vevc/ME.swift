@@ -732,7 +732,7 @@ struct MotionEstimation {
         let fX = FIRLUMACoeffs[fractX]
         let fY = FIRLUMACoeffs[fractY]
         
-        let safe = (bx + intDx - 1 >= 0) && (by + intDy - 1 >= 0) && (bx + intDx + 32 + 2 < width) && (by + intDy + 32 + 2 < height) && (bx + 32 <= width) && (by + 32 <= height)
+        let safe = (0 <= ((bx + intDx) - 1)) && (0 <= ((by + intDy) - 1)) && ((((bx + intDx) + 32) + 2) < width) && ((((by + intDy) + 32) + 2) < height) && ((bx + 32) <= width) && ((by + 32) <= height)
         let useFIR = (fractX != 0 || fractY != 0)
         
         let cX0 = Int32(fX[0]), cX1 = Int32(fX[1]), cX2 = Int32(fX[2]), cX3 = Int32(fX[3])

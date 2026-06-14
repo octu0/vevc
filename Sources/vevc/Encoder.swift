@@ -563,6 +563,7 @@ public struct EncoderTuning: @unchecked Sendable {
         self.l32LumaThreshold = Self.envInt(key: "VEVC_TUNE_L32_LUMA", defaultValue: l32LumaThreshold)
     }
     
+    @inline(__always)
     private static func envInt(key: String, defaultValue: Int) -> Int {
         if let valStr = ProcessInfo.processInfo.environment[key], let val = Int(valStr) {
             return val

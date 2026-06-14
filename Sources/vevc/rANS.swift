@@ -157,7 +157,7 @@ struct rANSModel {
     init(buildLUT: Bool = true) {
         self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)
         self.tokenCumFreqs = (0..<64).map { UInt32($0) * (rANSScale / 64) }
-        self.tokenLUT = buildLUT ? [UInt8](repeating: 0, count: Int(rANSScale)) : []
+        self.tokenLUT = if buildLUT { [UInt8](repeating: 0, count: Int(rANSScale)) } else { [] }
         if buildLUT { self.buildLUT() }
     }
     

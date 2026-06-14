@@ -125,7 +125,8 @@ public struct VEVCFrameHeader {
     @inline(__always)
     public func serialize() -> [UInt8] {
         var out = [UInt8]()
-        let flag = frameType.rawValue | (hasRefDir ? 0x10 : 0x00)
+        let refDirFlag: UInt8 = if hasRefDir { 0x10 } else { 0x00 }
+        let flag = frameType.rawValue | refDirFlag
         out.append(flag)
         if frameType != .copyFrame {
             appendUInt32BE(&out, UInt32(mvsSize))
