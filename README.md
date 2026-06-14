@@ -277,6 +277,7 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 ## C API (libvevc)
 
 We provide a C interface for synchronously encoding and decoding frame by frame.
+A fully buildable and runnable example is available in the [example/C](example/C) directory.
 
 ### Encoder Example
 
@@ -346,6 +347,10 @@ int main() {
     return 0;
 }
 ```
+
+### Go (CGO) Example
+
+You can call the C API from Go using CGO. A complete, runnable example containing Go module configuration and memory pinning (`runtime.Pinner`) is located in the [example/Go](example/Go) directory.
 
 ---
 

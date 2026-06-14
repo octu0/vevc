@@ -104,6 +104,7 @@ public func vevc_dec_decode(dec: UnsafeMutableRawPointer, data: UnsafePointer<UI
     }
     
     guard decodeChunk.isEmpty != true else {
+        res.pointee.status = VEVC_ERR
         return UnsafeMutableRawPointer(res)
     }
     

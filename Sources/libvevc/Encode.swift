@@ -143,7 +143,7 @@ public func vevc_enc_encode(enc: UnsafeMutableRawPointer, imgb: UnsafeRawPointer
             let flag = bytes[offset]
             if flag == 0x01 {
                 isCopy = true
-            } else if flag == 0x00 {
+            } else if flag == 0x02 {
                 isIFrame = true
             }
         }

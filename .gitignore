@@ -68,3 +68,6 @@ fastlane/test_output
 .antigravitycli/*
 
 Tests/vevcSpecV1/testdata/*.y4m
+
+example/C/test_c
+example/Go/test_go
