@@ -12,6 +12,15 @@ func debugLog(_ message: @autoclosure () -> String) {
 #endif
 }
 
+@inlinable @inline(__always)
+func statsLog(_ action: @autoclosure () -> Void) {
+#if DEBUG
+    if ProcessInfo.processInfo.environment["VEVC_STATS"] != nil {
+        action()
+    }
+#endif
+}
+
 public enum ColorGamut: UInt8 {
     case bt709 = 1
     case bt2020 = 2

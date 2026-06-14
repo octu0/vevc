@@ -57,12 +57,17 @@ public actor VEVCEncoder {
     /// Convenience for roundtrip tests and simple usage.
     @inline(__always)
     public func encodeToData(images: [YCbCrImage]) async throws -> [UInt8] {
-        let chunks = try await encode(images: images)
-        var result: [UInt8] = []
-        for chunk in chunks {
-            result.append(contentsOf: chunk)
+        let stream = self.encode(stream: AsyncStream<YCbCrImage> { c in
+            for img in images { c.yield(img) }; c.finish()
+        })
+        var out = [UInt8]()
+        for try await data in stream {
+            out.append(contentsOf: data)
         }
-        return result
+#if VEVC_ME_STATS
+        MEStats.printStats()
+#endif
+        return out
     }
 
     @inline(__always)

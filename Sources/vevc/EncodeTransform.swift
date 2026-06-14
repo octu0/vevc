@@ -434,7 +434,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -449,7 +449,11 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         let colCount32 = (colCount + 1) / 2
         let sadIdx = ((row / 2) * colCount32) + (col / 2)
         
-        let isHighError = if let sads = sads, sadIdx < sads.count, 1500 <= sads[sadIdx] { true } else { false }
+        let isHighSAD = if let sads = sads, sadIdx < sads.count, 1500 <= sads[sadIdx] { true } else { false }
+        let occScore = if let occ = occlusionScores, sadIdx < occ.count { occ[sadIdx] } else { 0 }
+        let isHighOcc = 2 <= occScore
+        
+        let isHighError = isHighSAD || isHighOcc
         let blockThreshold: Int
         switch true {
         case isHighError:

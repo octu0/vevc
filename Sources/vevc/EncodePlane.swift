@@ -18,38 +18,31 @@ func measureACEnergy32(view: BlockView) -> Int {
     // HL subband: rows 0..15, cols 16..31
     for y in 0..<16 {
         let ptr = base + y * s + 16
-        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-        let abs16 = v.replacing(with: .zero &- v, where: v .< 0)
-        // Horizontal sum of SIMD16<Int16>: split into two SIMD8, widen, sum
-        let lo8 = SIMD8<Int16>(abs16[0], abs16[1], abs16[2], abs16[3], abs16[4], abs16[5], abs16[6], abs16[7])
-        let hi8 = SIMD8<Int16>(abs16[8], abs16[9], abs16[10], abs16[11], abs16[12], abs16[13], abs16[14], abs16[15])
-        let sum8 = lo8 &+ hi8
-        let sum4 = SIMD4<Int16>(sum8[0] &+ sum8[4], sum8[1] &+ sum8[5], sum8[2] &+ sum8[6], sum8[3] &+ sum8[7])
-        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+        for x in 0..<16 {
+            let v = Int(ptr[x])
+            let mask = v &>> 31
+            totalSum &+= (v ^ mask) &- mask
+        }
     }
     
     // LH subband: rows 16..31, cols 0..15
     for y in 16..<32 {
         let ptr = base + y * s
-        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-        let abs16 = v.replacing(with: .zero &- v, where: v .< 0)
-        let lo8 = SIMD8<Int16>(abs16[0], abs16[1], abs16[2], abs16[3], abs16[4], abs16[5], abs16[6], abs16[7])
-        let hi8 = SIMD8<Int16>(abs16[8], abs16[9], abs16[10], abs16[11], abs16[12], abs16[13], abs16[14], abs16[15])
-        let sum8 = lo8 &+ hi8
-        let sum4 = SIMD4<Int16>(sum8[0] &+ sum8[4], sum8[1] &+ sum8[5], sum8[2] &+ sum8[6], sum8[3] &+ sum8[7])
-        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+        for x in 0..<16 {
+            let v = Int(ptr[x])
+            let mask = v &>> 31
+            totalSum &+= (v ^ mask) &- mask
+        }
     }
     
     // HH subband: rows 16..31, cols 16..31
     for y in 16..<32 {
         let ptr = base + y * s + 16
-        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-        let abs16 = v.replacing(with: .zero &- v, where: v .< 0)
-        let lo8 = SIMD8<Int16>(abs16[0], abs16[1], abs16[2], abs16[3], abs16[4], abs16[5], abs16[6], abs16[7])
-        let hi8 = SIMD8<Int16>(abs16[8], abs16[9], abs16[10], abs16[11], abs16[12], abs16[13], abs16[14], abs16[15])
-        let sum8 = lo8 &+ hi8
-        let sum4 = SIMD4<Int16>(sum8[0] &+ sum8[4], sum8[1] &+ sum8[5], sum8[2] &+ sum8[6], sum8[3] &+ sum8[7])
-        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
+        for x in 0..<16 {
+            let v = Int(ptr[x])
+            let mask = v &>> 31
+            totalSum &+= (v ^ mask) &- mask
+        }
     }
     
     return totalSum
@@ -156,7 +149,7 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, aqTable: AQTable, sads: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, aqTable: AQTable, sads: [Int]? = nil, occlusionScores: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -192,8 +185,21 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
                         dwt2DBlock32(view)
                         
                         let sad = sads?[blockIdx] ?? 1024
-                        if 256 < sad {
-                            safeEnergyBox.value[blockIdx] = measureACEnergy32(view: view)
+                        let occ = occlusionScores?[blockIdx] ?? 0
+                        
+                        let isHighSAD = 1500 <= sad
+                        let isHighOcc = 12 <= occ
+                        
+                        let isHighError = isHighSAD || isHighOcc
+                        
+                        if 256 < sad || isHighError {
+                            var energy = measureACEnergy32(view: view)
+                            // AQ injection: lower energy => finer quantization.
+                            // To make occlusion finer, we can artificially lower the energy.
+                            if isHighError {
+                                energy = energy / 4
+                            }
+                            safeEnergyBox.value[blockIdx] = energy
                         } else {
                             safeEnergyBox.value[blockIdx] = -1
                         }
@@ -455,7 +461,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
 }
 
 @inline(__always)
-func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, sads: [Int]? = nil, occlusionScores: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -761,14 +767,14 @@ func subtractCoeffsBase32(currBlocks: inout [BlockView], predBlocks: inout [Bloc
 }
 
 @inline(__always)
-func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, aqYTable: AQTable, qtCTable: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, aqYTable: AQTable, qtCTable: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rY, width: dx, height: dy, pool: pool, aqTable: aqYTable, sads: sads)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rY, width: dx, height: dy, pool: pool, aqTable: aqYTable, sads: sads, occlusionScores: occlusionScores)
         return (subband, blocks, r)
     }()
     
@@ -821,14 +827,14 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
 }
 
 @inline(__always)
-func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, sads: sads, occlusionScores: occlusionScores)
         return (subband, blocks, r)
     }()
     
@@ -891,7 +897,7 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 }
 
 @inline(__always)
-func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil) -> [UInt8] {
+func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil) -> [UInt8] {
     let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 4)))
     
@@ -905,7 +911,7 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // Note: SADs are evaluated at 32x32 granularity, so map Layer16 to Layer32 granularity
     // In layered structure, we just pass sads arrays if aligned, or map if necessary.
     // For now, only 32x32 blocks use it cleanly, but if Layer16 needs it:
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY)
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, occlusionScores: occlusionScores, colCount: colCountY, rowCount: rowCountY)
     let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC)
     let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC)
     
@@ -1355,7 +1361,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)

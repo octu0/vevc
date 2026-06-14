@@ -61,7 +61,7 @@ struct MotionEstimation {
     // penalizes Motion Vector Difference (MVD) to favor pmv
     @inline(__always)
     static func getMVDPenalty(dx: Int, dy: Int, pmvDx: Int, pmvDy: Int, lambda: Int) -> Int {
-        return (abs(dx - pmvDx) + abs(dy - pmvDy)) * lambda
+        return (Int((dx - pmvDx).magnitude) + Int((dy - pmvDy).magnitude)) * lambda
     }
 
     @inline(__always)
@@ -203,7 +203,7 @@ struct MotionEstimation {
             let pRow = pBase.advanced(by: ry * pStride)
             
             for rx in 0..<8 {
-                sad &+= abs(Int32(cRow[rx]) - Int32(pRow[rx]))
+                sad &+= Int32((Int32(cRow[rx]) - Int32(pRow[rx])).magnitude)
             }
         }
         return Int(sad)
@@ -213,7 +213,7 @@ struct MotionEstimation {
     static func compute64PointSADBlocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
         var sad: Int32 = 0
         for i in 0..<64 {
-            sad &+= abs(Int32(cBase[i]) - Int32(pBase[i]))
+            sad &+= Int32((Int32(cBase[i]) - Int32(pBase[i])).magnitude)
         }
         return Int(sad)
     }
@@ -551,8 +551,8 @@ struct MotionEstimation {
                     let currOffset = (cy + y) * cbw + cx
                     let refOffset = (cry + y) * cbw + crx
                     for x in 0..<4 {
-                        sad &+= abs(Int32(cCb[currOffset + x]) - Int32(rCb[refOffset + x]))
-                        sad &+= abs(Int32(cCr[currOffset + x]) - Int32(rCr[refOffset + x]))
+                        sad &+= Int32((Int32(cCb[currOffset + x]) - Int32(rCb[refOffset + x])).magnitude)
+                        sad &+= Int32((Int32(cCr[currOffset + x]) - Int32(rCr[refOffset + x])).magnitude)
                     }
                 }
                 return Int(sad) * 4 // Luma SAD scale matching (since we check 16 pixels here instead of 64 in Luma, *4 keeps penalty scale relative to Luma)
@@ -574,13 +574,13 @@ struct MotionEstimation {
             let py = by + intDy + ry
             let r = prev.advanced(by: py * width + bx + intDx)
             for rx in stride(from: 0, to: 32, by: 2) {
-                sad &+= abs(Int32(rowC[rx]) - Int32(r[rx]))
+                sad &+= Int32((Int32(rowC[rx]) - Int32(r[rx])).magnitude)
             }
         }
         return Int(sad)
     }
 
-    @inline(__always)
+@inline(__always)
     static func computeQuarterPixelSADSubsampled32_Safe_FIR_Y0(
         curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
         width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
@@ -592,12 +592,10 @@ struct MotionEstimation {
             let rowC = curr.advanced(by: cy * width + bx)
             let py = by + intDy + ry
             let r0 = prev.advanced(by: py * width + bx + intDx)
-            var rx = 0
-            while rx < 32 {
+            for rx in stride(from: 0, to: 32, by: 2) {
                 let h0 = cX0 &* Int32(r0[rx - 1]) &+ cX1 &* Int32(r0[rx]) &+ cX2 &* Int32(r0[rx + 1]) &+ cX3 &* Int32(r0[rx + 2])
                 let pVal = (h0 &+ 3) >> 3
-                sad &+= abs(Int32(rowC[rx]) &- pVal)
-                rx &+= 2
+                sad &+= Int32((Int32(rowC[rx]) &- pVal).magnitude)
             }
         }
         return Int(sad)
@@ -618,12 +616,10 @@ struct MotionEstimation {
             let r0 = prev.advanced(by: py * width + bx + intDx)
             let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
             let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-            var rx = 0
-            while rx < 32 {
+            for rx in stride(from: 0, to: 32, by: 2) {
                 let vertSum = cY0 &* Int32(rM1[rx]) &+ cY1 &* Int32(r0[rx]) &+ cY2 &* Int32(rP1[rx]) &+ cY3 &* Int32(rP2[rx])
                 let pVal = (vertSum &+ 3) >> 3
-                sad &+= abs(Int32(rowC[rx]) &- pVal)
-                rx &+= 2
+                sad &+= Int32((Int32(rowC[rx]) &- pVal).magnitude)
             }
         }
         return Int(sad)
@@ -645,16 +641,16 @@ struct MotionEstimation {
             let r0 = prev.advanced(by: py * width + bx + intDx)
             let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
             let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-            var rx = 0
-            while rx < 32 {
+            for rx in stride(from: 0, to: 32, by: 2) {
                 let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
                 let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
                 let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
                 let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
+                
                 let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
                 let pVal = (refVal &+ 31) >> 6
-                sad &+= abs(Int32(rowC[rx]) &- pVal)
-                rx &+= 2
+                
+                sad &+= Int32((Int32(rowC[rx]) &- pVal).magnitude)
             }
         }
         return Int(sad)
@@ -673,10 +669,8 @@ struct MotionEstimation {
             let sy0 = max(0, min(py, height - 1))
             let r = prev.advanced(by: sy0 * width)
             for rx in stride(from: 0, to: 32, by: 2) {
-                let px = bx + intDx + rx
-                let sx = max(0, min(px, width - 1))
-                let cx = min(bx + rx, width - 1)
-                sad &+= abs(Int32(rowC[cx]) - Int32(r[sx]))
+                let sx = max(0, min(bx + intDx + rx, width - 1))
+                sad &+= Int32((Int32(rowC[min(bx + rx, width - 1)]) - Int32(r[sx])).magnitude)
             }
         }
         return Int(sad)
@@ -702,22 +696,22 @@ struct MotionEstimation {
             let r0  = prev.advanced(by: sy0 * width)
             let rP1 = prev.advanced(by: syP1 * width)
             let rP2 = prev.advanced(by: syP2 * width)
-            var rx = 0
-            while rx < 32 {
+            for rx in stride(from: 0, to: 32, by: 2) {
                 let px = bx &+ intDx &+ rx
-                let cx = min(bx &+ rx, width - 1)
                 let sxM1 = max(0, min(px - 1, width - 1))
                 let sx0  = max(0, min(px, width - 1))
                 let sxP1 = max(0, min(px + 1, width - 1))
                 let sxP2 = max(0, min(px + 2, width - 1))
+                
                 let vM1 = cX0 &* Int32(rM1[sxM1]) &+ cX1 &* Int32(rM1[sx0]) &+ cX2 &* Int32(rM1[sxP1]) &+ cX3 &* Int32(rM1[sxP2])
                 let v0  = cX0 &* Int32(r0[sxM1])  &+ cX1 &* Int32(r0[sx0])  &+ cX2 &* Int32(r0[sxP1])  &+ cX3 &* Int32(r0[sxP2])
                 let vP1 = cX0 &* Int32(rP1[sxM1]) &+ cX1 &* Int32(rP1[sx0]) &+ cX2 &* Int32(rP1[sxP1]) &+ cX3 &* Int32(rP1[sxP2])
                 let vP2 = cX0 &* Int32(rP2[sxM1]) &+ cX1 &* Int32(rP2[sx0]) &+ cX2 &* Int32(rP2[sxP1]) &+ cX3 &* Int32(rP2[sxP2])
+                
                 let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
                 let pVal = (refVal &+ 31) >> 6
-                sad &+= abs(Int32(rowC[cx]) &- pVal)
-                rx &+= 2
+                
+                sad &+= Int32((Int32(rowC[min(bx &+ rx, width - 1)]) &- pVal).magnitude)
             }
         }
         return Int(sad)
@@ -796,7 +790,7 @@ struct MotionEstimation {
                 if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
                 if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
                 
-                let penalty = (abs(ox) + abs(oy)) * 6
+                let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 6
                 let maxSAD = bestSAD - penalty
                 if maxSAD <= 0 { continue }
                 
@@ -823,7 +817,7 @@ struct MotionEstimation {
                 if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
                 if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
                 
-                let penalty = (abs(ox) + abs(oy)) * 4
+                let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 4
                 let maxSAD = bestSAD - penalty
                 if maxSAD <= 0 { continue }
                 
@@ -839,10 +833,103 @@ struct MotionEstimation {
             return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
         }
     }
+
+    @inline(__always)
+    static func computeOcclusionScores(
+        currPlane: [Int16],
+        prevPlane: [Int16],
+        width: Int,
+        height: Int,
+        globalPrior: MotionVector
+    ) -> [Int] {
+        let colCount = (width + 7) / 8
+        let rowCount = (height + 7) / 8
+        var scores = [Int](repeating: 0, count: rowCount * colCount)
+        let gdy = Int(globalPrior.dy) / 4
+        let gdx = Int(globalPrior.dx) / 4
+        
+        currPlane.withUnsafeBufferPointer { currBuf in
+            prevPlane.withUnsafeBufferPointer { prevBuf in
+                guard let cBase = currBuf.baseAddress, let pBase = prevBuf.baseAddress else { return }
+                
+                scores.withUnsafeMutableBufferPointer { scoresBuf in
+                    guard let sBase = scoresBuf.baseAddress else { return }
+                    
+                    for row in 0..<rowCount {
+                        let by = row * 8
+                        let bHeight = min(8, height - by)
+                        if bHeight <= 0 { continue }
+                        
+                        let pBy = min(max(0, by + gdy), height - bHeight)
+                        
+                        for col in 0..<colCount {
+                            let bx = col * 8
+                            let bWidth = min(8, width - bx)
+                            if bWidth <= 0 { continue }
+                            
+                            var cProfile0: Int32 = 0, cProfile1: Int32 = 0, cProfile2: Int32 = 0, cProfile3: Int32 = 0
+                            var cProfile4: Int32 = 0, cProfile5: Int32 = 0, cProfile6: Int32 = 0, cProfile7: Int32 = 0
+                            
+                            var pProfile0: Int32 = 0, pProfile1: Int32 = 0, pProfile2: Int32 = 0, pProfile3: Int32 = 0
+                            var pProfile4: Int32 = 0, pProfile5: Int32 = 0, pProfile6: Int32 = 0, pProfile7: Int32 = 0
+                            
+                            // apply gdx
+                            let px0 = max(0, min(width - 1, bx + 0 + gdx)) - bx
+                            let px1 = max(0, min(width - 1, bx + 1 + gdx)) - bx
+                            let px2 = max(0, min(width - 1, bx + 2 + gdx)) - bx
+                            let px3 = max(0, min(width - 1, bx + 3 + gdx)) - bx
+                            let px4 = max(0, min(width - 1, bx + 4 + gdx)) - bx
+                            let px5 = max(0, min(width - 1, bx + 5 + gdx)) - bx
+                            let px6 = max(0, min(width - 1, bx + 6 + gdx)) - bx
+                            let px7 = max(0, min(width - 1, bx + 7 + gdx)) - bx
+                            
+                            for y in 0..<bHeight {
+                                let cOffset = (by + y) * width + bx
+                                let cRow = cBase.advanced(by: cOffset)
+                                if 0 < bWidth { cProfile0 &+= Int32(cRow[0]) }
+                                if 1 < bWidth { cProfile1 &+= Int32(cRow[1]) }
+                                if 2 < bWidth { cProfile2 &+= Int32(cRow[2]) }
+                                if 3 < bWidth { cProfile3 &+= Int32(cRow[3]) }
+                                if 4 < bWidth { cProfile4 &+= Int32(cRow[4]) }
+                                if 5 < bWidth { cProfile5 &+= Int32(cRow[5]) }
+                                if 6 < bWidth { cProfile6 &+= Int32(cRow[6]) }
+                                if 7 < bWidth { cProfile7 &+= Int32(cRow[7]) }
+                                
+                                let pOffset = (pBy + y) * width + bx
+                                let pRow = pBase.advanced(by: pOffset)
+                                
+                                if 0 < bWidth { pProfile0 &+= Int32(pRow[px0]) }
+                                if 1 < bWidth { pProfile1 &+= Int32(pRow[px1]) }
+                                if 2 < bWidth { pProfile2 &+= Int32(pRow[px2]) }
+                                if 3 < bWidth { pProfile3 &+= Int32(pRow[px3]) }
+                                if 4 < bWidth { pProfile4 &+= Int32(pRow[px4]) }
+                                if 5 < bWidth { pProfile5 &+= Int32(pRow[px5]) }
+                                if 6 < bWidth { pProfile6 &+= Int32(pRow[px6]) }
+                                if 7 < bWidth { pProfile7 &+= Int32(pRow[px7]) }
+                            }
+                            
+                            var score = 0
+                            if 0 < bWidth { score &+= Int(Int32((cProfile0 - pProfile0).magnitude)) }
+                            if 1 < bWidth { score &+= Int(Int32((cProfile1 - pProfile1).magnitude)) }
+                            if 2 < bWidth { score &+= Int(Int32((cProfile2 - pProfile2).magnitude)) }
+                            if 3 < bWidth { score &+= Int(Int32((cProfile3 - pProfile3).magnitude)) }
+                            if 4 < bWidth { score &+= Int(Int32((cProfile4 - pProfile4).magnitude)) }
+                            if 5 < bWidth { score &+= Int(Int32((cProfile5 - pProfile5).magnitude)) }
+                            if 6 < bWidth { score &+= Int(Int32((cProfile6 - pProfile6).magnitude)) }
+                            if 7 < bWidth { score &+= Int(Int32((cProfile7 - pProfile7).magnitude)) }
+                            
+                            sBase[row * colCount + col] = score / (bHeight * bWidth)
+                        }
+                    }
+                }
+            }
+        }
+        return scores
+    }
 }
 
 @inline(__always)
-func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int) async -> (MotionVectors, [Int]) {
+func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int) async -> (MotionVectors, [Int], [Int]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -921,8 +1008,8 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
                 if dynamicThreshold < sad {
                     var mvVariance = 0
                     if 0 < col && 0 < row {
-                        let dxDiff = abs(Int(ptrDx[idx - 1]) - Int(ptrDx[idx - colCount]))
-                        let dyDiff = abs(Int(ptrDy[idx - 1]) - Int(ptrDy[idx - colCount]))
+                        let dxDiff = Int((Int(ptrDx[idx - 1]) - Int(ptrDx[idx - colCount])).magnitude)
+                        let dyDiff = Int((Int(ptrDy[idx - 1]) - Int(ptrDy[idx - colCount])).magnitude)
                         mvVariance = dxDiff + dyDiff
                     }
                     if 32 < mvVariance && (dynamicThreshold * 2) < sad {
@@ -954,14 +1041,15 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
             ptrSADs[idx] = sad
         }
     }
-    return (mvs, sads)
+    let occlusionScores = MotionEstimation.computeOcclusionScores(currPlane: currSub1, prevPlane: prevSub1, width: targetWidth, height: targetHeight, globalPrior: MotionVector(dx: 0, dy: 0))
+    return (mvs, sads, occlusionScores)
 }
 
 /// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames, 
 /// and selects the one with smaller SAD per block.
 /// - Returns: (mvs, SADs, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int, gopPosition: Int) async -> (MotionVectors, [Int], [Bool]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int, gopPosition: Int) async -> (MotionVectors, [Int], [Bool], [Int]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1059,8 +1147,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 if dynT < mutSADPrev {
                     var mvVariance = 0
                     if 0 < col && 0 < row {
-                        let dxDiff = abs(Int(ptrDx[idx - 1]) - Int(ptrDx[idx - colCount]))
-                        let dyDiff = abs(Int(ptrDy[idx - 1]) - Int(ptrDy[idx - colCount]))
+                        let dxDiff = Int((Int(ptrDx[idx - 1]) - Int(ptrDx[idx - colCount])).magnitude)
+                        let dyDiff = Int((Int(ptrDy[idx - 1]) - Int(ptrDy[idx - colCount])).magnitude)
                         mvVariance = dxDiff + dyDiff
                     }
                     if 32 < mvVariance && (dynT * 2) < mutSADPrev {
@@ -1097,7 +1185,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
                 )
                 
-                let mvEnergyNext = abs(Int(mvNext.dx)) + abs(Int(mvNext.dy))
+                let mvEnergyNext = Int((Int(mvNext.dx)).magnitude) + Int((Int(mvNext.dy)).magnitude)
                 
                 // If I-frame (next) predicts the block extremely well, it's overwhelmingly likely
                 // a static background. Waive the GOP penalty to allow instantaneous ghost erasure.
@@ -1111,7 +1199,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     let intNextDy = Int(mvNext.dy)
                     let nextContrast = MotionEstimation.extractContrast8x8(plane: nextSub1, width: targetWidth, height: targetHeight, bx: bx + (intNextDx >> 2), by: by + (intNextDy >> 2))
                     
-                    let contrastDiff = abs(currContrast - nextContrast)
+                    let contrastDiff = Int((currContrast - nextContrast).magnitude)
                     let structurePenalty = (contrastDiff * contrastDiff) / 4
                     
                     // Chroma SAD penalty to completely block mismatching colors (e.g. blue background vs red hair)
@@ -1156,5 +1244,6 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             ptrRefDirs[idx] = dir
         }
     }
-    return (mvs, sads, refDirs)
+    let occlusionScores = MotionEstimation.computeOcclusionScores(currPlane: currSub1, prevPlane: prevSub1, width: targetWidth, height: targetHeight, globalPrior: MotionVector(dx: 0, dy: 0))
+    return (mvs, sads, refDirs, occlusionScores)
 }
