@@ -59,7 +59,7 @@ If the Status is not `0x01` (Copy-Frame), the following size information is stor
 
 > [!IMPORTANT]
 > **Derived Fields (not stored in header)**:
-> - **MVs Count**: Derived from frame dimensions: `ceil(width / 8) × ceil(height / 8)`. Width and height are available from the File Metadata.
+> - **MVs Count**: Derived from frame dimensions at the Base8 (L0) resolution after 2 DWT stages: `l1 = ceil(dim/2)`, `l0 = ceil(l1/2)`, then `ceil(l0_width / 8) × ceil(l0_height / 8)`. Width and height are available from the File Metadata.
 > - **RefDir Size**: Derived from MVs Count: `ceil(mvsCount / 8)`. Only present when the `hasRefDir` flag (bit 4 of Frame Status) is set.
 
 > [!TIP]
@@ -106,11 +106,11 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 |---|---|---|
 | Quantization Step Y | 2 Bytes (UInt16BE) | Base quantization step for the Y plane. |
 | Quantization Step CbCr | 2 Bytes (UInt16BE) | Base quantization step for the Cb/Cr planes. |
-| Y Payload Size | 4 Bytes (UInt32BE) | Byte size of the Y Payload Data. |
+| Y Payload Size | VLQ | Byte size of the Y Payload Data. |
 | **Y Payload Data** | (Y Payload Size bytes) | See section 3.1 below. |
-| Cb Payload Size | 4 Bytes (UInt32BE) | Byte size of the Cb Payload Data. |
+| Cb Payload Size | VLQ | Byte size of the Cb Payload Data. |
 | **Cb Payload Data** | (Cb Payload Size bytes) | |
-| Cr Payload Size | 4 Bytes (UInt32BE) | Byte size of the Cr Payload Data. |
+| Cr Payload Size | VLQ | Byte size of the Cr Payload Data. |
 | **Cr Payload Data** | (Cr Payload Size bytes) | |
 
 ### 3.1. Plane Payload (Y / Cb / Cr)

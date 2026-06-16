@@ -880,20 +880,10 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
     }())
     
-    var out: [UInt8] = []
-    appendUInt16BE(&out, UInt16(qtY.step))
-    appendUInt16BE(&out, UInt16(qtC.step))
-    
-    writeVLQSize(&out, bufY.count)
-    out.append(contentsOf: bufY)
-    
-    writeVLQSize(&out, bufCb.count)
-    out.append(contentsOf: bufCb)
-    
-    writeVLQSize(&out, bufCr.count)
-    out.append(contentsOf: bufCr)
-    
-    return out
+    return VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
 }
 
 @inline(__always)
@@ -919,20 +909,10 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
     }())
     
-    var out: [UInt8] = []
-    appendUInt16BE(&out, UInt16(qtY.step))
-    appendUInt16BE(&out, UInt16(qtC.step))
-    
-    writeVLQSize(&out, bufY.count)
-    out.append(contentsOf: bufY)
-    
-    writeVLQSize(&out, bufCb.count)
-    out.append(contentsOf: bufCb)
-    
-    writeVLQSize(&out, bufCr.count)
-    out.append(contentsOf: bufCr)
-    
-    return out
+    return VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
 }
 
 @inline(__always)
@@ -1450,18 +1430,10 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         return "  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
     }())
     
-    var out: [UInt8] = []
-    appendUInt16BE(&out, UInt16(qtY.step))
-    appendUInt16BE(&out, UInt16(qtC.step))
-    
-    writeVLQSize(&out, bufY.count)
-    out.append(contentsOf: bufY)
-    
-    writeVLQSize(&out, bufCb.count)
-    out.append(contentsOf: bufCb)
-    
-    writeVLQSize(&out, bufCr.count)
-    out.append(contentsOf: bufCr)
+    let out = VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
     
     return (out, reconstructed, base8YBlocks, base8CbBlocks, base8CrBlocks, {
         r0Y()
@@ -1610,18 +1582,10 @@ func encodePlaneBase32(pd: PlaneData420, pool: BlockViewPool, predictedPd: Plane
         return "  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
     }())
     
-    var out: [UInt8] = []
-    appendUInt16BE(&out, UInt16(qtY.step))
-    appendUInt16BE(&out, UInt16(qtC.step))
-    
-    writeVLQSize(&out, bufY.count)
-    out.append(contentsOf: bufY)
-    
-    writeVLQSize(&out, bufCb.count)
-    out.append(contentsOf: bufCb)
-    
-    writeVLQSize(&out, bufCr.count)
-    out.append(contentsOf: bufCr)
+    let out = VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
     let cR2Y = releaseL2Y; let cR2Cb = releaseL2Cb; let cR2Cr = releaseL2Cr
     return (out, reconstructed, { cR2Y(); cR2Cb(); cR2Cr() })
 }

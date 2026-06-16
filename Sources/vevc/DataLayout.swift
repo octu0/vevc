@@ -176,3 +176,75 @@ public func deriveMVCount(width: Int, height: Int) -> Int {
     let rows = (l0dy + 7) / 8
     return cols * rows
 }
+
+/// Layer Data structure (Section 4 of DataLayout.md).
+/// Encapsulates the serialization format for each spatial layer (Layer0/Layer1/Layer2):
+///   [Quantization Step Y (2B UInt16BE)]
+///   [Quantization Step CbCr (2B UInt16BE)]
+///   [Y Payload Size (VLQ)] [Y Payload Data]
+///   [Cb Payload Size (VLQ)] [Cb Payload Data]
+///   [Cr Payload Size (VLQ)] [Cr Payload Data]
+public struct VEVCLayerData {
+    
+    /// Serialize layer data into the bitstream format.
+    /// Writes quantization steps followed by VLQ-prefixed Y/Cb/Cr plane payloads.
+    @inline(__always)
+    static func serialize(
+        qtYStep: UInt16,
+        qtCStep: UInt16,
+        bufY: [UInt8],
+        bufCb: [UInt8],
+        bufCr: [UInt8]
+    ) -> [UInt8] {
+        var out: [UInt8] = []
+        appendUInt16BE(&out, qtYStep)
+        appendUInt16BE(&out, qtCStep)
+        
+        writeVLQSize(&out, bufY.count)
+        out.append(contentsOf: bufY)
+        
+        writeVLQSize(&out, bufCb.count)
+        out.append(contentsOf: bufCb)
+        
+        writeVLQSize(&out, bufCr.count)
+        out.append(contentsOf: bufCr)
+        
+        return out
+    }
+    
+    /// Deserialize layer data from a byte array.
+    /// Returns quantization tables and the raw byte slices for Y/Cb/Cr plane payloads.
+    @inline(__always)
+    static func deserialize(
+        from r: [UInt8],
+        layer: UInt8,
+        layerLabel: String
+    ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: [UInt8], bufCb: [UInt8], bufCr: [UInt8]) {
+        var offset = 0
+        let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
+        let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
+        
+        let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
+        guard (offset + bufYLen) <= r.count else {
+            throw DecodeError.invalidBlockDataContext("\(layerLabel) Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)")
+        }
+        let bufY = Array(r[offset..<(offset + bufYLen)])
+        offset += bufYLen
+        
+        let bufCbLen = try readVLQSizeFromBytes(r, offset: &offset)
+        guard (offset + bufCbLen) <= r.count else {
+            throw DecodeError.invalidBlockDataContext("\(layerLabel) Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)")
+        }
+        let bufCb = Array(r[offset..<(offset + bufCbLen)])
+        offset += bufCbLen
+        
+        let bufCrLen = try readVLQSizeFromBytes(r, offset: &offset)
+        guard (offset + bufCrLen) <= r.count else {
+            throw DecodeError.invalidBlockDataContext("\(layerLabel) Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)")
+        }
+        let bufCr = Array(r[offset..<(offset + bufCrLen)])
+        offset += bufCrLen
+        
+        return (qtY, qtC, bufY, bufCb, bufCr)
+    }
+}

@@ -167,15 +167,13 @@ DWT Coefficients
     A delivery server can perform O(1) resolution scaling by simply dropping
     the trailing layer payloads without recalculating sizes.
     +--------------------------------------------------------------------------------------------------+
-    | Frame Type (1B) (0x00: P-Frame, 0x01: CopyFrame, 0x02: I-Frame)                                  |
+    | Frame Status (1B) (lower 4 bits: 0x00=P, 0x01=Copy, 0x02=I; bit4: hasRefDir)                    |
     +---- IF NOT CopyFrame ----------------------------------------------------------------------------+
-    | MVs Count (4B) | MVs Size (4B)    | RefDir Size (4B)                                             |
-    +----------------+------------------+--------------------------------------------------------------+
-    | Layer0 Size(4B)| Layer1 Size (4B) | Layer2 Size (4B)                                             |
-    +----------------+------------------+--------------------------------------------------------------+
+    | MVs Size (4B)    | Layer0 Size (4B) | Layer1 Size (4B)  | Layer2 Size (4B)                        |
+    +------------------+------------------+-------------------+-----------------------------------------+
     | MVs Data Payload (MVs Size bytes)                                                                |
     +--------------------------------------------------------------------------------------------------+
-    | RefDir Data Payload (RefDir Size bytes)   (Only for P-Frames with Bidirectional Prediction)      |
+    | RefDir Data Payload (ceil(mvsCount/8) bytes)  (Only when hasRefDir bit is set)                    |
     +--------------------------------------------------------------------------------------------------+
     | Layer 0 Payload (Layer0 Size bytes)       (Base8: Thumbnail)                                     |
     +--------------------------------------------------------------------------------------------------+
@@ -188,11 +186,11 @@ DWT Coefficients
         +-------------+-----------+
         | qtY (2B)    | qtC (2B)  |
         +-------------+-----------+
-        | Y len (4B)  | Y data    |
+        | Y len (VLQ) | Y data    |
         +-------------+-----------+
-        | Cb len (4B) | Cb data   |
+        | Cb len (VLQ)| Cb data   |
         +-------------+-----------+
-        | Cr len (4B) | Cr data   |
+        | Cr len (VLQ)| Cr data   |
         +-------------+-----------+
 ```
 
