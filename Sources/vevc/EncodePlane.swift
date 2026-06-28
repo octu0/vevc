@@ -48,46 +48,6 @@ func measureACEnergy32(view: BlockView) -> Int {
     return totalSum
 }
 
-/// Measures the AC energy of a DWT-transformed 16x16 block.
-/// Layout after DWT of 16x16 block (stride=16):
-///   [LL 8x8] [HL 8x8]
-///   [LH 8x8] [HH 8x8]
-@inline(__always)
-func measureACEnergy16(view: BlockView) -> Int {
-    let base = view.base
-    let s = 16 // stride
-    var totalSum: Int = 0
-    
-    // HL subband: rows 0..7, cols 8..15
-    for y in 0..<8 {
-        let ptr = base + y * s + 8
-        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let abs8 = v.replacing(with: .zero &- v, where: v .< 0)
-        let sum4 = SIMD4<Int16>(abs8[0] &+ abs8[4], abs8[1] &+ abs8[5], abs8[2] &+ abs8[6], abs8[3] &+ abs8[7])
-        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
-    }
-    
-    // LH subband: rows 8..15, cols 0..7
-    for y in 8..<16 {
-        let ptr = base + y * s
-        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let abs8 = v.replacing(with: .zero &- v, where: v .< 0)
-        let sum4 = SIMD4<Int16>(abs8[0] &+ abs8[4], abs8[1] &+ abs8[5], abs8[2] &+ abs8[6], abs8[3] &+ abs8[7])
-        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
-    }
-    
-    // HH subband: rows 8..15, cols 8..15
-    for y in 8..<16 {
-        let ptr = base + y * s + 8
-        let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let abs8 = v.replacing(with: .zero &- v, where: v .< 0)
-        let sum4 = SIMD4<Int16>(abs8[0] &+ abs8[4], abs8[1] &+ abs8[5], abs8[2] &+ abs8[6], abs8[3] &+ abs8[7])
-        totalSum += Int(sum4[0]) + Int(sum4[1]) + Int(sum4[2]) + Int(sum4[3])
-    }
-    
-    return totalSum
-}
-
 fileprivate struct SendableInt16Ptr: @unchecked Sendable {
     let ptr: UnsafeMutablePointer<Int16>
     init(_ ptr: UnsafeMutablePointer<Int16>) { self.ptr = ptr }
