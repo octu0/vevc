@@ -113,7 +113,7 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = subband.withUnsafeMutableBufferPointer { SendableInt16Ptr($0.baseAddress!) }
+    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
     
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
@@ -255,7 +255,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = subband.withUnsafeMutableBufferPointer { SendableInt16Ptr($0.baseAddress!) }
+    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
     
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
@@ -367,8 +367,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    subband.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &subband) { dstBase in
         for i in 0..<rowCount {
             let h = (i * 32)
             for j in 0..<colCount {
@@ -428,7 +427,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = subband.withUnsafeMutableBufferPointer { SendableInt16Ptr($0.baseAddress!) }
+    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
     
     let rowCount = ((height + 16 - 1) / 16)
     let colCount = ((width + 16 - 1) / 16)
@@ -533,8 +532,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
         }
     }
     
-    subband.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &subband) { dstBase in
         for i in 0..<rowCount {
             let h = (i * 16)
             for j in 0..<colCount {
@@ -769,8 +767,7 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
     let colCount = (width + 7) / 8
     let rowCount = (height + 7) / 8
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 8
@@ -828,8 +825,7 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 32
@@ -889,8 +885,7 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 32
@@ -950,8 +945,7 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 32
@@ -1011,8 +1005,7 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 16
@@ -1072,8 +1065,7 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 16
@@ -1133,8 +1125,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
-    plane.withUnsafeMutableBufferPointer { dstBuf in
-        guard let dstBase = dstBuf.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
         for row in 0..<rowCount {
             let startY = row * 16

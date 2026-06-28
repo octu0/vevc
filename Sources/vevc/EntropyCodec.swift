@@ -980,10 +980,9 @@ func encodeMVs(mvs: MotionVectors) -> [UInt8] {
 
 @inline(__always)
 func decodeMVs(data: [UInt8], count: Int) throws -> MotionVectors {
-    return try data.withUnsafeBufferPointer { buf -> MotionVectors in
-        guard let base = buf.baseAddress else { return MotionVectors.empty }
+    return try withUnsafePointers(data) { base in
         var offset = 0
-        let bufCount = buf.count
+        let bufCount = data.count
         
         let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
         let modelDx = rANSModel(tokenFreqs: freqsDx)

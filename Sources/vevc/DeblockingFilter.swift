@@ -5,8 +5,7 @@
 /// In-place applies deblocking filter to the reconstructed image (32x32 block resolution).
 @inline(__always)
 func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { base in
         let rawTc = (qStep / 2) + 3
         let tc: Int16 = switch true {
             case qStep <= 3: 0
@@ -51,9 +50,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         return
     }
     
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
-        
+    withUnsafePointers(mut: &plane) { base in
         let rawTc = (qStep / 2) + 3
         let defaultTc: Int16 = switch true {
             case qStep <= 3: 0
@@ -88,9 +85,8 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         let hRem = height - hFast
         let wRem = width - wFast
         
-        mvs.dx.withUnsafeBufferPointer { mvDxBuffer in
-            guard let mvDxBase = mvDxBuffer.baseAddress else { return }
-            let mvCount = mvDxBuffer.count
+        withUnsafePointers(mvs.dx) { mvDxBase in
+            let mvCount = mvs.dx.count
             
             // Vertical Edges
             for col in 1..<colCount {
@@ -156,9 +152,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         return
     }
     
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
-        
+    withUnsafePointers(mut: &plane) { base in
         let rawTc = (qStep / 2) + 3
         let defaultTc: Int16 = switch true {
             case qStep <= 3: 0
@@ -194,9 +188,8 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         let hRem = height - hFast
         let wRem = width - wFast
         
-        mvs.dx.withUnsafeBufferPointer { mvDxBuffer in
-            guard let mvDxBase = mvDxBuffer.baseAddress else { return }
-            let mvCount = mvDxBuffer.count
+        withUnsafePointers(mvs.dx) { mvDxBase in
+            let mvCount = mvs.dx.count
             
             // Vertical Edges
             for col in 1..<colCountC {
@@ -259,8 +252,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
 /// In-place applies deblocking filter to the reconstructed image (16x16 block resolution).
 @inline(__always)
 func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { base in
         let rawTc = (qStep / 2) + 3
         let tc: Int16 = switch true {
             case qStep <= 3: 0
@@ -475,8 +467,7 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: MotionVectors, wid
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
+    withUnsafePointers(mut: &plane) { base in
         for row in 0..<rowCount {
             for col in 0..<colCount {
                 let idx = row * colCount + col

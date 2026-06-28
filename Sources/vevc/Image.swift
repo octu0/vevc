@@ -8,9 +8,7 @@ struct Int16Reader {
 
     @inline(__always)
     func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
-        data.withUnsafeBufferPointer { srcBuf in
-            guard let srcBase = srcBuf.baseAddress else { return }
-            
+        withUnsafePointers(data) { srcBase in
             for line in 0..<blockHeight {
                 let currentY = y + line
                 let safeY = min(currentY, self.height - 1)
@@ -29,7 +27,7 @@ struct Int16Reader {
                         }
                     }
                 } else {
-                    let lastVal = srcBuf[safeY * self.width + (self.width - 1)]
+                    let lastVal = srcBase[safeY * self.width + (self.width - 1)]
                     for i in 0..<blockWidth {
                         dstPtr[i] = lastVal
                     }
@@ -308,8 +306,7 @@ struct ImageReader: Sendable {
     @inline(__always)
     func readBlockY(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         if 0 <= x && 0 <= y && (y + blockHeight) <= height && (x + blockWidth) <= width {
-            img.yPlane.withUnsafeBufferPointer { srcPtr in
-                guard let srcBase = srcPtr.baseAddress else { return }
+            withUnsafePointers(img.yPlane) { srcBase in
                 for h in 0..<blockHeight {
                     let destPtr = view.rowPointer(y: h)
                     let offset = img.yOffset(x, y + h)
@@ -321,8 +318,7 @@ struct ImageReader: Sendable {
             return
         }
         
-        img.yPlane.withUnsafeBufferPointer { srcPtr in
-            guard let srcBase = srcPtr.baseAddress else { return }
+        withUnsafePointers(img.yPlane) { srcBase in
             for h in 0..<blockHeight {
                 let destPtr = view.rowPointer(y: h)
                 for w in 0..<blockWidth {
@@ -337,8 +333,7 @@ struct ImageReader: Sendable {
     @inline(__always)
     func readBlockCb(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         let is444 = (img.ratio == .ratio444)
-        img.cbPlane.withUnsafeBufferPointer { srcPtr in
-            guard let srcBase = srcPtr.baseAddress else { return }
+        withUnsafePointers(img.cbPlane) { srcBase in
             for h in 0..<blockHeight {
                 let destPtr = view.rowPointer(y: h)
                 for w in 0..<blockWidth {
@@ -355,8 +350,7 @@ struct ImageReader: Sendable {
     @inline(__always)
     func readBlockCr(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         let is444 = (img.ratio == .ratio444)
-        img.crPlane.withUnsafeBufferPointer { srcPtr in
-            guard let srcBase = srcPtr.baseAddress else { return }
+        withUnsafePointers(img.crPlane) { srcBase in
             for h in 0..<blockHeight {
                 let destPtr = view.rowPointer(y: h)
                 for w in 0..<blockWidth {
@@ -398,8 +392,7 @@ struct Image16: Sendable {
     
     @inline(__always)
     func readY(x: Int, y yPos: Int, size: Int, into view: BlockView) {
-        self.y.withUnsafeBufferPointer { srcBuf in
-            guard let srcBase = srcBuf.baseAddress else { return }
+        withUnsafePointers(self.y) { srcBase in
             // Fast path: block entirely within bounds → bulk row copy
             if 0 <= x && 0 <= yPos && (x + size) <= width && (yPos + size) <= height {
                 for h in 0..<size {
@@ -423,8 +416,7 @@ struct Image16: Sendable {
     func readCb(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        self.cb.withUnsafeBufferPointer { srcBuf in
-            guard let srcBase = srcBuf.baseAddress else { return }
+        withUnsafePointers(self.cb) { srcBase in
             // Fast path: block entirely within bounds → bulk row copy
             if 0 <= x && 0 <= yPos && (x + size) <= cWidth && (yPos + size) <= cHeight {
                 for h in 0..<size {
@@ -448,8 +440,7 @@ struct Image16: Sendable {
     func readCr(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        self.cr.withUnsafeBufferPointer { srcBuf in
-            guard let srcBase = srcBuf.baseAddress else { return }
+        withUnsafePointers(self.cr) { srcBase in
             // Fast path: block entirely within bounds → bulk row copy
             if 0 <= x && 0 <= yPos && (x + size) <= cWidth && (yPos + size) <= cHeight {
                 for h in 0..<size {
@@ -484,8 +475,7 @@ struct Image16: Sendable {
         let dataOffsetY = validStartY - startY
         let dataOffsetX = validStartX - startX
         
-        self.y.withUnsafeMutableBufferPointer { destBuf in
-            guard let destBase = destBuf.baseAddress else { return }
+        withUnsafePointers(mut: &self.y) { destBase in
             let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
@@ -513,8 +503,7 @@ struct Image16: Sendable {
         let dataOffsetY = validStartY - startY
         let dataOffsetX = validStartX - startX
         
-        self.cb.withUnsafeMutableBufferPointer { destBuf in
-            guard let destBase = destBuf.baseAddress else { return }
+        withUnsafePointers(mut: &self.cb) { destBase in
             let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
@@ -542,8 +531,7 @@ struct Image16: Sendable {
         let dataOffsetY = validStartY - startY
         let dataOffsetX = validStartX - startX
         
-        self.cr.withUnsafeMutableBufferPointer { destBuf in
-            guard let destBase = destBuf.baseAddress else { return }
+        withUnsafePointers(mut: &self.cr) { destBase in
             let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)

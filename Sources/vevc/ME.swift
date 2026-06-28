@@ -497,9 +497,7 @@ struct MotionEstimation {
         var minVal: Int32 = 32767
         var maxVal: Int32 = -32768
         
-        plane.withUnsafeBufferPointer { buf in
-            guard let base = buf.baseAddress else { return }
-            
+        withUnsafePointers(plane) { base in
             let isSafeX = (0 <= bx) && (bx + 8 <= width)
             let isSafeY = (0 <= by) && (by + 8 <= height)
             if isSafeX && isSafeY {
