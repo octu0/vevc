@@ -848,79 +848,70 @@ struct MotionEstimation {
         let gdy = Int(globalPrior.dy) / 4
         let gdx = Int(globalPrior.dx) / 4
         
-        currPlane.withUnsafeBufferPointer { currBuf in
-            prevPlane.withUnsafeBufferPointer { prevBuf in
-                guard let cBase = currBuf.baseAddress, let pBase = prevBuf.baseAddress else { return }
+        withUnsafePointers(currPlane, prevPlane, mut: &scores) { cBase, pBase, sBase in
+            for row in 0..<rowCount {
+                let by = row * 8
+                let bHeight = min(8, height - by)
+                if bHeight <= 0 { continue }
                 
-                scores.withUnsafeMutableBufferPointer { scoresBuf in
-                    guard let sBase = scoresBuf.baseAddress else { return }
+                let pBy = min(max(0, by + gdy), height - bHeight)
+                for col in 0..<colCount {
+                    let bx = col * 8
+                    let bWidth = min(8, width - bx)
+                    if bWidth <= 0 { continue }
                     
-                    for row in 0..<rowCount {
-                        let by = row * 8
-                        let bHeight = min(8, height - by)
-                        if bHeight <= 0 { continue }
+                    var cProfile0: Int32 = 0, cProfile1: Int32 = 0, cProfile2: Int32 = 0, cProfile3: Int32 = 0
+                    var cProfile4: Int32 = 0, cProfile5: Int32 = 0, cProfile6: Int32 = 0, cProfile7: Int32 = 0
+                    
+                    var pProfile0: Int32 = 0, pProfile1: Int32 = 0, pProfile2: Int32 = 0, pProfile3: Int32 = 0
+                    var pProfile4: Int32 = 0, pProfile5: Int32 = 0, pProfile6: Int32 = 0, pProfile7: Int32 = 0
+                    
+                    // apply gdx
+                    let px0 = max(0, min(width - 1, bx + 0 + gdx)) - bx
+                    let px1 = max(0, min(width - 1, bx + 1 + gdx)) - bx
+                    let px2 = max(0, min(width - 1, bx + 2 + gdx)) - bx
+                    let px3 = max(0, min(width - 1, bx + 3 + gdx)) - bx
+                    let px4 = max(0, min(width - 1, bx + 4 + gdx)) - bx
+                    let px5 = max(0, min(width - 1, bx + 5 + gdx)) - bx
+                    let px6 = max(0, min(width - 1, bx + 6 + gdx)) - bx
+                    let px7 = max(0, min(width - 1, bx + 7 + gdx)) - bx
+                    
+                    for y in 0..<bHeight {
+                        let cOffset = (by + y) * width + bx
+                        let cRow = cBase.advanced(by: cOffset)
+                        if 0 < bWidth { cProfile0 &+= Int32(cRow[0]) }
+                        if 1 < bWidth { cProfile1 &+= Int32(cRow[1]) }
+                        if 2 < bWidth { cProfile2 &+= Int32(cRow[2]) }
+                        if 3 < bWidth { cProfile3 &+= Int32(cRow[3]) }
+                        if 4 < bWidth { cProfile4 &+= Int32(cRow[4]) }
+                        if 5 < bWidth { cProfile5 &+= Int32(cRow[5]) }
+                        if 6 < bWidth { cProfile6 &+= Int32(cRow[6]) }
+                        if 7 < bWidth { cProfile7 &+= Int32(cRow[7]) }
                         
-                        let pBy = min(max(0, by + gdy), height - bHeight)
+                        let pOffset = (pBy + y) * width + bx
+                        let pRow = pBase.advanced(by: pOffset)
                         
-                        for col in 0..<colCount {
-                            let bx = col * 8
-                            let bWidth = min(8, width - bx)
-                            if bWidth <= 0 { continue }
-                            
-                            var cProfile0: Int32 = 0, cProfile1: Int32 = 0, cProfile2: Int32 = 0, cProfile3: Int32 = 0
-                            var cProfile4: Int32 = 0, cProfile5: Int32 = 0, cProfile6: Int32 = 0, cProfile7: Int32 = 0
-                            
-                            var pProfile0: Int32 = 0, pProfile1: Int32 = 0, pProfile2: Int32 = 0, pProfile3: Int32 = 0
-                            var pProfile4: Int32 = 0, pProfile5: Int32 = 0, pProfile6: Int32 = 0, pProfile7: Int32 = 0
-                            
-                            // apply gdx
-                            let px0 = max(0, min(width - 1, bx + 0 + gdx)) - bx
-                            let px1 = max(0, min(width - 1, bx + 1 + gdx)) - bx
-                            let px2 = max(0, min(width - 1, bx + 2 + gdx)) - bx
-                            let px3 = max(0, min(width - 1, bx + 3 + gdx)) - bx
-                            let px4 = max(0, min(width - 1, bx + 4 + gdx)) - bx
-                            let px5 = max(0, min(width - 1, bx + 5 + gdx)) - bx
-                            let px6 = max(0, min(width - 1, bx + 6 + gdx)) - bx
-                            let px7 = max(0, min(width - 1, bx + 7 + gdx)) - bx
-                            
-                            for y in 0..<bHeight {
-                                let cOffset = (by + y) * width + bx
-                                let cRow = cBase.advanced(by: cOffset)
-                                if 0 < bWidth { cProfile0 &+= Int32(cRow[0]) }
-                                if 1 < bWidth { cProfile1 &+= Int32(cRow[1]) }
-                                if 2 < bWidth { cProfile2 &+= Int32(cRow[2]) }
-                                if 3 < bWidth { cProfile3 &+= Int32(cRow[3]) }
-                                if 4 < bWidth { cProfile4 &+= Int32(cRow[4]) }
-                                if 5 < bWidth { cProfile5 &+= Int32(cRow[5]) }
-                                if 6 < bWidth { cProfile6 &+= Int32(cRow[6]) }
-                                if 7 < bWidth { cProfile7 &+= Int32(cRow[7]) }
-                                
-                                let pOffset = (pBy + y) * width + bx
-                                let pRow = pBase.advanced(by: pOffset)
-                                
-                                if 0 < bWidth { pProfile0 &+= Int32(pRow[px0]) }
-                                if 1 < bWidth { pProfile1 &+= Int32(pRow[px1]) }
-                                if 2 < bWidth { pProfile2 &+= Int32(pRow[px2]) }
-                                if 3 < bWidth { pProfile3 &+= Int32(pRow[px3]) }
-                                if 4 < bWidth { pProfile4 &+= Int32(pRow[px4]) }
-                                if 5 < bWidth { pProfile5 &+= Int32(pRow[px5]) }
-                                if 6 < bWidth { pProfile6 &+= Int32(pRow[px6]) }
-                                if 7 < bWidth { pProfile7 &+= Int32(pRow[px7]) }
-                            }
-                            
-                            var score = 0
-                            if 0 < bWidth { score &+= Int(Int32((cProfile0 - pProfile0).magnitude)) }
-                            if 1 < bWidth { score &+= Int(Int32((cProfile1 - pProfile1).magnitude)) }
-                            if 2 < bWidth { score &+= Int(Int32((cProfile2 - pProfile2).magnitude)) }
-                            if 3 < bWidth { score &+= Int(Int32((cProfile3 - pProfile3).magnitude)) }
-                            if 4 < bWidth { score &+= Int(Int32((cProfile4 - pProfile4).magnitude)) }
-                            if 5 < bWidth { score &+= Int(Int32((cProfile5 - pProfile5).magnitude)) }
-                            if 6 < bWidth { score &+= Int(Int32((cProfile6 - pProfile6).magnitude)) }
-                            if 7 < bWidth { score &+= Int(Int32((cProfile7 - pProfile7).magnitude)) }
-                            
-                            sBase[row * colCount + col] = score / (bHeight * bWidth)
-                        }
+                        if 0 < bWidth { pProfile0 &+= Int32(pRow[px0]) }
+                        if 1 < bWidth { pProfile1 &+= Int32(pRow[px1]) }
+                        if 2 < bWidth { pProfile2 &+= Int32(pRow[px2]) }
+                        if 3 < bWidth { pProfile3 &+= Int32(pRow[px3]) }
+                        if 4 < bWidth { pProfile4 &+= Int32(pRow[px4]) }
+                        if 5 < bWidth { pProfile5 &+= Int32(pRow[px5]) }
+                        if 6 < bWidth { pProfile6 &+= Int32(pRow[px6]) }
+                        if 7 < bWidth { pProfile7 &+= Int32(pRow[px7]) }
                     }
+                    
+                    var score = 0
+                    if 0 < bWidth { score &+= Int(Int32((cProfile0 - pProfile0).magnitude)) }
+                    if 1 < bWidth { score &+= Int(Int32((cProfile1 - pProfile1).magnitude)) }
+                    if 2 < bWidth { score &+= Int(Int32((cProfile2 - pProfile2).magnitude)) }
+                    if 3 < bWidth { score &+= Int(Int32((cProfile3 - pProfile3).magnitude)) }
+                    if 4 < bWidth { score &+= Int(Int32((cProfile4 - pProfile4).magnitude)) }
+                    if 5 < bWidth { score &+= Int(Int32((cProfile5 - pProfile5).magnitude)) }
+                    if 6 < bWidth { score &+= Int(Int32((cProfile6 - pProfile6).magnitude)) }
+                    if 7 < bWidth { score &+= Int(Int32((cProfile7 - pProfile7).magnitude)) }
+                    
+                    sBase[row * colCount + col] = score / (bHeight * bWidth)
                 }
             }
         }

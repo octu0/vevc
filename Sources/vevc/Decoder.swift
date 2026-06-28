@@ -1,9 +1,7 @@
 import Foundation
 
 actor ConcurrencyLimiter {
-
     private var permits: Int
-
     private var waiters: [CheckedContinuation<Void, Never>] = []
 
     init(limit: Int) {

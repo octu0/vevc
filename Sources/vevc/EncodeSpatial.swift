@@ -247,7 +247,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     }())
     
     var out: [UInt8] = []
-    
     let mvData = encodeMVs(mvs: mvs)
     
     let refDirByteCount = (refDirs.count + 7) / 8

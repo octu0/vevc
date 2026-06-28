@@ -1,7 +1,5 @@
 // MARK: - DWT
 
-// MARK: - DWT Structures
-
 struct Subbands {
     var ll: BlockView
     var hl: BlockView
@@ -27,40 +25,6 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 // All lift53/inverseLift53 functions are optimized for stride=1 (contiguous memory).
 // Column processing uses transpose->row_lift->transpose_back pattern in dwt2d functions,
 // so stride is always 1 when these functions are called.
-
-@inline(__always)
-func lift53Block4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    var low = SIMD2<Int16>(buffer[0 * stride], buffer[2 * stride])
-    var high = SIMD2<Int16>(buffer[1 * stride], buffer[3 * stride])
-
-    let lowShifted = SIMD2<Int16>(low[1], low[1])
-    high &-= (low &+ lowShifted) &>> 1
-
-    let highShifted = SIMD2<Int16>(high[0], high[0])
-    low &+= (highShifted &+ high &+ 2) &>> 2
-
-    buffer[0 * stride] = low[0]
-    buffer[1 * stride] = low[1]
-    buffer[2 * stride] = high[0]
-    buffer[3 * stride] = high[1]
-}
-
-@inline(__always)
-func inverseLift53Block4(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    var low = SIMD2<Int16>(buffer[0 * stride], buffer[1 * stride])
-    var high = SIMD2<Int16>(buffer[2 * stride], buffer[3 * stride])
-
-    let highShifted = SIMD2<Int16>(high[0], high[0])
-    low &-= (highShifted &+ high &+ 2) &>> 2
-
-    let lowShifted = SIMD2<Int16>(low[1], low[1])
-    high &+= (low &+ lowShifted) &>> 1
-
-    buffer[0 * stride] = low[0]
-    buffer[1 * stride] = high[0]
-    buffer[2 * stride] = low[1]
-    buffer[3 * stride] = high[1]
-}
 
 // stride=1 optimized: contiguous SIMD load/store
 
@@ -406,12 +370,6 @@ func dwt2DBlock16(_ block: BlockView) {
 }
 
 @inline(__always)
-func dwt2DBlock16Subbands(_ block: BlockView) -> Subbands {
-    dwt2DBlock16(block)
-    return makeSubbands(base: block.base, size: 16, stride: block.stride)
-}
-
-@inline(__always)
 func dwt2DBlock32(_ block: BlockView) {
     let base = block.base
     let width = block.stride
@@ -483,12 +441,6 @@ func dwt2DBlock32(_ block: BlockView) {
     lift53Block32(UnsafeMutableBufferPointer(start: base + (30 * width), count: 32), stride: 1)
     lift53Block32(UnsafeMutableBufferPointer(start: base + (31 * width), count: 32), stride: 1)
     transpose32x32InPlace(base, stride: width)
-}
-
-@inline(__always)
-func dwt2DBlock32Subbands(_ block: BlockView) -> Subbands {
-    dwt2DBlock32(block)
-    return makeSubbands(base: block.base, size: 32, stride: block.stride)
 }
 
 @inline(__always)

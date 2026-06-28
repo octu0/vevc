@@ -326,38 +326,6 @@ func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
 }
 
 @inline(__always)
-func blockDecode4VWithParentBlock(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView) throws {
-    let hasNonZero = try decoder.decodeBypass()
-    if hasNonZero == 0 {
-        return
-    }
-
-    let lscpX = Int(decoder.readPair(context: 5).run)
-    let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
-
-    var currentIdx = 0
-    var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 4 + lscpY
-    while currentIdx <= lscpIdx {
-        let startX = currentIdx / 4
-        let startY = currentIdx % 4
-        let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
-        prevVal = val
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let x = currentIdx / 4
-            let y = currentIdx % 4
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
-        }
-        currentIdx += 1
-    }
-}
-
-@inline(__always)
 func blockDecode4H(decoder: inout EntropyDecoder, block: BlockView) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {

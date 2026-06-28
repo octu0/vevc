@@ -9,15 +9,15 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         guard let base = buffer.baseAddress else { return }
         let rawTc = (qStep / 2) + 3
         let tc: Int16 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
-        default: Int16(min(15, rawTc))
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
         }
         let rawBeta = qStep + 6
         let beta: Int32 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
-        default: Int32(min(50, rawBeta))
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
         }
         
         let hFast = (height / 32) * 32
@@ -56,28 +56,28 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         
         let rawTc = (qStep / 2) + 3
         let defaultTc: Int16 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
-        default: Int16(min(15, rawTc))
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
         }
         let rawBeta = qStep + 6
         let defaultBeta: Int32 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
-        default: Int32(min(50, rawBeta))
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
         }
         
         let rawETc = ((qStep / 2) + 3) * 3 / 2
         let enhancedTc: Int16 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
-        default: Int16(min(22, rawETc))
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
+            default: Int16(min(22, rawETc))
         }
         let rawEBeta = (qStep + 6) * 2
         let enhancedBeta: Int32 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int32((rawEBeta * (qStep - 3)) / 12)
-        default: Int32(min(100, rawEBeta))
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawEBeta * (qStep - 3)) / 12)
+            default: Int32(min(100, rawEBeta))
         }
         
         let colCount = (width + 31) / 32
@@ -161,28 +161,28 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         
         let rawTc = (qStep / 2) + 3
         let defaultTc: Int16 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
-        default: Int16(min(15, rawTc))
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
         }
         let rawBeta = qStep + 6
         let defaultBeta: Int32 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
-        default: Int32(min(50, rawBeta))
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
         }
         
         let rawETc = ((qStep / 2) + 3) * 3 / 2
         let enhancedTc: Int16 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
-        default: Int16(min(22, rawETc))
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
+            default: Int16(min(22, rawETc))
         }
         let rawEBeta = (qStep + 6) * 2
         let enhancedBeta: Int32 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int32((rawEBeta * (qStep - 3)) / 12)
-        default: Int32(min(100, rawEBeta))
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawEBeta * (qStep - 3)) / 12)
+            default: Int32(min(100, rawEBeta))
         }
         
         let colCountC = (width + 15) / 16
@@ -263,15 +263,15 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
         guard let base = buffer.baseAddress else { return }
         let rawTc = (qStep / 2) + 3
         let tc: Int16 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
-        default: Int16(min(15, rawTc))
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
         }
         let rawBeta = qStep + 6
         let beta: Int32 = switch true {
-        case qStep <= 3: 0
-        case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
-        default: Int32(min(50, rawBeta))
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
         }
         
         let hFast = (height / 16) * 16
@@ -574,42 +574,6 @@ private func blendHorizontalEdgeLuma32(base: UnsafeMutablePointer<Int16>, width:
         base[offset + 1 * width] = Int16((q1 * 5 + p0 * 3) >> 3)
         base[offset + 2 * width] = Int16((q2 * 6 + p0 * 2) >> 3)
         base[offset + 3 * width] = Int16((q3 * 7 + p0 * 1) >> 3)
-        
-        offset += 1
-    }
-}
-
-@inline(__always)
-private func blendVerticalEdgeChroma16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, height: Int) {
-    var offset = y * width + x
-    for _ in 0..<height {
-        let p1 = Int32(base[offset - 2])
-        let p0 = Int32(base[offset - 1])
-        let q0 = Int32(base[offset + 0])
-        let q1 = Int32(base[offset + 1])
-        
-        base[offset - 2] = Int16((p1 * 3 + q0 * 1) >> 2)
-        base[offset - 1] = Int16((p0 * 2 + q0 * 2) >> 2)
-        base[offset + 0] = Int16((q0 * 2 + p0 * 2) >> 2)
-        base[offset + 1] = Int16((q1 * 3 + p0 * 1) >> 2)
-        
-        offset += width
-    }
-}
-
-@inline(__always)
-private func blendHorizontalEdgeChroma16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, widthBlock: Int) {
-    var offset = y * width + x
-    for _ in 0..<widthBlock {
-        let p1 = Int32(base[offset - 2 * width])
-        let p0 = Int32(base[offset - 1 * width])
-        let q0 = Int32(base[offset + 0 * width])
-        let q1 = Int32(base[offset + 1 * width])
-        
-        base[offset - 2 * width] = Int16((p1 * 3 + q0 * 1) >> 2)
-        base[offset - 1 * width] = Int16((p0 * 2 + q0 * 2) >> 2)
-        base[offset + 0 * width] = Int16((q0 * 2 + p0 * 2) >> 2)
-        base[offset + 1 * width] = Int16((q1 * 3 + p0 * 1) >> 2)
         
         offset += 1
     }

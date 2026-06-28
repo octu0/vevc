@@ -3,15 +3,6 @@ import XCTest
 
 final class DeblockingFilterTests: XCTestCase {
 
-    // Helper to print a 1D slice of 1D array for visualization
-    private func printRow(plane: [Int16], width: Int, row: Int, colStart: Int, colEnd: Int) {
-        var str = ""
-        for x in colStart...colEnd {
-            str += "\(plane[row * width + x]) "
-        }
-        print("Row \(row): [\(str)]")
-    }
-
     func testVerticalEdgeSmoothing() {
         let width = 64
         let height = 32

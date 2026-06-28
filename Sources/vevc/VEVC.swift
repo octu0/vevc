@@ -59,16 +59,6 @@ struct BlockView: @unchecked Sendable {
     }
 
     @inline(__always)
-    func setRow(offsetY: Int, row: [Int16]) {
-        let ptr = rowPointer(y: offsetY)
-        row.withUnsafeBufferPointer { src in
-            guard let srcBase = src.baseAddress else { return }
-            ptr.update(from: srcBase, count: width)
-        }
-    }
-
-
-    @inline(__always)
     static func allocate(width: Int, height: Int, stride strideVal: Int? = nil) -> BlockView {
         let s = strideVal ?? width
         let count = s * height
@@ -108,7 +98,6 @@ func clearBlockRegion(base: UnsafeMutablePointer<Int16>, width: Int, height: Int
 }
 
 // MARK: - BlockViewPool
-
 
 final class BaseBlockViewPool: @unchecked Sendable {
     private var pools: [Int: [BlockView]] = [:]

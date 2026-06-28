@@ -292,92 +292,6 @@ public struct YCbCrImage: Sendable {
     public func cOffset(_ x: Int, _ y: Int) -> Int {
         return ((y * cStride) + x)
     }
-
-    @inline(__always)
-    private func getChromaSize(w: Int, h: Int, ratio: YCbCrRatio) -> (Int, Int) {
-        switch ratio {
-        case .ratio420:
-            return ((w + 1) / 2, (h + 1) / 2)
-        case .ratio444:
-            return (w, h)
-        }
-    }
-
-    @inline(__always)
-    public func resize(factor: Double) -> YCbCrImage {
-        let newWidth = Int(Double(width) * factor)
-        let newHeight = Int(Double(height) * factor)
-
-        guard 0 < newWidth && 0 < newHeight else {
-            return YCbCrImage(width: max(1, newWidth), height: max(1, newHeight), ratio: self.ratio, fps: self.fps)
-        }
-
-        var dstImg = YCbCrImage(width: newWidth, height: newHeight, ratio: self.ratio, fps: self.fps)
-
-        boxResizePlane(
-            src: self.yPlane, srcW: self.width, srcH: self.height, srcStride: self.yStride,
-            dst: &dstImg.yPlane, dstW: dstImg.width, dstH: dstImg.height, dstStride: dstImg.yStride
-        )
-
-        let (srcCW, srcCH) = getChromaSize(w: self.width, h: self.height, ratio: self.ratio)
-        let (dstCW, dstCH) = getChromaSize(w: dstImg.width, h: dstImg.height, ratio: dstImg.ratio)
-
-        boxResizePlane(
-            src: self.cbPlane, srcW: srcCW, srcH: srcCH, srcStride: self.cStride,
-            dst: &dstImg.cbPlane, dstW: dstCW, dstH: dstCH, dstStride: dstImg.cStride
-        )
-
-        boxResizePlane(
-            src: self.crPlane, srcW: srcCW, srcH: srcCH, srcStride: self.cStride,
-            dst: &dstImg.crPlane, dstW: dstCW, dstH: dstCH, dstStride: dstImg.cStride
-        )
-
-        return dstImg
-    }
-
-    @inline(__always)
-    private func boxResizePlane(
-        src: [UInt8], srcW: Int, srcH: Int, srcStride: Int,
-        dst: inout [UInt8], dstW: Int, dstH: Int, dstStride: Int
-    ) {
-        let scaleX = Double(srcW) / Double(dstW)
-        let scaleY = Double(srcH) / Double(dstH)
-
-        for dy in 0..<dstH {
-            let syStart = Int(Double(dy) * scaleY)
-            var syEnd = Int(Double(dy + 1) * scaleY)
-            if srcH <= syEnd { syEnd = srcH }
-            if syEnd <= syStart { syEnd = syStart + 1 }
-
-            for dx in 0..<dstW {
-                let sxStart = Int(Double(dx) * scaleX)
-                var sxEnd = Int(Double(dx + 1) * scaleX)
-                if srcW <= sxEnd { sxEnd = srcW }
-                if sxEnd <= sxStart { sxEnd = sxStart + 1 }
-
-                var sum: Int = 0
-                var count: Int = 0
-
-                for sy in syStart..<syEnd {
-                    let rowOffset = sy * srcStride
-                    for sx in sxStart..<sxEnd {
-                        let srcIdx = rowOffset + sx
-                        if srcIdx < src.count {
-                            sum += Int(src[srcIdx])
-                            count += 1
-                        }
-                    }
-                }
-
-                if 0 < count {
-                    let dstIdx = (dy * dstStride) + dx
-                    if dstIdx < dst.count {
-                        dst[dstIdx] = UInt8(sum / count)
-                    }
-                }
-            }
-        }
-    }
 }
 
 struct ImageReader: Sendable {
@@ -464,16 +378,6 @@ struct Image16: Sendable {
     let width: Int
     let height: Int
     
-    init(width: Int, height: Int) {
-        self.width = width
-        self.height = height
-        self.y = [Int16](unsafeUninitializedCapacity: width * height) { _, c in c = width * height }
-        let cWidth = (width + 1) / 2
-        let cHeight = (height + 1) / 2
-        self.cb = [Int16](unsafeUninitializedCapacity: cWidth * cHeight) { _, c in c = cWidth * cHeight }
-        self.cr = [Int16](unsafeUninitializedCapacity: cWidth * cHeight) { _, c in c = cWidth * cHeight }
-    }
-    
     init(width: Int, height: Int, pool: BlockViewPool) {
         self.width = width
         self.height = height
@@ -490,13 +394,6 @@ struct Image16: Sendable {
         self.y = y
         self.cb = cb
         self.cr = cr
-    }
-    
-    @inline(__always)
-    func getY(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
-        let block = pool.get(width: size, height: size)
-        readY(x: x, y: yPos, size: size, into: block)
-        return block
     }
     
     @inline(__always)
@@ -523,13 +420,6 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    func getCb(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
-        let block = pool.get(width: size, height: size)
-        readCb(x: x, y: yPos, size: size, into: block)
-        return block
-    }
-    
-    @inline(__always)
     func readCb(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
@@ -552,13 +442,6 @@ struct Image16: Sendable {
                 }
             }
         }
-    }
-    
-    @inline(__always)
-    func getCr(x: Int, y yPos: Int, size: Int, pool: BlockViewPool) -> BlockView {
-        let block = pool.get(width: size, height: size)
-        readCr(x: x, y: yPos, size: size, into: block)
-        return block
     }
     
     @inline(__always)

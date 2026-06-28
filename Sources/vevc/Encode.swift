@@ -1,7 +1,6 @@
 // MARK: - Encode Context
 
 public enum EncodeError: Error {
-    case unsupportedArchitecture
     case missingReferenceFramesForPFrame
 }
 
@@ -49,7 +48,6 @@ func blockEncode16V(encoder: inout EntropyEncoder, block: BlockView) {
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -192,7 +190,6 @@ func blockEncode16H(encoder: inout EntropyEncoder, block: BlockView) {
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -268,7 +265,6 @@ func blockEncode16HWithParent(encoder: inout EntropyEncoder, block: BlockView, p
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -337,7 +333,6 @@ func blockEncode8V(encoder: inout EntropyEncoder, block: BlockView) {
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -395,7 +390,6 @@ func blockEncode8VWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -476,7 +470,6 @@ func blockEncode8H(encoder: inout EntropyEncoder, block: BlockView) {
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -552,7 +545,6 @@ func blockEncode8HWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -618,7 +610,6 @@ func blockEncode4V(encoder: inout EntropyEncoder, block: BlockView) {
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -679,7 +670,6 @@ func blockEncode4H(encoder: inout EntropyEncoder, block: BlockView) {
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
@@ -741,7 +731,6 @@ func blockEncode4HWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
         return
     }
     encoder.encodeBypass(binVal: 1)
-
     encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
     encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
