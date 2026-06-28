@@ -526,58 +526,6 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: MotionVectors, wid
 }
 
 @inline(__always)
-func blendIntraInterBoundaryChroma16(plane: inout [Int16], mvs: MotionVectors, width: Int, height: Int) {
-    let colCount = (width + 15) / 16
-    let rowCount = (height + 15) / 16
-    
-    plane.withUnsafeMutableBufferPointer { buffer in
-        guard let base = buffer.baseAddress else { return }
-        for row in 0..<rowCount {
-            for col in 0..<colCount {
-                let idx = row * colCount + col
-                let isIntra = idx < mvs.count && mvs.dx[idx] == 32767 && mvs.dy[idx] == 32767
-                if isIntra {
-                    let bx = col * 16
-                    let by = row * 16
-                    
-                    let leftNotIntra = if 0 < col { mvs.dx[idx - 1] != 32767 || mvs.dy[idx - 1] != 32767 } else { false }
-                    if leftNotIntra {
-                        let safeH = min(16, height - by)
-                        if 2 <= bx && bx + 1 < width {
-                            blendVerticalEdgeChroma16(base: base, width: width, x: bx, y: by, height: safeH)
-                        }
-                    }
-                    let rightNotIntra = if col < colCount - 1 { mvs.dx[idx + 1] != 32767 || mvs.dy[idx + 1] != 32767 } else { false }
-                    if rightNotIntra {
-                        let bxRight = bx + 16
-                        if 2 <= bxRight && bxRight + 1 < width {
-                            let safeH = min(16, height - by)
-                            blendVerticalEdgeChroma16(base: base, width: width, x: bxRight, y: by, height: safeH)
-                        }
-                    }
-                    let topNotIntra = if 0 < row { mvs.dx[idx - colCount] != 32767 || mvs.dy[idx - colCount] != 32767 } else { false }
-                    if topNotIntra {
-                        let safeW = min(16, width - bx)
-                        if 2 <= by && by + 1 < height {
-                            blendHorizontalEdgeChroma16(base: base, width: width, x: bx, y: by, widthBlock: safeW)
-                        }
-                    }
-                    let bottomNotIntra = if row < rowCount - 1 { mvs.dx[idx + colCount] != 32767 || mvs.dy[idx + colCount] != 32767 } else { false }
-                    if bottomNotIntra {
-                        let byBottom = by + 16
-                        let safeW = min(16, width - bx)
-                        if 2 <= byBottom && byBottom + 1 < height {
-                            blendHorizontalEdgeChroma16(base: base, width: width, x: bx, y: byBottom, widthBlock: safeW)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-
-@inline(__always)
 private func blendVerticalEdgeLuma32(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, height: Int) {
     var offset = y * width + x
     for _ in 0..<height {
