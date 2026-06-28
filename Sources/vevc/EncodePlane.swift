@@ -160,6 +160,7 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
@@ -301,6 +302,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
@@ -380,6 +382,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
@@ -472,6 +475,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 16, height: 16))
     }
@@ -544,6 +548,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 16, height: 16))
     }
@@ -623,6 +628,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 8, height: 8))
     }
@@ -656,6 +662,7 @@ func extractSingleTransformBlocksBase32(r: Int16Reader, width: Int, height: Int,
     let totalBlocks = rowCount * colCount
     
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
