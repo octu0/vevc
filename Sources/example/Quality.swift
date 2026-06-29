@@ -163,8 +163,8 @@ private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: In
                     var vSum12 = SIMD8<UInt32>(repeating: 0)
 
                     for dy in 0..<8 {
-                        let r1 = UnsafeRawPointer(b1.advanced(by: (y + dy) * stride1 + x))
-                        let r2 = UnsafeRawPointer(b2.advanced(by: (y + dy) * stride2 + x))
+                        let r1 = UnsafeRawPointer(b1.advanced(by: ((y + dy) * stride1) + x))
+                        let r2 = UnsafeRawPointer(b2.advanced(by: ((y + dy) * stride2) + x))
 
                         let u8_1 = r1.loadUnaligned(as: SIMD8<UInt8>.self)
                         let u8_2 = r2.loadUnaligned(as: SIMD8<UInt8>.self)
