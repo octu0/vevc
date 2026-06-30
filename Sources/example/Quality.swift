@@ -156,21 +156,51 @@ private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: In
             guard let b1 = ptr1.baseAddress, let b2 = ptr2.baseAddress else { return }
             for y in stride(from: 0, to: h - 7, by: 8) {
                 for x in stride(from: 0, to: w - 7, by: 8) {
-                    var sum1 = 0, sum2 = 0, sum1sq = 0, sum2sq = 0, sum12 = 0
+                    var sum1_simd = SIMD8<UInt16>(repeating: 0)
+                    var sum2_simd = SIMD8<UInt16>(repeating: 0)
+                    var sum1sq_simd = SIMD8<UInt32>(repeating: 0)
+                    var sum2sq_simd = SIMD8<UInt32>(repeating: 0)
+                    var sum12_simd = SIMD8<UInt32>(repeating: 0)
+
                     for dy in 0..<8 {
                         let r1 = b1.advanced(by: (y + dy) * stride1 + x)
                         let r2 = b2.advanced(by: (y + dy) * stride2 + x)
-                        for dx in 0..<8 {
-                            let v1 = Int(r1[dx])
-                            let v2 = Int(r2[dx])
-                            sum1 += v1
-                            sum2 += v2
-                            sum1sq += v1 * v1
-                            sum2sq += v2 * v2
-                            sum12 += v1 * v2
-                        }
+
+                        let v1_8 = UnsafeRawPointer(r1).loadUnaligned(as: SIMD8<UInt8>.self)
+                        let v2_8 = UnsafeRawPointer(r2).loadUnaligned(as: SIMD8<UInt8>.self)
+
+                        let v1_16 = SIMD8<UInt16>(
+                            UInt16(v1_8[0]), UInt16(v1_8[1]), UInt16(v1_8[2]), UInt16(v1_8[3]),
+                            UInt16(v1_8[4]), UInt16(v1_8[5]), UInt16(v1_8[6]), UInt16(v1_8[7])
+                        )
+                        let v2_16 = SIMD8<UInt16>(
+                            UInt16(v2_8[0]), UInt16(v2_8[1]), UInt16(v2_8[2]), UInt16(v2_8[3]),
+                            UInt16(v2_8[4]), UInt16(v2_8[5]), UInt16(v2_8[6]), UInt16(v2_8[7])
+                        )
+
+                        sum1_simd &+= v1_16
+                        sum2_simd &+= v2_16
+
+                        let v1_32 = SIMD8<UInt32>(
+                            UInt32(v1_8[0]), UInt32(v1_8[1]), UInt32(v1_8[2]), UInt32(v1_8[3]),
+                            UInt32(v1_8[4]), UInt32(v1_8[5]), UInt32(v1_8[6]), UInt32(v1_8[7])
+                        )
+                        let v2_32 = SIMD8<UInt32>(
+                            UInt32(v2_8[0]), UInt32(v2_8[1]), UInt32(v2_8[2]), UInt32(v2_8[3]),
+                            UInt32(v2_8[4]), UInt32(v2_8[5]), UInt32(v2_8[6]), UInt32(v2_8[7])
+                        )
+
+                        sum1sq_simd &+= v1_32 &* v1_32
+                        sum2sq_simd &+= v2_32 &* v2_32
+                        sum12_simd &+= v1_32 &* v2_32
                     }
                     
+                    let sum1 = Int(sum1_simd.wrappedSum())
+                    let sum2 = Int(sum2_simd.wrappedSum())
+                    let sum1sq = Int(sum1sq_simd.wrappedSum())
+                    let sum2sq = Int(sum2sq_simd.wrappedSum())
+                    let sum12 = Int(sum12_simd.wrappedSum())
+
                     let n = 64.0
                     let mu1 = Double(sum1) / n
                     let mu2 = Double(sum2) / n
