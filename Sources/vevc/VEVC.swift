@@ -97,6 +97,50 @@ func clearBlockRegion(base: UnsafeMutablePointer<Int16>, width: Int, height: Int
     }
 }
 
+// MARK: - PlatformLock
+
+struct PlatformLock {
+    #if canImport(os)
+    private let _lock: UnsafeMutablePointer<os_unfair_lock_s>
+    #else
+    private let _lock: NSLock
+    #endif
+
+    init() {
+        #if canImport(os)
+        _lock = .allocate(capacity: 1)
+        _lock.initialize(to: os_unfair_lock())
+        #else
+        _lock = NSLock()
+        #endif
+    }
+
+    func deallocate() {
+        #if canImport(os)
+        _lock.deinitialize(count: 1)
+        _lock.deallocate()
+        #endif
+    }
+
+    @inline(__always)
+    func lock() {
+        #if canImport(os)
+        os_unfair_lock_lock(_lock)
+        #else
+        _lock.lock()
+        #endif
+    }
+
+    @inline(__always)
+    func unlock() {
+        #if canImport(os)
+        os_unfair_lock_unlock(_lock)
+        #else
+        _lock.unlock()
+        #endif
+    }
+}
+
 // MARK: - BlockViewPool
 
 final class BaseBlockViewPool: @unchecked Sendable {
@@ -108,20 +152,16 @@ final class BaseBlockViewPool: @unchecked Sendable {
     
     // no lock Wasm is single thread
     #if !arch(wasm32)
-    private let lock = UnsafeMutablePointer<os_unfair_lock_s>.allocate(capacity: 1)
+    private let _lock = PlatformLock()
     #endif
     
     init(maxPerSize: Int = 256) {
         self.maxPerSize = maxPerSize
-        #if !arch(wasm32)
-        lock.initialize(to: os_unfair_lock())
-        #endif
     }
     
     deinit {
         #if !arch(wasm32)
-        lock.deinitialize(count: 1)
-        lock.deallocate()
+        _lock.deallocate()
         #endif
 
         for (_, blocks) in pools {
@@ -143,15 +183,15 @@ final class BaseBlockViewPool: @unchecked Sendable {
             return block
         }
         #else
-        os_unfair_lock_lock(lock)
+        _lock.lock()
         if var bucket = pools[key], bucket.isEmpty != true {
             let block = bucket.removeLast()
             pools[key] = bucket
-            os_unfair_lock_unlock(lock)
+            _lock.unlock()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
         }
-        os_unfair_lock_unlock(lock)
+        _lock.unlock()
         #endif
         
         return BlockView.allocate(width: width, height: height)
@@ -177,7 +217,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
             block.deallocate()
         }
         #else
-        os_unfair_lock_lock(lock)
+        _lock.lock()
         var bucket = pools[key] ?? []
         if bucket.count < maxPerSize {
             bucket.append(block)
@@ -185,7 +225,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
         } else {
             block.deallocate()
         }
-        os_unfair_lock_unlock(lock)
+        _lock.unlock()
         #endif
     }
     
@@ -205,14 +245,14 @@ final class BaseBlockViewPool: @unchecked Sendable {
             return arr
         }
         #else
-        os_unfair_lock_lock(lock)
+        _lock.lock()
         if var bucket = int16Pools[count], bucket.isEmpty != true {
             let arr = bucket.removeLast()
             int16Pools[count] = bucket
-            os_unfair_lock_unlock(lock)
+            _lock.unlock()
             return arr
         }
-        os_unfair_lock_unlock(lock)
+        _lock.unlock()
         #endif
         return [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
     }
@@ -227,13 +267,13 @@ final class BaseBlockViewPool: @unchecked Sendable {
             int16Pools[count] = bucket
         }
         #else
-        os_unfair_lock_lock(lock)
+        _lock.lock()
         var bucket = int16Pools[count] ?? []
         if bucket.count < maxPerSize {
             bucket.append(array)
             int16Pools[count] = bucket
         }
-        os_unfair_lock_unlock(lock)
+        _lock.unlock()
         #endif
     }
     
@@ -246,14 +286,14 @@ final class BaseBlockViewPool: @unchecked Sendable {
             return arr
         }
         #else
-        os_unfair_lock_lock(lock)
+        _lock.lock()
         if var bucket = arrayPools[capacity], bucket.isEmpty != true {
             let arr = bucket.removeLast()
             arrayPools[capacity] = bucket
-            os_unfair_lock_unlock(lock)
+            _lock.unlock()
             return arr
         }
-        os_unfair_lock_unlock(lock)
+        _lock.unlock()
         #endif
         var arr = [BlockView]()
         arr.reserveCapacity(capacity)
@@ -276,13 +316,13 @@ final class BaseBlockViewPool: @unchecked Sendable {
             arrayPools[capacity] = bucket
         }
         #else
-        os_unfair_lock_lock(lock)
+        _lock.lock()
         var bucket = arrayPools[capacity] ?? []
         if bucket.count < maxPerSize {
             bucket.append(arr)
             arrayPools[capacity] = bucket
         }
-        os_unfair_lock_unlock(lock)
+        _lock.unlock()
         #endif
     }
 }
