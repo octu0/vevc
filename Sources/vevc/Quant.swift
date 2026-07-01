@@ -164,8 +164,8 @@ struct AQTable: Sendable {
         self.tables = (
             makeScaled(7),  // 0.70 - faces/flat regions perfectly protected
             makeScaled(8),  // 0.80
-            makeScaled(10),  // 1.00 - average blocks
-            makeScaled(11),  // 1.10
+            makeScaled(10), // 1.00 - average blocks
+            makeScaled(11), // 1.10
             makeScaled(12)  // 1.20 - high energy textures slightly quantized
         )
     }
@@ -173,22 +173,56 @@ struct AQTable: Sendable {
     /// Select the appropriate quantization table based on block AC energy
     /// relative to the frame average, and block motion activity (SAD).
     @inline(__always)
-    func select(energy: Int, avgEnergy: Int, sad: Int = 0) -> QuantizationTable {
+    func select(energy: Int, avgEnergy: Int, sad: Int = -1, bx: Int = 0, by: Int = 0, colCount: Int = 1, rowCount: Int = 1) -> QuantizationTable {
         // Psycho-visual AQ: ratio = energy / avgEnergy
-        // Flat regions (low energy) get finer quantization (scale < 1.0) because artifacts are highly visible.
-        // Texture/edge regions (high energy) get coarser quantization (scale > 1.0) because texture masks noise.
         let safeAvg = max(1, avgEnergy)
         let ratioX10 = (energy * 10) / safeAvg
 
         var adjustedRatio = ratioX10
-        // Motion-Adaptive override:
-        if 512 < sad {
-            if ratioX10 <= 8 {
-                // Flat region with high motion -> lower QP to protect from ghosting/blur
-                adjustedRatio -= 3
-            } else if 12 < ratioX10 {
-                // Texture region with high motion -> increase QP to save bits (noise is masked by motion)
-                adjustedRatio += 4
+
+        // ROI (Region of Interest) Spatial Rate Allocation:
+        // Prevents the "top-heavy" token depletion problem common in raster-scan token bucket RateControllers.
+        // By intentionally applying coarser quantization to the screen periphery (where human visual attention is lower),
+        // we can reclaim and save tokens. These saved tokens are then prioritized for the screen center,
+        // which is visually critical and directly impacts SSIM.
+        let cx = colCount / 2
+        let cy = rowCount / 2
+        let dist = Int((bx - cx).magnitude) + Int((by - cy).magnitude)
+        let maxDist = max(1, cx + cy)
+        let distRatio = (dist * 10) / maxDist
+        
+        if 7 <= distRatio {
+            // Screen periphery: Less visual attention, degradation is less noticeable.
+            // Forcibly apply coarse quantization to reclaim tokens.
+            adjustedRatio += 2
+        } else if distRatio <= 4 {
+            // Screen center: The focus of visual attention. Degradation here severely impacts perceived quality and SSIM.
+            // Strongly protect details by applying fine quantization.
+            adjustedRatio -= 3
+        }
+
+        // Motion (SAD) and Spatial Frequency (Energy) Hybrid Adaptive Quantization:
+        // Reuses SAD (Sum of Absolute Differences) calculated during the ME phase to evaluate temporal activity at zero cost.
+        // We skip this hybrid adjustment for I-Frames (where sad == -1) since they lack temporal prediction.
+        if sad != -1 {
+            if sad < 128 {
+                // Extremely flat backgrounds or regions with almost zero motion:
+                // Lack of visual change makes artifacts less noticeable. 
+                // We can safely widen the dead-zone (coarser quantization) to efficiently harvest tokens.
+                adjustedRatio += 2
+            } else if 256 < sad {
+                if ratioX10 <= 10 {
+                    // Regions with high motion but simple/low texture (e.g., moving edges or faces):
+                    // Degradation here results in highly visible ghosting or blurring.
+                    // Protecting these areas (fine quantization) is a top priority.
+                    adjustedRatio -= 3
+                } else {
+                    // Regions with high motion AND highly complex texture (e.g., moving water, swaying leaves):
+                    // The Human Visual System (HVS) suffers from a masking effect and cannot track high-frequency noise 
+                    // within fast-moving complex patterns. We can intentionally apply coarser quantization to save 
+                    // a massive amount of tokens without perceived quality loss.
+                    adjustedRatio += 2
+                }
             }
         }
 

@@ -230,13 +230,13 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
                         if width <= w || height <= h { continue }
                         let blockIdx = (i * colCount) + j
                         let view = blocks[blockIdx]
-                        let sad = sads?[blockIdx] ?? 0
+                        let sad = sads?[blockIdx] ?? -1
                         let energy = energies[blockIdx]
                         
                         let blockQt = if energy == -1 {
                             aqTable.base
                         } else {
-                            aqTable.select(energy: energy, avgEnergy: avgEnergy, sad: sad)
+                            aqTable.select(energy: energy, avgEnergy: avgEnergy, sad: sad, bx: j, by: i, colCount: colCount, rowCount: rowCount)
                         }
                         
                         evaluateQuantizeLayer32(view: view, qt: blockQt)
