@@ -152,6 +152,7 @@ func blockEncode16H(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
+
     
     for y in stride(from: 16 - 1, through: 0, by: -1) {
         let ptr = block.rowPointer(y: y)
@@ -227,7 +228,7 @@ func blockEncode16HWithParent(encoder: inout EntropyEncoder, block: BlockView, p
     var lscpX = -1
     var lscpY = -1
     let zero8 = SIMD8<Int16>(repeating: 0)
-    
+
     for y in stride(from: 16 - 1, through: 0, by: -1) {
         let ptr = block.rowPointer(y: y)
         let v1 = UnsafeRawPointer(ptr.advanced(by: 8)).loadUnaligned(as: SIMD8<Int16>.self)
@@ -432,7 +433,7 @@ func blockEncode8H(encoder: inout EntropyEncoder, block: BlockView) {
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
-    
+
     for y in stride(from: 8 - 1, through: 0, by: -1) {
         let ptr = block.rowPointer(y: y)
         let v1 = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)
@@ -507,7 +508,7 @@ func blockEncode8HWithParent(encoder: inout EntropyEncoder, block: BlockView, pa
     var lscpX = -1
     var lscpY = -1
     let zero4 = SIMD4<Int16>(repeating: 0)
-    
+
     for y in stride(from: 8 - 1, through: 0, by: -1) {
         let ptr = block.rowPointer(y: y)
         let v1 = UnsafeRawPointer(ptr.advanced(by: 4)).loadUnaligned(as: SIMD4<Int16>.self)

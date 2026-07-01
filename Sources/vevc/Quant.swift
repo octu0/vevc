@@ -76,32 +76,54 @@ struct QuantizationTable: Sendable {
             qLowDivisor = 8
         }
 
+        var dzMidY: Int32 = -4000
+        var dzHighY: Int32 = -8000
+        
+        if layerIndex == 2 {
+            dzMidY = 0
+            dzHighY = -8000
+        } else if layerIndex == 1 {
+            dzMidY = 8192
+            dzHighY = 0
+        } else if layerIndex == 0 {
+            dzMidY = 16384  // +0.25 positive bias to boost Luma SSIM
+            dzHighY = 8192
+        }
+        
+        let dzMidC: Int32
+        let dzHighC: Int32
+        
+        if layerIndex == 0 {
+            dzMidC = -8000
+            dzHighC = -16000
+        } else if layerIndex == 1 {
+            dzMidC = -16000
+            dzHighC = -32000
+        } else {
+            dzMidC = -32000
+            dzHighC = -64000
+        }
+
         if isChroma {
-            // Prevent color loss in high-motion scenes by capping chroma quantization steps.
+            // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(16, max(1, baseStep / 8))
             let cMid = min(24, max(1, (baseStep * qMidNum) / qMidDen))
             let cHigh = min(48, max(1, (baseStep * qHighNum) / qHighDen))
 
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(cMid), roundToNearest: true)
-            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: true)
+            self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC)
+            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC)
         } else {
-            // qLow: Strictly cap at 16 to completely preserve face gradients and base brightness
+            // qLow is the DC component: NEVER scale it!
             let lLow = min(16, max(1, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
 
-            // qMid: Cap at 48 to preserve facial contours and important structural edges
+            // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
             let lMid = min(48, max(1, (baseStep * qMidNum) / qMidDen))
-            self.qMid = Quantizer(step: Int(lMid), roundToNearest: true)
+            self.qMid = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY)
 
-            // qHigh: Cap at 64 to preserve fine details during motion, reducing blurry ghost trails
-            if layerIndex == 2 {
-                let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
-            } else {
-                let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
-                self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: true)
-            }
+            let lHigh = min(64, max(1, (baseStep * qHighNum) / qHighDen))
+            self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY)
         }
     }
 }
