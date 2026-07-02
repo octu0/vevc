@@ -60,7 +60,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     }())
     
     var out: [UInt8] = []
-    let frameHeader = VEVCFrameHeader(frameType: .iFrame, mvsSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .iFrame, mvsSize: 0, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: layer0)
     out.append(contentsOf: layer1)
@@ -152,7 +152,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var out: [UInt8] = []
     let mvData = encodeMVs(mvs: mvs)
     
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, mvsSize: mvData.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, mvsSize: mvData.count, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: mvData)
     out.append(contentsOf: layer0)
@@ -257,7 +257,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         }
     }
     
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, mvsSize: mvData.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, mvsSize: mvData.count, refDirSize: refDirBuf.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: mvData)
     out.append(contentsOf: refDirBuf)

@@ -45,6 +45,7 @@ struct SplitterTests {
 
         let headerSizes: [UInt8] = [
             0x00, 0x00, 0x00, 0x01, // mvsSize = 1
+            0x00, 0x00, 0x00, 0x00, // refDirSize = 0 (hasRefDir is false in flag 0x02)
             0x00, 0x00, 0x00, 0x01, // layer0Size = 1
             0x00, 0x00, 0x00, 0x01, // layer1Size = 1
             0x00, 0x00, 0x00, 0x01  // layer2Size = 1
@@ -90,10 +91,10 @@ struct SplitterTests {
                 } else if case .invalidMagic = error {
                      #expect(i < 4) // Only valid if magic was truncated or wrong
                 } else {
-                     Issue.record("Unexpected SplitterError: \\(error) at length \\(i)")
+                     Issue.record("Unexpected SplitterError: \(error) at length \(i)")
                 }
             } catch {
-                Issue.record("Unexpected error type: \\(error) at length \\(i)")
+                Issue.record("Unexpected error type: \(error) at length \(i)")
             }
         }
     }
@@ -117,10 +118,65 @@ struct SplitterTests {
             if case .unexpectedEOF = error {
                 // Success
             } else {
-                 Issue.record("Unexpected SplitterError: \\(error)")
+                 Issue.record("Unexpected SplitterError: \(error)")
             }
         } catch {
-            Issue.record("Unexpected error type: \\(error)")
+            Issue.record("Unexpected error type: \(error)")
         }
+    }
+
+    @Test
+    func testSplitVEVCRoundtrip() async throws {
+        let y4mPath = "Tests/vevcSpecV1/testdata/spec_1080p_60f.y4m"
+        let fileHandle = try FileHandle(forReadingFrom: URL(fileURLWithPath: y4mPath))
+        let reader = try Y4MReader(fileHandle: fileHandle)
+        var frames = [YCbCrImage]()
+        while let frame = try reader.readFrame() {
+            frames.append(frame)
+        }
+        
+        let encoder = VEVCEncoder(
+            width: frames[0].width,
+            height: frames[0].height,
+            maxbitrate: 1000 * 1024,
+            zeroThreshold: 3,
+            keyint: 10
+        )
+        
+        let bitstream = try await encoder.encodeToData(images: Array(frames.prefix(5)))
+        let bytes = [UInt8](bitstream)
+        
+        // 1. Split to maxLayer = 1
+        let l1Result = try splitVEVCStream(input: bytes, maxLayer: 1)
+        #expect(l1Result.processedFrames == 5)
+        #expect(l1Result.droppedLayer2Bytes > 0)
+        #expect(l1Result.droppedLayer1Bytes == 0)
+        
+        // Decode l1
+        let decoder1 = Decoder(maxLayer: 1)
+        let decL1Frames = try await decoder1.decode(data: l1Result.data)
+        #expect(decL1Frames.count == 5)
+        
+        // 2. Split to maxLayer = 0
+        let l0Result = try splitVEVCStream(input: bytes, maxLayer: 0)
+        #expect(l0Result.processedFrames == 5)
+        #expect(l0Result.droppedLayer2Bytes > 0)
+        #expect(l0Result.droppedLayer1Bytes > 0)
+        
+        // Decode l0
+        let decoder0 = Decoder(maxLayer: 0)
+        let decL0Frames = try await decoder0.decode(data: l0Result.data)
+        #expect(decL0Frames.count == 5)
+        
+        // 3. Split to maxLayer = 2 (should be same as original)
+        let l2Result = try splitVEVCStream(input: bytes, maxLayer: 2)
+        #expect(l2Result.processedFrames == 5)
+        #expect(l2Result.droppedLayer2Bytes == 0)
+        #expect(l2Result.droppedLayer1Bytes == 0)
+        
+        // Decode l2
+        let decoder2 = Decoder(maxLayer: 2)
+        let decL2Frames = try await decoder2.decode(data: l2Result.data)
+        #expect(decL2Frames.count == 5)
     }
 }

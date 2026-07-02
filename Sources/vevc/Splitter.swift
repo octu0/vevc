@@ -53,13 +53,9 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
     let msOffset = metadataSizeSlice.startIndex
     let metadataSize = Int(UInt16(metadataSizeSlice[msOffset]) << 8 | UInt16(metadataSizeSlice[msOffset + 1]))
     
-    // 3. Read metadata payload and extract width/height
+    // 3. Read metadata payload
     let metadataSlice = try readFully(count: metadataSize)
-    let metaBase = metadataSlice.startIndex
-    // metadata layout: profile(1B) + width(2B) + height(2B) + ...
     guard 5 <= metadataSize else { throw SplitterError.unexpectedEOF }
-    let frameWidth = Int(UInt16(input[metaBase + 1]) << 8 | UInt16(input[metaBase + 2]))
-    let frameHeight = Int(UInt16(input[metaBase + 3]) << 8 | UInt16(input[metaBase + 4]))
     
     // Pre-allocate output buffer
     var output = [UInt8]()
@@ -92,8 +88,8 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
             continue
         }
         
-        // Read 4 x UInt32BE = 16 bytes of frame header sizes
-        let sizesSlice = try readFully(count: 16)
+        // Read 5 x UInt32BE = 20 bytes of frame header sizes
+        let sizesSlice = try readFully(count: 20)
         var sizeBase = sizesSlice.startIndex
         
         @inline(__always)
@@ -104,13 +100,11 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
             return v
         }
         
-        let mvsSize   = readU32()
+        let mvsSize    = readU32()
+        let refDirSize = readU32()
         let layer0Size = readU32()
         let layer1Size = readU32()
         let layer2Size = readU32()
-        
-        // Derive refDirSize from frame dimensions
-        let refDirSize = if hasRefDir { (deriveMVCount(width: frameWidth, height: frameHeight) + 7) / 8 } else { 0 }
         
         // Rebuild header with trimmed layer sizes
         let newLayer1Size = if 1 <= maxLayer { layer1Size } else { 0 }
@@ -120,6 +114,7 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
             frameType: fType,
             hasRefDir: hasRefDir,
             mvsSize: mvsSize,
+            refDirSize: refDirSize,
             layer0Size: layer0Size,
             layer1Size: newLayer1Size,
             layer2Size: newLayer2Size

@@ -90,14 +90,16 @@ public struct VEVCFrameHeader {
     public let frameType: FrameType
     public let hasRefDir: Bool
     public let mvsSize: Int
+    public let refDirSize: Int
     public let layer0Size: Int
     public let layer1Size: Int
     public let layer2Size: Int
     
-    public init(frameType: FrameType, hasRefDir: Bool = false, mvsSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
+    public init(frameType: FrameType, hasRefDir: Bool = false, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
         self.mvsSize = mvsSize
+        self.refDirSize = refDirSize
         self.layer0Size = layer0Size
         self.layer1Size = layer1Size
         self.layer2Size = layer2Size
@@ -114,12 +116,10 @@ public struct VEVCFrameHeader {
     }
     
     /// Compute payload size including derived refDirSize.
-    /// width/height are needed to derive mvsCount → refDirSize.
     @inline(__always)
-    public func payloadSize(width: Int, height: Int) -> Int {
+    public var payloadSize: Int {
         if frameType == .copyFrame { return 0 }
-        let refDirBytes = if hasRefDir { (deriveMVCount(width: width, height: height) + 7) / 8 } else { 0 }
-        return mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
+        return mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
     }
     
     @inline(__always)
@@ -130,6 +130,7 @@ public struct VEVCFrameHeader {
         out.append(flag)
         if frameType != .copyFrame {
             appendUInt32BE(&out, UInt32(mvsSize))
+            appendUInt32BE(&out, UInt32(refDirSize))
             appendUInt32BE(&out, UInt32(layer0Size))
             appendUInt32BE(&out, UInt32(layer1Size))
             appendUInt32BE(&out, UInt32(layer2Size))
@@ -155,11 +156,16 @@ public struct VEVCFrameHeader {
         }
         
         let mvsSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
+        let refDirSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer0Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer1Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer2Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         
-        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, mvsSize: mvsSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        if (hasRefDir && refDirSize == 0) || (!hasRefDir && refDirSize != 0) {
+            throw DecodeError.invalidHeader
+        }
+        
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }
 

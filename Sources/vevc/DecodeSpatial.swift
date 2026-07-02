@@ -34,7 +34,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     // Direction flag only exists for bidirectional prediction frames.
     // Indicates whether each block uses forward (prev) or backward (next) reference.
     if frameHeader.hasRefDir && nextPd != nil {
-        let refDirByteCount = (mvsCount + 7) / 8
+        let refDirByteCount = frameHeader.refDirSize
         guard (offset + refDirByteCount) <= r.count else { throw DecodeError.insufficientData }
         let refDirBuf = Array(r[offset..<(offset + refDirByteCount)])
         offset += refDirByteCount

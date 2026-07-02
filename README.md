@@ -141,9 +141,9 @@ DWT Coefficients
 
 ```
                            VEVC File Structure
-+-------------------+------------+-----------------+-----+-------------+
-| Magic 'VEVC' (4B) | Metadata   | GOP (0..3)      | ... | GOP (tail)  |
-+-------------------+------------+-----------------+-----+-------------+
++-------------------+------------+----------------+-----+----------------+
+| Magic 'VEVC' (4B) | Metadata   | Frame Packet 0 | ... | Frame Packet N |
++-------------------+------------+----------------+-----+----------------+
 
     Metadata (Profile 1)
 +---------------------------------------------+
@@ -153,13 +153,12 @@ DWT Coefficients
 +------------+-------------+------------------+----------+----------------+
 | Table Flag (1B): 0x00=built-in, 0x01=custom tables follow               |
 +--------------------------------------------------------------------------+
-  Color Gamut: 0x01=BT.709, 0x02=BT.2020
-  Timescale:   0x00=1000ms, 0x01=90000hz
+  Color Gamut: 0x01=BT.709 (0x02=BT.2020 reserved, not yet implemented)
+  Timescale:   0x00=1000ms (0x01=90000hz reserved, not yet implemented)
 
-    Variable GOP (I-Frame followed by P-Frames up to keyint / scene change)
-+-------------------+
-| Frame Count (4B)  |
-+-------------------+-------------+--------------------+--------------------+
+    Frame Packets (stored sequentially until EOF; no per-GOP header.
+    An I-Frame followed by P-Frames up to keyint / scene change forms a logical GOP)
++---------------------------------+--------------------+--------------------+
 | F0 (I-Frame)                    | F1 (P-Frame)       | F2 (P-Frame)       |
 +---------------------------------+--------------------+--------------------+
 
@@ -169,11 +168,11 @@ DWT Coefficients
     +--------------------------------------------------------------------------------------------------+
     | Frame Status (1B) (lower 4 bits: 0x00=P, 0x01=Copy, 0x02=I; bit4: hasRefDir)                    |
     +---- IF NOT CopyFrame ----------------------------------------------------------------------------+
-    | MVs Size (4B)    | Layer0 Size (4B) | Layer1 Size (4B)  | Layer2 Size (4B)                        |
-    +------------------+------------------+-------------------+-----------------------------------------+
+    | MVs Size (4B)    | RefDir Size (4B) | Layer0 Size (4B) | Layer1 Size (4B)  | Layer2 Size (4B)                        |
+    +------------------+------------------+------------------+-------------------+-----------------------------------------+
     | MVs Data Payload (MVs Size bytes)                                                                |
     +--------------------------------------------------------------------------------------------------+
-    | RefDir Data Payload (ceil(mvsCount/8) bytes)  (Only when hasRefDir bit is set)                    |
+    | RefDir Data Payload (RefDir Size bytes)  (Only when hasRefDir bit is set)                        |
     +--------------------------------------------------------------------------------------------------+
     | Layer 0 Payload (Layer0 Size bytes)       (Base8: Thumbnail)                                     |
     +--------------------------------------------------------------------------------------------------+
@@ -185,7 +184,9 @@ DWT Coefficients
         Layer Payload
         +-------------+-----------+
         | qtY (2B)    | qtC (2B)  |
-        +-------------+-----------+
+        +-------------------+-------------+
+        | AQ Map len (VLQ)  | AQ Map data |   (Layer2 ONLY)
+        +-------------------+-------------+
         | Y len (VLQ) | Y data    |
         +-------------+-----------+
         | Cb len (VLQ)| Cb data   |

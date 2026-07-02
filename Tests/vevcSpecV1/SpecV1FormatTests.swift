@@ -91,14 +91,18 @@ final class SpecV1FormatTests: XCTestCase {
                 let hasRefDir = (status & 0x10) != 0
                 XCTAssertTrue(frameTypeBits == 0x00 || frameTypeBits == 0x02, "Frame type must be pFrame or iFrame, got \(frameTypeBits)")
                 
-                // Normal or B-Frame: 4 x UInt32BE = 16 bytes
+                // Normal or B-Frame: 5 x UInt32BE = 20 bytes
                 let mvsSize = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
+                let refDirSize = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 let layer0Size = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 let layer1Size = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 let layer2Size = Int(try readUInt32BEFromBytes(bytes, offset: &offset))
                 
-                let refDirBytes = if hasRefDir { (deriveMVCount(width: width, height: height) + 7) / 8 } else { 0 }
-                let totalPayload = mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
+                // Verify refDirSize matching hasRefDir logic
+                let expectedRefDirBytes = if hasRefDir { (deriveMVCount(width: width, height: height) + 7) / 8 } else { 0 }
+                XCTAssertEqual(refDirSize, expectedRefDirBytes, "refDirSize in header must match expectedRefDirBytes")
+                
+                let totalPayload = mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
                 XCTAssertLessThanOrEqual(offset + totalPayload, bytes.count, "Payload exceeds bitstream size")
                 
                 offset += totalPayload
@@ -107,6 +111,44 @@ final class SpecV1FormatTests: XCTestCase {
         }
         
         XCTAssertEqual(frameCount, allFrames.count, "Bitstream must contain exactly the encoded number of frames")
+    }
+    
+    func testFrameHeaderRefDirSizeValidation() {
+        // Case 1: hasRefDir == true, but refDirSize == 0 (invalid)
+        var badBytes1 = [UInt8]()
+        let flag1: UInt8 = 0x10 | 0x00 // hasRefDir | pFrame
+        badBytes1.append(flag1)
+        appendUInt32BE(&badBytes1, 100) // mvsSize
+        appendUInt32BE(&badBytes1, 0)   // refDirSize (0 is bad when hasRefDir is true)
+        appendUInt32BE(&badBytes1, 100) // layer0Size
+        appendUInt32BE(&badBytes1, 100) // layer1Size
+        appendUInt32BE(&badBytes1, 100) // layer2Size
+        
+        var offset1 = 0
+        XCTAssertThrowsError(try VEVCFrameHeader.deserialize(from: badBytes1, offset: &offset1)) { error in
+            XCTAssertTrue(error is DecodeError)
+            if let decodeError = error as? DecodeError {
+                XCTAssertEqual(decodeError.description, "DecodeError.invalidHeader")
+            }
+        }
+        
+        // Case 2: hasRefDir == false, but refDirSize > 0 (invalid)
+        var badBytes2 = [UInt8]()
+        let flag2: UInt8 = 0x00 | 0x00 // hasRefDir=0 | pFrame
+        badBytes2.append(flag2)
+        appendUInt32BE(&badBytes2, 100) // mvsSize
+        appendUInt32BE(&badBytes2, 50)  // refDirSize (50 is bad when hasRefDir is false)
+        appendUInt32BE(&badBytes2, 100) // layer0Size
+        appendUInt32BE(&badBytes2, 100) // layer1Size
+        appendUInt32BE(&badBytes2, 100) // layer2Size
+        
+        var offset2 = 0
+        XCTAssertThrowsError(try VEVCFrameHeader.deserialize(from: badBytes2, offset: &offset2)) { error in
+            XCTAssertTrue(error is DecodeError)
+            if let decodeError = error as? DecodeError {
+                XCTAssertEqual(decodeError.description, "DecodeError.invalidHeader")
+            }
+        }
     }
 }
 

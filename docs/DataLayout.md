@@ -48,11 +48,12 @@ Immediately following the File Metadata, "Frame Packets" are stored sequentially
 > The Frame Status byte encodes both the frame type (lower 4 bits) and the `hasRefDir` flag (bit 4, `0x10`). When bit 4 is set, the frame includes a Reference Direction bitset in the payload. This flag is only meaningful for P-Frames (`0x00`), yielding `0x10` for bidirectional P-Frames.
 
 ### 2.1. Frame Header (For I-Frames and P-Frames)
-If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow.
+If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes).
 
 | Field Name | Size | Description |
 |---|---|---|
 | MVs Size | 4 Bytes (UInt32BE) | Byte size of the following MV Data payload. |
+| RefDir Size | 4 Bytes (UInt32BE) | Byte size of the Reference Direction payload. Stored as `0` if `hasRefDir` is false. |
 | Layer0 Size | 4 Bytes (UInt32BE) | Byte size of the Base Layer (8x8) payload. |
 | Layer1 Size | 4 Bytes (UInt32BE) | Byte size of Enhancement Layer 1 (16x16) payload. |
 | Layer2 Size | 4 Bytes (UInt32BE) | Byte size of Enhancement Layer 2 (32x32) payload. |
@@ -60,7 +61,6 @@ If the Status is not `0x01` (Copy-Frame), the following size information is stor
 > [!IMPORTANT]
 > **Derived Fields (not stored in header)**:
 > - **MVs Count**: Derived from frame dimensions at the Base8 (L0) resolution after 2 DWT stages: `l1 = ceil(dim/2)`, `l0 = ceil(l1/2)`, then `ceil(l0_width / 8) × ceil(l0_height / 8)`. Width and height are available from the File Metadata.
-> - **RefDir Size**: Derived from MVs Count: `ceil(mvsCount / 8)`. Only present when the `hasRefDir` flag (bit 4 of Frame Status) is set.
 
 > [!TIP]
 > **Scalable Bitstream (Droppable Layers)**
@@ -74,10 +74,10 @@ If the Status is not `0x01` (Copy-Frame), the following size information is stor
 > This "Encode Once, Route Anywhere" design means each resolution tier independently performs motion compensation using the same shared MV data, drastically reducing both compute and data overhead.
 
 ### 2.2. Frame Payload
-Data is stored continuously according to the sizes specified (or derived from) the header.
+Data is stored continuously according to the sizes specified in the header.
 
 1. **MV Data** (`MVs Size` bytes)
-2. **RefDir Data** (`ceil(mvsCount / 8)` bytes, only present when `hasRefDir` is set): A bitset of flags used for bidirectional prediction.
+2. **RefDir Data** (`RefDir Size` bytes): A bitset of flags used for bidirectional prediction. Stored only when `RefDir Size > 0`.
 3. **Layer0 Data** (`Layer0 Size` bytes)
 4. **Layer1 Data** (`Layer1 Size` bytes)
 5. **Layer2 Data** (`Layer2 Size` bytes)
@@ -109,13 +109,13 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 | AQ Map Size | VLQ | Byte size of the AQ Map data (Present ONLY in Layer2). |
 | **AQ Map Data** | (AQ Map Size bytes) | Encoded Adaptive Quantization map defining per-block quantization levels for Layer2. (Present ONLY in Layer2). |
 | Y Payload Size | VLQ | Byte size of the Y Payload Data. |
-| **Y Payload Data** | (Y Payload Size bytes) | See section 3.1 below. |
+| **Y Payload Data** | (Y Payload Size bytes) | See section 4.1 below. |
 | Cb Payload Size | VLQ | Byte size of the Cb Payload Data. |
 | **Cb Payload Data** | (Cb Payload Size bytes) | |
 | Cr Payload Size | VLQ | Byte size of the Cr Payload Data. |
 | **Cr Payload Data** | (Cr Payload Size bytes) | |
 
-### 3.1. Plane Payload (Y / Cb / Cr)
+### 4.1. Plane Payload (Y / Cb / Cr)
 The data for each plane consists of a single **unified entropy stream** that encodes all four DWT subbands (LL, HL, LH, HH) together using 5 rANS contexts.
 
 The payload consists of:
@@ -143,14 +143,14 @@ The unified entropy stream is coded using a combination of Bypass (raw bitstream
 
 If `Coefficient Count` is 0, the data terminates here. If it is 1 or greater, it is followed by one of the formats below.
 
-### 4.1. Raw Mode (Uncompressed / Low Pair Count)
+### 5.1. Raw Mode (Uncompressed / Low Pair Count)
 This format is used when the number of coefficients is very small (<= 32 pairs).
 - `Flags` (1 Byte): Value is exactly `0x80`.
 - `Raw Data Size` (VLQ)
 - `Raw Data` (Bypass Bitstream of `Raw Data Size` bytes)
   - Zero-runs and coefficient tokens are written directly bit-by-bit.
 
-### 4.2. rANS Mode
+### 5.2. rANS Mode
 This is the standard mode used for the vast majority of blocks.
 - `Flags` (1 Byte):
   - Bit 6 (`0x40`): Indicates the use of Static Tables (decoder uses the built-in models instead of reading dynamic tables).
