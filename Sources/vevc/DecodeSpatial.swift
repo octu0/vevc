@@ -55,7 +55,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     offset += frameHeader.layer0Size
     
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame)
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame)
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
@@ -108,9 +108,11 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                     applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                     applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 }
-                applyDeblockingFilter16(plane: &current.y, width: l1dx, height: l1dy, qStep: 1)
-                applyDeblockingFilter16(plane: &current.cb, width: cbDx1, height: cbDy1, qStep: 1)
-                applyDeblockingFilter16(plane: &current.cr, width: cbDx1, height: cbDy1, qStep: 1)
+                
+                applyDeblockingFilterN(plane: &current.y, width: l1dx, height: l1dy, qStep: qtYStep, blockSize: 16)
+                let cStep = min(qtCStep * 2, 255)
+                applyDeblockingFilterN(plane: &current.cb, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
+                applyDeblockingFilterN(plane: &current.cr, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
             }
         } else {
             // Apply MC at layer0 resolution (8x8 blocks, mvShift=2)
@@ -126,9 +128,11 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                     applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                     applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                 }
-                applyDeblockingFilter32(plane: &current.y, width: l0dx, height: l0dy, qStep: 1)
-                applyDeblockingFilter32(plane: &current.cb, width: cbDx0, height: cbDy0, qStep: 1)
-                applyDeblockingFilter32(plane: &current.cr, width: cbDx0, height: cbDy0, qStep: 1)
+                
+                applyDeblockingFilterN(plane: &current.y, width: l0dx, height: l0dy, qStep: qtYStep, blockSize: 8)
+                let cStep = min(qtCStep * 2, 255)
+                applyDeblockingFilterN(plane: &current.cb, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
+                applyDeblockingFilterN(plane: &current.cr, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
             }
         }
     }

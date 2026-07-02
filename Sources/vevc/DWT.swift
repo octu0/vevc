@@ -36,10 +36,12 @@ func lift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var high = SIMD4<Int16>(raw[1], raw[3], raw[5], raw[7])
 
     let lowShifted = SIMD4<Int16>(low[1], low[2], low[3], low[3])
-    high &-= (low &+ lowShifted) &>> 1
+    let ditherPredict = SIMD4<Int16>(0, 1, 0, 1)
+    high &-= (low &+ lowShifted &+ ditherPredict) &>> 1
 
     let highShifted = SIMD4<Int16>(high[0], high[0], high[1], high[2])
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    let ditherUpdate = SIMD4<Int16>(1, 2, 1, 2)
+    low &+= (highShifted &+ high &+ ditherUpdate) &>> 2
 
     let result = SIMD8<Int16>(low[0], low[1], low[2], low[3], high[0], high[1], high[2], high[3])
     UnsafeMutableRawPointer(base).storeBytes(of: result, as: SIMD8<Int16>.self)
@@ -54,10 +56,12 @@ func lift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
     var high = SIMD8<Int16>(raw0[1], raw0[3], raw0[5], raw0[7], raw1[1], raw1[3], raw1[5], raw1[7])
 
     let lowShifted = SIMD8<Int16>(low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[7])
-    high &-= (low &+ lowShifted) &>> 1
+    let ditherPredictVec = SIMD8<Int16>(0, 1, 0, 1, 0, 1, 0, 1)
+    high &-= (low &+ lowShifted &+ ditherPredictVec) &>> 1
 
     let highShifted = SIMD8<Int16>(high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6])
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    let ditherUpdateVec = SIMD8<Int16>(1, 2, 1, 2, 1, 2, 1, 2)
+    low &+= (highShifted &+ high &+ ditherUpdateVec) &>> 2
 
     UnsafeMutableRawPointer(base).storeBytes(of: low, as: SIMD8<Int16>.self)
     UnsafeMutableRawPointer(base + 8).storeBytes(of: high, as: SIMD8<Int16>.self)
@@ -83,13 +87,21 @@ func lift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
         low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[8],
         low[9], low[10], low[11], low[12], low[13], low[14], low[15], low[15]
     )
-    high &-= (low &+ lowShifted) &>> 1
+    let ditherPredict = SIMD16<Int16>(
+        0, 1, 0, 1, 0, 1, 0, 1,
+        0, 1, 0, 1, 0, 1, 0, 1
+    )
+    high &-= (low &+ lowShifted &+ ditherPredict) &>> 1
 
     let highShifted = SIMD16<Int16>(
         high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6],
         high[7], high[8], high[9], high[10], high[11], high[12], high[13], high[14]
     )
-    low &+= (highShifted &+ high &+ 2) &>> 2
+    let ditherUpdate = SIMD16<Int16>(
+        1, 2, 1, 2, 1, 2, 1, 2,
+        1, 2, 1, 2, 1, 2, 1, 2
+    )
+    low &+= (highShifted &+ high &+ ditherUpdate) &>> 2
 
     UnsafeMutableRawPointer(base).storeBytes(of: low, as: SIMD16<Int16>.self)
     UnsafeMutableRawPointer(base + 16).storeBytes(of: high, as: SIMD16<Int16>.self)
@@ -103,10 +115,12 @@ func inverseLift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: In
     var high = SIMD4<Int16>(raw[4], raw[5], raw[6], raw[7])
 
     let highShifted = SIMD4<Int16>(high[0], high[0], high[1], high[2])
-    low &-= (highShifted &+ high &+ 2) &>> 2
+    let ditherUpdate = SIMD4<Int16>(1, 2, 1, 2)
+    low &-= (highShifted &+ high &+ ditherUpdate) &>> 2
 
     let lowShifted = SIMD4<Int16>(low[1], low[2], low[3], low[3])
-    high &+= (low &+ lowShifted) &>> 1
+    let ditherPredict = SIMD4<Int16>(0, 1, 0, 1)
+    high &+= (low &+ lowShifted &+ ditherPredict) &>> 1
 
     let result = SIMD8<Int16>(low[0], high[0], low[1], high[1], low[2], high[2], low[3], high[3])
     UnsafeMutableRawPointer(base).storeBytes(of: result, as: SIMD8<Int16>.self)
@@ -119,10 +133,12 @@ func inverseLift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: I
     var high = UnsafeRawPointer(base + 8).loadUnaligned(as: SIMD8<Int16>.self)
 
     let highShifted = SIMD8<Int16>(high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6])
-    low &-= (highShifted &+ high &+ 2) &>> 2
+    let ditherUpdate = SIMD8<Int16>(1, 2, 1, 2, 1, 2, 1, 2)
+    low &-= (highShifted &+ high &+ ditherUpdate) &>> 2
 
     let lowShifted = SIMD8<Int16>(low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[7])
-    high &+= (low &+ lowShifted) &>> 1
+    let ditherPredict = SIMD8<Int16>(0, 1, 0, 1, 0, 1, 0, 1)
+    high &+= (low &+ lowShifted &+ ditherPredict) &>> 1
 
     let out0 = SIMD8<Int16>(low[0], high[0], low[1], high[1], low[2], high[2], low[3], high[3])
     let out1 = SIMD8<Int16>(low[4], high[4], low[5], high[5], low[6], high[6], low[7], high[7])
@@ -140,13 +156,21 @@ func inverseLift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: I
         high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6],
         high[7], high[8], high[9], high[10], high[11], high[12], high[13], high[14]
     )
-    low &-= (highShifted &+ high &+ 2) &>> 2
+    let ditherUpdate = SIMD16<Int16>(
+        1, 2, 1, 2, 1, 2, 1, 2,
+        1, 2, 1, 2, 1, 2, 1, 2
+    )
+    low &-= (highShifted &+ high &+ ditherUpdate) &>> 2
 
     let lowShifted = SIMD16<Int16>(
         low[1], low[2], low[3], low[4], low[5], low[6], low[7], low[8],
         low[9], low[10], low[11], low[12], low[13], low[14], low[15], low[15]
     )
-    high &+= (low &+ lowShifted) &>> 1
+    let ditherPredict = SIMD16<Int16>(
+        0, 1, 0, 1, 0, 1, 0, 1,
+        0, 1, 0, 1, 0, 1, 0, 1
+    )
+    high &+= (low &+ lowShifted &+ ditherPredict) &>> 1
 
     let out0 = SIMD8<Int16>(low[0], high[0], low[1], high[1], low[2], high[2], low[3], high[3])
     let out1 = SIMD8<Int16>(low[4], high[4], low[5], high[5], low[6], high[6], low[7], high[7])
