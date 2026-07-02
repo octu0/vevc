@@ -192,6 +192,7 @@ public struct VEVCLayerData {
     static func serialize(
         qtYStep: UInt16,
         qtCStep: UInt16,
+        aqMap: [UInt8]? = nil,
         bufY: [UInt8],
         bufCb: [UInt8],
         bufCr: [UInt8]
@@ -199,6 +200,11 @@ public struct VEVCLayerData {
         var out: [UInt8] = []
         appendUInt16BE(&out, qtYStep)
         appendUInt16BE(&out, qtCStep)
+        
+        if let aqMap = aqMap {
+            writeVLQSize(&out, aqMap.count)
+            out.append(contentsOf: aqMap)
+        }
         
         writeVLQSize(&out, bufY.count)
         out.append(contentsOf: bufY)
@@ -219,10 +225,24 @@ public struct VEVCLayerData {
         from r: [UInt8],
         layer: UInt8,
         layerLabel: String
-    ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: [UInt8], bufCb: [UInt8], bufCr: [UInt8]) {
+    ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, aqMapData: [UInt8]?, bufY: [UInt8], bufCb: [UInt8], bufCr: [UInt8]) {
         var offset = 0
         let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
         let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
+        
+        var aqMapData: [UInt8]? = nil
+        if layer == 2 {
+            let aqLen = try readVLQSizeFromBytes(r, offset: &offset)
+            guard (offset + aqLen) <= r.count else {
+                throw DecodeError.invalidBlockDataContext("\(layerLabel) AQMap overflow: offset=\(offset) len=\(aqLen) total=\(r.count)")
+            }
+            if 0 < aqLen {
+                aqMapData = Array(r[offset..<(offset + aqLen)])
+            } else {
+                aqMapData = []
+            }
+            offset += aqLen
+        }
         
         let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
         guard (offset + bufYLen) <= r.count else {
@@ -245,6 +265,70 @@ public struct VEVCLayerData {
         let bufCr = Array(r[offset..<(offset + bufCrLen)])
         offset += bufCrLen
         
-        return (qtY, qtC, bufY, bufCb, bufCr)
+        return (qtY, qtC, aqMapData, bufY, bufCb, bufCr)
+    }
+}
+
+// MARK: - AQ Map Data Layout
+
+@inline(__always)
+public func encodeAQMap(levels: [UInt8]) -> [UInt8] {
+    if levels.allSatisfy({ $0 == 2 }) {
+        return []
+    }
+    
+    var writer = BypassWriter()
+    let count = levels.count
+    var i = 0
+    while i < count {
+        let level = levels[i]
+        var runLength = 1
+        while i + runLength < count && levels[i + runLength] == level {
+            runLength += 1
+        }
+        
+        writer.writeBits(UInt32(level), count: 3)
+        var val = UInt32(runLength - 1)
+        while 128 <= val {
+            writer.writeBits((val & 0x7F) | 0x80, count: 8)
+            val >>= 7
+        }
+        writer.writeBits(val & 0x7F, count: 8)
+        
+        i += runLength
+    }
+    writer.flush()
+    return writer.bytes
+}
+
+@inline(__always)
+public func decodeAQMap(data: [UInt8], blockCount: Int) -> [UInt8] {
+    if data.isEmpty {
+        return [UInt8](repeating: 2, count: blockCount)
+    }
+    
+    return data.withUnsafeBufferPointer { ptr -> [UInt8] in
+        var reader = BypassReader(base: ptr.baseAddress!, count: ptr.count)
+        var levels = [UInt8]()
+        levels.reserveCapacity(blockCount)
+        
+        while levels.count < blockCount {
+            let level = UInt8(reader.readBits(count: 3))
+            
+            var run: UInt32 = 0
+            var shift = 0
+            while true {
+                let b = reader.readBits(count: 8)
+                run |= (b & 0x7F) << shift
+                if (b & 0x80) == 0 { break }
+                shift += 7
+            }
+            
+            let runLength = Int(run) + 1
+            for _ in 0..<runLength {
+                levels.append(level)
+            }
+        }
+        return levels
     }
 }

@@ -230,6 +230,7 @@ The encoder automatically selects the mode that minimizes total encoded size for
 - **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely
 - **Compressed Frequency Tables**: Bitmap-based encoding reduces table size from 32B to ~10B
 - **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 1-byte markers
+- **Adaptive Quantization Map**: Dynamic per-block quantization scaling in Layer2 based on energy and SAD to preserve fine detail while reducing overall bitrate
 
 ---
 

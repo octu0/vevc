@@ -170,10 +170,21 @@ struct AQTable: Sendable {
         )
     }
 
-    /// Select the appropriate quantization table based on block AC energy
+    @inline(__always)
+    subscript(index: Int) -> QuantizationTable {
+        switch index {
+        case 0: return tables.0
+        case 1: return tables.1
+        case 2: return tables.2
+        case 3: return tables.3
+        default: return tables.4
+        }
+    }
+
+    /// Select the appropriate quantization table index (0..4) based on block AC energy
     /// relative to the frame average, and block motion activity (SAD).
     @inline(__always)
-    func select(energy: Int, avgEnergy: Int, sad: Int = -1, bx: Int = 0, by: Int = 0, colCount: Int = 1, rowCount: Int = 1) -> QuantizationTable {
+    func selectIndex(energy: Int, avgEnergy: Int, sad: Int = -1, bx: Int = 0, by: Int = 0, colCount: Int = 1, rowCount: Int = 1) -> Int {
         // Psycho-visual AQ: ratio = energy / avgEnergy
         let safeAvg = max(1, avgEnergy)
         let ratioX10 = (energy * 10) / safeAvg
@@ -181,10 +192,6 @@ struct AQTable: Sendable {
         var adjustedRatio = ratioX10
 
         // ROI (Region of Interest) Spatial Rate Allocation:
-        // Prevents the "top-heavy" token depletion problem common in raster-scan token bucket RateControllers.
-        // By intentionally applying coarser quantization to the screen periphery (where human visual attention is lower),
-        // we can reclaim and save tokens. These saved tokens are then prioritized for the screen center,
-        // which is visually critical and directly impacts SSIM.
         let cx = colCount / 2
         let cy = rowCount / 2
         let dist = Int((bx - cx).magnitude) + Int((by - cy).magnitude)
@@ -192,52 +199,38 @@ struct AQTable: Sendable {
         let distRatio = (dist * 10) / maxDist
         
         if 7 <= distRatio {
-            // Screen periphery: Less visual attention, degradation is less noticeable.
-            // Forcibly apply coarse quantization to reclaim tokens.
             adjustedRatio += 2
         } else if distRatio <= 4 {
-            // Screen center: The focus of visual attention. Degradation here severely impacts perceived quality and SSIM.
-            // Strongly protect details by applying fine quantization.
             adjustedRatio -= 3
         }
 
         // Motion (SAD) and Spatial Frequency (Energy) Hybrid Adaptive Quantization:
-        // Reuses SAD (Sum of Absolute Differences) calculated during the ME phase to evaluate temporal activity at zero cost.
-        // We skip this hybrid adjustment for I-Frames (where sad == -1) since they lack temporal prediction.
         if sad != -1 {
             if sad < 128 {
-                // Extremely flat backgrounds or regions with almost zero motion:
-                // Lack of visual change makes artifacts less noticeable. 
-                // We can safely widen the dead-zone (coarser quantization) to efficiently harvest tokens.
                 adjustedRatio += 2
             } else if 256 < sad {
                 if ratioX10 <= 10 {
-                    // Regions with high motion but simple/low texture (e.g., moving edges or faces):
-                    // Degradation here results in highly visible ghosting or blurring.
-                    // Protecting these areas (fine quantization) is a top priority.
                     adjustedRatio -= 3
                 } else {
-                    // Regions with high motion AND highly complex texture (e.g., moving water, swaying leaves):
-                    // The Human Visual System (HVS) suffers from a masking effect and cannot track high-frequency noise 
-                    // within fast-moving complex patterns. We can intentionally apply coarser quantization to save 
-                    // a massive amount of tokens without perceived quality loss.
                     adjustedRatio += 2
                 }
             }
         }
 
-        // ratioX10 <= 6  → level 0 (scale=0.70) = very flat region (faces, sky)
-        // ratioX10 <= 8  → level 1 (scale=0.85) = flat region
-        // ratioX10 <= 12 → level 2 (scale=1.00) = average
-        // ratioX10 <= 15 → level 3 (scale=1.20) = high energy
-        // ratioX10 > 15  → level 4 (scale=1.40) = very high energy (textures)
         switch true {
-        case adjustedRatio <= 6: return tables.0
-        case adjustedRatio <= 8: return tables.1
-        case adjustedRatio <= 12: return tables.2
-        case adjustedRatio <= 15: return tables.3
-        default: return tables.4
+        case adjustedRatio <= 6: return 0
+        case adjustedRatio <= 8: return 1
+        case adjustedRatio <= 12: return 2
+        case adjustedRatio <= 15: return 3
+        default: return 4
         }
+    }
+
+    /// Select the appropriate quantization table.
+    @inline(__always)
+    func select(energy: Int, avgEnergy: Int, sad: Int = -1, bx: Int = 0, by: Int = 0, colCount: Int = 1, rowCount: Int = 1) -> QuantizationTable {
+        let idx = selectIndex(energy: energy, avgEnergy: avgEnergy, sad: sad, bx: bx, by: by, colCount: colCount, rowCount: rowCount)
+        return self[idx]
     }
 }
 

@@ -540,12 +540,19 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 
 @inline(__always)
 func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: MotionVectors? = nil, refDirs: [Bool]? = nil, roundOffset: Int) async throws -> Image16 {
-    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer32")
+    let (qtY, qtC, aqMap, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer32")
     
+    guard let aqMapData = aqMap else {
+        throw DecodeError.invalidBlockDataContext("Layer32 requires AQ Map but it was missing in the bitstream.")
+    }
+    
+    let aqY = AQTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
     var sub = Image16(width: dx, height: dy, pool: pool)
     
     let rowCountY = (dy + 32 - 1) / 32
     let colCountY = (dx + 32 - 1) / 32
+    let levels = decodeAQMap(data: aqMapData, blockCount: rowCountY * colCountY)
+    
     let yBlocks: [BlockView]
     if let p = parentYBlocks {
         yBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: p)
@@ -573,7 +580,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     }
     
-    let resY32 = decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY)
+    let resY32 = decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, aqTable: aqY, levels: levels)
     for j in resY32.indices {
         var blk = resY32[j].0
         let w = resY32[j].1
@@ -625,7 +632,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 
 @inline(__always)
 func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
-    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16")
+    let (qtY, qtC, _, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16")
     
     var sub = Image16(width: dx, height: dy, pool: pool)
     
@@ -687,7 +694,7 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 
 @inline(__always)
 func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
-    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8")
+    let (qtY, qtC, _, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8")
     
     var sub = Image16(width: dx, height: dy, pool: pool)
     
@@ -733,7 +740,7 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable) -> [(BlockView, Int, Int)] {
+func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, aqTable: AQTable, levels: [UInt8]) -> [(BlockView, Int, Int)] {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return [] }
@@ -743,6 +750,8 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
         for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
             let blockIndex: Int = i * colCount + xIdx
             let block: BlockView = blocks[blockIndex]
+            let level = levels[blockIndex]
+            let qt = aqTable[Int(level)]
             let half: Int = 32 / 2
             prev.readY(x: w / 2, y: h / 2, size: half, into: block)
             let view = block

@@ -109,7 +109,7 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 }
 
 @inline(__always)
-func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, aqTable: AQTable, sads: [Int]? = nil, occlusionScores: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, aqTable: AQTable, sads: [Int]? = nil, occlusionScores: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], levels: [UInt8], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -129,7 +129,9 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
     let chunkSize = 8
     
     let energyBox = ConcurrentBox([Int](repeating: 0, count: totalBlocks))
+    let levelsBox = ConcurrentBox([UInt8](repeating: 2, count: totalBlocks))
     let safeEnergyBox = energyBox
+    let safeLevelsBox = levelsBox
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
@@ -222,7 +224,7 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, energies, aqTable, sads] in
+            group.addTask { [blocks, energies, safeLevelsBox, aqTable, sads] in
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     for j in 0..<colCount {
@@ -233,10 +235,13 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
                         let sad = sads?[blockIdx] ?? -1
                         let energy = energies[blockIdx]
                         
-                        let blockQt = if energy == -1 {
-                            aqTable.base
+                        let blockQt: QuantizationTable
+                        if energy == -1 {
+                            blockQt = aqTable.base
                         } else {
-                            aqTable.select(energy: energy, avgEnergy: avgEnergy, sad: sad, bx: j, by: i, colCount: colCount, rowCount: rowCount)
+                            let levelIdx = aqTable.selectIndex(energy: energy, avgEnergy: avgEnergy, sad: sad, bx: j, by: i, colCount: colCount, rowCount: rowCount)
+                            blockQt = aqTable[levelIdx]
+                            safeLevelsBox.value[blockIdx] = UInt8(levelIdx)
                         }
                         
                         evaluateQuantizeLayer32(view: view, qt: blockQt)
@@ -247,7 +252,8 @@ func extractSingleTransformBlocks32AQ(r: Int16Reader, width: Int, height: Int, p
     }
     
     withExtendedLifetime(subband) {}
-    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
+    let levels = levelsBox.value
+    return (tmpBlocks, subband, levels, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
 @inline(__always)
@@ -614,15 +620,15 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
 }
 
 @inline(__always)
-func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, aqYTable: AQTable, qtCTable: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, aqYTable: AQTable, qtCTable: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], [UInt8], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
-    async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32AQ(r: pd.rY, width: dx, height: dy, pool: pool, aqTable: aqYTable, sads: sads, occlusionScores: occlusionScores)
-        return (subband, blocks, r)
+    async let taskBufY = { () -> ([Int16], [BlockView], [UInt8], @Sendable () -> Void) in
+        let (blocks, subband, levels, r) = await extractSingleTransformBlocks32AQ(r: pd.rY, width: dx, height: dy, pool: pool, aqTable: aqYTable, sads: sads, occlusionScores: occlusionScores)
+        return (subband, blocks, levels, r)
     }()
     
     async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
@@ -635,12 +641,12 @@ func preparePlaneLayer32AQ(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, 
         return (subband, blocks, r)
     }()
 
-    let (subY, yBlocks, relY) = await taskBufY
+    let (subY, yBlocks, levels, relY) = await taskBufY
     let (subCb, cbBlocks, relCb) = await taskBufCb
     let (subCr, crBlocks, relCr) = await taskBufCr
 
     let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
-    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
+    return (subPlane, yBlocks, cbBlocks, crBlocks, levels, { relY(); relCb(); relCr() })
 }
 
 @inline(__always)
@@ -704,7 +710,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, oc
 }
 
 @inline(__always)
-func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil) -> [UInt8] {
+func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, levels: [UInt8]? = nil) -> [UInt8] {
     // Layer2 (32x32) contains the highest-frequency DWT subbands with the
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=3) than Layer1 (threshold=2) without
@@ -727,8 +733,11 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
     }())
     
+    let aqMap = levels.map { encodeAQMap(levels: $0) }
+    
     return VEVCLayerData.serialize(
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        aqMap: aqMap,
         bufY: bufY, bufCb: bufCb, bufCr: bufCr
     )
 }
@@ -821,7 +830,7 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, aqTable: AQTable, levels: [UInt8], pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -840,6 +849,7 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 let isEdgeX = (loopW < 32)
                 
                 let blk = blocks[idx]
+                let level = levels[idx]
                 idx += 1
                 
                 let llX = startX / 2
@@ -851,6 +861,8 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
                 let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
                 let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
+                
+                let qt = aqTable[Int(level)]
                 dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
