@@ -693,7 +693,7 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
+func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView], qtYStep: Int, qtCStep: Int) {
     let (qtY, qtC, _, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8")
     
     var sub = Image16(width: dx, height: dy, pool: pool)
@@ -736,7 +736,7 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
         sub.updateCr(data: &blk, startX: w, startY: h, size: 8)
     }
         
-    return (sub, yBlocks, cbBlocks, crBlocks)
+    return (sub, yBlocks, cbBlocks, crBlocks, qtYStep: Int(qtY.step), qtCStep: Int(qtC.step))
 }
 
 @Sendable @inline(__always)

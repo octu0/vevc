@@ -60,6 +60,7 @@ public actor StreamingDecoderActor {
             guard let prev = previousReconstructed else {
                 throw DecodeError.insufficientDataContext("Copy frame without previous frame")
             }
+            roundOffsetIndex += 1
             return prev.toYCbCr()
         }
         

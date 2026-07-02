@@ -289,6 +289,39 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
     }
 }
 
+/// In-place applies deblocking filter to the reconstructed image with a customizable block size boundary.
+@inline(__always)
+func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep: Int, blockSize: Int) {
+    withUnsafePointers(mut: &plane) { base in
+        let rawTc = (qStep / 2) + 3
+        let tc: Int16 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
+        }
+        let rawBeta = qStep + 6
+        let beta: Int32 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
+        }
+        
+        // Vertical Edges
+        for x in stride(from: blockSize, to: width, by: blockSize) {
+            if x >= 2 && x + 1 < width {
+                deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: 0, count: height, tc: tc, beta: beta)
+            }
+        }
+        
+        // Horizontal Edges
+        for y in stride(from: blockSize, to: height, by: blockSize) {
+            if y >= 2 && y + 1 < height {
+                deblockFilterHorizontalEdgeScalar(base: base, width: width, x: 0, y: y, count: width, tc: tc, beta: beta)
+            }
+        }
+    }
+}
+
 @inline(__always)
 private func deblockFilterVerticalEdge16SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
     let off0 = (y * width) + x

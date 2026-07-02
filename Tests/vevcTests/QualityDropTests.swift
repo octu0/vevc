@@ -106,7 +106,7 @@ final class QualityDropTests: XCTestCase {
         // 1. Base8
         let (bytesB8, reconB8, _, _, _, relb8) = try await encodePlaneBase8(pd: pd, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         defer { relb8() }
-        let (decB8, _, _, _) = try await decodeBase8(r: bytesB8, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
+        let (decB8, _, _, _, _, _) = try await decodeBase8(r: bytesB8, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
         let decB8Pd = PlaneData420(width: pd.width, height: pd.height, y: decB8.y, cb: decB8.cb, cr: decB8.cr)
         let decImgB8 = planeDataToImage(pd: decB8Pd)
 
@@ -140,7 +140,7 @@ final class QualityDropTests: XCTestCase {
         let (reconL1Cr, _) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC, pool: pool)
         let (_, _, _, _, _, relb8_b) = try await encodePlaneBase8(pd: sub16, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY, qtC: qtC, zeroThreshold: 3)
         defer { relb8_b() }
-        let (decB8_sub16, _, _, _) = try await decodeBase8(r: b8ReconBytes, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
+        let (decB8_sub16, _, _, _, _, _) = try await decodeBase8(r: b8ReconBytes, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
 
         let recon16 = PlaneData420(width: pd.width, height: pd.height, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
         let decImg16 = planeDataToImage(pd: recon16)
