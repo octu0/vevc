@@ -18,6 +18,10 @@ struct RateController {
     private(set) var avgDistortion: Int = 0
     private(set) var lastDistortion: Int = 0
     
+    // Closed-loop rate correction gain in Q8 fixed-point (256 = 1.0).
+    // actual/budget consumption ratio of past GOPs, tracked by EMA.
+    private(set) var rateGainQ8: Int = 256
+    
     @inline(__always)
     var isDriftAccelerating: Bool {
         if avgDistortion == 0 { return false }
@@ -32,6 +36,21 @@ struct RateController {
     
     @inline(__always)
     mutating func beginGOP() -> Int {
+        // Update closed-loop gain from the previous GOP's actual consumption.
+        // Scene-change may cut a GOP short, so compare against the budget
+        // prorated by the number of frames actually consumed.
+        let framesUsed = self.keyint - self.gopRemainingFrames
+        if 0 < self.gopTargetBits && 0 < framesUsed {
+            let expected = max(1, (self.gopTargetBits * framesUsed) / self.keyint)
+            let consumed = self.gopTargetBits - self.gopRemainingBits
+            if 0 < consumed {
+                let instantQ8 = (consumed << 8) / expected
+                let clamped = max(64, min(2048, instantQ8))   // [0.25x, 8.0x]
+                // EMA: gain = gain * 0.75 + instant * 0.25
+                self.rateGainQ8 = max(64, min(2048, ((self.rateGainQ8 * 3) + clamped) / 4))
+            }
+        }
+        
         let baseGOPBits = (maxbitrate * keyint) / framerate
         // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
         let carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
