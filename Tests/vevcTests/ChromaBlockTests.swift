@@ -219,28 +219,25 @@ final class ChromaBlockTests: XCTestCase {
 
     /// 量子化テーブルの異なるステップでのクロマ歪みを直接比較する。
     /// encodeSpatialLayersを使わず、QuantizationTableレベルで誤差を測定する。
-    func testChromaQuantizationDistortionByStep() async throws {
-        // テスト対象: 量子化→逆量子化のラウンドトリップでの情報損失
+    func testChromaQuantizationDistortionByStep() {
         let blockSize = 8
+        var block = BlockView.allocate(width: blockSize, height: blockSize)
+        defer { block.deallocate() }
 
-        // 色差パターン: 高周波成分を含むグラデーション（量子化ステップの差異が出やすいようにする）
-        var originalValues = [Int16](repeating: 0, count: blockSize * blockSize)
-        var rng = LCG(seed: 12345)
-        for y in 0..<blockSize {
-            for x in 0..<blockSize {
-                originalValues[y * blockSize + x] = Int16(Int(rng.next() % 100) - 50)
-            }
-        }
-
-        let steps = [16, 24, 32]
+        // テスト用のステップ: 256, 384, 512 (Q4表現: 実数では16, 24, 32)
+        let testSteps = [256, 384, 512]
         var distortions: [(step: Int, mse: Double)] = []
 
-        for step in steps {
+        for step in testSteps {
             let qt = QuantizationTable(baseStep: step)
-
-            // ブロックを作成して量子化→逆量子化
-            let block = BlockView.allocate(width: blockSize, height: blockSize)
-            defer { block.deallocate() }
+            
+            // Generate synthetic gradient block
+            let originalValues: [Int16] = (0..<(blockSize * blockSize)).map { i in
+                let x = i % blockSize
+                let y = i / blockSize
+                return Int16((x + y) * 2 - 14)
+            }
+            
             var view = block
             for y in 0..<blockSize {
                 let ptr = view.rowPointer(y: y)
@@ -282,13 +279,13 @@ final class ChromaBlockTests: XCTestCase {
         }
 
         // クロマ用ステップ(step*3等)の歪みが輝度用(step)に比べてどの程度大きいか確認
-        // step=16でのMSEとstep=24でのMSE比較
-        let mseLuma = distortions.first(where: { $0.step == 16 })?.mse ?? 0
-        let mseChrCurrent = distortions.first(where: { $0.step == 32 })?.mse ?? 0  // 現在: step*2
-        let mseChrProposed = distortions.first(where: { $0.step == 24 })?.mse ?? 0  // 提案: step*1.5
+        // step=256でのMSEとstep=384でのMSE比較
+        let mseLuma = distortions.first(where: { $0.step == 256 })?.mse ?? 0
+        let mseChrCurrent = distortions.first(where: { $0.step == 512 })?.mse ?? 0  // 現在: step*2
+        let mseChrProposed = distortions.first(where: { $0.step == 384 })?.mse ?? 0  // 提案: step*1.5
 
-        // 提案版（step=4）は現行（step=6）より歪みが小さいことを確認
-        XCTAssertLessThan(mseChrProposed, mseChrCurrent, "提案クロマステップ(step=24)は現行(step=32)より歪みが小さいべき")
+        // 提案版（step=384）は現行（step=512）より歪みが小さいことを確認
+        XCTAssertLessThan(mseChrProposed, mseChrCurrent, "提案クロマステップ(step=384)は現行(step=512)より歪みが小さいべき")
 
         // 提案版のクロマMSEが輝度MSEの4倍以内であることを確認
         let proposedRatio = mseChrProposed / max(mseLuma, 0.001)

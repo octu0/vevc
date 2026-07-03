@@ -106,17 +106,33 @@ struct RateController {
         let clampedMul16 = max(13107, min(327680, multiplier16))
         let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
         
+        let plannedRemaining = max(1, (gopTargetBits * gopRemainingFrames) / max(1, keyint))
+        let budgetRatioQ8: Int
+        if gopRemainingBits < 0 {
+            budgetRatioQ8 = 64
+        } else {
+            budgetRatioQ8 = max(64, min(1024, (gopRemainingBits << 8) / plannedRemaining))
+        }
+
         // maxStep scales proportionally to baseStep: P-Frame worst-case quality
         // tracks I-Frame quality level. At high bitrates (low baseStep), this
         // prevents P-Frames from degrading to poor quality even if bits are tight.
         // Allowing maxStep to drop below 64 prevents the SSIM inversion bug.
-        let maxStep = max(baseStep * 2, min(8192, baseStep * 4))
+        var maxStep = max(baseStep * 2, min(8192, baseStep * 4))
         
         var newStepInt = (baseStep * 3) / 2
         // P-Frame QP floor: baseStep ensures P-Frames never use finer
-        // quantization than the I-Frame. At high bitrates (baseStep=1-2),
+        // quantization than the I-Frame. At high bitrates (baseStep=16-32),
         // this allows near-lossless P-frame quality.
-        let minStep = max(16, baseStep)
+        var minStep = max(16, baseStep)
+
+        if budgetRatioQ8 < 192 {
+            // 予算逼迫 (<0.75): さらに粗くすることを許可
+            maxStep = min(8192, baseStep * 8)
+        } else if 320 < budgetRatioQ8 {
+            // 予算余剰 (>1.25): I-frame より一段細かくすることを許可
+            minStep = max(16, (baseStep * 3) / 4)
+        }
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
             // The bits should scale with SAD relative to the last frame, NOT the average.

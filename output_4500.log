@@ -17,15 +17,15 @@ Warmup complete.
 
 Running vevc (layers)...
   -> runVEVC Encoding...
-  -> runVEVC Encoded 19778065 bytes
+  -> runVEVC Encoded 19562250 bytes
   -> runVEVC Decoding...
   -> runVEVC Decoded 1802 frames
 
 --- Results ---
 [VEVC (Layers)]
-  Encode : 4713.68 ms (382.29 fps) - 2.62 ms / frame
-  Decode :  823.08 ms (2189.33 fps) - 0.46 ms / frame
-  Size   : 19314.52 KB (0.75% of raw 2565738.28 KB)
-  PSNR   : Avg: 39.88 | Min: 35.78 | Max: 48.37 | 50%: 39.50 | 90%: 43.26 | SD:  2.18
-  SSIM   : Avg: 0.9552 | Min: 0.9133 | Max: 0.9926 | 50%: 0.9545 | 90%: 0.9771 | SD: 0.0154
+  Encode : 4674.03 ms (385.53 fps) - 2.59 ms / frame
+  Decode :  790.51 ms (2279.53 fps) - 0.44 ms / frame
+  Size   : 19103.76 KB (0.74% of raw 2565738.28 KB)
+  PSNR   : Avg: 39.93 | Min: 35.76 | Max: 48.37 | 50%: 39.43 | 90%: 43.60 | SD:  2.43
+  SSIM   : Avg: 0.9553 | Min: 0.9138 | Max: 0.9926 | 50%: 0.9544 | 90%: 0.9792 | SD: 0.0167
 ---------------
