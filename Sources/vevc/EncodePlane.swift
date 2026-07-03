@@ -715,8 +715,8 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=3) than Layer1 (threshold=2) without
     // perceptible quality loss.
-    let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
-    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 4)))
+    let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
+    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
     
     let colCountY = (dx + 31) / 32
     let rowCountY = (dy + 31) / 32
@@ -744,8 +744,8 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 
 @inline(__always)
 func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil) -> [UInt8] {
-    let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
-    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 4)))
+    let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
+    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
     
     let colCountY = (dx + 15) / 16
     let rowCountY = (dy + 15) / 16
@@ -1209,7 +1209,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
             if let sList = sads, i < sList.count {
                 let col = i % yColCount8
                 let row = i / yColCount8
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: Int(qtY.step)), blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
+                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: (Int(qtY.step) + 8) >> 4), blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
                 if sList[i] < threshold { 
                     let b = blocks[i]
                     clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
@@ -1221,7 +1221,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
         
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
-        let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 4)))
+        let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
@@ -1241,7 +1241,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
         
-        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 2)))
+        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {
@@ -1260,7 +1260,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
         
-        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 2)))
+        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
         let buf = if isIFrame != true {
             encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
         } else {

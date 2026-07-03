@@ -104,8 +104,8 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 
 | Field Name | Size | Description |
 |---|---|---|
-| Quantization Step Y | 2 Bytes (UInt16BE) | Base quantization step for the Y plane. |
-| Quantization Step CbCr | 2 Bytes (UInt16BE) | Base quantization step for the Cb/Cr planes. |
+| Quantization Step Y | 2 Bytes (UInt16BE) | Base quantization step for the Y plane, stored in Q4 fixed-point format (value × 16). |
+| Quantization Step CbCr | 2 Bytes (UInt16BE) | Base quantization step for the Cb/Cr planes, stored in Q4 fixed-point format (value × 16). |
 | AQ Map Size | VLQ | Byte size of the AQ Map data (Present ONLY in Layer2). |
 | **AQ Map Data** | (AQ Map Size bytes) | Encoded Adaptive Quantization map defining per-block quantization levels for Layer2. (Present ONLY in Layer2). |
 | Y Payload Size | VLQ | Byte size of the Y Payload Data. |

@@ -618,13 +618,13 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     }
 
     if let mvs = mvs, mvs.isEmpty != true {
-        applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step), mvs: mvs)
-        applyDeblockingFilterChroma16(plane: &sub.cb, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: mvs)
-        applyDeblockingFilterChroma16(plane: &sub.cr, width: cbDx, height: cbDy, qStep: Int(qtC.step), mvs: mvs)
+        applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: (Int(qtY.step) + 8) >> 4, mvs: mvs)
+        applyDeblockingFilterChroma16(plane: &sub.cb, width: cbDx, height: cbDy, qStep: (Int(qtC.step) + 8) >> 4, mvs: mvs)
+        applyDeblockingFilterChroma16(plane: &sub.cr, width: cbDx, height: cbDy, qStep: (Int(qtC.step) + 8) >> 4, mvs: mvs)
     } else {
-        applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: Int(qtY.step))
-        applyDeblockingFilter16(plane: &sub.cb, width: cbDx, height: cbDy, qStep: Int(qtC.step))
-        applyDeblockingFilter16(plane: &sub.cr, width: cbDx, height: cbDy, qStep: Int(qtC.step))
+        applyDeblockingFilter32(plane: &sub.y, width: dx, height: dy, qStep: (Int(qtY.step) + 8) >> 4)
+        applyDeblockingFilter16(plane: &sub.cb, width: cbDx, height: cbDy, qStep: (Int(qtC.step) + 8) >> 4)
+        applyDeblockingFilter16(plane: &sub.cr, width: cbDx, height: cbDy, qStep: (Int(qtC.step) + 8) >> 4)
     }
     
     return sub

@@ -1,0 +1,31 @@
+Building for production...
+[0/2] Write swift-version--33285C21BD41A109.txt
+Build of product 'compare' complete! (0.09s)
+--- Settings ---
+Input frames   : 1802
+Resolution     : 1080x450
+Target Bitrate : 2500 kbps
+Target FPS     : 60
+Quality Check  : true
+----------------
+Warming up (5 frames)...
+  -> runVEVC Encoding...
+  -> runVEVC Encoded 76093 bytes
+  -> runVEVC Decoding...
+  -> runVEVC Decoded 5 frames
+Warmup complete.
+
+Running vevc (layers)...
+  -> runVEVC Encoding...
+  -> runVEVC Encoded 11226095 bytes
+  -> runVEVC Decoding...
+  -> runVEVC Decoded 1802 frames
+
+--- Results ---
+[VEVC (Layers)]
+  Encode : 4073.30 ms (442.39 fps) - 2.26 ms / frame
+  Decode :  737.15 ms (2444.54 fps) - 0.41 ms / frame
+  Size   : 10962.98 KB (0.43% of raw 2565738.28 KB)
+  PSNR   : Avg: 38.11 | Min: 33.90 | Max: 45.58 | 50%: 38.04 | 90%: 40.99 | SD:  2.08
+  SSIM   : Avg: 0.9401 | Min: 0.8821 | Max: 0.9870 | 50%: 0.9399 | 90%: 0.9653 | SD: 0.0190
+---------------

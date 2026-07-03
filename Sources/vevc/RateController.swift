@@ -110,13 +110,13 @@ struct RateController {
         // tracks I-Frame quality level. At high bitrates (low baseStep), this
         // prevents P-Frames from degrading to poor quality even if bits are tight.
         // Allowing maxStep to drop below 64 prevents the SSIM inversion bug.
-        let maxStep = max(baseStep * 2, min(512, baseStep * 4))
+        let maxStep = max(baseStep * 2, min(8192, baseStep * 4))
         
         var newStepInt = (baseStep * 3) / 2
         // P-Frame QP floor: baseStep ensures P-Frames never use finer
         // quantization than the I-Frame. At high bitrates (baseStep=1-2),
         // this allows near-lossless P-frame quality.
-        let minStep = max(1, baseStep)
+        let minStep = max(16, baseStep)
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
             // The bits should scale with SAD relative to the last frame, NOT the average.

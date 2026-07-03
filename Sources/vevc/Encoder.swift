@@ -194,8 +194,8 @@ actor LayersEncodeActor {
             framesSinceKeyframe = 0
             
             let baseStep = Int(baseQt.step)
-            let qtY = QuantizationTable(baseStep: max(1, baseStep), isChroma: false, layerIndex: 0)
-            let qtC = QuantizationTable(baseStep: max(1, baseStep), isChroma: true, layerIndex: 0)
+            let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
+            let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0)
             
             let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, maxbitrate: maxbitrate,
@@ -247,8 +247,8 @@ actor LayersEncodeActor {
             
             let frameSAD = estimateFrameSAD(current: plane, previous: prevRecon)
             let adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
-            let qtY = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: false, layerIndex: 0)
-            let qtC = QuantizationTable(baseStep: max(1, adjustedStep), isChroma: true, layerIndex: 0)
+            let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
+            let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
             
             let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
@@ -362,7 +362,7 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
 
 @inline(__always)
 private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateGainQ8: Int = 256) -> QuantizationTable {
-    let probeStep = 64
+    let probeStep = 1024
     let qt = QuantizationTable(baseStep: probeStep)
     
     let w = (img.width / 8)
@@ -434,7 +434,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateGainQ8: 
     // The cliff-edge discontinuity at low baseStep (previously requiring
     // floor=5) is now resolved by RateController.calculatePFrameQStep
     // guaranteeing maxStep>=40 independently of baseStep.
-    let q = min(256, Int(max(1, correctedStep64)))
+    let q = min(4096, Int(max(16, correctedStep64)))
     
     return QuantizationTable(baseStep: q)
 }
