@@ -78,10 +78,10 @@ SW: Software, HWA: Hardware Acceleration
 
 *(Crop 400x400 from Tears of Steel 1080p width)*
 
-#### 1. Frame 1602 (VEVC Min SSIM)
+#### 1. Frame 1630 (VEVC Min SSIM)
 | Original | VEVC | H.264(SW) | H.265(SW) |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/versus_vevc_min_frame1602_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1602_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1602_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1602_hevc.png" width="200" /> |
+| <img src="docs/versus_vevc_min_frame1630_orig.png" width="200" /> | <img src="docs/versus_vevc_min_frame1630_vevc.png" width="200" /> | <img src="docs/versus_vevc_min_frame1630_h264.png" width="200" /> | <img src="docs/versus_vevc_min_frame1630_hevc.png" width="200" /> |
 
 (CC) Blender Foundation | [mango.blender.org](https://mango.blender.org)
 

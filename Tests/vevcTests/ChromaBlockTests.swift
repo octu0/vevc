@@ -221,7 +221,7 @@ final class ChromaBlockTests: XCTestCase {
     /// encodeSpatialLayersを使わず、QuantizationTableレベルで誤差を測定する。
     func testChromaQuantizationDistortionByStep() {
         let blockSize = 8
-        var block = BlockView.allocate(width: blockSize, height: blockSize)
+        let block = BlockView.allocate(width: blockSize, height: blockSize)
         defer { block.deallocate() }
 
         // テスト用のステップ: 256, 384, 512 (Q4表現: 実数では16, 24, 32)

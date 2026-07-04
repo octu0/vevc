@@ -29,7 +29,7 @@ public actor VEVCEncoder {
         self.coreEncoder = LayersEncodeActor(
             width: width,
             height: height,
-            maxbitrate: maxbitrate,
+            maxbitrate: self.maxbitrate,
             framerate: framerate,
             zeroThreshold: zeroThreshold,
             keyint: keyint,

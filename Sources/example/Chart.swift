@@ -15,6 +15,7 @@ struct BitrateSsimPoint: Hashable {
     let codec: String
     let bitrate: Int
     let ssim: Double
+    let sizeKB: Double
 }
 
 @available(macOS 13.0, *)
@@ -266,6 +267,11 @@ struct BitrateSsimChart: View {
                 )
                 .foregroundStyle(by: .value("Codec", pt.codec))
                 .symbol(.circle)
+                .annotation(position: .top, alignment: .center) {
+                    Text(String(format: "%.0f KB", pt.sizeKB))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
             .chartForegroundStyleScale([
                 "VEVC (Layers)": Color.orange,

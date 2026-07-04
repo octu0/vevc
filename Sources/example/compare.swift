@@ -953,18 +953,18 @@ struct CompareApp {
                     
                     let vevcRes = try await runVEVC(images: localImages, config: sweepConfig)
                     if let stats = calculateQualityStats(metrics: vevcRes.metrics ?? []) {
-                        chartPoints.append(.init(codec: "VEVC (Layers)", bitrate: br, ssim: stats.avgSSIM))
+                        chartPoints.append(.init(codec: "VEVC (Layers)", bitrate: br, ssim: stats.avgSSIM, sizeKB: Double(vevcRes.compSize) / 1024.0))
                     }
                     
                     if localConfig.vevcOnly != true {
                         let h264SwRes = try await runH264(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
                         if let stats = calculateQualityStats(metrics: h264SwRes.metrics ?? []) {
-                            chartPoints.append(.init(codec: "H.264 (SW)", bitrate: br, ssim: stats.avgSSIM))
+                            chartPoints.append(.init(codec: "H.264 (SW)", bitrate: br, ssim: stats.avgSSIM, sizeKB: Double(h264SwRes.compSize) / 1024.0))
                         }
                         
                         let hevcSwRes = try await runHEVC(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
                         if let stats = calculateQualityStats(metrics: hevcSwRes.metrics ?? []) {
-                            chartPoints.append(.init(codec: "HEVC (SW)", bitrate: br, ssim: stats.avgSSIM))
+                            chartPoints.append(.init(codec: "HEVC (SW)", bitrate: br, ssim: stats.avgSSIM, sizeKB: Double(hevcSwRes.compSize) / 1024.0))
                         }
                     }
                 }

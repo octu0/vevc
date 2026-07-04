@@ -29,7 +29,7 @@ struct RateController {
     }
     
     init(maxbitrate: Int, framerate: Int, keyint: Int) {
-        self.maxbitrate = maxbitrate
+        self.maxbitrate = Int(Double(maxbitrate) * 1.6)
         self.framerate = framerate
         self.keyint = keyint
     }
