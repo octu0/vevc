@@ -24,12 +24,31 @@ struct RateController {
     // actual/budget consumption ratio of past GOPs, tracked by EMA.
     private(set) var rateGainQ8: Int = 256
     
+    // budgetSurplusEMAQ8: EMA of theoretical budget surplus (baseMaxBitrate based)
+    private(set) var budgetSurplusEMAQ8: Int = 256
+    
+    // isQualitySaturated: Unified state for quality saturation (D*)
+    private(set) var isQualitySaturated: Bool = false
+    
     @inline(__always)
     var isDriftAccelerating: Bool {
         if avgDistortion == 0 { return false }
         return (avgDistortion * 2) < lastDistortion && 32 < lastDistortion
     }
     
+    @inline(__always)
+    private mutating func updateSaturationState() {
+        if self.isQualitySaturated {
+            if self.budgetSurplusEMAQ8 < 256 || (self.targetDistortion * 5) / 4 < self.avgDistortion {
+                self.isQualitySaturated = false
+            }
+        } else {
+            if 320 < self.budgetSurplusEMAQ8 && 0 < self.avgDistortion && self.avgDistortion < self.targetDistortion {
+                self.isQualitySaturated = true
+            }
+        }
+    }
+
     init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 2) {
         self.baseMaxBitrate = maxbitrate
         self.maxbitrate = (maxbitrate * 410) / 256
@@ -55,26 +74,24 @@ struct RateController {
             }
         }
         // 1.6x ゲインの distortion 適応化
-        if 0 < self.targetDistortion {
-            if self.avgDistortion <= self.targetDistortion {
-                self.maxbitrate = self.baseMaxBitrate
-            } else {
-                let margin = max(1, self.targetDistortion / 2)
-                let diff = self.avgDistortion - self.targetDistortion
-                let rawGain = 256 + (diff * (410 - 256)) / margin
-                let gainQ8 = max(256, min(410, rawGain))
-                self.maxbitrate = (self.baseMaxBitrate * gainQ8) / 256
-            }
+        if self.isQualitySaturated {
+            self.maxbitrate = self.baseMaxBitrate
         } else {
-            self.maxbitrate = (self.baseMaxBitrate * 410) / 256
+            let margin = max(1, self.targetDistortion / 2)
+            let diff = self.avgDistortion - self.targetDistortion
+            let rawGain = 256 + (diff * (410 - 256)) / margin
+            let gainQ8 = max(256, min(410, rawGain))
+            self.maxbitrate = (self.baseMaxBitrate * gainQ8) / 256
         }
+        
+        self.maxbitrate = max(100, self.maxbitrate)
         
         let baseGOPBits = (self.maxbitrate * self.keyint) / self.framerate
         // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
         var carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
         
-        // 飽落時の carry-over 抑制
-        if 0 < self.targetDistortion && self.avgDistortion <= self.targetDistortion {
+        // 品質天井に当たっているときはキャリーオーバーを抑制して無駄な肥大化を防ぐ
+        if self.isQualitySaturated {
             carryOver = 0
         }
         
@@ -130,6 +147,13 @@ struct RateController {
         let targetFrameBits = Int((Int64(avgBitsPerFrame) * clampedMul16) >> 16)
         
         let plannedRemaining = max(1, (gopTargetBits * gopRemainingFrames) / max(1, keyint))
+        
+        // Update budgetSurplusEMAQ8 using theoretical budget (baseMaxBitrate) to prevent oscillation
+        let theoreticalBudget = (self.baseMaxBitrate * 1000) / self.framerate
+        let theoreticalPFrameBudget = max(1000, (theoreticalBudget * 80) / 100)
+        let theoreticalRatioQ8 = (theoreticalPFrameBudget * 256) / max(1, self.lastPFrameBits)
+        self.budgetSurplusEMAQ8 = (self.budgetSurplusEMAQ8 * 3 + theoreticalRatioQ8) / 4
+        
         let budgetRatioQ8: Int
         if gopRemainingBits < 0 {
             budgetRatioQ8 = 64
@@ -159,13 +183,11 @@ struct RateController {
         
         let referenceStep = max(16, self.lastPFrameQStep > 0 ? self.lastPFrameQStep : baseStep)
         // Distortion target D* による品質天井
-        if 0 < self.targetDistortion {
-            if self.avgDistortion < self.targetDistortion {
-                let safeAvg = max(1, self.avgDistortion)
-                let ratio = min(150, (self.targetDistortion * 100) / safeAvg)
-                let qualityStep = (referenceStep * ratio) / 100
-                minStep = max(minStep, qualityStep)
-            }
+        if self.isQualitySaturated {
+            let safeAvg = max(1, self.avgDistortion)
+            let ratio = min(150, (self.targetDistortion * 100) / safeAvg)
+            let qualityStep = min(8192, (referenceStep * ratio) / 100)
+            minStep = max(minStep, qualityStep)
         }
         
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
@@ -220,7 +242,7 @@ struct RateController {
             newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), smoothed)))
         }
         
-        let finalStep = max(minStep, min(maxStep, newStepInt))
+        let finalStep = min(16384, max(minStep, min(maxStep, newStepInt)))
         return finalStep
     }
     
@@ -241,5 +263,7 @@ struct RateController {
         } else {
             self.avgDistortion = ((self.avgDistortion * 7) + distortion) / 8
         }
+        
+        updateSaturationState()
     }
 }

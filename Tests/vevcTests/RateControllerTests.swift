@@ -44,4 +44,69 @@ final class RateControllerTests: XCTestCase {
         XCTAssertEqual(controller.gopRemainingBits, 330_000)
         XCTAssertEqual(controller.gopRemainingFrames, 12)
     }
+
+    func testSaturationState() {
+        let framerate = 30
+        let keyint = 15
+        let bitrateParam = 1000 * 1000 // 1Mbps
+        var controller = RateController(maxbitrate: bitrateParam, framerate: framerate, keyint: keyint, targetDistortion: 2)
+        
+        let _ = controller.beginGOP()
+        controller.consumeIFrame(bits: 100_000, qStep: 32)
+        
+        // At start, budgetSurplusEMAQ8 is 256. Quality is not saturated.
+        XCTAssertFalse(controller.isQualitySaturated)
+        
+        // P-Frame 1: Small size, low distortion.
+        // Theoretical budget per P-frame is ~80% of 1Mbps/30 = ~26.6Kbits.
+        // Let's use 5000 bits. Ratio = 26666 * 256 / 5000 = ~1365.
+        // EMA will go up quickly.
+        let q1 = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1)
+        
+        // Calculate step again to update EMA
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1)
+        
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1)
+        
+        // Now budgetSurplusEMAQ8 should be > 320, and avgDistortion < targetDistortion (1 < 2)
+        XCTAssertTrue(controller.isQualitySaturated)
+        
+        // Now simulate high bitrate (budget tight). size = 50_000
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 50_000, qStep: q1, sad: 1000, distortion: 1)
+        
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 50_000, qStep: q1, sad: 1000, distortion: 1)
+        
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 50_000, qStep: q1, sad: 1000, distortion: 1)
+        
+        // budgetSurplusEMAQ8 drops < 256
+        XCTAssertFalse(controller.isQualitySaturated)
+        
+        // Now test hysteresis on distortion side.
+        // Make budget high again
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1)
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1)
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1)
+        
+        XCTAssertTrue(controller.isQualitySaturated)
+        
+        // Now make distortion high (e.g. 3). avgDistortion goes up
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 3)
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 3)
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 3)
+        
+        // avgDistortion should now be > 2.5 (which is 2 * 1.25)
+        XCTAssertFalse(controller.isQualitySaturated)
+    }
 }

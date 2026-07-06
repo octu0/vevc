@@ -250,20 +250,16 @@ actor LayersEncodeActor {
             let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
             
-            let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
+            let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
             )
             
-            // Compute reconstruction distortion: SAD between original and reconstructed.
-            // Reuses estimateFrameSAD which samples 8 representative blocks.
-            // This feeds the distortion feedback loop in RateController.
-            let reconDistortion = estimateFrameSAD(current: plane, previous: reconstructed)
-            if framesSinceKeyframe % 30 == 0 {
-                print("reconDistortion: \(reconDistortion)")
-            }
-            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD, distortion: reconDistortion)
+            // Using masked recon distortion for quality metric
+            let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
+            
+            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
             
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon
@@ -358,9 +354,76 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
     }
     
     if 0 < totalPixels {
-        return totalSAD / totalPixels
+        return totalPixels > 0 ? (totalSAD / totalPixels) : 0
     }
     return 0
+}
+
+/// 全ブロック走査 + アクティビティマスク付き再構成歪み計測。
+/// 戻り値は per-pixel 平均 SAD（従来の estimateFrameSAD と同じ単位）。
+@inline(__always)
+func computeMaskedReconDistortion(
+    original: PlaneData420,
+    reconstructed: PlaneData420,
+    sads: [Int]?
+) -> Int {
+    let width = original.width
+    let height = original.height
+    guard 0 < width && 0 < height else { return 0 }
+    
+    let blockSize = 32
+    let colCount = (width + 31) / 32
+    let rowCount = (height + 31) / 32
+    
+    var totalSAD: Int = 0
+    var activePixels: Int = 0
+    var totalFallbackSAD: Int = 0
+    var totalPixels: Int = 0
+    
+    original.y.withUnsafeBufferPointer { origPtr in
+        reconstructed.y.withUnsafeBufferPointer { reconPtr in
+            guard let oBase = origPtr.baseAddress, let rBase = reconPtr.baseAddress else { return }
+            
+            for r in 0..<rowCount {
+                let sy = r * blockSize
+                let bh = min(blockSize, height - sy)
+                let rowOffset = r * colCount
+                
+                for c in 0..<colCount {
+                    let sx = c * blockSize
+                    let bw = min(blockSize, width - sx)
+                    
+                    var blockSAD = 0
+                    for y in sy..<sy+bh {
+                        let oRow = oBase + y * width + sx
+                        let rRow = rBase + y * width + sx
+                        
+                        for x in 0..<bw {
+                            blockSAD += abs(Int(oRow[x]) - Int(rRow[x]))
+                        }
+                    }
+                    
+                    let pixels = bw * bh
+                    totalPixels += pixels
+                    totalFallbackSAD += blockSAD
+                    
+                    if let sads = sads {
+                        if 256 < sads[rowOffset + c] {
+                            totalSAD += blockSAD
+                            activePixels += pixels
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // フォールバック: アクティブブロックが全体の5%未満の場合は全ブロック平均に切り替える
+    if sads == nil || activePixels < (totalPixels / 20) {
+        return totalPixels > 0 ? (totalFallbackSAD / totalPixels) : 0
+    } else {
+        return activePixels > 0 ? (totalSAD / activePixels) : 0
+    }
 }
 
 @inline(__always)
@@ -440,15 +503,13 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateControll
     let q = min(4096, Int(max(16, correctedStep64)))
     
     var finalQ = q
-    if 0 < rateController.targetDistortion {
-        if rateController.avgDistortion < rateController.targetDistortion {
-                // 品質過剰：QPを引き上げる
-                let safeAvg = max(1, rateController.avgDistortion)
-                let ratio = min(150, (rateController.targetDistortion * 100) / safeAvg)
-                let qualityStep = (q * ratio) / 100
-                finalQ = max(finalQ, qualityStep)
-            }
-        }
+    if rateController.isQualitySaturated {
+        // 品質過剰：QPを引き上げる
+        let safeAvg = max(1, rateController.avgDistortion)
+        let ratio = min(150, (rateController.targetDistortion * 100) / safeAvg)
+        let qualityStep = (q * ratio) / 100
+        finalQ = max(finalQ, qualityStep)
+    }
     
     return QuantizationTable(baseStep: finalQ)
 }
