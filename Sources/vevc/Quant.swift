@@ -104,6 +104,7 @@ struct QuantizationTable: Sendable {
             dzHighC = -64000
         }
 
+
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(256, max(16, baseStep / 8))

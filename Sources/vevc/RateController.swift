@@ -53,7 +53,7 @@ struct RateController {
         }
     }
 
-    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 768) {
+    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 0) {
         self.baseMaxBitrate = maxbitrate
         self.maxbitrate = (maxbitrate * 410) / 256
         self.framerate = framerate

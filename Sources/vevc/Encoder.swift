@@ -179,16 +179,9 @@ actor LayersEncodeActor {
         
         if isIFrame {
             // Rate control
-            let oldTarget = rateController.gopTargetBits
-            let oldConsumed = rateController.gopTargetBits - rateController.gopRemainingBits
-            
+
             let targetBits = rateController.beginGOP()
             let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
-            
-            if ProcessInfo.processInfo.environment["VEVC_RC_LOG"] == "1" {
-                let pct = oldTarget > 0 ? (oldConsumed * 100) / oldTarget : 0
-                print("[RC] q=\(baseQt.step) gain=\(rateController.rateGainQ8) target=\(oldTarget) consumed=\(oldConsumed) (\(pct)%)")
-            }
             
             self.qt = baseQt
             framesSinceKeyframe = 0
@@ -261,11 +254,7 @@ actor LayersEncodeActor {
             
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
             
-            if getenv("VEVC_RC_LOG") != nil {
-                let msg = "\(frameIndex),\(Int(adjustedStep)),\(rateController.avgDistortionQ8),\(rateController.budgetSurplusEMAQ8),\(rateController.isQualitySaturated),\(bytes.count * 8)\n"
-                FileHandle.standardError.write(Data(msg.utf8))
-            }
-            
+
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon
             
