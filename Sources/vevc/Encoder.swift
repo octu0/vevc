@@ -183,7 +183,7 @@ actor LayersEncodeActor {
             let oldConsumed = rateController.gopTargetBits - rateController.gopRemainingBits
             
             let targetBits = rateController.beginGOP()
-            let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateGainQ8: rateController.rateGainQ8)
+            let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
             
             if ProcessInfo.processInfo.environment["VEVC_RC_LOG"] == "1" {
                 let pct = oldTarget > 0 ? (oldConsumed * 100) / oldTarget : 0
@@ -260,6 +260,9 @@ actor LayersEncodeActor {
             // Reuses estimateFrameSAD which samples 8 representative blocks.
             // This feeds the distortion feedback loop in RateController.
             let reconDistortion = estimateFrameSAD(current: plane, previous: reconstructed)
+            if framesSinceKeyframe % 30 == 0 {
+                print("reconDistortion: \(reconDistortion)")
+            }
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(qtY.step), sad: frameSAD, distortion: reconDistortion)
             
             let oldRecon = previousReconstructed!
@@ -361,7 +364,7 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
 }
 
 @inline(__always)
-private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateGainQ8: Int = 256) -> QuantizationTable {
+private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateController: RateController) -> QuantizationTable {
     let probeStep = 1024
     let qt = QuantizationTable(baseStep: probeStep)
     
@@ -428,7 +431,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateGainQ8: 
     // A lower factor produces larger (higher quality) I-frames, providing
     // a stronger structural base for subsequent P-frames to reference.
     let predictedStep64 = (Int64(probeStep) * estimatedTotalBits64 * Int64(EncoderTuning.shared.iFrameQuantizationScale)) / (Int64(targetBits) * 100)
-    let correctedStep64 = (predictedStep64 * Int64(rateGainQ8)) >> 8
+    let correctedStep64 = (predictedStep64 * Int64(rateController.rateGainQ8)) >> 8
 
     // I-Frame QP floor = 1: allows near-lossless quality at high bitrates.
     // The cliff-edge discontinuity at low baseStep (previously requiring
@@ -436,7 +439,18 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateGainQ8: 
     // guaranteeing maxStep>=40 independently of baseStep.
     let q = min(4096, Int(max(16, correctedStep64)))
     
-    return QuantizationTable(baseStep: q)
+    var finalQ = q
+    if 0 < rateController.targetDistortion {
+        if rateController.avgDistortion < rateController.targetDistortion {
+                // 品質過剰：QPを引き上げる
+                let safeAvg = max(1, rateController.avgDistortion)
+                let ratio = min(150, (rateController.targetDistortion * 100) / safeAvg)
+                let qualityStep = (q * ratio) / 100
+                finalQ = max(finalQ, qualityStep)
+            }
+        }
+    
+    return QuantizationTable(baseStep: finalQ)
 }
 
 @inline(__always)

@@ -1,7 +1,9 @@
 struct RateController {
-    let maxbitrate: Int
+    let baseMaxBitrate: Int
+    private(set) var maxbitrate: Int
     let framerate: Int
     let keyint: Int
+    let targetDistortion: Int
     
     private(set) var gopTargetBits: Int = 0
     private(set) var gopRemainingBits: Int = 0
@@ -28,10 +30,12 @@ struct RateController {
         return (avgDistortion * 2) < lastDistortion && 32 < lastDistortion
     }
     
-    init(maxbitrate: Int, framerate: Int, keyint: Int) {
-        self.maxbitrate = Int(Double(maxbitrate) * 1.6)
+    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 2) {
+        self.baseMaxBitrate = maxbitrate
+        self.maxbitrate = (maxbitrate * 410) / 256
         self.framerate = framerate
         self.keyint = keyint
+        self.targetDistortion = targetDistortion
     }
     
     @inline(__always)
@@ -50,14 +54,33 @@ struct RateController {
                 self.rateGainQ8 = max(64, min(2048, ((self.rateGainQ8 * 3) + clamped) / 4))
             }
         }
+        // 1.6x ゲインの distortion 適応化
+        if 0 < self.targetDistortion {
+            if self.avgDistortion <= self.targetDistortion {
+                self.maxbitrate = self.baseMaxBitrate
+            } else {
+                let margin = max(1, self.targetDistortion / 2)
+                let diff = self.avgDistortion - self.targetDistortion
+                let rawGain = 256 + (diff * (410 - 256)) / margin
+                let gainQ8 = max(256, min(410, rawGain))
+                self.maxbitrate = (self.baseMaxBitrate * gainQ8) / 256
+            }
+        } else {
+            self.maxbitrate = (self.baseMaxBitrate * 410) / 256
+        }
         
-        let baseGOPBits = (maxbitrate * keyint) / framerate
+        let baseGOPBits = (self.maxbitrate * self.keyint) / self.framerate
         // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
-        let carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
+        var carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
+        
+        // 飽落時の carry-over 抑制
+        if 0 < self.targetDistortion && self.avgDistortion <= self.targetDistortion {
+            carryOver = 0
+        }
+        
         self.gopTargetBits = baseGOPBits + carryOver
         self.gopRemainingBits = self.gopTargetBits
         self.gopRemainingFrames = self.keyint
-        
         // lastPFrameBits / lastPFrameQStep / lastPFrameSAD are intentionally
         // NOT reset here. Carrying over the previous GOP's last P-frame data
         // allows the first P-frame of the new GOP to use it as a prediction
@@ -133,6 +156,18 @@ struct RateController {
             // 予算余剰 (>1.25): I-frame より一段細かくすることを許可
             minStep = max(16, (baseStep * 3) / 4)
         }
+        
+        let referenceStep = max(16, self.lastPFrameQStep > 0 ? self.lastPFrameQStep : baseStep)
+        // Distortion target D* による品質天井
+        if 0 < self.targetDistortion {
+            if self.avgDistortion < self.targetDistortion {
+                let safeAvg = max(1, self.avgDistortion)
+                let ratio = min(150, (self.targetDistortion * 100) / safeAvg)
+                let qualityStep = (referenceStep * ratio) / 100
+                minStep = max(minStep, qualityStep)
+            }
+        }
+        
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
             // Predict the amount of bits we'd get if we used the same Q as last P-frame
             // The bits should scale with SAD relative to the last frame, NOT the average.
