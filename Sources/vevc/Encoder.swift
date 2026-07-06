@@ -261,6 +261,11 @@ actor LayersEncodeActor {
             
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
             
+            if getenv("VEVC_RC_LOG") != nil {
+                let msg = "\(frameIndex),\(Int(adjustedStep)),\(rateController.avgDistortionQ8),\(rateController.budgetSurplusEMAQ8),\(rateController.isQualitySaturated),\(bytes.count * 8)\n"
+                FileHandle.standardError.write(Data(msg.utf8))
+            }
+            
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon
             
@@ -420,9 +425,9 @@ func computeMaskedReconDistortion(
     
     // フォールバック: アクティブブロックが全体の5%未満の場合は全ブロック平均に切り替える
     if sads == nil || activePixels < (totalPixels / 20) {
-        return totalPixels > 0 ? (totalFallbackSAD / totalPixels) : 0
+        return totalPixels > 0 ? ((totalFallbackSAD << 8) / totalPixels) : 0
     } else {
-        return activePixels > 0 ? (totalSAD / activePixels) : 0
+        return activePixels > 0 ? ((totalSAD << 8) / activePixels) : 0
     }
 }
 
@@ -504,11 +509,9 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateControll
     
     var finalQ = q
     if rateController.isQualitySaturated {
-        // 品質過剰：QPを引き上げる
-        let safeAvg = max(1, rateController.avgDistortion)
-        let ratio = min(150, (rateController.targetDistortion * 100) / safeAvg)
-        let qualityStep = (q * ratio) / 100
-        finalQ = max(finalQ, qualityStep)
+        let safeAvg = max(1, rateController.avgDistortionQ8)
+        let ratioQ8 = min(512, (rateController.targetDistortionQ8 * 256) / safeAvg)
+        finalQ = max(q, min((q * ratioQ8) / 256, q * 2))
     }
     
     return QuantizationTable(baseStep: finalQ)

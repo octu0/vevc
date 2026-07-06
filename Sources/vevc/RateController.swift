@@ -3,7 +3,7 @@ struct RateController {
     private(set) var maxbitrate: Int
     let framerate: Int
     let keyint: Int
-    let targetDistortion: Int
+    let targetDistortionQ8: Int
     
     private(set) var gopTargetBits: Int = 0
     private(set) var gopRemainingBits: Int = 0
@@ -15,10 +15,10 @@ struct RateController {
     private(set) var lastPFrameSAD: Int = 0
     
     // Reconstruction distortion tracking for quality-consistent QP adjustment.
-    // avgDistortion: EMA of per-pixel reconstruction SAD (target quality level)
-    // lastDistortion: previous frame's per-pixel reconstruction SAD
-    private(set) var avgDistortion: Int = 0
-    private(set) var lastDistortion: Int = 0
+    // avgDistortionQ8: EMA of per-pixel reconstruction SAD in Q8 (target quality level)
+    // lastDistortionQ8: previous frame's per-pixel reconstruction SAD in Q8
+    private(set) var avgDistortionQ8: Int = 0
+    private(set) var lastDistortionQ8: Int = 0
     
     // Closed-loop rate correction gain in Q8 fixed-point (256 = 1.0).
     // actual/budget consumption ratio of past GOPs, tracked by EMA.
@@ -30,31 +30,35 @@ struct RateController {
     // isQualitySaturated: Unified state for quality saturation (D*)
     private(set) var isQualitySaturated: Bool = false
     
+    private(set) var saturationAnchorStep: Int = 0
+    
     @inline(__always)
     var isDriftAccelerating: Bool {
-        if avgDistortion == 0 { return false }
-        return (avgDistortion * 2) < lastDistortion && 32 < lastDistortion
+        if avgDistortionQ8 == 0 { return false }
+        return (avgDistortionQ8 * 2) < lastDistortionQ8 && (32 * 256) < lastDistortionQ8
     }
     
     @inline(__always)
     private mutating func updateSaturationState() {
         if self.isQualitySaturated {
-            if self.budgetSurplusEMAQ8 < 256 || (self.targetDistortion * 5) / 4 < self.avgDistortion {
+            if self.budgetSurplusEMAQ8 < 256 || (self.targetDistortionQ8 * 5) / 4 < self.avgDistortionQ8 {
                 self.isQualitySaturated = false
+                self.saturationAnchorStep = 0
             }
         } else {
-            if 320 < self.budgetSurplusEMAQ8 && 0 < self.avgDistortion && self.avgDistortion < self.targetDistortion {
+            if 320 < self.budgetSurplusEMAQ8 && 0 < self.avgDistortionQ8 && self.avgDistortionQ8 < self.targetDistortionQ8 {
                 self.isQualitySaturated = true
+                self.saturationAnchorStep = max(16, self.lastPFrameQStep)
             }
         }
     }
 
-    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 2) {
+    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 768) {
         self.baseMaxBitrate = maxbitrate
         self.maxbitrate = (maxbitrate * 410) / 256
         self.framerate = framerate
         self.keyint = keyint
-        self.targetDistortion = targetDistortion
+        self.targetDistortionQ8 = targetDistortion
     }
     
     @inline(__always)
@@ -77,8 +81,8 @@ struct RateController {
         if self.isQualitySaturated {
             self.maxbitrate = self.baseMaxBitrate
         } else {
-            let margin = max(1, self.targetDistortion / 2)
-            let diff = self.avgDistortion - self.targetDistortion
+            let margin = max(1, self.targetDistortionQ8 / 2)
+            let diff = self.avgDistortionQ8 - self.targetDistortionQ8
             let rawGain = 256 + (diff * (410 - 256)) / margin
             let gainQ8 = max(256, min(410, rawGain))
             self.maxbitrate = (self.baseMaxBitrate * gainQ8) / 256
@@ -149,9 +153,9 @@ struct RateController {
         let plannedRemaining = max(1, (gopTargetBits * gopRemainingFrames) / max(1, keyint))
         
         // Update budgetSurplusEMAQ8 using theoretical budget (baseMaxBitrate) to prevent oscillation
-        let theoreticalBudget = (self.baseMaxBitrate * 1000) / self.framerate
-        let theoreticalPFrameBudget = max(1000, (theoreticalBudget * 80) / 100)
-        let theoreticalRatioQ8 = (theoreticalPFrameBudget * 256) / max(1, self.lastPFrameBits)
+        let theoreticalFrameBits = max(1, self.baseMaxBitrate / self.framerate)
+        let theoreticalPFrameBudget = max(1, (theoreticalFrameBits * 80) / 100)
+        let theoreticalRatioQ8 = min(2048, (theoreticalPFrameBudget * 256) / max(1, self.lastPFrameBits))
         self.budgetSurplusEMAQ8 = (self.budgetSurplusEMAQ8 * 3 + theoreticalRatioQ8) / 4
         
         let budgetRatioQ8: Int
@@ -183,11 +187,11 @@ struct RateController {
         
         let referenceStep = max(16, self.lastPFrameQStep > 0 ? self.lastPFrameQStep : baseStep)
         // Distortion target D* による品質天井
-        if self.isQualitySaturated {
-            let safeAvg = max(1, self.avgDistortion)
-            let ratio = min(150, (self.targetDistortion * 100) / safeAvg)
-            let qualityStep = min(8192, (referenceStep * ratio) / 100)
-            minStep = max(minStep, qualityStep)
+        if self.isQualitySaturated && 0 < self.saturationAnchorStep {
+            let safeAvg = max(1, self.avgDistortionQ8)
+            let ratioQ8 = min(512, (self.targetDistortionQ8 * 256) / safeAvg)
+            let qualityFloor = (self.saturationAnchorStep * ratioQ8) / 256
+            minStep = max(minStep, min(qualityFloor, self.saturationAnchorStep * 2))
         }
         
         if 0 < lastPFrameBits && 0 < lastPFrameQStep && 0 < lastPFrameSAD {
@@ -212,10 +216,10 @@ struct RateController {
         // This is content-adaptive: no fixed parameters, responds to actual quality.
         // Half-strength blending: apply only 50% of the correction to avoid
         // over-reacting and causing excessive size increase.
-        if 0 < lastDistortion && 0 < avgDistortion {
+        if 0 < lastDistortionQ8 && 0 < avgDistortionQ8 {
             // fullCorrection = newStep * avgDistortion / lastDistortion
             // blended = (newStep + fullCorrection) / 2 → 50% correction strength
-            let fullCorrection = (Int64(newStepInt) * Int64(avgDistortion)) / Int64(lastDistortion)
+            let fullCorrection = (Int64(newStepInt) * Int64(avgDistortionQ8)) / Int64(lastDistortionQ8)
             let blended = (Int64(newStepInt) + fullCorrection) / 2
             newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), blended)))
         }
@@ -257,11 +261,11 @@ struct RateController {
         
         // Track reconstruction distortion with EMA.
         // Slow adaptation (7/8 weight on history) to establish a stable target.
-        self.lastDistortion = distortion
-        if self.avgDistortion == 0 {
-            self.avgDistortion = distortion
+        self.lastDistortionQ8 = distortion
+        if self.avgDistortionQ8 == 0 {
+            self.avgDistortionQ8 = distortion
         } else {
-            self.avgDistortion = ((self.avgDistortion * 7) + distortion) / 8
+            self.avgDistortionQ8 = ((self.avgDistortionQ8 * 7) + distortion) / 8
         }
         
         updateSaturationState()
