@@ -254,7 +254,13 @@ actor LayersEncodeActor {
             
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
             
-
+            // --- 作業1c: D* 動作の可視化（一時ログ）---
+            // v6 作業5 の最終クリーンアップで削除すること
+            if ProcessInfo.processInfo.environment["VEVC_RC_LOG"] != nil {
+                let msg = "frame=\(frameIndex), qStep=\(adjustedStep), avgDistortionQ8=\(rateController.avgDistortionQ8), isQualitySaturated=\(rateController.isQualitySaturated), bits=\(bytes.count * 8)\n"
+                fputs(msg, stderr)
+            }
+            // ----------------------------------------
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon
             

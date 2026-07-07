@@ -24,8 +24,13 @@ struct RateController {
     // actual/budget consumption ratio of past GOPs, tracked by EMA.
     private(set) var rateGainQ8: Int = 256
     
-    // budgetSurplusEMAQ8: EMA of theoretical budget surplus (baseMaxBitrate based)
-    private(set) var budgetSurplusEMAQ8: Int = 256
+    // budgetRatioQ8: GOP内の消化ペース（値が大きいほど予算が余っている）
+    private(set) var budgetRatioQ8: Int = 64
+    
+    // pPaceRatioQ8: P-frame専用の消化ペース（I-frame消費後を基準とする）
+    private(set) var pPlanBits: Int = 0
+    private(set) var pPlanFrames: Int = 0
+    private(set) var pPaceRatioQ8: Int = 256
     
     // isQualitySaturated: Unified state for quality saturation (D*)
     private(set) var isQualitySaturated: Bool = false
@@ -41,19 +46,19 @@ struct RateController {
     @inline(__always)
     private mutating func updateSaturationState() {
         if self.isQualitySaturated {
-            if self.budgetSurplusEMAQ8 < 256 || (self.targetDistortionQ8 * 5) / 4 < self.avgDistortionQ8 {
+            if (self.targetDistortionQ8 * 5) / 4 < self.avgDistortionQ8 {
                 self.isQualitySaturated = false
                 self.saturationAnchorStep = 0
             }
         } else {
-            if 320 < self.budgetSurplusEMAQ8 && 0 < self.avgDistortionQ8 && self.avgDistortionQ8 < self.targetDistortionQ8 {
+            if 0 < self.avgDistortionQ8 && self.avgDistortionQ8 < self.targetDistortionQ8 && 230 <= self.pPaceRatioQ8 {
                 self.isQualitySaturated = true
                 self.saturationAnchorStep = max(16, self.lastPFrameQStep)
             }
         }
     }
 
-    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 0) {
+    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 690) {
         self.baseMaxBitrate = maxbitrate
         self.maxbitrate = (maxbitrate * 410) / 256
         self.framerate = framerate
@@ -77,6 +82,18 @@ struct RateController {
                 self.rateGainQ8 = max(64, min(2048, ((self.rateGainQ8 * 3) + clamped) / 4))
             }
         }
+        
+        /* 
+         * --- ガードレール（作業5で削除予定） ---
+         * vevcのレート制御は strict ABR ではない。
+         * - maxbitrateは厳守すべき平均値ではなく「基準値」。
+         * - 低ビットレート指定時は、意図的に最大1.6倍まで消費してAVCのSSIMを上回るのが製品要件。
+         * - 品質が目標値 D* (targetDistortionQ8) に近づくと、ゲインは 1.6x -> 1.0x に自動で縮む。
+         * - 実測ビットレートが指定値を超えるのはバグではなく仕様。
+         * - 品質が飽和し、予算が余った場合のみ isQualitySaturated が立ち、QStepの下限を引き上げてサイズ増を止める。
+         * このロジックを修正・削除してはならない。
+         * ----------------------------------------
+         */
         // 1.6x ゲインの distortion 適応化
         if self.isQualitySaturated {
             self.maxbitrate = self.baseMaxBitrate
@@ -128,6 +145,9 @@ struct RateController {
     mutating func consumeIFrame(bits: Int, qStep: Int) {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
+        
+        self.pPlanBits = self.gopRemainingBits
+        self.pPlanFrames = self.gopRemainingFrames
     }
     
     @inline(__always)
@@ -152,18 +172,15 @@ struct RateController {
         
         let plannedRemaining = max(1, (gopTargetBits * gopRemainingFrames) / max(1, keyint))
         
-        // Update budgetSurplusEMAQ8 using theoretical budget (baseMaxBitrate) to prevent oscillation
-        let theoreticalFrameBits = max(1, self.baseMaxBitrate / self.framerate)
-        let theoreticalPFrameBudget = max(1, (theoreticalFrameBits * 80) / 100)
-        let theoreticalRatioQ8 = min(2048, (theoreticalPFrameBudget * 256) / max(1, self.lastPFrameBits))
-        self.budgetSurplusEMAQ8 = (self.budgetSurplusEMAQ8 * 3 + theoreticalRatioQ8) / 4
-        
-        let budgetRatioQ8: Int
         if gopRemainingBits < 0 {
-            budgetRatioQ8 = 64
+            self.budgetRatioQ8 = 64
         } else {
-            budgetRatioQ8 = max(64, min(1024, (gopRemainingBits << 8) / plannedRemaining))
+            self.budgetRatioQ8 = max(64, min(1024, (gopRemainingBits << 8) / plannedRemaining))
         }
+        let budgetRatioQ8 = self.budgetRatioQ8
+        
+        let plannedP = max(1, (self.pPlanBits * self.gopRemainingFrames) / max(1, self.pPlanFrames))
+        self.pPaceRatioQ8 = max(0, min(1024, (self.gopRemainingBits << 8) / plannedP))
 
         // maxStep scales proportionally to baseStep: P-Frame worst-case quality
         // tracks I-Frame quality level. At high bitrates (low baseStep), this
