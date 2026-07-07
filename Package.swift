@@ -7,7 +7,7 @@ let isWasmBuild = ProcessInfo.processInfo.environment["WASM_BUILD"] == "1"
 var packageProducts: [Product] = [
     .library(name: "vevc", targets: ["vevc"]),
     .library(name: "libvevc", type: .dynamic, targets: ["libvevc"]),
-    .library(name: "libvevc_static", type: .static, targets: ["libvevc"]),
+    .library(name: "libvevc_static", type: .static, targets: ["libvevc"])
 ]
 
 var packageDeps: [Package.Dependency] = [

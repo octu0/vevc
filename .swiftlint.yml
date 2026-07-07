@@ -1,0 +1,38 @@
+disabled_rules:
+  - trailing_whitespace
+  - force_cast
+  - force_try
+  - function_body_length
+  - type_body_length
+  - file_length
+  - cyclomatic_complexity
+  - large_tuple
+  - nesting
+  - identifier_name
+  - shorthand_operator
+  - for_where
+  - line_length
+  - function_parameter_count
+  - switch_case_alignment
+  - type_name
+  - multiple_closures_with_trailing_closure
+  - unused_optional_binding
+  - orphaned_doc_comment
+  - opening_brace
+
+opt_in_rules:
+  - implicit_return
+  - implicit_getter
+  - literal_expression_end_indentation
+
+implicit_return:
+  included: [closure, function, getter]
+
+literal_expression_end_indentation:
+  severity: warning
+
+analyzer_rules:
+  - unused_import
+
+excluded:
+  - .build
