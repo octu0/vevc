@@ -7,6 +7,7 @@ var bitrate = 500
 var zeroThreshold = 3
 var keyint = 30
 var sceneThreshold = 32
+var qstep: Int? = nil
 
 let args = CommandLine.arguments
 var i = 1
@@ -26,6 +27,11 @@ while i < args.count {
     case "-b":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { bitrate = v }
+            i += 1
+        }
+    case "-qstep", "--qstep":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { qstep = v }
             i += 1
         }
     case "-keyint":
@@ -50,7 +56,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>]\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>]\n", stderr)
     exit(1)
 }
 
@@ -89,15 +95,28 @@ do {
         }
     }
     
-    let encoder = vevc.VEVCEncoder(
-        width: y4mReader.width,
-        height: y4mReader.height,
-        maxbitrate: bitrate * 1000,
-        framerate: Int(fps),
-        zeroThreshold: zeroThreshold,
-        keyint: keyint,
-        sceneChangeThreshold: sceneThreshold
-    )
+    let encoder: vevc.VEVCEncoder
+    if let qstep = qstep {
+        encoder = vevc.VEVCEncoder(
+            width: y4mReader.width,
+            height: y4mReader.height,
+            qstep: qstep,
+            framerate: Int(fps),
+            zeroThreshold: zeroThreshold,
+            keyint: keyint,
+            sceneChangeThreshold: sceneThreshold
+        )
+    } else {
+        encoder = vevc.VEVCEncoder(
+            width: y4mReader.width,
+            height: y4mReader.height,
+            maxbitrate: bitrate * 1000,
+            framerate: Int(fps),
+            zeroThreshold: zeroThreshold,
+            keyint: keyint,
+            sceneChangeThreshold: sceneThreshold
+        )
+    }
 
     var frameCount = 0
     var totalEncodeTime: TimeInterval = 0

@@ -1,3 +1,5 @@
+import Foundation
+
 // MARK: - Quantization
 
 struct Quantizer: Sendable {
@@ -182,31 +184,50 @@ struct AQTable: Sendable {
         }
     }
 
+    public static var mode: Int {
+        if let str = ProcessInfo.processInfo.environment["VEVC_AQ_MODE"], let m = Int(str) {
+            return m
+        }
+        return 3
+    }
+
     /// Select the appropriate quantization table index (0..4) based on block AC energy
     /// relative to the frame average, and block motion activity (SAD).
     @inline(__always)
     func selectIndex(energy: Int, avgEnergy: Int, sad: Int = -1, bx: Int = 0, by: Int = 0, colCount: Int = 1, rowCount: Int = 1) -> Int {
+        let m = Self.mode
+        if m == 0 {
+            return 2 // C0: Baseline (No AQ)
+        }
+        
         // Psycho-visual AQ: ratio = energy / avgEnergy
         let safeAvg = max(1, avgEnergy)
-        let ratioX10 = (energy * 10) / safeAvg
+        let ratioX10: Int
+        if m == 2 {
+            ratioX10 = 10 // C2: Motion Only ignores Energy
+        } else {
+            ratioX10 = (energy * 10) / safeAvg
+        }
 
         var adjustedRatio = ratioX10
 
         // ROI (Region of Interest) Spatial Rate Allocation:
-        let cx = colCount / 2
-        let cy = rowCount / 2
-        let dist = Int((bx - cx).magnitude) + Int((by - cy).magnitude)
-        let maxDist = max(1, cx + cy)
-        let distRatio = (dist * 10) / maxDist
-        
-        if 7 <= distRatio {
-            adjustedRatio += 2
-        } else if distRatio <= 4 {
-            adjustedRatio -= 3
+        if m == 3 {
+            let cx = colCount / 2
+            let cy = rowCount / 2
+            let dist = Int((bx - cx).magnitude) + Int((by - cy).magnitude)
+            let maxDist = max(1, cx + cy)
+            let distRatio = (dist * 10) / maxDist
+            
+            if 7 <= distRatio {
+                adjustedRatio += 2
+            } else if distRatio <= 4 {
+                adjustedRatio -= 3
+            }
         }
 
-        // Motion (SAD) and Spatial Frequency (Energy) Hybrid Adaptive Quantization:
-        if sad != -1 {
+        // Motion (SAD) Adaptive Quantization:
+        if (m == 2 || m == 3) && sad != -1 {
             if sad < 128 {
                 adjustedRatio += 2
             } else if 256 < sad {

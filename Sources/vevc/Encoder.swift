@@ -10,6 +10,7 @@ public actor VEVCEncoder {
     public nonisolated let keyint: Int
     public nonisolated let sceneChangeThreshold: Int
     public nonisolated let maxConcurrency: Int
+    public nonisolated let qstep: Int?
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
@@ -24,6 +25,7 @@ public actor VEVCEncoder {
         self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
         self.maxConcurrency = maxConcurrency
+        self.qstep = nil
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -34,7 +36,33 @@ public actor VEVCEncoder {
             zeroThreshold: zeroThreshold,
             keyint: keyint,
             sceneChangeThreshold: sceneChangeThreshold,
-            pool: pool
+            pool: pool,
+            qstep: nil
+        )
+    }
+
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
+        self.width = width
+        self.height = height
+        self.maxbitrate = 0
+        self.framerate = framerate
+        self.zeroThreshold = zeroThreshold
+        self.keyint = keyint
+        self.sceneChangeThreshold = sceneChangeThreshold
+        self.maxConcurrency = maxConcurrency
+        self.qstep = qstep
+        
+        self.pool = BlockViewPool()
+        self.coreEncoder = LayersEncodeActor(
+            width: width,
+            height: height,
+            maxbitrate: 0,
+            framerate: framerate,
+            zeroThreshold: zeroThreshold,
+            keyint: keyint,
+            sceneChangeThreshold: sceneChangeThreshold,
+            pool: pool,
+            qstep: qstep
         )
     }
     
@@ -114,6 +142,7 @@ actor LayersEncodeActor {
     let keyint: Int
     let sceneChangeThreshold: Int
     let pool: BlockViewPool
+    let qstep: Int?
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
@@ -130,7 +159,7 @@ actor LayersEncodeActor {
     private var previousReconstructed: PlaneData420?
     private var releasePreviousRecon: (@Sendable () -> Void)?
     
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -139,6 +168,7 @@ actor LayersEncodeActor {
         self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
         self.pool = pool
+        self.qstep = qstep
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
@@ -151,6 +181,7 @@ actor LayersEncodeActor {
         self.keyint = keyint
         self.sceneChangeThreshold = sceneChangeThreshold
         self.pool = BlockViewPool()
+        self.qstep = nil
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
@@ -179,14 +210,19 @@ actor LayersEncodeActor {
         
         if isIFrame {
             // Rate control
-
-            let targetBits = rateController.beginGOP()
-            let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
+            let baseStep: Int
+            if let fixedStep = self.qstep {
+                baseStep = fixedStep
+                self.qt = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
+            } else {
+                let targetBits = rateController.beginGOP()
+                let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
+                self.qt = baseQt
+                baseStep = Int(baseQt.step)
+            }
             
-            self.qt = baseQt
             framesSinceKeyframe = 0
             
-            let baseStep = Int(baseQt.step)
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0)
             
@@ -195,7 +231,9 @@ actor LayersEncodeActor {
                 qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0
             )
             
-            rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
+            if self.qstep == nil {
+                rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
+            }
             
             // Clean up old state
             releasePreviousInput?()
@@ -239,7 +277,12 @@ actor LayersEncodeActor {
             let baseStep = Int(baseQt.step)
             
             let frameSAD = estimateFrameSAD(current: plane, previous: prevRecon)
-            let adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
+            let adjustedStep: Int
+            if let fixedStep = self.qstep {
+                adjustedStep = fixedStep
+            } else {
+                adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
+            }
             let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
             
@@ -252,11 +295,13 @@ actor LayersEncodeActor {
             // Using masked recon distortion for quality metric
             let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
             
-            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
+            if self.qstep == nil {
+                rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
+            }
             
             // --- 作業1c: D* 動作の可視化（一時ログ）---
             // v6 作業5 の最終クリーンアップで削除すること
-            if ProcessInfo.processInfo.environment["VEVC_RC_LOG"] != nil {
+            if ProcessInfo.processInfo.environment["VEVC_RC_LOG"] != nil && self.qstep == nil {
                 let msg = "frame=\(frameIndex), qStep=\(adjustedStep), avgDistortionQ8=\(rateController.avgDistortionQ8), isQualitySaturated=\(rateController.isQualitySaturated), bits=\(bytes.count * 8)\n"
                 fputs(msg, stderr)
             }

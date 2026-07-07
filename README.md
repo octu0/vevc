@@ -249,7 +249,8 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 
 - `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
-- `-b <kilobit>`: Specifies the target bitrate (desired compression ratio/quality) in kilobit per second.
+- `-b <kilobit>`: Target maximum bitrate in kbps (default: 500).
+- `-qstep <val>`: CQP mode. Uses a constant quantization step, bypassing rate control.
 - `-keyint <keyint>`: Specifies the keyframe interval (maximum GOP size, automatically falls back to I-Frame for scene changes or end of stream).
 - `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size by aggressively skipping noise).
 - `-sceneThreshold <sad>`: Sets the SAD threshold for scene change detection (forces an I-frame when temporal changes are too massive).

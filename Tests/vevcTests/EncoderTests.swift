@@ -54,14 +54,58 @@ final class EncoderTests: XCTestCase {
         
         // Total SAD for active blocks = (10 * 1024) + (20 * 1024) = 30 * 1024
         // Active pixels = 2 * 1024 = 2048
-        // maskedSAD = 30 * 1024 / 2048 = 15
-        XCTAssertEqual(maskedSAD, 15)
+        // maskedSAD = (30 * 1024 * 256) / 2048 = 3840
+        XCTAssertEqual(maskedSAD, 3840)
         
         // Fallback test: no sads provided
         let fallbackSAD = computeMaskedReconDistortion(original: originalPd, reconstructed: reconPd, sads: nil)
         // Total SAD = 30 * 1024
         // Total pixels = 4096
-        // fallbackSAD = 30 * 1024 / 4096 = 7.5 -> 7
-        XCTAssertEqual(fallbackSAD, 7)
+        // fallbackSAD = (30 * 1024 * 256) / 4096 = 1920
+        XCTAssertEqual(fallbackSAD, 1920)
+    }
+    func testCQPDeterminism() async throws {
+        let width = 64
+        let height = 64
+        
+        let pool = BlockViewPool()
+        var img1 = YCbCrImage(width: width, height: height, ratio: .ratio420)
+        var img2 = YCbCrImage(width: width, height: height, ratio: .ratio420)
+        
+        // Fill some predictable data
+        img1.yPlane.withUnsafeMutableBufferPointer { ptr in
+            for i in 0..<ptr.count { ptr[i] = UInt8(i % 256) }
+        }
+        img1.cbPlane.withUnsafeMutableBufferPointer { ptr in
+            for i in 0..<ptr.count { ptr[i] = 128 }
+        }
+        img1.crPlane.withUnsafeMutableBufferPointer { ptr in
+            for i in 0..<ptr.count { ptr[i] = 128 }
+        }
+        
+        // Same data for img2
+        img2.yPlane.withUnsafeMutableBufferPointer { ptr in
+            for i in 0..<ptr.count { ptr[i] = UInt8(i % 256) }
+        }
+        img2.cbPlane.withUnsafeMutableBufferPointer { ptr in
+            for i in 0..<ptr.count { ptr[i] = 128 }
+        }
+        img2.crPlane.withUnsafeMutableBufferPointer { ptr in
+            for i in 0..<ptr.count { ptr[i] = 128 }
+        }
+        
+        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 100)
+        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 100)
+        
+        let bytes1 = try await encoder1.encode(image: img1)
+        let bytes2 = try await encoder2.encode(image: img2)
+        
+        XCTAssertEqual(bytes1, bytes2)
+        
+        // Test a second frame
+        let bytes1_p = try await encoder1.encode(image: img1)
+        let bytes2_p = try await encoder2.encode(image: img2)
+        
+        XCTAssertEqual(bytes1_p, bytes2_p)
     }
 }
