@@ -89,7 +89,7 @@ do {
     var fps = 30
     if y4mReader.fpsHeader.starts(with: "F") {
         let parts = y4mReader.fpsHeader.dropFirst().split(separator: ":")
-        if parts.count == 2, let num = Int(parts[0]), let den = Int(parts[1]), den > 0 {
+        if parts.count == 2, let num = Int(parts[0]), let den = Int(parts[1]), 0 < den {
             fps = num / den
             if fps == 0 { fps = 30 }
         }
@@ -131,7 +131,7 @@ do {
     }
 
     if outPath != "-" {
-        let msPerFrame = frameCount > 0 ? (totalEncodeTime * 1000 / Double(frameCount)) : 0
+        let msPerFrame = if 0 < frameCount { (totalEncodeTime * 1000 / Double(frameCount)) } else { 0.0 }
         let logMsg = String(format: "Encoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, totalEncodeTime * 1000, msPerFrame)
         fputs(logMsg, stderr)
     }

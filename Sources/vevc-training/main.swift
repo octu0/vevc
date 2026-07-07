@@ -89,7 +89,7 @@ func main() async {
         )
         
         do {
-            let _ = try await encoder.encodeToData(images: images)
+            _ = try await encoder.encodeToData(images: images)
             print("Encoded \(path) and collected frequencies.")
         } catch {
             print("Failed to encode \(path): \(error)")
@@ -108,7 +108,7 @@ func main() async {
     for ctx in 0..<4 {
         // Run Model
         let runTotal = trainer.runFreqs[ctx].reduce(0, +)
-        if runTotal > 0 {
+        if 0 < runTotal {
             for i in 0..<64 {
                 let scaled = UInt32(UInt64(trainer.runFreqs[ctx][i]) * UInt64(targetTotal) / UInt64(runTotal))
                 trainer.runFreqs[ctx][i] = max(1, scaled) // Ensure at least 1
@@ -117,7 +117,7 @@ func main() async {
         
         // Val Model
         let valTotal = trainer.valFreqs[ctx].reduce(0, +)
-        if valTotal > 0 {
+        if 0 < valTotal {
             for i in 0..<64 {
                 let scaled = UInt32(UInt64(trainer.valFreqs[ctx][i]) * UInt64(targetTotal) / UInt64(valTotal))
                 trainer.valFreqs[ctx][i] = max(1, scaled)

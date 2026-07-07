@@ -213,7 +213,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         ] as CFDictionary
     }
     
-    // 1. Setup Compression Session
+
     var compressionSessionOut: VTCompressionSession?
     let status = VTCompressionSessionCreate(
         allocator: kCFAllocatorDefault,
@@ -236,7 +236,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         throw NSError(domain: "VTCompressionSessionCreate", code: Int(status), userInfo: nil)
     }
     
-    // Properties
+
     let bitRateBps = config.bitrate * 1000
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
@@ -255,10 +255,10 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         }
     }
     
-    // Encode loop
+
     let encStart = Date()
     for (idx, pixelBuffer) in encodeBuffers.enumerated() {
-        // Define frame time
+    
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
         
         var flags: VTEncodeInfoFlags = []
@@ -276,14 +276,14 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
     VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
     encTime = Date().timeIntervalSince(encStart)
     
-    // Calculate size
+
     for sample in frameBox.frames {
         if let dataBuffer = CMSampleBufferGetDataBuffer(sample) {
             compSize += CMBlockBufferGetDataLength(dataBuffer)
         }
     }
     
-    // 2. Setup Decompression Session
+
     var decTime: Double = 0
     guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil, frameBox.frames) }
     
@@ -320,7 +320,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
         throw NSError(domain: "VTDecompressionSessionCreate", code: Int(decStatus), userInfo: nil)
     }
 
-    // Decode loop (Speed Pass)
+
     let decStart = Date()
     for sample in frameBox.frames {
         var flags: VTDecodeInfoFlags = []
@@ -378,7 +378,7 @@ func runH264(images: [ImageInput], config: Config, width: Int, height: Int, disa
             }
         }
         metrics = mets
-        frameBox.decodedBuffers.removeAll() // Clear memory!
+        frameBox.decodedBuffers.removeAll()
     }
 
     return (encTime, decTime, compSize, metrics, frameBox.frames)
@@ -405,7 +405,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         ] as CFDictionary
     }
     
-    // 1. Setup Compression Session
+
     var compressionSessionOut: VTCompressionSession?
     let status = VTCompressionSessionCreate(
         allocator: kCFAllocatorDefault,
@@ -429,7 +429,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         throw NSError(domain: "VTCompressionSessionCreate (HEVC)", code: Int(status), userInfo: nil)
     }
     
-    // Properties
+
     let bitRateBps = config.bitrate * 1000
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
@@ -448,7 +448,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         }
     }
     
-    // Encode loop
+
     let encStart = Date()
     for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
@@ -467,16 +467,16 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
     encTime = Date().timeIntervalSince(encStart)
     
-    // Calculate size
+
     for sample in frameBox.frames {
         if let dataBuffer = CMSampleBufferGetDataBuffer(sample) {
             compSize += CMBlockBufferGetDataLength(dataBuffer)
         }
     }
     
-    // 2. Setup Decompression Session
+
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil, frameBox.frames) }
+    guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil, frameBox.frames) }
     
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
         throw NSError(domain: "CMSampleBufferGetFormatDescription (HEVC)", code: -1, userInfo: nil)
@@ -510,7 +510,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         throw NSError(domain: "VTDecompressionSessionCreate (HEVC)", code: Int(decStatus), userInfo: nil)
     }
 
-    // Decode loop (Speed Pass)
+
     let decStart = Date()
     for sample in frameBox.frames {
         var flags: VTDecodeInfoFlags = []
@@ -568,7 +568,7 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
             }
         }
         metrics = mets
-        frameBox.decodedBuffers.removeAll() // Clear memory!
+        frameBox.decodedBuffers.removeAll()
     }
 
     return (encTime, decTime, compSize, metrics, frameBox.frames)
@@ -586,7 +586,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
     }
     let frameBox = FrameBox()
     
-    // 1. Setup Compression Session
+
     var compressionSessionOut: VTCompressionSession?
     let status = VTCompressionSessionCreate(
         allocator: kCFAllocatorDefault,
@@ -610,7 +610,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         throw NSError(domain: "VTCompressionSessionCreate (MJPEG)", code: Int(status), userInfo: nil)
     }
     
-    // Properties
+
     let bitRateBps = config.bitrate * 1000
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
@@ -627,7 +627,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         }
     }
     
-    // Encode loop
+
     let encStart = Date()
     for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
@@ -646,16 +646,16 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
     VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
     encTime = Date().timeIntervalSince(encStart)
     
-    // Calculate size
+
     for sample in frameBox.frames {
         if let dataBuffer = CMSampleBufferGetDataBuffer(sample) {
             compSize += CMBlockBufferGetDataLength(dataBuffer)
         }
     }
     
-    // 2. Setup Decompression Session
+
     var decTime: Double = 0
-    guard !frameBox.frames.isEmpty else { return (encTime, decTime, compSize, nil) }
+    guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil) }
     
     guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
         throw NSError(domain: "CMSampleBufferGetFormatDescription (MJPEG)", code: -1, userInfo: nil)
@@ -680,7 +680,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         throw NSError(domain: "VTDecompressionSessionCreate (MJPEG)", code: Int(decStatus), userInfo: nil)
     }
 
-    // Decode loop (Speed Pass)
+
     let decStart = Date()
     for sample in frameBox.frames {
         var flags: VTDecodeInfoFlags = []
@@ -738,7 +738,7 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
             }
         }
         metrics = mets
-        frameBox.decodedBuffers.removeAll() // Clear memory!
+        frameBox.decodedBuffers.removeAll()
     }
 
     return (encTime, decTime, compSize, metrics)
@@ -870,13 +870,13 @@ struct CompareApp {
             let warmupCount = min(5, localImages.count)
             let warmupImages = Array(localImages[0..<warmupCount])
             print("Warming up (\(warmupCount) frames)...")
-            let _ = try await runVEVC(images: warmupImages, config: localConfig)
+            _ = try await runVEVC(images: warmupImages, config: localConfig)
             if localConfig.vevcOnly != true {
-                let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-                let _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-                let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
-                let _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-                let _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+                _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+                _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+                _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
+                _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
+                _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
             }
             print("Warmup complete.\n")
 
@@ -1194,7 +1194,7 @@ func saveVersusImage(idx: Int, orig: ImageInput, vevcF: YCbCrImage?, h264F: YCbC
             size: (x: cropW, y: cropH),
             layout: .init(format: .rgba8(palette: [], fill: nil))
         )
-        if let _ = try? image.compress(path: filename, level: 6) {
+        if (try? image.compress(path: filename, level: 6)) != nil {
             print("  -> Saved \(filename)")
         } else {
             print("  -> Failed to save \(filename)")

@@ -901,27 +901,27 @@ struct EntropyDecoder {
             
             pairIndex += 1
             return (Int(zeroRun), 0)
-        } else {
-            let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
-            let ctx = Int(context)
-            let rtInfo = runModels[ctx].findToken(cf: cfRun)
-            ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
-            
-            let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
-            let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
-            let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
-            
-            let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
-            let vtInfo = valModels[ctx].findToken(cf: cfVal)
-            ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
-            
-            let valBypassLen = valueBypassLength(for: vtInfo.token)
-            let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
-            let val = valueDetokenize(token: vtInfo.token, bypassBits: valBypassBits)
-            
-            pairIndex += 1
-            return (Int(zeroRun), val)
         }
+        
+        let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
+        let ctx = Int(context)
+        let rtInfo = runModels[ctx].findToken(cf: cfRun)
+        ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
+        
+        let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
+        let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
+        let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
+        
+        let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
+        let vtInfo = valModels[ctx].findToken(cf: cfVal)
+        ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
+        
+        let valBypassLen = valueBypassLength(for: vtInfo.token)
+        let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
+        let val = valueDetokenize(token: vtInfo.token, bypassBits: valBypassBits)
+        
+        pairIndex += 1
+        return (Int(zeroRun), val)
     }
 }
 

@@ -114,7 +114,7 @@ class PlayerViewModel: ObservableObject {
             self.statusMessage = String(format: "Playing (%.2f fps)", fps)
         }
         
-        let bufferCapacity = (y4mReader.width >= 1920) ? 15 : 30
+        let bufferCapacity = if 1920 <= y4mReader.width { 15 } else { 30 }
         let frameBuffer = FrameBuffer(maxCapacity: bufferCapacity)
         
         let producerTask = Task {
@@ -346,7 +346,7 @@ class PlayerViewModel: ObservableObject {
             self.statusMessage = String(format: "Playing (%.2f fps)", fps)
         }
         
-        let bufferCapacity = (width >= 1920) ? 15 : 30
+        let bufferCapacity = if 1920 <= width { 15 } else { 30 }
         let frameBuffer = FrameBuffer(maxCapacity: bufferCapacity)
         
         let producerTask = Task {
@@ -480,7 +480,7 @@ actor FrameBuffer {
     }
     
     func enqueue(_ frame: FrameData) async throws {
-        while frames.count >= maxCapacity {
+        while maxCapacity <= frames.count {
             try Task.checkCancellation()
             try await Task.sleep(nanoseconds: 10_000_000) // 10ms wait
         }

@@ -25,16 +25,16 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if tlZero != true { let _ = brFlags.readBit() }
+                if tlZero != true { brFlags.skipBit() }
                 
                 let trZero = brFlags.readBit()
-                if trZero != true { let _ = brFlags.readBit() }
+                if trZero != true { brFlags.skipBit() }
                 
                 let blZero = brFlags.readBit()
-                if blZero != true { let _ = brFlags.readBit() }
+                if blZero != true { brFlags.skipBit() }
                 
                 let brZero = brFlags.readBit()
-                if brZero != true { let _ = brFlags.readBit() }
+                if brZero != true { brFlags.skipBit() }
                 
                 tasks.append((i, .split8(
                     tlZero != true, 
@@ -154,16 +154,16 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if tlZero != true { let _ = brFlags.readBit() }
+                if tlZero != true { brFlags.skipBit() }
                 
                 let trZero = brFlags.readBit()
-                if trZero != true { let _ = brFlags.readBit() }
+                if trZero != true { brFlags.skipBit() }
                 
                 let blZero = brFlags.readBit()
-                if blZero != true { let _ = brFlags.readBit() }
+                if blZero != true { brFlags.skipBit() }
                 
                 let brZero = brFlags.readBit()
-                if brZero != true { let _ = brFlags.readBit() }
+                if brZero != true { brFlags.skipBit() }
                 
                 tasks.append((i, .split8(
                     tlZero != true, 
@@ -360,16 +360,16 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if tlZero != true { let _ = brFlags.readBit() }
+                if tlZero != true { brFlags.skipBit() }
                 
                 let trZero = brFlags.readBit()
-                if trZero != true { let _ = brFlags.readBit() }
+                if trZero != true { brFlags.skipBit() }
                 
                 let blZero = brFlags.readBit()
-                if blZero != true { let _ = brFlags.readBit() }
+                if blZero != true { brFlags.skipBit() }
                 
                 let brZero = brFlags.readBit()
-                if brZero != true { let _ = brFlags.readBit() }
+                if brZero != true { brFlags.skipBit() }
                 
                 tasks.append((i, .split4(
                     tlZero != true, 
@@ -478,16 +478,16 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
             let mbType = brFlags.readBit()
             if mbType {
                 let tlZero = brFlags.readBit()
-                if tlZero != true { let _ = brFlags.readBit() }
+                if tlZero != true { brFlags.skipBit() }
                 
                 let trZero = brFlags.readBit()
-                if trZero != true { let _ = brFlags.readBit() }
+                if trZero != true { brFlags.skipBit() }
                 
                 let blZero = brFlags.readBit()
-                if blZero != true { let _ = brFlags.readBit() }
+                if blZero != true { brFlags.skipBit() }
                 
                 let brZero = brFlags.readBit()
-                if brZero != true { let _ = brFlags.readBit() }
+                if brZero != true { brFlags.skipBit() }
                 
                 tasks.append((i, .split4(
                     tlZero != true, 
@@ -657,7 +657,7 @@ fileprivate func decodePlaneBaseSubbands8BlockView(buf: UnsafeBufferPointer<UInt
     nonZeroIndices.reserveCapacity(blockCount)
     for i in 0..<blockCount {
         let isZero = brFlags.readBit()
-        let _ = brFlags.readBit()
+        brFlags.skipBit()
         if isZero != true {
             nonZeroIndices.append(i)
         }

@@ -27,7 +27,7 @@ struct SpeedSizeChart: View {
     var body: some View {
         let maxTime = results.map { max($0.encTimeMs, $0.decTimeMs) }.max() ?? 1.0
         let maxSize = results.map { $0.sizeKB }.max() ?? 1.0
-        let ratio = maxSize > 0 ? (maxTime / maxSize) : 1.0
+        let ratio = if 0 < maxSize { (maxTime / maxSize) } else { 1.0 }
         
         VStack(alignment: .leading) {
             Text("Speed & Size Benchmark")
@@ -35,29 +35,32 @@ struct SpeedSizeChart: View {
                 .padding()
             
             Chart(results, id: \.name) { res in
-                // Using BarMarks for Encoding and Decoding Times
                 let isVEVC = res.name.contains("VEVC")
+                let normalizedSize = res.sizeKB * ratio
+                
+                let encodeCategory = if isVEVC { "VEVC Encode" } else { "Encode Time" }
+                let decodeCategory = if isVEVC { "VEVC Decode" } else { "Decode Time" }
+                let sizeCategory = if isVEVC { "VEVC Size" } else { "Size (KB)" }
+                
                 BarMark(
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", res.encTimeMs)
                 )
-                .foregroundStyle(by: .value("Category", isVEVC ? "VEVC Encode" : "Encode Time"))
+                .foregroundStyle(by: .value("Category", encodeCategory))
                 .position(by: .value("Type", "Encode Time"))
                 
                 BarMark(
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", res.decTimeMs)
                 )
-                .foregroundStyle(by: .value("Category", isVEVC ? "VEVC Decode" : "Decode Time"))
+                .foregroundStyle(by: .value("Category", decodeCategory))
                 .position(by: .value("Type", "Decode Time"))
                 
-                // Normalized Size
-                let normalizedSize = res.sizeKB * ratio
-                PointMark(
+                LineMark(
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", normalizedSize)
                 )
-                .foregroundStyle(by: .value("Category", isVEVC ? "VEVC Size" : "Size (KB)"))
+                .foregroundStyle(by: .value("Category", sizeCategory))
                 .symbol(.circle)
                 .symbolSize(100)
                 .annotation(position: .top) {
@@ -118,7 +121,7 @@ struct PsnrChart: View {
             Chart(validResults, id: \.name) { res in
                 let isVEVC = res.name.contains("VEVC")
                 let stats = res.stats!
-                let color = isVEVC ? Color.orange : Color.blue.opacity(0.8)
+                let color = if isVEVC { Color.orange } else { Color.blue.opacity(0.8) }
                 
                 RuleMark(
                     x: .value("Codec", res.name),
@@ -166,7 +169,7 @@ struct SsimChart: View {
             Chart(validResults, id: \.name) { res in
                 let isVEVC = res.name.contains("VEVC")
                 let stats = res.stats!
-                let color = isVEVC ? Color.orange : Color.green.opacity(0.8)
+                let color = if isVEVC { Color.orange } else { Color.green.opacity(0.8) }
                 
                 RuleMark(
                     x: .value("Codec", res.name),

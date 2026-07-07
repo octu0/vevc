@@ -66,7 +66,8 @@ struct ContentView: View {
                             viewModel.play()
                         }
                     }) {
-                        Image(systemName: viewModel.isPlaying ? "pause.fill" : "play.fill")
+                        let icon = if viewModel.isPlaying { "pause.fill" } else { "play.fill" }
+                        Image(systemName: icon)
                             .font(.title)
                     }
                     .disabled(viewModel.totalFrames <= 0.0 || viewModel.isLoading)

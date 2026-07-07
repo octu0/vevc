@@ -64,17 +64,17 @@ final class CAPIEncoderContext: @unchecked Sendable {
 private func copyPlane(src: UnsafePointer<UInt8>, stride: Int, width: Int, height: Int) -> [UInt8] {
     if stride == width {
         return Array(UnsafeBufferPointer(start: src, count: width * height))
-    } else {
-        var plane = [UInt8](repeating: 0, count: width * height)
-        for y in 0..<height {
-            let dstOffset = y * width
-            let srcOffset = y * stride
-            for x in 0..<width {
-                plane[dstOffset + x] = src.advanced(by: srcOffset + x).pointee
-            }
-        }
-        return plane
     }
+    
+    var plane = [UInt8](repeating: 0, count: width * height)
+    for y in 0..<height {
+        let dstOffset = y * width
+        let srcOffset = y * stride
+        for x in 0..<width {
+            plane[dstOffset + x] = src.advanced(by: srcOffset + x).pointee
+        }
+    }
+    return plane
 }
 
 @_cdecl("vevc_enc_create")

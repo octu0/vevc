@@ -621,6 +621,13 @@ struct BypassReader {
     }
     
     @inline(__always)
+    mutating func skipBit() {
+        ensureBits(1)
+        bitsInBuffer -= 1
+        buffer &= (1 << bitsInBuffer) &- 1
+    }
+    
+    @inline(__always)
     mutating func readBits(count: Int) -> UInt32 {
         guard 0 < count else { return 0 }
         let safeCount = min(count, 32)
@@ -702,9 +709,8 @@ func valueDetokenize(token: UInt8, bypassBits: UInt32) -> Int16 {
     if sign {
         let neg = 0 &- absValue
         return Int16(truncatingIfNeeded: neg)
-    } else {
-        return Int16(truncatingIfNeeded: absValue)
     }
+    return Int16(truncatingIfNeeded: absValue)
 }
 
 @inline(__always)

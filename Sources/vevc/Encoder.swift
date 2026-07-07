@@ -255,70 +255,70 @@ actor LayersEncodeActor {
             frameIndex += 1
             
             return bytes
-        } else {
-            // Duplicate frame detection
-            if let prevIn = previousInputPlane {
-                let isDuplicate = isPlaneIdentical(a: plane, b: prevIn)
-                if isDuplicate {
-                    releasePlane()
-                    framesSinceKeyframe += 1
-                    frameIndex += 1
-                    return VEVCFrameHeader(frameType: .copyFrame).serialize()
-                }
-            }
-            
-            releasePreviousInput?()
-            previousInputPlane = plane
-            releasePreviousInput = releasePlane
-            
-            guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed else {
-                throw EncodeError.missingReferenceFramesForPFrame
-            }
-            let baseStep = Int(baseQt.step)
-            
-            let frameSAD = estimateFrameSAD(current: plane, previous: prevRecon)
-            let adjustedStep: Int
-            if let fixedStep = self.qstep {
-                adjustedStep = fixedStep
-            } else {
-                adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
-            }
-            let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
-            let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
-            
-            let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
-                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
-                maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-                roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
-            )
-            
-            // Using masked recon distortion for quality metric
-            let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
-            
-            if self.qstep == nil {
-                rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
-            }
-            
-
-            let oldRecon = previousReconstructed!
-            let oldRelease = releasePreviousRecon
-            
-            let isPrevFirst = withUnsafePointers(oldRecon.y, firstRecon.y) { p, f in
-                p == f
-            }
-            if isPrevFirst != true {
-                oldRelease?()
-            }
-            
-            previousReconstructed = reconstructed
-            releasePreviousRecon = releaseRecon
-            previousMVs = mvs
-            
-            framesSinceKeyframe += 1
-            frameIndex += 1
-            
-            return bytes
         }
+        
+        // Duplicate frame detection
+        if let prevIn = previousInputPlane {
+            let isDuplicate = isPlaneIdentical(a: plane, b: prevIn)
+            if isDuplicate {
+                releasePlane()
+                framesSinceKeyframe += 1
+                frameIndex += 1
+                return VEVCFrameHeader(frameType: .copyFrame).serialize()
+            }
+        }
+        
+        releasePreviousInput?()
+        previousInputPlane = plane
+        releasePreviousInput = releasePlane
+        
+        guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed else {
+            throw EncodeError.missingReferenceFramesForPFrame
+        }
+        let baseStep = Int(baseQt.step)
+        
+        let frameSAD = estimateFrameSAD(current: plane, previous: prevRecon)
+        let adjustedStep: Int
+        if let fixedStep = self.qstep {
+            adjustedStep = fixedStep
+        } else {
+            adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
+        }
+        let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
+        let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
+        
+        let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
+            pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
+            maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
+            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
+        )
+        
+        // Using masked recon distortion for quality metric
+        let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
+        
+        if self.qstep == nil {
+            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
+        }
+        
+
+        let oldRecon = previousReconstructed!
+        let oldRelease = releasePreviousRecon
+        
+        let isPrevFirst = withUnsafePointers(oldRecon.y, firstRecon.y) { p, f in
+            p == f
+        }
+        if isPrevFirst != true {
+            oldRelease?()
+        }
+        
+        previousReconstructed = reconstructed
+        releasePreviousRecon = releaseRecon
+        previousMVs = mvs
+        
+        framesSinceKeyframe += 1
+        frameIndex += 1
+        
+        return bytes
     }
 }
 

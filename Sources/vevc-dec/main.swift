@@ -98,7 +98,7 @@ do {
     frameCount = count
 
     if outPath != "-" {
-        let msPerFrame = frameCount > 0 ? (decodeTime * 1000 / Double(frameCount)) : 0
+        let msPerFrame = if 0 < frameCount { (decodeTime * 1000 / Double(frameCount)) } else { 0.0 }
         let logMsg = String(format: "Decoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, decodeTime * 1000, msPerFrame)
         fputs(logMsg, stderr)
     }

@@ -390,17 +390,17 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
         return out
-    } else {
-        for (i, task) in tasks {
-            let view = blocks[i]
-            let subs = getSubbands32(view: view)
-            encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs, lastVal: &lastVal)
-        }
-        encoder.flush()
-        var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
-        return out
     }
+    
+    for (i, task) in tasks {
+        let view = blocks[i]
+        let subs = getSubbands32(view: view)
+        encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs, lastVal: &lastVal)
+    }
+    encoder.flush()
+    var out = bwFlags.bytes
+    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+    return out
 }
 
 enum EncodeTask16 {
@@ -504,17 +504,17 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
         return out
-    } else {
-        for (i, task) in tasks {
-            let view = blocks[i]
-            let subs = getSubbands16(view: view)
-            encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
-        }
-        encoder.flush()
-        var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
-        return out
     }
+    
+    for (i, task) in tasks {
+        let view = blocks[i]
+        let subs = getSubbands16(view: view)
+        encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
+    }
+    encoder.flush()
+    var out = bwFlags.bytes
+    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+    return out
 }
 
 @inline(__always)
