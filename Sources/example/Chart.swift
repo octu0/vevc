@@ -14,7 +14,9 @@ struct CodecBenchmarkResult {
 struct BitrateSsimPoint: Hashable {
     let codec: String
     let bitrate: Int
-    let ssim: Double
+    let ssimAvg: Double
+    let ssimMin: Double
+    let ssimMax: Double
     let sizeKB: Double
 }
 
@@ -249,42 +251,86 @@ struct BitrateSsimChart: View {
     let points: [BitrateSsimPoint]
     
     var body: some View {
+        let maxDataSize = points.map { $0.sizeKB }.max() ?? 1000.0
+        let maxChartSize = max(ceil(maxDataSize / 1000.0) * 1000.0, 15000.0)
+        let ratio = maxChartSize
+        
         VStack(alignment: .leading) {
-            Text("SSIM vs Bitrate (Higher is better)")
+            Text("Size & SSIM vs Bitrate")
                 .font(.title)
                 .padding()
             
             Chart(points, id: \.self) { pt in
-                LineMark(
-                    x: .value("Bitrate", pt.bitrate),
-                    y: .value("SSIM Avg", pt.ssim)
+                // Size Bar
+                BarMark(
+                    x: .value("Bitrate", String(pt.bitrate)),
+                    y: .value("Size KB", pt.sizeKB)
                 )
+                .position(by: .value("Codec", pt.codec))
+                .foregroundStyle(by: .value("Codec", pt.codec))
+                .opacity(0.3)
+                .annotation(position: .overlay, alignment: .bottom) {
+                    let yOffset: CGFloat = {
+                        if pt.codec.contains("VEVC") { return -35 }
+                        if pt.codec.contains("H.264") { return -20 }
+                        return -5
+                    }()
+                    Text(String(format: "%.0f KB", pt.sizeKB))
+                        .font(.system(size: 9))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .offset(y: yOffset)
+                        .foregroundColor(.secondary)
+                }
+                
+                // SSIM Candlestick
+                RuleMark(
+                    x: .value("Bitrate", String(pt.bitrate)),
+                    yStart: .value("SSIM Min", pt.ssimMin * ratio),
+                    yEnd: .value("SSIM Max", pt.ssimMax * ratio)
+                )
+                .position(by: .value("Codec", pt.codec))
                 .foregroundStyle(by: .value("Codec", pt.codec))
                 
+                // SSIM Avg Point
                 PointMark(
-                    x: .value("Bitrate", pt.bitrate),
-                    y: .value("SSIM Avg", pt.ssim)
+                    x: .value("Bitrate", String(pt.bitrate)),
+                    y: .value("SSIM Avg", pt.ssimAvg * ratio)
                 )
+                .position(by: .value("Codec", pt.codec))
                 .foregroundStyle(by: .value("Codec", pt.codec))
                 .symbol(.circle)
                 .annotation(position: .top, alignment: .center) {
-                    Text(String(format: "%.0f KB", pt.sizeKB))
+                    Text(String(format: "%.4f", pt.ssimAvg))
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .fontWeight(.regular)
+                        .foregroundColor(.primary)
                 }
             }
             .chartForegroundStyleScale([
                 "VEVC (Layers)": Color.orange,
-                "HEVC (SW)": Color.blue.opacity(0.3),
-                "H.264 (SW)": Color.green.opacity(0.3)
+                "HEVC (SW)": Color.blue,
+                "H.264 (SW)": Color.green
             ])
-            .chartXScale(domain: 300...3000)
-            .chartYScale(domain: .automatic(includesZero: false))
-            .chartXAxis {
-                AxisMarks(values: Array(stride(from: 300, through: 3000, by: 300))) { value in
+            .chartYScale(domain: 0...maxChartSize)
+            .chartYAxis {
+                AxisMarks(position: .leading) { value in
                     AxisGridLine()
                     AxisTick()
-                    AxisValueLabel()
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text("\(Int(v)) KB")
+                        }
+                    }
+                }
+                AxisMarks(position: .trailing, values: Array(stride(from: 0.0, through: 1.0, by: 0.1).map { $0 * ratio })) { value in
+                    AxisGridLine()
+                    AxisTick()
+                    AxisValueLabel {
+                        if let v = value.as(Double.self) {
+                            Text(String(format: "%.1f", v / ratio))
+                        }
+                    }
                 }
             }
             .frame(width: 800, height: 500)
