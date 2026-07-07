@@ -150,13 +150,27 @@ struct AQTable: Sendable {
     /// Level 2 = original (unmodified) quantization.
     /// Wider range prioritizes noise reduction in edge/texture regions at the cost of
     /// slightly larger file size. Applied to both I-frames and P-frames.
-    let tables: (QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable)
+    public static var expMode: Int {
+        if let str = ProcessInfo.processInfo.environment["VEVC_EXP_A"], let m = Int(str) {
+            return m
+        }
+        return 0 // default A0
+    }
 
-    /// Unmodified table at level 2.
-    var base: QuantizationTable { tables.2 }
+    public static var baseIndex: UInt8 {
+        return expMode == 0 ? 2 : 3
+    }
+
+    // A0: 5 levels. A1/A2: 7 levels. We'll use a tuple of 7 for both, padding A0 with dummy values.
+    let tables: (QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable, QuantizationTable)
+
+    /// Unmodified table at base index.
+    var base: QuantizationTable {
+        return self[Int(Self.baseIndex)]
+    }
 
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
-        let scaleDen = 10
+        let scaleDen = 100
 
         @inline(__always)
         func makeScaled(_ num: Int) -> QuantizationTable {
@@ -164,13 +178,30 @@ struct AQTable: Sendable {
             return QuantizationTable(baseStep: scaledStep, isChroma: isChroma, layerIndex: layerIndex)
         }
 
-        self.tables = (
-            makeScaled(7),  // 0.70 - faces/flat regions perfectly protected
-            makeScaled(8),  // 0.80
-            makeScaled(10), // 1.00 - average blocks
-            makeScaled(11), // 1.10
-            makeScaled(12)  // 1.20 - high energy textures slightly quantized
-        )
+        let m = Self.expMode
+        if m == 0 {
+            // A0 (Current): [0.70, 0.80, 1.00, 1.10, 1.20] (indices 0..4, base=2)
+            self.tables = (
+                makeScaled(70),
+                makeScaled(80),
+                makeScaled(100),
+                makeScaled(110),
+                makeScaled(120),
+                makeScaled(120), // dummy
+                makeScaled(120)  // dummy
+            )
+        } else {
+            // A1/A2: [0.50, 0.65, 0.85, 1.00, 1.20, 1.40, 1.60] (indices 0..6, base=3)
+            self.tables = (
+                makeScaled(50),
+                makeScaled(65),
+                makeScaled(85),
+                makeScaled(100),
+                makeScaled(120),
+                makeScaled(140),
+                makeScaled(160)
+            )
+        }
     }
 
     @inline(__always)
@@ -180,39 +211,23 @@ struct AQTable: Sendable {
         case 1: return tables.1
         case 2: return tables.2
         case 3: return tables.3
-        default: return tables.4
+        case 4: return tables.4
+        case 5: return tables.5
+        default: return tables.6
         }
     }
 
-    public static var mode: Int {
-        if let str = ProcessInfo.processInfo.environment["VEVC_AQ_MODE"], let m = Int(str) {
-            return m
-        }
-        return 3
-    }
-
-    /// Select the appropriate quantization table index (0..4) based on block AC energy
+    /// Select the appropriate quantization table index based on block AC energy
     /// relative to the frame average, and block motion activity (SAD).
     @inline(__always)
     func selectIndex(energy: Int, avgEnergy: Int, sad: Int = -1, bx: Int = 0, by: Int = 0, colCount: Int = 1, rowCount: Int = 1) -> Int {
-        let m = Self.mode
+        let m = Self.expMode
         if m == 0 {
-            return 2 // C0: Baseline (No AQ)
-        }
-        
-        // Psycho-visual AQ: ratio = energy / avgEnergy
-        let safeAvg = max(1, avgEnergy)
-        let ratioX10: Int
-        if m == 2 {
-            ratioX10 = 10 // C2: Motion Only ignores Energy
-        } else {
-            ratioX10 = (energy * 10) / safeAvg
-        }
+            // A0: Current linear logic
+            let safeAvg = max(1, avgEnergy)
+            let ratioX10 = (energy * 10) / safeAvg
+            var adjustedRatio = ratioX10
 
-        var adjustedRatio = ratioX10
-
-        // ROI (Region of Interest) Spatial Rate Allocation:
-        if m == 3 {
             let cx = colCount / 2
             let cy = rowCount / 2
             let dist = Int((bx - cx).magnitude) + Int((by - cy).magnitude)
@@ -224,27 +239,70 @@ struct AQTable: Sendable {
             } else if distRatio <= 4 {
                 adjustedRatio -= 3
             }
-        }
 
-        // Motion (SAD) Adaptive Quantization:
-        if (m == 2 || m == 3) && sad != -1 {
-            if sad < 128 {
-                adjustedRatio += 2
-            } else if 256 < sad {
-                if ratioX10 <= 10 {
-                    adjustedRatio -= 3
-                } else {
+            if sad != -1 {
+                if sad < 128 {
                     adjustedRatio += 2
+                } else if 256 < sad {
+                    if ratioX10 <= 10 {
+                        adjustedRatio -= 3
+                    } else {
+                        adjustedRatio += 2
+                    }
                 }
             }
-        }
 
-        switch true {
-        case adjustedRatio <= 6: return 0
-        case adjustedRatio <= 8: return 1
-        case adjustedRatio <= 12: return 2
-        case adjustedRatio <= 15: return 3
-        default: return 4
+            switch true {
+            case adjustedRatio <= 6: return 0
+            case adjustedRatio <= 8: return 1
+            case adjustedRatio <= 12: return 2
+            case adjustedRatio <= 15: return 3
+            default: return 4
+            }
+        } else {
+            // A1 / A2: Logarithmic scaling
+            let strengthQ8 = (m == 1) ? 128 : 64
+            let eLog = log2Q8(max(1, energy))
+            let aLog = log2Q8(max(1, avgEnergy))
+            let d = ((eLog - aLog) * strengthQ8) / 256
+            
+            var level: Int
+            switch true {
+            case d < -200: level = 0
+            case d < -110: level = 1
+            case d <  -30: level = 2
+            case d <=  30: level = 3
+            case d <=  95: level = 4
+            case d <= 150: level = 5
+            default:       level = 6
+            }
+            
+            // Apply SAD/ROI corrections
+            let cx = colCount / 2
+            let cy = rowCount / 2
+            let dist = Int((bx - cx).magnitude) + Int((by - cy).magnitude)
+            let maxDist = max(1, cx + cy)
+            let distRatio = (dist * 10) / maxDist
+            
+            if 7 <= distRatio {
+                level += 1
+            } else if distRatio <= 4 {
+                level -= 1
+            }
+            
+            if sad != -1 {
+                if sad < 128 {
+                    level += 1
+                } else if 256 < sad {
+                    if energy <= avgEnergy {
+                        level -= 1
+                    } else {
+                        level += 1
+                    }
+                }
+            }
+            
+            return max(0, min(6, level))
         }
     }
 
