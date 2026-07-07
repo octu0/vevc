@@ -161,7 +161,7 @@ public struct VEVCFrameHeader {
         let layer1Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer2Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         
-        if (hasRefDir && refDirSize == 0) || (hasRefDir == false && refDirSize != 0) {
+        if (hasRefDir && refDirSize == 0) || (hasRefDir != true && refDirSize != 0) {
             throw DecodeError.invalidHeader
         }
         

@@ -880,8 +880,8 @@ fileprivate func addMCBlockChroma16(
 func scaledMV(_ mv: MotionVector, rightShift: Int) -> MotionVector {
     if mv.isIntra { return mv }
     if rightShift == 0 { return mv }
-    // (v + half) >> s は算術シフトのfloorと合わせて両符号で正しい四捨五入になる。
-    // (v + (v >= 0 ? half : -half)) >> s は負値でゼロから遠ざかる過剰丸めになるので不可。
+    // (v + half) >> s rounds correctly for both signs combined with arithmetic right shift floor behavior.
+    // (v + (v >= 0 ? half : -half)) >> s is incorrect because it causes excessive rounding away from zero for negative values.
     let half = 1 << (rightShift - 1)
     return MotionVector(
         dx: Int16((Int(mv.dx) + half) >> rightShift),

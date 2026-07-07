@@ -398,8 +398,8 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
     return 0
 }
 
-/// 全ブロック走査 + アクティビティマスク付き再構成歪み計測。
-/// 戻り値は per-pixel 平均 SAD（従来の estimateFrameSAD と同じ単位）。
+/// Full block scan with activity mask-based reconstruction distortion measurement.
+/// Returns per-pixel average SAD (same unit as traditional estimateFrameSAD).
 @inline(__always)
 func computeMaskedReconDistortion(
     original: PlaneData420,
@@ -457,7 +457,7 @@ func computeMaskedReconDistortion(
         }
     }
     
-    // フォールバック: アクティブブロックが全体の5%未満の場合は全ブロック平均に切り替える
+    // Fallback: Use full block average if active blocks are less than 5% of total
     if sads == nil || activePixels < (totalPixels / 20) {
         if 0 < totalPixels {
             return (totalFallbackSAD << 8) / totalPixels

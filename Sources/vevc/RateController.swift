@@ -24,10 +24,10 @@ struct RateController {
     // actual/budget consumption ratio of past GOPs, tracked by EMA.
     private(set) var rateGainQ8: Int = 256
     
-    // budgetRatioQ8: GOP内の消化ペース（値が大きいほど予算が余っている）
+    // budgetRatioQ8: Consumption pace within GOP (larger value means more budget remaining)
     private(set) var budgetRatioQ8: Int = 64
     
-    // pPaceRatioQ8: P-frame専用の消化ペース（I-frame消費後を基準とする）
+    // pPaceRatioQ8: Consumption pace specific to P-frames (relative to after I-frame consumption)
     private(set) var pPlanBits: Int = 0
     private(set) var pPlanFrames: Int = 0
     private(set) var pPaceRatioQ8: Int = 256
@@ -83,18 +83,7 @@ struct RateController {
             }
         }
         
-        /* 
-         * --- ガードレール（作業5で削除予定） ---
-         * vevcのレート制御は strict ABR ではない。
-         * - maxbitrateは厳守すべき平均値ではなく「基準値」。
-         * - 低ビットレート指定時は、意図的に最大1.6倍まで消費してAVCのSSIMを上回るのが製品要件。
-         * - 品質が目標値 D* (targetDistortionQ8) に近づくと、ゲインは 1.6x -> 1.0x に自動で縮む。
-         * - 実測ビットレートが指定値を超えるのはバグではなく仕様。
-         * - 品質が飽和し、予算が余った場合のみ isQualitySaturated が立ち、QStepの下限を引き上げてサイズ増を止める。
-         * このロジックを修正・削除してはならない。
-         * ----------------------------------------
-         */
-        // 1.6x ゲインの distortion 適応化
+        // Distortion adaptation of 1.6x gain
         if self.isQualitySaturated {
             self.maxbitrate = self.baseMaxBitrate
         } else {
@@ -111,7 +100,7 @@ struct RateController {
         // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
         var carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
         
-        // 品質天井に当たっているときはキャリーオーバーを抑制して無駄な肥大化を防ぐ
+        // Suppress carry-over when quality hits the ceiling to prevent useless size bloat
         if self.isQualitySaturated {
             carryOver = 0
         }
@@ -195,15 +184,15 @@ struct RateController {
         var minStep = max(16, baseStep)
 
         if budgetRatioQ8 < 192 {
-            // 予算逼迫 (<0.75): さらに粗くすることを許可
+            // Budget tight (<0.75): Allow coarser quantization
             maxStep = min(8192, baseStep * 8)
         } else if 320 < budgetRatioQ8 {
-            // 予算余剰 (>1.25): I-frame より一段細かくすることを許可
+            // Budget surplus (>1.25): Allow finer quantization than I-frame
             minStep = max(16, (baseStep * 3) / 4)
         }
         
 
-        // Distortion target D* による品質天井
+        // Quality ceiling by Distortion target D*
         if self.isQualitySaturated && 0 < self.saturationAnchorStep {
             let safeAvg = max(1, self.avgDistortionQ8)
             let ratioQ8 = min(512, (self.targetDistortionQ8 * 256) / safeAvg)
