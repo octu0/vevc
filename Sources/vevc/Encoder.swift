@@ -299,13 +299,7 @@ actor LayersEncodeActor {
                 rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
             }
             
-            // --- 作業1c: D* 動作の可視化（一時ログ）---
-            // v6 作業5 の最終クリーンアップで削除すること
-            if ProcessInfo.processInfo.environment["VEVC_RC_LOG"] != nil && self.qstep == nil {
-                let msg = "frame=\(frameIndex), qStep=\(adjustedStep), avgDistortionQ8=\(rateController.avgDistortionQ8), isQualitySaturated=\(rateController.isQualitySaturated), bits=\(bytes.count * 8)\n"
-                fputs(msg, stderr)
-            }
-            // ----------------------------------------
+
             let oldRecon = previousReconstructed!
             let oldRelease = releasePreviousRecon
             
@@ -399,7 +393,7 @@ private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> 
     }
     
     if 0 < totalPixels {
-        return totalPixels > 0 ? (totalSAD / totalPixels) : 0
+        return totalSAD / totalPixels
     }
     return 0
 }
@@ -465,10 +459,16 @@ func computeMaskedReconDistortion(
     
     // フォールバック: アクティブブロックが全体の5%未満の場合は全ブロック平均に切り替える
     if sads == nil || activePixels < (totalPixels / 20) {
-        return totalPixels > 0 ? ((totalFallbackSAD << 8) / totalPixels) : 0
-    } else {
-        return activePixels > 0 ? ((totalSAD << 8) / activePixels) : 0
+        if 0 < totalPixels {
+            return (totalFallbackSAD << 8) / totalPixels
+        }
+        return 0
     }
+    
+    if 0 < activePixels {
+        return (totalSAD << 8) / activePixels
+    }
+    return 0
 }
 
 @inline(__always)

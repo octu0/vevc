@@ -202,7 +202,7 @@ struct RateController {
             minStep = max(16, (baseStep * 3) / 4)
         }
         
-        let referenceStep = max(16, self.lastPFrameQStep > 0 ? self.lastPFrameQStep : baseStep)
+
         // Distortion target D* による品質天井
         if self.isQualitySaturated && 0 < self.saturationAnchorStep {
             let safeAvg = max(1, self.avgDistortionQ8)

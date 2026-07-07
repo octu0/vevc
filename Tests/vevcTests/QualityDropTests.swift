@@ -207,9 +207,7 @@ final class QualityDropTests: XCTestCase {
 
         let rowCount = (pd.height + 31) / 32
         let colCount = (pd.width + 31) / 32
-        let levels = [UInt8](repeating: 2, count: colCount * rowCount)
-        let aqY = AQTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
-        let (r32Y, _) = reconstructPlaneLayer32Y(blocks: l32yBlocks, prevImg: prevImg16, width: pd.width, height: pd.height, aqTable: aqY, levels: levels, pool: pool)
+        let (r32Y, _) = reconstructPlaneLayer32Y(blocks: l32yBlocks, prevImg: prevImg16, width: pd.width, height: pd.height, qt: qtY, pool: pool)
         let (r32Cb, _) = reconstructPlaneLayer32Cb(blocks: l32cbBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
         let (r32Cr, _) = reconstructPlaneLayer32Cr(blocks: l32crBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
 
