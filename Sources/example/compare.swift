@@ -895,30 +895,18 @@ struct CompareApp {
             var vevcResultP2: VEVCResultType? = nil
 
             if localConfig.outputGraph {
-                vevcEnableDiagnostics()
-                vevcResetDiagnostics()
                 print("Running vevc (profile 1)...")
                 var configP1 = localConfig
                 configP1.profile = 1
                 vevcResultP1 = try await runVEVC(images: localImages, config: configP1)
-                print("--- Profile 1 Diagnostics ---")
-                vevcPrintDiagnostics()
-                vevcResetDiagnostics()
                 
                 print("Running vevc (profile 2)...")
                 var configP2 = localConfig
                 configP2.profile = 2
                 vevcResultP2 = try await runVEVC(images: localImages, config: configP2)
-                print("--- Profile 2 Diagnostics ---")
-                vevcPrintDiagnostics()
-                vevcDisableDiagnostics()
             } else {
                 print("Running vevc (layers)...")
-                vevcEnableDiagnostics()
-                vevcResetDiagnostics()
                 vevcResult = try await runVEVC(images: localImages, config: localConfig)
-                vevcPrintDiagnostics()
-                vevcDisableDiagnostics()
             }
             
             var h264Result: H264Result? = nil
