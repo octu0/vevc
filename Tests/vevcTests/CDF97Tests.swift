@@ -25,7 +25,6 @@ final class CDF97Tests: XCTestCase {
             for i in 0..<half { L[i] += mulShift(cB, ch(i-1) + H[i]) }
             for i in 0..<half { H[i] += mulShift(cG, cl(i) + cl(i+1)) }
             for i in 0..<half { L[i] += mulShift(cD, ch(i-1) + H[i]) }
-            for i in 0..<half { L[i] = mulShift(cIK, L[i]); H[i] = mulShift(cK, H[i]) }
             for i in 0..<half {
                 x[i] = Int16(truncatingIfNeeded: L[i])
                 x[half+i] = Int16(truncatingIfNeeded: H[i])
@@ -38,7 +37,6 @@ final class CDF97Tests: XCTestCase {
             var H = (0..<half).map { Int32(x[half+$0]) }
             func cl(_ i: Int) -> Int32 { L[min(max(i, 0), half-1)] }
             func ch(_ i: Int) -> Int32 { H[min(max(i, 0), half-1)] }
-            for i in 0..<half { L[i] = mulShift(cK, L[i]); H[i] = mulShift(cIK, H[i]) }
             for i in 0..<half { L[i] -= mulShift(cD, ch(i-1) + H[i]) }
             for i in 0..<half { H[i] -= mulShift(cG, cl(i) + cl(i+1)) }
             for i in 0..<half { L[i] -= mulShift(cB, ch(i-1) + H[i]) }
@@ -150,30 +148,90 @@ final class CDF97Tests: XCTestCase {
                     sumSqErr += Double(err * err)
                 }
                 let rms = sqrt(sumSqErr / Double(length))
-                XCTAssertLessThanOrEqual(maxErr, 5, "Per-sample error exceeds 5")
-                XCTAssertLessThanOrEqual(rms, 1.5, "RMS error exceeds 1.5")
+                XCTAssertEqual(maxErr, 0, "Per-sample error should be exactly 0 (strictly reversible)")
+                XCTAssertEqual(rms, 0.0, "RMS error should be exactly 0.0")
             }
         }
     }
 
     func testGainRules() {
-        // DC gain test
-        var dcInput = [Int16](repeating: 100, count: 16)
-        CDF97Ref.forward(&dcInput)
-        for i in 0..<8 {
-            XCTAssertEqual(dcInput[i], 100, "DC gain for LL should be exactly 1")
-            XCTAssertEqual(dcInput[8+i], 0, "High frequency for DC input should be 0")
+        // 2D Constant input (DC) -> LL should be ~1.513c
+        let width = 16
+        var dcBlock = [Int16](repeating: 100, count: width * width)
+        
+        let pool = BlockViewPool()
+        let view = pool.get(width: width, height: width)
+        dcBlock.withUnsafeMutableBufferPointer { ptr in
+            for y in 0..<width {
+                for x in 0..<width {
+                    view.base[y * view.stride + x] = ptr[y * width + x]
+                }
+            }
         }
         
-        // Nyquist test
-        var nyquistInput = [Int16](repeating: 0, count: 16)
-        for i in 0..<16 { nyquistInput[i] = (i % 2 == 0) ? 100 : -100 }
-        CDF97Ref.forward(&nyquistInput)
-        for i in 0..<8 {
-            XCTAssertEqual(dcInput[i], 100, "LL should not capture Nyquist frequency properly, but let's just check HH gain.")
-            // Wait, nyquist input into forward gives LL ~ 0 and H ~ amplified.
-            // Let's just print to verify the nyquist gain if needed, but the test ensures it's about 2.0 (actually -1.625 * K)
-            XCTAssert(abs(nyquistInput[8+i]) >= 190 && abs(nyquistInput[8+i]) <= 210, "Nyquist gain should be approximately 2.0")
+        cdf97Dwt2DBlock16(view)
+        
+        // LL subband is in view.get(x, y) for x < 8, y < 8
+        // Gain should be approximately K^2 = 1.5133 * 100 ≈ 151
+        for y in 0..<8 {
+            for x in 0..<8 {
+                let v = view.base[y * view.stride + x]
+                XCTAssert(v >= 150 && v <= 153, "DC gain for LL should be approx 1.5133, got \(v)")
+            }
+        }
+        
+        // 2D Checkerboard input (Nyquist) -> HH should be ~2.64c
+        var nyqBlock = [Int16](repeating: 0, count: width * width)
+        for y in 0..<width {
+            for x in 0..<width {
+                nyqBlock[y * width + x] = ((x + y) % 2 == 0) ? 100 : -100
+            }
+        }
+        nyqBlock.withUnsafeMutableBufferPointer { ptr in
+            for y in 0..<width {
+                for x in 0..<width {
+                    view.base[y * view.stride + x] = ptr[y * width + x]
+                }
+            }
+        }
+        
+        cdf97Dwt2DBlock16(view)
+        
+        // HH subband is in view.get(x+8, y+8)
+        // Gain should be approx 4 / K^2 = 2.6432 * 100 ≈ 264
+        for y in 0..<8 {
+            for x in 0..<8 {
+                let v = view.base[(y + 8) * view.stride + (x + 8)]
+                XCTAssert(abs(v) >= 260 && abs(v) <= 268, "Nyquist gain for HH should be approx 2.64, got \(abs(v))")
+            }
+        }
+        pool.put(view)
+    }
+
+    func testPartialDecodeLuminance() async throws {
+        let width = 64
+        let height = 64
+        var yPlane = [UInt8](repeating: 128, count: width * height)
+        let cbPlane = [UInt8](repeating: 128, count: width * height / 4)
+        let crPlane = [UInt8](repeating: 128, count: width * height / 4)
+        
+        var image = YCbCrImage(width: width, height: height)
+        image.yPlane = yPlane
+        image.cbPlane = cbPlane
+        image.crPlane = crPlane
+        
+        let encoder = VEVCEncoder(width: width, height: height, qstep: 16, profile: 0x02)
+        let bitstream = try await encoder.encodeToData(images: [image])
+        
+        for ml in 0...2 {
+            let decoder = Decoder(maxLayer: ml)
+            let frames = try await decoder.decode(data: bitstream)
+            let decodedImage = frames.first
+            
+            XCTAssertNotNil(decodedImage)
+            let decodedY = decodedImage!.yPlane
+            let avg = decodedY.map { Int($0) }.reduce(0, +) / decodedY.count
+            XCTAssert(avg >= 127 && avg <= 129, "maxLayer \(ml) partial decode luminance average should be ~128, got \(avg)")
         }
     }
 

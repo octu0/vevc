@@ -56,11 +56,6 @@ func cdf97LiftBlock16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) 
     // L += cD * (ch(i-1) + H[i])
     highShifted = SIMD8<Int32>(high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6])
     low &+= mulShift(cD, highShifted &+ high)
-    
-    // Scale
-    low = mulShift(cIK, low)
-    high = mulShift(cK, high)
-    
     // Convert back to Int16
     let outL = SIMD8<Int16>(truncatingIfNeeded: low)
     let outH = SIMD8<Int16>(truncatingIfNeeded: high)
@@ -83,11 +78,6 @@ func inverseCdf97LiftBlock16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride
         Int32(rawH[0]), Int32(rawH[1]), Int32(rawH[2]), Int32(rawH[3]),
         Int32(rawH[4]), Int32(rawH[5]), Int32(rawH[6]), Int32(rawH[7])
     )
-    
-    // Inverse Scale
-    low = mulShift(cK, low)
-    high = mulShift(cIK, high)
-    
     // L -= cD * (ch(i-1) + H[i])
     var highShifted = SIMD8<Int32>(high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6])
     low &-= mulShift(cD, highShifted &+ high)
@@ -161,9 +151,6 @@ func cdf97LiftBlock32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) 
     )
     low &+= mulShift16(cD, highShifted &+ high)
     
-    low = mulShift16(cIK, low)
-    high = mulShift16(cK, high)
-    
     let outL0 = SIMD8<Int16>(truncatingIfNeeded: low.lowHalf)
     let outL1 = SIMD8<Int16>(truncatingIfNeeded: low.highHalf)
     let outH0 = SIMD8<Int16>(truncatingIfNeeded: high.lowHalf)
@@ -195,9 +182,6 @@ func inverseCdf97LiftBlock32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride
         Int32(rawH1[0]), Int32(rawH1[1]), Int32(rawH1[2]), Int32(rawH1[3]),
         Int32(rawH1[4]), Int32(rawH1[5]), Int32(rawH1[6]), Int32(rawH1[7])
     )
-    
-    low = mulShift16(cK, low)
-    high = mulShift16(cIK, high)
     
     var highShifted = SIMD16<Int32>(
         high[0], high[0], high[1], high[2], high[3], high[4], high[5], high[6],

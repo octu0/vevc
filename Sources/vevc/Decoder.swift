@@ -124,6 +124,12 @@ public actor StreamingDecoderActor {
         }
         
         roundOffsetIndex += 1
+        
+        if profile == 0x02 && maxLayer < 2 {
+            let multiplier: Int16 = (maxLayer == 0) ? 7154 : 10827
+            return pd.toYCbCr(multiplier: multiplier)
+        }
+        
         return pd.toYCbCr()
     }
 }

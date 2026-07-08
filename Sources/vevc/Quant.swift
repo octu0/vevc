@@ -57,9 +57,9 @@ struct QuantProfileParams: Sendable {
     ])
 
     static let cdf97 = QuantProfileParams(layers: [
-        QuantLayerParams(qLowDivisor: 13, cLowDivisor: 13, qMidNum: 3, qMidDen: 10, qHighNum: 9, qHighDen: 20, dzMidY: 16384, dzHighY: 8192, dzMidC: -8000, dzHighC: -16000),
-        QuantLayerParams(qLowDivisor: 6, cLowDivisor: 8, qMidNum: 2, qMidDen: 5, qHighNum: 21, qHighDen: 20, dzMidY: 8192, dzHighY: 0, dzMidC: -16000, dzHighC: -32000),
-        QuantLayerParams(qLowDivisor: 1, cLowDivisor: 8, qMidNum: 1, qMidDen: 1, qHighNum: 17, qHighDen: 10, dzMidY: 0, dzHighY: -8000, dzMidC: -32000, dzHighC: -64000)
+        QuantLayerParams(qLowDivisor: 6, cLowDivisor: 6, qMidNum: 11, qMidDen: 16, qHighNum: 33, qHighDen: 32, dzMidY: 16384, dzHighY: 8192, dzMidC: -8000, dzHighC: -16000), // Layer 0
+        QuantLayerParams(qLowDivisor: 6, cLowDivisor: 8, qMidNum: 3, qMidDen: 5, qHighNum: 21, qHighDen: 20, dzMidY: 8192, dzHighY: 0, dzMidC: -16000, dzHighC: -32000), // Layer 1
+        QuantLayerParams(qLowDivisor: 1, cLowDivisor: 8, qMidNum: 1, qMidDen: 1, qHighNum: 9, qHighDen: 8, dzMidY: 0, dzHighY: -8000, dzMidC: -32000, dzHighC: -64000) // Layer 2
     ])
 }
 

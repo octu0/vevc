@@ -65,7 +65,7 @@ extension PlaneData420 {
     }
     
     @inline(__always)
-    func toYCbCr() -> YCbCrImage {
+    func toYCbCr(multiplier: Int16? = nil) -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
         if width < 1 || height < 1 { return img }
 
@@ -106,10 +106,34 @@ extension PlaneData420 {
                 }
             }
         }
+        
+        @inline(__always)
+        func convertPlaneScaled(src: [Int16], dst: inout [UInt8], multiplier: Int16) {
+            let count = min(src.count, dst.count)
+            let mul = Int32(multiplier)
+            withUnsafePointers(src, mut: &dst) { srcPtr, dstPtr in
+                var i = 0
+                while i < count {
+                    let v = (Int32(srcPtr[i]) &* mul &+ 8192) &>> 14
+                    switch v {
+                    case ..<(-128): dstPtr[i] = 0
+                    case 128...: dstPtr[i] = 255
+                    default: dstPtr[i] = UInt8(v + 128)
+                    }
+                    i += 1
+                }
+            }
+        }
 
-        convertPlane(src: self.y, dst: &img.yPlane)
-        convertPlane(src: self.cb, dst: &img.cbPlane)
-        convertPlane(src: self.cr, dst: &img.crPlane)
+        if let m = multiplier {
+            convertPlaneScaled(src: self.y, dst: &img.yPlane, multiplier: m)
+            convertPlaneScaled(src: self.cb, dst: &img.cbPlane, multiplier: m)
+            convertPlaneScaled(src: self.cr, dst: &img.crPlane, multiplier: m)
+        } else {
+            convertPlane(src: self.y, dst: &img.yPlane)
+            convertPlane(src: self.cb, dst: &img.cbPlane)
+            convertPlane(src: self.cr, dst: &img.crPlane)
+        }
 
         return img
     }
