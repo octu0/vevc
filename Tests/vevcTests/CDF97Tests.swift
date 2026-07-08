@@ -155,8 +155,8 @@ final class CDF97Tests: XCTestCase {
     }
 
     func testGainRules() {
-        // 2D Constant input (DC) -> LL should be ~1.513c
-        let width = 16
+        // 2D Constant input (DC) -> LL should be ~1.513c * 2 = 3.026c
+        let width = 32
         var dcBlock = [Int16](repeating: 100, count: width * width)
         
         let pool = BlockViewPool()
@@ -169,18 +169,18 @@ final class CDF97Tests: XCTestCase {
             }
         }
         
-        cdf97Dwt2DBlock16(view)
+        cdf97Dwt2DBlock32(view)
         
-        // LL subband is in view.get(x, y) for x < 8, y < 8
-        // Gain should be approximately K^2 = 1.5133 * 100 ≈ 151
-        for y in 0..<8 {
-            for x in 0..<8 {
+        // LL subband is in view.get(x, y) for x < 16, y < 16
+        // Gain should be approximately 2 * K^2 = 2 * 1.5133 * 100 ≈ 302
+        for y in 0..<16 {
+            for x in 0..<16 {
                 let v = view.base[y * view.stride + x]
-                XCTAssert(v >= 150 && v <= 153, "DC gain for LL should be approx 1.5133, got \(v)")
+                XCTAssert(v >= 298 && v <= 306, "DC gain for LL should be approx 3.0266, got \(v)")
             }
         }
         
-        // 2D Checkerboard input (Nyquist) -> HH should be ~2.64c
+        // 2D Checkerboard input (Nyquist) -> HH should be ~2.64c * 2 = 5.28c
         var nyqBlock = [Int16](repeating: 0, count: width * width)
         for y in 0..<width {
             for x in 0..<width {
@@ -195,17 +195,57 @@ final class CDF97Tests: XCTestCase {
             }
         }
         
-        cdf97Dwt2DBlock16(view)
+        cdf97Dwt2DBlock32(view)
         
-        // HH subband is in view.get(x+8, y+8)
-        // Gain should be approx 4 / K^2 = 2.6432 * 100 ≈ 264
-        for y in 0..<8 {
-            for x in 0..<8 {
-                let v = view.base[(y + 8) * view.stride + (x + 8)]
-                XCTAssert(abs(v) >= 260 && abs(v) <= 268, "Nyquist gain for HH should be approx 2.64, got \(abs(v))")
+        // HH subband is in view.get(x+16, y+16)
+        // Gain should be approx 2 * 4 / K^2 = 2 * 2.6432 * 100 ≈ 528
+        for y in 0..<16 {
+            for x in 0..<16 {
+                let v = view.base[(y + 16) * view.stride + (x + 16)]
+                XCTAssert(abs(v) >= 520 && abs(v) <= 536, "Nyquist gain for HH should be approx 5.28, got \(abs(v))")
             }
         }
         pool.put(view)
+    }
+
+    func testRoundtripBlock32Extreme() {
+        let width = 32
+        let pool = BlockViewPool()
+        
+        // Test case 1: Uniform extreme values
+        let view1 = pool.get(width: width, height: width)
+        for y in 0..<width {
+            for x in 0..<width {
+                view1.base[y * view1.stride + x] = 2048
+            }
+        }
+        cdf97Dwt2DBlock32(view1)
+        inverseCdf97Dwt2DBlock32(view1)
+        for y in 0..<width {
+            for x in 0..<width {
+                let v = view1.base[y * view1.stride + x]
+                XCTAssertEqual(v, 2048, "Roundtrip failed for uniform extreme 2048 at \(x),\(y)")
+            }
+        }
+        pool.put(view1)
+        
+        // Test case 2: Checkerboard extreme values
+        let view2 = pool.get(width: width, height: width)
+        for y in 0..<width {
+            for x in 0..<width {
+                view2.base[y * view2.stride + x] = ((x + y) % 2 == 0) ? 2048 : -2048
+            }
+        }
+        cdf97Dwt2DBlock32(view2)
+        inverseCdf97Dwt2DBlock32(view2)
+        for y in 0..<width {
+            for x in 0..<width {
+                let v = view2.base[y * view2.stride + x]
+                let expected: Int16 = ((x + y) % 2 == 0) ? 2048 : -2048
+                XCTAssertEqual(v, expected, "Roundtrip failed for checkerboard extreme at \(x),\(y)")
+            }
+        }
+        pool.put(view2)
     }
 
     func testPartialDecodeLuminance() async throws {

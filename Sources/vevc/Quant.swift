@@ -41,6 +41,7 @@ struct QuantLayerParams: Sendable {
 }
 
 struct QuantProfileParams: Sendable {
+    let stepScale: Int
     let layers: [QuantLayerParams]
 
     static func forProfile(_ profile: UInt8) -> QuantProfileParams {
@@ -50,13 +51,13 @@ struct QuantProfileParams: Sendable {
         }
     }
 
-    static let legall53 = QuantProfileParams(layers: [
+    static let legall53 = QuantProfileParams(stepScale: 1, layers: [
         QuantLayerParams(qLowDivisor: 8, cLowDivisor: 8, qMidNum: 1, qMidDen: 2, qHighNum: 3, qHighDen: 4, dzMidY: 16384, dzHighY: 8192, dzMidC: -8000, dzHighC: -16000),
         QuantLayerParams(qLowDivisor: 6, cLowDivisor: 8, qMidNum: 1, qMidDen: 2, qHighNum: 1, qHighDen: 1, dzMidY: 8192, dzHighY: 0, dzMidC: -16000, dzHighC: -32000),
         QuantLayerParams(qLowDivisor: 1, cLowDivisor: 8, qMidNum: 1, qMidDen: 1, qHighNum: 5, qHighDen: 4, dzMidY: 0, dzHighY: -8000, dzMidC: -32000, dzHighC: -64000)
     ])
 
-    static let cdf97 = QuantProfileParams(layers: [
+    static let cdf97 = QuantProfileParams(stepScale: 2, layers: [
         QuantLayerParams(qLowDivisor: 6, cLowDivisor: 6, qMidNum: 11, qMidDen: 16, qHighNum: 33, qHighDen: 32, dzMidY: 16384, dzHighY: 8192, dzMidC: -8000, dzHighC: -16000), // Layer 0
         QuantLayerParams(qLowDivisor: 6, cLowDivisor: 8, qMidNum: 3, qMidDen: 5, qHighNum: 21, qHighDen: 20, dzMidY: 8192, dzHighY: 0, dzMidC: -16000, dzHighC: -32000), // Layer 1
         QuantLayerParams(qLowDivisor: 1, cLowDivisor: 8, qMidNum: 1, qMidDen: 1, qHighNum: 9, qHighDen: 8, dzMidY: 0, dzHighY: -8000, dzMidC: -32000, dzHighC: -64000) // Layer 2
@@ -92,23 +93,23 @@ struct QuantizationTable: Sendable {
 
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
-            let cLow = min(256, max(16, baseStep / cLowDivisor))
-            let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen))
-            let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen))
+            let cLow = min(256, max(16, baseStep / cLowDivisor)) * profileParams.stepScale
+            let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen)) * profileParams.stepScale
+            let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen)) * profileParams.stepScale
 
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC)
             self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC)
         } else {
             // qLow is the DC component: NEVER scale it!
-            let lLow = min(256, max(16, baseStep / qLowDivisor))
+            let lLow = min(256, max(16, baseStep / qLowDivisor)) * profileParams.stepScale
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
 
             // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
-            let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen))
+            let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen)) * profileParams.stepScale
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY)
 
-            let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen))
+            let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen)) * profileParams.stepScale
             self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY)
         }
     }

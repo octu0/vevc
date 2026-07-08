@@ -250,6 +250,10 @@ func inverseCdf97Dwt2DBlock16(_ block: BlockView) {
 func cdf97Dwt2DBlock32(_ block: BlockView) {
     let base = block.base
     let width = block.stride
+    let total = width * 32
+    for i in 0..<total {
+        base[i] = base[i] << 1
+    }
     for i in 0..<32 { cdf97LiftBlock32(UnsafeMutableBufferPointer(start: base + (i * width), count: 32), stride: 1) }
     transpose32x32InPlace(base, stride: width)
     for i in 0..<32 { cdf97LiftBlock32(UnsafeMutableBufferPointer(start: base + (i * width), count: 32), stride: 1) }
@@ -264,5 +268,9 @@ func inverseCdf97Dwt2DBlock32(_ block: BlockView) {
     for i in 0..<32 { inverseCdf97LiftBlock32(UnsafeMutableBufferPointer(start: base + (i * width), count: 32), stride: 1) }
     transpose32x32InPlace(base, stride: width)
     for i in 0..<32 { inverseCdf97LiftBlock32(UnsafeMutableBufferPointer(start: base + (i * width), count: 32), stride: 1) }
+    let total = width * 32
+    for i in 0..<total {
+        base[i] = (base[i] + 1) >> 1
+    }
 }
 
