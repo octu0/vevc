@@ -888,14 +888,43 @@ struct CompareApp {
             }
             print("Warmup complete.\n")
 
-            print("Running vevc (layers)...")
-            let vevcResult = try await runVEVC(images: localImages, config: localConfig)
+            typealias H264Result = (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [CMSampleBuffer])
+            typealias VEVCResultType = (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [UInt8])
+            var vevcResult: VEVCResultType? = nil
+            var vevcResultP1: VEVCResultType? = nil
+            var vevcResultP2: VEVCResultType? = nil
+
+            if localConfig.outputGraph {
+                vevcEnableDiagnostics()
+                vevcResetDiagnostics()
+                print("Running vevc (profile 1)...")
+                var configP1 = localConfig
+                configP1.profile = 1
+                vevcResultP1 = try await runVEVC(images: localImages, config: configP1)
+                print("--- Profile 1 Diagnostics ---")
+                vevcPrintDiagnostics()
+                vevcResetDiagnostics()
+                
+                print("Running vevc (profile 2)...")
+                var configP2 = localConfig
+                configP2.profile = 2
+                vevcResultP2 = try await runVEVC(images: localImages, config: configP2)
+                print("--- Profile 2 Diagnostics ---")
+                vevcPrintDiagnostics()
+                vevcDisableDiagnostics()
+            } else {
+                print("Running vevc (layers)...")
+                vevcEnableDiagnostics()
+                vevcResetDiagnostics()
+                vevcResult = try await runVEVC(images: localImages, config: localConfig)
+                vevcPrintDiagnostics()
+                vevcDisableDiagnostics()
+            }
             
-            typealias CodecResult = (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [CMSampleBuffer])
-            var h264Result: CodecResult? = nil
-            var h264SwResult: CodecResult? = nil
-            var hevcResult: CodecResult? = nil
-            var hevcSwResult: CodecResult? = nil
+            var h264Result: H264Result? = nil
+            var h264SwResult: H264Result? = nil
+            var hevcResult: H264Result? = nil
+            var hevcSwResult: H264Result? = nil
             var mjpegResult: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?)? = nil
             
             if localConfig.vevcOnly != true {
@@ -941,7 +970,18 @@ struct CompareApp {
             
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
-            chartResults.append(printStats(name: "VEVC (Layers)", encTime: vevcResult.encTime, decTime: vevcResult.decTime, compSize: vevcResult.compSize, metrics: vevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            if localConfig.outputGraph {
+                if let p1 = vevcResultP1 {
+                    chartResults.append(printStats(name: "VEVC (profile1)", encTime: p1.encTime, decTime: p1.decTime, compSize: p1.compSize, metrics: p1.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+                if let p2 = vevcResultP2 {
+                    chartResults.append(printStats(name: "VEVC (profile2)", encTime: p2.encTime, decTime: p2.decTime, compSize: p2.compSize, metrics: p2.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+            } else {
+                if let res = vevcResult {
+                    chartResults.append(printStats(name: "VEVC (Layers)", encTime: res.encTime, decTime: res.decTime, compSize: res.compSize, metrics: res.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+                }
+            }
             
             if localConfig.vevcOnly != true {
                 if let h264Sw = h264SwResult {
@@ -978,9 +1018,18 @@ struct CompareApp {
                     sweepConfig.bitrate = br
                     print(">> Bitrate: \(br) kbps")
                     
-                    let vevcRes = try await runVEVC(images: localImages, config: sweepConfig)
-                    if let stats = calculateQualityStats(metrics: vevcRes.metrics ?? []) {
-                        chartPoints.append(.init(codec: "VEVC (Layers)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(vevcRes.compSize) / 1024.0))
+                    var configP1 = sweepConfig
+                    configP1.profile = 1
+                    let vevcResP1 = try await runVEVC(images: localImages, config: configP1)
+                    if let stats = calculateQualityStats(metrics: vevcResP1.metrics ?? []) {
+                        chartPoints.append(.init(codec: "VEVC (profile1)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(vevcResP1.compSize) / 1024.0))
+                    }
+                    
+                    var configP2 = sweepConfig
+                    configP2.profile = 2
+                    let vevcResP2 = try await runVEVC(images: localImages, config: configP2)
+                    if let stats = calculateQualityStats(metrics: vevcResP2.metrics ?? []) {
+                        chartPoints.append(.init(codec: "VEVC (profile2)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(vevcResP2.compSize) / 1024.0))
                     }
                     
                     if localConfig.vevcOnly != true {
@@ -1004,7 +1053,7 @@ struct CompareApp {
             if localConfig.outputVersus {
                 print("\n--- Output Versus Images ---")
                 
-                let vevcMinIdx = vevcResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let vevcMinIdx = vevcResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let h264MinIdx = h264SwResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let hevcMinIdx = hevcSwResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let sec14Idx = min(14 * localConfig.framerate, localImages.count - 1)
@@ -1013,7 +1062,10 @@ struct CompareApp {
                 print("Target Indices: VEVC Min SSIM (\(vevcMinIdx)), H264 Min SSIM (\(h264MinIdx)), HEVC Min SSIM (\(hevcMinIdx)), 14s (\(sec14Idx))")
                 
                 print("Extracting VEVC frames...")
-                let vevcExtracted = try await extractVEVCFrames(bitstream: vevcResult.bitstream, config: localConfig, indices: targetIndices)
+                var vevcExtracted: [Int: YCbCrImage] = [:]
+                if let bitstream = vevcResult?.bitstream {
+                    vevcExtracted = try await extractVEVCFrames(bitstream: bitstream, config: localConfig, indices: targetIndices)
+                }
                 
                 var h264Extracted: [Int: YCbCrImage] = [:]
                 if let res = h264SwResult {

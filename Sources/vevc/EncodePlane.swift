@@ -19,6 +19,9 @@ func evaluateQuantizeLayer32(view: BlockView, qt: QuantizationTable) {
     quantizeSIMDSignedMapping16(hl, q: qt.qMid)
     quantizeSIMDSignedMapping16(lh, q: qt.qMid)
     quantizeSIMDSignedMapping16(hh, q: qt.qHigh)
+    Diagnostic.record(block: hl, layer: 2, subband: "HL")
+    Diagnostic.record(block: lh, layer: 2, subband: "LH")
+    Diagnostic.record(block: hh, layer: 2, subband: "HH")
 }
 
 @inline(__always)
@@ -30,6 +33,9 @@ func evaluateQuantizeLayer16(view: BlockView, qt: QuantizationTable) {
     quantizeSIMDSignedMapping8(hl, q: qt.qMid)
     quantizeSIMDSignedMapping8(lh, q: qt.qMid)
     quantizeSIMDSignedMapping8(hh, q: qt.qHigh)
+    Diagnostic.record(block: hl, layer: 1, subband: "HL")
+    Diagnostic.record(block: lh, layer: 1, subband: "LH")
+    Diagnostic.record(block: hh, layer: 1, subband: "HH")
 }
 
 @inline(__always)
@@ -43,6 +49,10 @@ func evaluateQuantizeBase8(view: BlockView, qt: QuantizationTable) {
     quantizeSIMDSignedMapping4(hl, q: qt.qMid)
     quantizeSIMDSignedMapping4(lh, q: qt.qMid)
     quantizeSIMDSignedMapping4(hh, q: qt.qHigh)
+    Diagnostic.record(block: ll, layer: 0, subband: "LL")
+    Diagnostic.record(block: hl, layer: 0, subband: "HL")
+    Diagnostic.record(block: lh, layer: 0, subband: "LH")
+    Diagnostic.record(block: hh, layer: 0, subband: "HH")
 }
 
 @inline(__always)

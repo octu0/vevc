@@ -311,7 +311,8 @@ struct BitrateSsimChart: View {
                 }
             }
             .chartForegroundStyleScale([
-                "VEVC (Layers)": Color.orange,
+                "VEVC (profile1)": Color.orange,
+                "VEVC (profile2)": Color.red,
                 "HEVC (SW)": Color.blue,
                 "H.264 (SW)": Color.green
             ])

@@ -424,3 +424,21 @@ final class BlockViewPool: @unchecked Sendable {
         #endif
     }
 }
+
+// MARK: - Diagnostics
+
+public func vevcEnableDiagnostics() {
+    Diagnostic.enabled = true
+}
+
+public func vevcDisableDiagnostics() {
+    Diagnostic.enabled = false
+}
+
+public func vevcResetDiagnostics() {
+    Diagnostic.reset()
+}
+
+public func vevcPrintDiagnostics() {
+    Diagnostic.printStats()
+}
