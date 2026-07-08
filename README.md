@@ -145,7 +145,7 @@ DWT Coefficients
 | Magic 'VEVC' (4B) | Metadata   | Frame Packet 0 | ... | Frame Packet N |
 +-------------------+------------+----------------+-----+----------------+
 
-    Metadata (Profile 1)
+    Metadata (Profile 0x01/0x02)
 +---------------------------------------------+
 | Metadata Size (2B) | Profile Version(1B)    |
 +------------+-------+-----+------------------+----------+----------------+

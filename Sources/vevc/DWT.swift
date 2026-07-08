@@ -188,7 +188,7 @@ func inverseLift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: I
 /// Transposes an 8x8 block stored row-major with the given stride.
 /// After transpose, row[i] becomes column[i] and vice versa.
 @inline(__always)
-private func transpose8x8InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
+func transpose8x8InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
     // Load all 8 rows
     var r0 = UnsafeRawPointer(base + 0 * s).loadUnaligned(as: SIMD8<Int16>.self)
     var r1 = UnsafeRawPointer(base + 1 * s).loadUnaligned(as: SIMD8<Int16>.self)
@@ -271,7 +271,7 @@ private func transpose8x8InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: 
 /// 1. Transpose each 8x8 quadrant in-place
 /// 2. Swap TR and BL quadrants
 @inline(__always)
-private func transpose16x16InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
+func transpose16x16InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
     // Transpose 4 quadrants independently
     transpose8x8InPlace(base, stride: s)  // TL
     transpose8x8InPlace(base + 8, stride: s)  // TR
@@ -294,7 +294,7 @@ private func transpose16x16InPlace(_ base: UnsafeMutablePointer<Int16>, stride s
 /// 1. Transpose each 16x16 quadrant in-place
 /// 2. Swap TR and BL quadrants
 @inline(__always)
-private func transpose32x32InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
+func transpose32x32InPlace(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
     // Transpose 4 quadrants independently
     transpose16x16InPlace(base, stride: s)  // TL
     transpose16x16InPlace(base + 16, stride: s)  // TR

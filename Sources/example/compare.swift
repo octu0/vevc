@@ -17,6 +17,7 @@ struct Config {
     var outputBitrates: Bool = false
     var vevcOnly: Bool = false
     var qstep: Int? = nil
+    var profile: UInt8 = 0x01
 }
 
 struct ImageInput {
@@ -85,7 +86,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     let encStart = Date()
     guard let first = vevcImages.first else { return (0, 0, 0, nil, []) }
     let vevcEncoder: VEVCEncoder
-    if let qstep = config.qstep {
+        if let qstep = config.qstep {
         vevcEncoder = VEVCEncoder(
             width: first.width,
             height: first.height,
@@ -93,7 +94,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
             framerate: config.framerate,
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
-            sceneChangeThreshold: config.sceneThreshold
+            sceneChangeThreshold: config.sceneThreshold,
+            profile: config.profile
         )
     } else {
         vevcEncoder = VEVCEncoder(
@@ -103,7 +105,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
             framerate: config.framerate,
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
-            sceneChangeThreshold: config.sceneThreshold
+            sceneChangeThreshold: config.sceneThreshold,
+            profile: config.profile
         )
     }
     let outBytes = try await vevcEncoder.encodeToData(images: vevcImages)
@@ -815,6 +818,11 @@ struct CompareApp {
                 y4mPath = args[i + 1]
                 i += 1
             }
+        case "-profile", "--profile":
+            if (i + 1) < args.count {
+                if let v = UInt8(args[i + 1]) { config.profile = v }
+                i += 1
+            }
         default:
             positionalArgs.append(arg)
         }
@@ -822,7 +830,7 @@ struct CompareApp {
     }
 
     if positionalArgs.isEmpty && y4mPath == nil {
-        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [-vevc-only] [<input1.png> input2.png ...]")
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <1|2>] [-quality] [-output-graph] [-vevc-only] [<input1.png> input2.png ...]")
         exit(1)
     }
 

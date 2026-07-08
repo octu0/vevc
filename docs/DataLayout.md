@@ -23,7 +23,7 @@ The metadata payload occupies exactly the number of bytes specified by `Metadata
 
 | Field Name | Size | Description |
 |---|---|---|
-| Profile Version | 1 Byte | Currently always `0x01`. |
+| Profile Version | 1 Byte | `0x01` (LeGall 5/3 DWT) or `0x02` (CDF 9/7 DWT) |
 | Width | 2 Bytes (UInt16BE) | The pixel width of the video. |
 | Height | 2 Bytes (UInt16BE) | The pixel height of the video. |
 | Color Gamut | 1 Byte | Color gamut flag. Currently fixed to `0x01` (BT.709). |
