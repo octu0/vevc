@@ -540,7 +540,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 
 @inline(__always)
 func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: MotionVectors? = nil, refDirs: [Bool]? = nil, roundOffset: Int, profile: UInt8 = 0x01) async throws -> Image16 {
-    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer32")
+    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer32", profile: profile)
     
     var sub = Image16(width: dx, height: dy, pool: pool)
     
@@ -626,7 +626,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 
 @inline(__always)
 func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, profile: UInt8 = 0x01) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
-    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16")
+    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16", profile: profile)
     
     var sub = Image16(width: dx, height: dy, pool: pool)
     
@@ -687,8 +687,8 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView], qtYStep: Int, qtCStep: Int) {
-    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8")
+func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool, profile: UInt8 = 0x01) async throws -> (Image16, [BlockView], [BlockView], [BlockView], qtYStep: Int, qtCStep: Int) {
+    let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8", profile: profile)
     
     var sub = Image16(width: dx, height: dy, pool: pool)
     

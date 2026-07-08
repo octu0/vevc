@@ -31,6 +31,38 @@ struct Quantizer: Sendable {
     }
 }
 
+struct QuantLayerParams: Sendable {
+    let qLowDivisor: Int
+    let cLowDivisor: Int
+    let qMidNum: Int, qMidDen: Int
+    let qHighNum: Int, qHighDen: Int
+    let dzMidY: Int32, dzHighY: Int32
+    let dzMidC: Int32, dzHighC: Int32
+}
+
+struct QuantProfileParams: Sendable {
+    let layers: [QuantLayerParams]
+
+    static func forProfile(_ profile: UInt8) -> QuantProfileParams {
+        switch profile {
+        case 0x02: return .cdf97
+        default:   return .legall53
+        }
+    }
+
+    static let legall53 = QuantProfileParams(layers: [
+        QuantLayerParams(qLowDivisor: 8, cLowDivisor: 8, qMidNum: 1, qMidDen: 2, qHighNum: 3, qHighDen: 4, dzMidY: 16384, dzHighY: 8192, dzMidC: -8000, dzHighC: -16000),
+        QuantLayerParams(qLowDivisor: 6, cLowDivisor: 8, qMidNum: 1, qMidDen: 2, qHighNum: 1, qHighDen: 1, dzMidY: 8192, dzHighY: 0, dzMidC: -16000, dzHighC: -32000),
+        QuantLayerParams(qLowDivisor: 1, cLowDivisor: 8, qMidNum: 1, qMidDen: 1, qHighNum: 5, qHighDen: 4, dzMidY: 0, dzHighY: -8000, dzMidC: -32000, dzHighC: -64000)
+    ])
+
+    static let cdf97 = QuantProfileParams(layers: [
+        QuantLayerParams(qLowDivisor: 13, cLowDivisor: 13, qMidNum: 3, qMidDen: 10, qHighNum: 9, qHighDen: 20, dzMidY: 16384, dzHighY: 8192, dzMidC: -8000, dzHighC: -16000),
+        QuantLayerParams(qLowDivisor: 6, cLowDivisor: 8, qMidNum: 2, qMidDen: 5, qHighNum: 21, qHighDen: 20, dzMidY: 8192, dzHighY: 0, dzMidC: -16000, dzHighC: -32000),
+        QuantLayerParams(qLowDivisor: 1, cLowDivisor: 8, qMidNum: 1, qMidDen: 1, qHighNum: 17, qHighDen: 10, dzMidY: 0, dzHighY: -8000, dzMidC: -32000, dzHighC: -64000)
+    ])
+}
+
 struct QuantizationTable: Sendable {
     let step: Int16
     let isChroma: Bool
@@ -38,78 +70,29 @@ struct QuantizationTable: Sendable {
     public let qMid: Quantizer
     public let qHigh: Quantizer
 
-    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
+    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0, profile: UInt8 = 0x01) {
         let s = max(16, min(baseStep, 4096))
         self.step = Int16(s)
         self.isChroma = isChroma
 
-        // CSF-based perceptual quantization
-        // DWT subbands map to spatial frequency bands:
-        //   Layer 0 (Base8)  = lowest freq  → high CSF sensitivity → fine quantization
-        //   Layer 1 (L16)    = mid freq      → moderate sensitivity
-        //   Layer 2 (L32)    = highest freq  → low sensitivity → coarse quantization
-        //   HH (diagonal) = √2× higher freq than HL/LH → even less perceptible
-        //
-        // Scale factors are expressed as integer ratios (numerator, denominator)
-        // to avoid floating-point computation entirely.
-        var qMidNum = 4  // HL/LH scale numerator   (4/4 = 1.0)
-        var qMidDen = 4  // HL/LH scale denominator
-        var qHighNum = 6  // HH scale numerator      (6/4 = 1.5)
-        var qHighDen = 4  // HH scale denominator
-        var qLowDivisor = 6
+        let profileParams = QuantProfileParams.forProfile(profile)
+        let params = profileParams.layers[layerIndex]
 
-        switch layerIndex {
-        case 2:
-            qLowDivisor = 1
-            qMidNum = 1
-            qMidDen = 1  // 1.0
-            qHighNum = 5
-            qHighDen = 4  // 1.25
-        case 1:
-            qMidNum = 1
-            qMidDen = 2  // 0.50
-            qHighNum = 1
-            qHighDen = 1  // 1.00
-        default:  // layerIndex == 0
-            qMidNum = 1
-            qMidDen = 2  // 0.5
-            qHighNum = 3
-            qHighDen = 4  // 0.75
-            qLowDivisor = 8
-        }
+        let qLowDivisor = params.qLowDivisor
+        let cLowDivisor = params.cLowDivisor
+        let qMidNum = params.qMidNum
+        let qMidDen = params.qMidDen
+        let qHighNum = params.qHighNum
+        let qHighDen = params.qHighDen
 
-        var dzMidY: Int32 = -4000
-        var dzHighY: Int32 = -8000
-        
-        if layerIndex == 2 {
-            dzMidY = 0
-            dzHighY = -8000
-        } else if layerIndex == 1 {
-            dzMidY = 8192
-            dzHighY = 0
-        } else if layerIndex == 0 {
-            dzMidY = 16384  // +0.25 positive bias to boost Luma SSIM
-            dzHighY = 8192
-        }
-        
-        let dzMidC: Int32
-        let dzHighC: Int32
-        
-        if layerIndex == 0 {
-            dzMidC = -8000
-            dzHighC = -16000
-        } else if layerIndex == 1 {
-            dzMidC = -16000
-            dzHighC = -32000
-        } else {
-            dzMidC = -32000
-            dzHighC = -64000
-        }
-
+        let dzMidY = params.dzMidY
+        let dzHighY = params.dzHighY
+        let dzMidC = params.dzMidC
+        let dzHighC = params.dzHighC
 
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
-            let cLow = min(256, max(16, baseStep / 8))
+            let cLow = min(256, max(16, baseStep / cLowDivisor))
             let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen))
             let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen))
 

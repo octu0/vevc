@@ -225,11 +225,12 @@ public struct VEVCLayerData {
     static func deserialize(
         from r: [UInt8],
         layer: UInt8,
-        layerLabel: String
+        layerLabel: String,
+        profile: UInt8 = 0x01
     ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: [UInt8], bufCb: [UInt8], bufCr: [UInt8]) {
         var offset = 0
-        let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
-        let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
+        let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer), profile: profile)
+        let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer), profile: profile)
         
         let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
         guard (offset + bufYLen) <= r.count else {

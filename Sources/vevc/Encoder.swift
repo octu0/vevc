@@ -221,18 +221,18 @@ actor LayersEncodeActor {
             let baseStep: Int
             if let fixedStep = self.qstep {
                 baseStep = fixedStep
-                self.qt = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
+                self.qt = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0, profile: profile)
             } else {
                 let targetBits = rateController.beginGOP()
-                let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
+                let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController, profile: profile)
                 self.qt = baseQt
                 baseStep = Int(baseQt.step)
             }
             
             framesSinceKeyframe = 0
             
-            let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
-            let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0)
+            let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0, profile: profile)
+            let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0, profile: profile)
             
             let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, maxbitrate: maxbitrate,
@@ -292,8 +292,8 @@ actor LayersEncodeActor {
         } else {
             adjustedStep = rateController.calculatePFrameQStep(currentSAD: frameSAD, baseStep: baseStep)
         }
-        let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
-        let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
+        let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0, profile: profile)
+        let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0, profile: profile)
         
         let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
             pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
@@ -480,9 +480,9 @@ func computeMaskedReconDistortion(
 }
 
 @inline(__always)
-private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateController: RateController) -> QuantizationTable {
+private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateController: RateController, profile: UInt8) -> QuantizationTable {
     let probeStep = 1024
-    let qt = QuantizationTable(baseStep: probeStep)
+    let qt = QuantizationTable(baseStep: probeStep, profile: profile)
     
     let w = (img.width / 8)
     let h = (img.height / 8)
@@ -562,7 +562,7 @@ private func estimateQuantization(img: YCbCrImage, targetBits: Int, rateControll
         finalQ = max(q, min((q * ratioQ8) / 256, q * 2))
     }
     
-    return QuantizationTable(baseStep: finalQ)
+    return QuantizationTable(baseStep: finalQ, profile: profile)
 }
 
 @inline(__always)

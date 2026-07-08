@@ -55,7 +55,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     offset += frameHeader.layer0Size
     
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame)
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame, profile: profile)
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
