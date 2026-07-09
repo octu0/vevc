@@ -100,7 +100,7 @@ public actor StreamingDecoderActor {
         if profile == 0x02 {
             let header = VEVCFileHeader(width: width, height: height, framerate: 0, profile: 0x02)
             let payload = Array(chunk[offset...])
-            img16 = try await decodeIntraTiles(from: payload, pool: pool, header: header)
+            img16 = try await decodeIntraTiles(from: payload, pool: pool, header: header, maxLayer: maxLayer)
         } else {
             img16 = try await decodeSpatialLayers(
                 r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,

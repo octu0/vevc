@@ -37,18 +37,17 @@ private func splitMargin(_ margin: Int) -> [Int] {
 public func computeIntraTileMap(width: Int, height: Int) -> [IntraTileRect] {
     let paddedW = (width + 7) & ~7
     let paddedH = (height + 7) & ~7
-    
     let n512x = paddedW / 512
     let remX = paddedW % 512
     let marginX1 = (remX / 2) & ~7
     let marginX2 = remX - marginX1
-    let xSizes = splitMargin(marginX1) + Array(repeating: 512, count: n512x) + splitMargin(marginX2)
+    let xSizes = splitMargin(marginX1).reversed() + Array(repeating: 512, count: n512x) + splitMargin(marginX2)
     
     let n512y = paddedH / 512
     let remY = paddedH % 512
     let marginY1 = (remY / 2) & ~7
     let marginY2 = remY - marginY1
-    let ySizes = splitMargin(marginY1) + Array(repeating: 512, count: n512y) + splitMargin(marginY2)
+    let ySizes = splitMargin(marginY1).reversed() + Array(repeating: 512, count: n512y) + splitMargin(marginY2)
     
     var rects: [IntraTileRect] = []
     var cy = 0
