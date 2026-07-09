@@ -706,3 +706,88 @@ internal func dequantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantize
         }
     }
 }
+
+// MARK: - Intra Tile Profile 0x02 Quantization
+
+public enum SubbandType {
+    case LL
+    case HL
+    case LH
+    case HH
+}
+
+extension QuantizationTable {
+    /// Get the quantizer for a specific level and subband in IntraTile (Profile 0x02)
+    /// - Parameters:
+    ///   - baseStep: User-defined base quantization step.
+    ///   - filter: DWT filter type (cdf97 or leGall53).
+    ///   - level: The decomposition level (1-indexed, 1 is the finest resolution / highest frequency).
+    ///   - subband: The subband type (LL, HL, LH, HH).
+    ///   - isChroma: Whether this is for the chroma plane.
+    public static func quantizerForIntraTile(baseStep: Int, filter: DWTFilterType, level: Int, subband: SubbandType, isChroma: Bool) -> Quantizer {
+        var step = Float(baseStep)
+        
+        // Base CSF adjustment: higher frequencies (lower level numbers) get coarser quantization
+        // For example, level 1 (highest freq) -> multiplier = 1.5
+        // level 2 -> multiplier = 1.2
+        // level 3+ -> multiplier = 1.0
+        var csfScale: Float = 1.0
+        if level == 1 {
+            csfScale = 1.5
+        } else if level == 2 {
+            csfScale = 1.2
+        }
+        
+        if isChroma {
+            csfScale *= 1.5 // Chroma is less sensitive, quantize coarser
+        }
+        
+        step *= csfScale
+        
+        if filter == .cdf97 {
+            // CDF97 L2-Norm Gain Compensation
+            let K: Float = 1.229928
+            let K_inv: Float = 0.813026
+            
+            // Accumulate base LL gain from previous levels
+            // For level 1, baseGain = 1.0
+            // For level 2, baseGain = K^2
+            let baseGain = pow(K * K, Float(level - 1))
+            
+            let bandGain: Float
+            switch subband {
+            case .LL: bandGain = baseGain * (K * K)
+            case .HL: bandGain = baseGain * (K * K_inv)
+            case .LH: bandGain = baseGain * (K_inv * K)
+            case .HH: bandGain = baseGain * (K_inv * K_inv)
+            }
+            
+            // To compensate for the gain introduced by the filter,
+            // we scale the quantization step proportionally.
+            step *= bandGain
+        } else {
+            // LeGall53 doesn't introduce floating-point gain, but we apply an energy scale approximation
+            // Since LeGall53 expands dynamic range slightly at each level (approx * 1.4 per 1D).
+            // Usually we just rely on CSF for LeGall.
+        }
+        
+        // Subband-specific fine-tuning (similar to mid/high distinction in legacy)
+        var dzBias: Int32 = 0
+        switch subband {
+        case .LL:
+            // LL uses round-to-nearest
+            let s = max(16, min(Int(step), 8192))
+            return Quantizer(step: s, roundToNearest: true)
+        case .HL, .LH:
+            // Edges (Mid)
+            dzBias = isChroma ? -16000 : 8192
+        case .HH:
+            // High frequency detail (High)
+            dzBias = isChroma ? -32000 : 0
+            step *= 1.2 // further penalize HH
+        }
+        
+        let s = max(16, min(Int(step), 8192))
+        return Quantizer(step: s, roundToNearest: false, deadZoneBias: dzBias)
+    }
+}

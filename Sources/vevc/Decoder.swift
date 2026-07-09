@@ -96,10 +96,17 @@ public actor StreamingDecoderActor {
         let useBidirectional = isPFrame && firstReconstructed != nil
         let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
         
-        let img16 = try await decodeSpatialLayers(
-            r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile
-        )
+        let img16: Image16
+        if profile == 0x02 {
+            let header = VEVCFileHeader(width: width, height: height, framerate: 0, profile: 0x02)
+            let payload = Array(chunk[offset...])
+            img16 = try await decodeIntraTiles(from: payload, pool: pool, header: header)
+        } else {
+            img16 = try await decodeSpatialLayers(
+                r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
+                predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile
+            )
+        }
         
         let pd = PlaneData420(img16: img16)
         let yBase = pd.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
@@ -124,11 +131,6 @@ public actor StreamingDecoderActor {
         }
         
         roundOffsetIndex += 1
-        
-        if profile == 0x02 && maxLayer < 2 {
-            let multiplier: Int16 = (maxLayer == 0) ? 3577 : 5413
-            return pd.toYCbCr(multiplier: multiplier)
-        }
         
         return pd.toYCbCr()
     }

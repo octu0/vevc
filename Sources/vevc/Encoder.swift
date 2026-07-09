@@ -214,7 +214,7 @@ actor LayersEncodeActor {
             forceIFrame = true
         }
         
-        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceIFrame)
+        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceIFrame || profile == 0x02)
         
         if isIFrame {
             // Rate control
@@ -234,10 +234,30 @@ actor LayersEncodeActor {
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0, profile: profile)
             let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0, profile: profile)
             
-            let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
-                pd: plane, pool: pool, maxbitrate: maxbitrate,
-                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile
-            )
+            let bytes: [UInt8]
+            let reconstructed: PlaneData420
+            let mvs: MotionVectors
+            let releaseRecon: @Sendable () -> Void
+            
+            if profile == 0x02 {
+                let payload = try await encodeIntraTiles(pd: plane, pool: pool, qtY: qtY, qtC: qtC)
+                let fHeader = VEVCFrameHeader(frameType: .iFrame, hasRefDir: false, mvsSize: 0, refDirSize: 0, layer0Size: payload.count, layer1Size: 0, layer2Size: 0)
+                bytes = fHeader.serialize() + payload
+                
+                // Profile 0x02 is I-frame only, no need for actual reconstruction.
+                reconstructed = PlaneData420(width: 0, height: 0, y: [], cb: [], cr: [])
+                releaseRecon = {}
+                mvs = MotionVectors(count: 0)
+            } else {
+                let res = try await encodeSpatialLayers(
+                    pd: plane, pool: pool, maxbitrate: maxbitrate,
+                    qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile
+                )
+                bytes = res.0
+                reconstructed = res.1
+                mvs = res.2
+                releaseRecon = res.4
+            }
             
             if self.qstep == nil {
                 rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
