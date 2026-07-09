@@ -19,27 +19,26 @@ func encodeIntraTiles(
     let mapC = computeIntraTileMap(width: (pd.width + 1) / 2, height: (pd.height + 1) / 2)
     
     // We will accumulate entropy encoded data for Y, Cb, Cr
-    var tileYBytes: [UInt8] = []
-    var tileCbBytes: [UInt8] = []
-    var tileCrBytes: [UInt8] = []
-    
-    // Encode Y plane
+    var encoderY = EntropyEncoder()
     for t in mapY {
-        let tileBytes = try encodeSingleIntraTile(r: pd.rY, tileInfo: t, isChroma: false, qt: qtY, pool: pool)
-        tileYBytes.append(contentsOf: tileBytes)
+        try encodeSingleIntraTile(r: pd.rY, tileInfo: t, isChroma: false, qt: qtY, pool: pool, encoder: &encoderY)
     }
+    encoderY.flush()
+    let tileYBytes = encoderY.getData(selectModel: unifiedSelectModel)
     
-    // Encode Cb plane
+    var encoderCb = EntropyEncoder()
     for t in mapC {
-        let tileBytes = try encodeSingleIntraTile(r: pd.rCb, tileInfo: t, isChroma: true, qt: qtC, pool: pool)
-        tileCbBytes.append(contentsOf: tileBytes)
+        try encodeSingleIntraTile(r: pd.rCb, tileInfo: t, isChroma: true, qt: qtC, pool: pool, encoder: &encoderCb)
     }
+    encoderCb.flush()
+    let tileCbBytes = encoderCb.getData(selectModel: unifiedSelectModel)
     
-    // Encode Cr plane
+    var encoderCr = EntropyEncoder()
     for t in mapC {
-        let tileBytes = try encodeSingleIntraTile(r: pd.rCr, tileInfo: t, isChroma: true, qt: qtC, pool: pool)
-        tileCrBytes.append(contentsOf: tileBytes)
+        try encodeSingleIntraTile(r: pd.rCr, tileInfo: t, isChroma: true, qt: qtC, pool: pool, encoder: &encoderCr)
     }
+    encoderCr.flush()
+    let tileCrBytes = encoderCr.getData(selectModel: unifiedSelectModel)
     
     // Serialize as VEVCLayerData (using Layer0 payload as the whole frame payload)
     let payload = VEVCLayerData.serialize(
@@ -58,8 +57,9 @@ private func encodeSingleIntraTile(
     tileInfo: IntraTileRect,
     isChroma: Bool,
     qt: QuantizationTable,
-    pool: BlockViewPool
-) throws -> [UInt8] {
+    pool: BlockViewPool,
+    encoder: inout EntropyEncoder
+) throws {
     let block = pool.get(width: tileInfo.size, height: tileInfo.size)
     defer { pool.put(block) }
     
@@ -70,7 +70,6 @@ private func encodeSingleIntraTile(
     intraDwt2D(base: block.base, size: tileInfo.size, stride: block.stride, levels: tileInfo.levels, filter: tileInfo.filter)
     
     // Entropy Encode Subbands
-    var encoder = EntropyEncoder()
     var lastVal: Int16 = 0
     
     for l in (1...tileInfo.levels).reversed() {
@@ -96,9 +95,6 @@ private func encodeSingleIntraTile(
         quantizeSIMD(hh, q: qHH)
         encodeSubbandGrid(view: hh, encoder: &encoder, isLL: false, lastVal: &lastVal)
     }
-    
-    encoder.flush()
-    return encoder.getData(selectModel: unifiedSelectModel)
 }
 
 /// Helper to get LL, HL, LH, HH subbands for a specific DWT level
@@ -165,23 +161,37 @@ private func encodeSubbandGrid(view: BlockView, encoder: inout EntropyEncoder, i
 
 // Fallback generic encoding if sizes are not 16x16, 8x8, or 4x4
 private func blockEncodeGeneric(encoder: inout EntropyEncoder, block: BlockView) {
-    // A simple raster scan encoding for non-standard blocks
     let width = block.width
     let height = block.height
-    var run = 0
-    var prevVal: Int16 = 0
     
+    var lastIdx = -1
     for y in 0..<height {
         let ptr = block.rowPointer(y: y)
         for x in 0..<width {
-            let val = ptr[x]
-            if val == 0 {
-                run += 1
-            } else {
-                encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
-                prevVal = val
-                run = 0
+            if ptr[x] != 0 {
+                lastIdx = y * width + x
             }
+        }
+    }
+    
+    encoder.addPair(run: UInt32(max(0, lastIdx)), val: 0, context: 5)
+    if lastIdx < 0 { return }
+    
+    var run = 0
+    var prevVal: Int16 = 0
+    
+    for i in 0...lastIdx {
+        let y = i / width
+        let x = i % width
+        let ptr = block.rowPointer(y: y)
+        let val = ptr[x]
+        
+        if val == 0 {
+            run += 1
+        } else {
+            encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+            prevVal = val
+            run = 0
         }
     }
 }

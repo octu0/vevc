@@ -11,7 +11,8 @@ import Foundation
 func decodeIntraTiles(
     from r: [UInt8],
     pool: BlockViewPool,
-    header: VEVCFileHeader
+    header: VEVCFileHeader,
+    maxLayer: Int
 ) async throws -> Image16 {
     let mapY = computeIntraTileMap(width: header.width, height: header.height)
     let mapC = computeIntraTileMap(width: (header.width + 1) / 2, height: (header.height + 1) / 2)
@@ -20,9 +21,9 @@ func decodeIntraTiles(
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: 0, layerLabel: "IntraTile", profile: header.profile)
     
     // Decode planes sequentially
-    let (yData, releaseY) = try decodeSinglePlane(mapTiles: mapY, buf: bufY, pool: pool, qt: qtY, isChroma: false)
-    let (cbData, releaseCb) = try decodeSinglePlane(mapTiles: mapC, buf: bufCb, pool: pool, qt: qtC, isChroma: true)
-    let (crData, releaseCr) = try decodeSinglePlane(mapTiles: mapC, buf: bufCr, pool: pool, qt: qtC, isChroma: true)
+    let (yData, releaseY) = try decodeSinglePlane(mapTiles: mapY, buf: bufY, pool: pool, qt: qtY, isChroma: false, maxLayer: maxLayer)
+    let (cbData, releaseCb) = try decodeSinglePlane(mapTiles: mapC, buf: bufCb, pool: pool, qt: qtC, isChroma: true, maxLayer: maxLayer)
+    let (crData, releaseCr) = try decodeSinglePlane(mapTiles: mapC, buf: bufCr, pool: pool, qt: qtC, isChroma: true, maxLayer: maxLayer)
     
     // YCbCrImage takes ownership of these buffers if needed, or copies them.
     // In VEVC, Image16 directly owns the buffers.
@@ -40,8 +41,11 @@ private func decodeSinglePlane(
     buf: [UInt8],
     pool: BlockViewPool,
     qt: QuantizationTable,
-    isChroma: Bool
+    isChroma: Bool,
+    maxLayer: Int
 ) throws -> ([Int16], @Sendable () -> Void) {
+    let dropLevels = max(0, 2 - maxLayer)
+    
     // Total plane data array
     var totalWidth = 0
     var totalHeight = 0
@@ -49,7 +53,10 @@ private func decodeSinglePlane(
         totalWidth = max(totalWidth, t.x + t.size)
         totalHeight = max(totalHeight, t.y + t.size)
     }
-    var outData = [Int16](repeating: 0, count: totalWidth * totalHeight)
+    
+    let scaledTotalWidth = max(1, totalWidth >> dropLevels)
+    let scaledTotalHeight = max(1, totalHeight >> dropLevels)
+    var outData = [Int16](repeating: 0, count: scaledTotalWidth * scaledTotalHeight)
     
     try buf.withUnsafeBufferPointer { ptr in
         guard let bufBase = ptr.baseAddress else { return }
@@ -87,15 +94,44 @@ private func decodeSinglePlane(
             }
             
             // Inverse 2D DWT
-            inverseIntraDwt2D(base: block.base, size: tileInfo.size, stride: block.stride, levels: tileInfo.levels, filter: tileInfo.filter)
+            let targetLevels = max(1, tileInfo.levels - dropLevels)
+            inverseIntraDwt2D(base: block.base, size: tileInfo.size, stride: block.stride, levels: targetLevels, filter: tileInfo.filter)
             
-            // Copy to output array
+            // Copy to output array with scaling
+            let outputSize = tileInfo.size >> dropLevels
+            let outX = tileInfo.x >> dropLevels
+            let outY = tileInfo.y >> dropLevels
+            
             outData.withUnsafeMutableBufferPointer { outPtr in
                 guard let base = outPtr.baseAddress else { return }
-                for y in 0..<tileInfo.size {
+                for y in 0..<outputSize {
                     let src = block.rowPointer(y: y)
-                    let dst = base.advanced(by: (tileInfo.y + y) * totalWidth + tileInfo.x)
-                    UnsafeMutableRawPointer(dst).copyMemory(from: UnsafeRawPointer(src), byteCount: tileInfo.size * 2)
+                    let dst = base.advanced(by: (outY + y) * scaledTotalWidth + outX)
+                    
+                    if tileInfo.filter == .cdf97 {
+                        if dropLevels == 1 {
+                            for x in 0..<outputSize {
+                                let v = Int32(src[x])
+                                dst[x] = Int16(clamping: (v * 5413) >> 14)
+                            }
+                        } else if dropLevels >= 2 {
+                            for x in 0..<outputSize {
+                                let v = Int32(src[x])
+                                dst[x] = Int16(clamping: (v * 3577) >> 14)
+                            }
+                        } else {
+                            for x in 0..<outputSize {
+                                let v = Int32(src[x])
+                                dst[x] = Int16(clamping: (v + 1) >> 1)
+                            }
+                        }
+                    } else {
+                        // LeGall53
+                        for x in 0..<outputSize {
+                            let v = Int32(src[x])
+                            dst[x] = Int16(clamping: (v + 1) >> 1)
+                        }
+                    }
                 }
             }
         }
@@ -165,12 +201,18 @@ private func decodeSubbandGrid(view: BlockView, decoder: inout EntropyDecoder, i
 private func blockDecodeGeneric(decoder: inout EntropyDecoder, block: BlockView) throws {
     let width = block.width
     let height = block.height
+    
+    let lastIdxUInt = try decoder.readPair(context: 5).run
+    let lastIdx = Int(lastIdxUInt)
+    if lastIdx < 0 || lastIdx >= width * height { return }
+    
     var prevVal: Int16 = 0
     var remainRun = 0
     
-    var y = 0
-    var x = 0
-    while y < height {
+    var i = 0
+    while i <= lastIdx {
+        let y = i / width
+        let x = i % width
         let ptr = block.rowPointer(y: y)
         if remainRun > 0 {
             ptr[x] = 0
@@ -181,11 +223,14 @@ private func blockDecodeGeneric(decoder: inout EntropyDecoder, block: BlockView)
             ptr[x] = val
             prevVal = val
         }
-        
-        x += 1
-        if x >= width {
-            x = 0
-            y += 1
-        }
+        i += 1
+    }
+    
+    while i < width * height {
+        let y = i / width
+        let x = i % width
+        let ptr = block.rowPointer(y: y)
+        ptr[x] = 0
+        i += 1
     }
 }
