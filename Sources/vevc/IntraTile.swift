@@ -5,6 +5,8 @@ public enum DWTFilterType: Equatable {
     case cdf97
 }
 
+public let CDF97_K: Float = 1.230174105
+
 public struct IntraTileRect: Equatable {
     public let x: Int
     public let y: Int

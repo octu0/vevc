@@ -354,11 +354,4 @@ public func inverseIntraDwt2D(base: UnsafeMutablePointer<Int16>, size: Int, stri
         }
         currentSize *= 2
     }
-    
-    for y in 0..<size {
-        let p = base + y * stride
-        for x in 0..<size {
-            p[x] = (p[x] + 1) >> 1
-        }
-    }
 }

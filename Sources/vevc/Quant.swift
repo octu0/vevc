@@ -513,7 +513,7 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
         }
         while x < width {
             let val = Int32(ptr[x])
-            let res = val &* step
+            let res = (val &* step &+ 8) >> 4
             ptr[x] = Int16(clamping: res)
             x += 1
         }
@@ -746,8 +746,8 @@ extension QuantizationTable {
         
         if filter == .cdf97 {
             // CDF97 L2-Norm Gain Compensation
-            let K: Float = 1.229928
-            let K_inv: Float = 0.813026
+            let K: Float = CDF97_K
+            let K_inv: Float = 1.0 / CDF97_K
             
             // Accumulate base LL gain from previous levels
             // For level 1, baseGain = 1.0
@@ -765,6 +765,9 @@ extension QuantizationTable {
             // To compensate for the gain introduced by the filter,
             // we scale the quantization step proportionally.
             step *= bandGain
+            
+            // Account for guard bit (<< 1) introduced in intraDwt2D
+            step *= 2.0
         } else {
             // LeGall53 doesn't introduce floating-point gain, but we apply an energy scale approximation
             // Since LeGall53 expands dynamic range slightly at each level (approx * 1.4 per 1D).

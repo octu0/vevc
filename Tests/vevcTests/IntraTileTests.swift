@@ -121,7 +121,7 @@ final class IntraTileTests: XCTestCase {
         // Verify
         for i in 0..<input.count {
             let expected = input[i]
-            let actual = work[i]
+            let actual = work[i] / 2 // inverseIntraDwt2D outputs scaled by 2
             let diff = abs(Int(expected) - Int(actual))
             if filter == .cdf97 {
                 XCTAssertLessThanOrEqual(diff, 1, "Identity failed for \(name) size \(size) at \(i): expected \(expected), got \(actual)")
@@ -195,13 +195,13 @@ final class IntraTileTests: XCTestCase {
         
         for y in 0..<height {
             for x in 0..<width {
-                yPlane[y * width + x] = Int16((x + y) % 255)
+                yPlane[y * width + x] = Int16((x + y) % 255) - 128
             }
         }
         for y in 0..<(height/2) {
             for x in 0..<(width/2) {
-                cbPlane[y * (width/2) + x] = Int16((x) % 255)
-                crPlane[y * (width/2) + x] = Int16((y) % 255)
+                cbPlane[y * (width/2) + x] = Int16((x) % 255) - 128
+                crPlane[y * (width/2) + x] = Int16((y) % 255) - 128
             }
         }
         
@@ -216,10 +216,70 @@ final class IntraTileTests: XCTestCase {
         
         let decoded = try await decodeIntraTiles(from: payload, pool: pool, header: fHeader, maxLayer: 2)
         
+        let paddedW_Y = (width + 7) & ~7
+        let paddedH_Y = (height + 7) & ~7
+        let paddedW_C = (width / 2 + 7) & ~7
+        let paddedH_C = (height / 2 + 7) & ~7
+        
         XCTAssertEqual(decoded.width, width)
         XCTAssertEqual(decoded.height, height)
-        XCTAssertEqual(decoded.y.count, width * height)
-        XCTAssertEqual(decoded.cb.count, (width/2) * (height/2))
-        XCTAssertEqual(decoded.cr.count, (width/2) * (height/2))
+        XCTAssertEqual(decoded.y.count, paddedW_Y * paddedH_Y)
+        XCTAssertEqual(decoded.cb.count, paddedW_C * paddedH_C)
+        XCTAssertEqual(decoded.cr.count, paddedW_C * paddedH_C)
+        
+        let psnrY = calculatePSNR(original: yPlane, decoded: decoded.y)
+        let psnrCb = calculatePSNR(original: cbPlane, decoded: decoded.cb)
+        let psnrCr = calculatePSNR(original: crPlane, decoded: decoded.cr)
+        
+        XCTAssertGreaterThanOrEqual(psnrY, 45.0, "Y PSNR too low")
+        XCTAssertGreaterThanOrEqual(psnrCb, 45.0, "Cb PSNR too low")
+        XCTAssertGreaterThanOrEqual(psnrCr, 45.0, "Cr PSNR too low")
+    }
+
+    private func calculatePSNR(original: [Int16], decoded: [Int16]) -> Double {
+        var mse: Double = 0
+        for i in 0..<original.count {
+            let diff = Double(original[i]) - Double(decoded[i])
+            mse += diff * diff
+        }
+        mse /= Double(original.count)
+        if mse == 0 { return 100.0 }
+        return 10.0 * log10((255.0 * 255.0) / mse)
+    }
+
+    // 6. ドロップレベルの E2E 検証
+    func testE2EWithDropLevels() async throws {
+        let width = 1920
+        let height = 1080
+        var yPlane = [Int16](repeating: 0, count: width * height)
+        var cbPlane = [Int16](repeating: 0, count: (width/2) * (height/2))
+        var crPlane = [Int16](repeating: 0, count: (width/2) * (height/2))
+        
+        for y in 0..<height {
+            for x in 0..<width {
+                yPlane[y * width + x] = Int16((x * y) % 255) - 128
+            }
+        }
+        
+        let pool = BlockViewPool()
+        let pd = PlaneData420(width: width, height: height, y: yPlane, cb: cbPlane, cr: crPlane)
+        
+        let qtY = QuantizationTable(baseStep: 16, isChroma: false, layerIndex: 0, profile: 0x02)
+        let qtC = QuantizationTable(baseStep: 16, isChroma: true, layerIndex: 0, profile: 0x02)
+        
+        let payload = try await encodeIntraTiles(pd: pd, pool: pool, qtY: qtY, qtC: qtC)
+        let fHeader = VEVCFileHeader(width: width, height: height, framerate: 0, profile: 0x02)
+        
+        // Decode maxLayer=1 (drop 1 level, so 1/2 resolution)
+        let decodedLayer1 = try await decodeIntraTiles(from: payload, pool: pool, header: fHeader, maxLayer: 1)
+        
+        XCTAssertEqual(decodedLayer1.width, width / 2)
+        XCTAssertEqual(decodedLayer1.height, height / 2)
+        
+        // Decode maxLayer=0 (drop 2 levels, so 1/4 resolution)
+        let decodedLayer0 = try await decodeIntraTiles(from: payload, pool: pool, header: fHeader, maxLayer: 0)
+        
+        XCTAssertEqual(decodedLayer0.width, width / 4)
+        XCTAssertEqual(decodedLayer0.height, height / 4)
     }
 }
