@@ -845,58 +845,6 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
-        if profile == 0x02 {
-            var idx = 0
-            for row in 0..<rowCount {
-                let startY = row * 16
-                let validEndY = min(height, startY + 16)
-                let loopH = validEndY - startY
-                let isEdgeY = (loopH < 16)
-                
-                for col in 0..<colCount {
-                    let startX = col * 16
-                    let validEndX = min(width, startX + 16)
-                    let loopW = validEndX - startX
-                    let isEdgeX = (loopW < 16)
-                    
-                    let blk = blocks[idx]
-                    idx += 1
-                    
-                    let llX = startX / 2
-                    let llY = startY / 2
-                    prevImg.readCb(x: llX, y: llY, size: 8, into: blk)
-                                            
-                    let view = blk
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                    let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                    let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                    dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                    // inverseCdf97Dwt2DBlock16(view)
-                                
-                    switch true {
-                    case isEdgeY != true && isEdgeX != true:
-                        let v = blk
-                        for h in 0..<16 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
-                    case 0 < loopH && 0 < loopW:
-                        let v = blk
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
-                    default:
-                        break
-                    }
-                }
-            }
-        } else {
             var idx = 0
             for row in 0..<rowCount {
                 let startY = row * 16
@@ -947,7 +895,6 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                     }
                 }
             }
-        }
     }
     return (plane, { [plane] in pool.putInt16(plane) })
 }
@@ -958,58 +905,6 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
     let rowCount = (height + 15) / 16
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
-        if profile == 0x02 {
-            var idx = 0
-            for row in 0..<rowCount {
-                let startY = row * 16
-                let validEndY = min(height, startY + 16)
-                let loopH = validEndY - startY
-                let isEdgeY = (loopH < 16)
-                
-                for col in 0..<colCount {
-                    let startX = col * 16
-                    let validEndX = min(width, startX + 16)
-                    let loopW = validEndX - startX
-                    let isEdgeX = (loopW < 16)
-                    
-                    let blk = blocks[idx]
-                    idx += 1
-                    
-                    let llX = startX / 2
-                    let llY = startY / 2
-                    prevImg.readCr(x: llX, y: llY, size: 8, into: blk)
-                                            
-                    let view = blk
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                    let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                    let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                    dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                    // inverseCdf97Dwt2DBlock16(view)
-                                
-                    switch true {
-                    case isEdgeY != true && isEdgeX != true:
-                        let v = blk
-                        for h in 0..<16 {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: 16)
-                        }
-                    case 0 < loopH && 0 < loopW:
-                        let v = blk
-                        for h in 0..<loopH {
-                            let srcPtr = v.rowPointer(y: h)
-                            let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                            destPtr.update(from: srcPtr, count: loopW)
-                        }
-                    default:
-                        break
-                    }
-                }
-            }
-        } else {
             var idx = 0
             for row in 0..<rowCount {
                 let startY = row * 16
@@ -1060,7 +955,6 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                     }
                 }
             }
-        }
     }
     return (plane, { [plane] in pool.putInt16(plane) })
 }
