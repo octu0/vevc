@@ -29,15 +29,48 @@ func decodeIntraTiles(
     let scaledWidth = max(1, header.width >> dropLevels)
     let scaledHeight = max(1, header.height >> dropLevels)
     
+    var yTotalWidth = 0
+    for t in mapY { yTotalWidth = max(yTotalWidth, t.x + t.size) }
+    let yScaledTotalWidth = max(1, yTotalWidth >> dropLevels)
+    
+    var cTotalWidth = 0
+    for t in mapC { cTotalWidth = max(cTotalWidth, t.x + t.size) }
+    let cScaledTotalWidth = max(1, cTotalWidth >> dropLevels)
+    
+    let cScaledWidth = (scaledWidth + 1) / 2
+    let cScaledHeight = (scaledHeight + 1) / 2
+    
+    let croppedY = cropPlane(src: yData, srcWidth: yScaledTotalWidth, dstWidth: scaledWidth, dstHeight: scaledHeight)
+    let croppedCb = cropPlane(src: cbData, srcWidth: cScaledTotalWidth, dstWidth: cScaledWidth, dstHeight: cScaledHeight)
+    let croppedCr = cropPlane(src: crData, srcWidth: cScaledTotalWidth, dstWidth: cScaledWidth, dstHeight: cScaledHeight)
+    
     // YCbCrImage takes ownership of these buffers if needed, or copies them.
     // In VEVC, Image16 directly owns the buffers.
-    let img = Image16(width: scaledWidth, height: scaledHeight, y: yData, cb: cbData, cr: crData)
+    let img = Image16(width: scaledWidth, height: scaledHeight, y: croppedY, cb: croppedCb, cr: croppedCr)
     
     releaseY()
     releaseCb()
     releaseCr()
     
     return img
+}
+
+private func cropPlane(src: [Int16], srcWidth: Int, dstWidth: Int, dstHeight: Int) -> [Int16] {
+    if srcWidth == dstWidth && src.count == dstWidth * dstHeight { return src }
+    var dst = [Int16](repeating: 0, count: dstWidth * dstHeight)
+    src.withUnsafeBufferPointer { srcPtr in
+        dst.withUnsafeMutableBufferPointer { dstPtr in
+            guard let sBase = srcPtr.baseAddress, let dBase = dstPtr.baseAddress else { return }
+            for y in 0..<dstHeight {
+                let sRow = sBase.advanced(by: y * srcWidth)
+                let dRow = dBase.advanced(by: y * dstWidth)
+                for x in 0..<dstWidth {
+                    dRow[x] = sRow[x]
+                }
+            }
+        }
+    }
+    return dst
 }
 
 private func decodeSinglePlane(

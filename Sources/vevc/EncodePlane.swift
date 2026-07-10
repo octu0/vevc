@@ -874,7 +874,7 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                     dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                     dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                     dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                    inverseCdf97Dwt2DBlock16(view)
+                    // inverseCdf97Dwt2DBlock16(view)
                                 
                     switch true {
                     case isEdgeY != true && isEdgeX != true:
@@ -987,7 +987,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                     dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                     dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                     dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                    inverseCdf97Dwt2DBlock16(view)
+                    // inverseCdf97Dwt2DBlock16(view)
                                 
                     switch true {
                     case isEdgeY != true && isEdgeX != true:

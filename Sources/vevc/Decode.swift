@@ -756,7 +756,7 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                 dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
-                inverseCdf97Dwt2DBlock32(view)
+                // inverseCdf97Dwt2DBlock32(view)
                 rowResults.append((block, w, h))
             }
         }
@@ -807,7 +807,7 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
-                inverseCdf97Dwt2DBlock32(view)
+                // inverseCdf97Dwt2DBlock32(view)
                 rowResults.append((block, w, h))
             }
         }
@@ -858,7 +858,7 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
-                inverseCdf97Dwt2DBlock32(view)
+                // inverseCdf97Dwt2DBlock32(view)
                 rowResults.append((block, w, h))
             }
         }
@@ -909,7 +909,7 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                 dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
-                inverseCdf97Dwt2DBlock16(view)
+                // inverseCdf97Dwt2DBlock16(view)
                 rowResults.append((block, w, h))
             }
         }
@@ -960,7 +960,7 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                inverseCdf97Dwt2DBlock16(view)
+                // inverseCdf97Dwt2DBlock16(view)
                 rowResults.append((block, w, h))
             }
         }
@@ -1011,7 +1011,7 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
                 dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                inverseCdf97Dwt2DBlock16(view)
+                // inverseCdf97Dwt2DBlock16(view)
                 rowResults.append((block, w, h))
             }
         }
