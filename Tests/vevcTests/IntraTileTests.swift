@@ -216,16 +216,11 @@ final class IntraTileTests: XCTestCase {
         
         let decoded = try await decodeIntraTiles(from: payload, pool: pool, header: fHeader, maxLayer: 2)
         
-        let paddedW_Y = (width + 7) & ~7
-        let paddedH_Y = (height + 7) & ~7
-        let paddedW_C = (width / 2 + 7) & ~7
-        let paddedH_C = (height / 2 + 7) & ~7
-        
         XCTAssertEqual(decoded.width, width)
         XCTAssertEqual(decoded.height, height)
-        XCTAssertEqual(decoded.y.count, paddedW_Y * paddedH_Y)
-        XCTAssertEqual(decoded.cb.count, paddedW_C * paddedH_C)
-        XCTAssertEqual(decoded.cr.count, paddedW_C * paddedH_C)
+        XCTAssertEqual(decoded.y.count, width * height)
+        XCTAssertEqual(decoded.cb.count, (width / 2) * (height / 2))
+        XCTAssertEqual(decoded.cr.count, (width / 2) * (height / 2))
         
         let psnrY = calculatePSNR(original: yPlane, decoded: decoded.y)
         let psnrCb = calculatePSNR(original: cbPlane, decoded: decoded.cb)
@@ -245,6 +240,52 @@ final class IntraTileTests: XCTestCase {
         mse /= Double(original.count)
         if mse == 0 { return 100.0 }
         return 10.0 * log10((255.0 * 255.0) / mse)
+    }
+    
+    // Crop regression test for unaligned resolutions (e.g. 1080x450)
+    func testCropRegression() async throws {
+        let width = 1080
+        let height = 450
+        var yPlane = [Int16](repeating: 0, count: width * height)
+        var cbPlane = [Int16](repeating: 0, count: (width/2) * (height/2))
+        var crPlane = [Int16](repeating: 0, count: (width/2) * (height/2))
+        
+        for y in 0..<height {
+            for x in 0..<width {
+                yPlane[y * width + x] = Int16((x + y) % 255) - 128
+            }
+        }
+        for y in 0..<(height/2) {
+            for x in 0..<(width/2) {
+                cbPlane[y * (width/2) + x] = Int16((x) % 255) - 128
+                crPlane[y * (width/2) + x] = Int16((y) % 255) - 128
+            }
+        }
+        
+        let pool = BlockViewPool()
+        let pd = PlaneData420(width: width, height: height, y: yPlane, cb: cbPlane, cr: crPlane)
+        
+        let qtY = QuantizationTable(baseStep: 16, isChroma: false, layerIndex: 0, profile: 0x02)
+        let qtC = QuantizationTable(baseStep: 16, isChroma: true, layerIndex: 0, profile: 0x02)
+        
+        let payload = try await encodeIntraTiles(pd: pd, pool: pool, qtY: qtY, qtC: qtC)
+        let fHeader = VEVCFileHeader(width: width, height: height, framerate: 0, profile: 0x02)
+        
+        let decoded = try await decodeIntraTiles(from: payload, pool: pool, header: fHeader, maxLayer: 2)
+        
+        XCTAssertEqual(decoded.width, width)
+        XCTAssertEqual(decoded.height, height)
+        XCTAssertEqual(decoded.y.count, width * height)
+        XCTAssertEqual(decoded.cb.count, (width / 2) * (height / 2))
+        XCTAssertEqual(decoded.cr.count, (width / 2) * (height / 2))
+        
+        let psnrY = calculatePSNR(original: yPlane, decoded: decoded.y)
+        let psnrCb = calculatePSNR(original: cbPlane, decoded: decoded.cb)
+        let psnrCr = calculatePSNR(original: crPlane, decoded: decoded.cr)
+        
+        XCTAssertGreaterThanOrEqual(psnrY, 45.0, "Y PSNR too low for cropped unaligned frame")
+        XCTAssertGreaterThanOrEqual(psnrCb, 45.0, "Cb PSNR too low for cropped unaligned frame")
+        XCTAssertGreaterThanOrEqual(psnrCr, 45.0, "Cr PSNR too low for cropped unaligned frame")
     }
 
     // 6. ドロップレベルの E2E 検証
