@@ -43,8 +43,6 @@ final class Profile2DichotomyTests: XCTestCase {
         let psnrCr = calculatePlanePSNR(original: image.crPlane, decoded: decodedYCbCr.crPlane)
         
         let avg = (4.0 * psnrY + psnrCb + psnrCr) / 6.0
-        
-        print("DIRECT Plane PSNR: Y=\(psnrY), U=\(psnrCb), V=\(psnrCr), Avg=\(avg)")
     }
     
     private func calculatePlanePSNR(original: [UInt8], decoded: [UInt8]) -> Double {

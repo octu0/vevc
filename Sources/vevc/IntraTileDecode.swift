@@ -239,7 +239,7 @@ private func blockDecodeGeneric(decoder: inout EntropyDecoder, block: BlockView)
     let width = block.width
     let height = block.height
     
-    let lastIdxUInt = try decoder.readPair(context: 5).run
+    let lastIdxUInt = decoder.readPair(context: 5).run
     let lastIdx = Int(lastIdxUInt)
     if lastIdx < 0 || lastIdx >= width * height { return }
     

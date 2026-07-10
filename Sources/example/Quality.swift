@@ -94,7 +94,6 @@ public func calculatePSNR(img1: YCbCrImage, img2: YCbCrImage) -> Double {
     let psnrV = calcPlanePSNR(p1: img1.crPlane, p2: img2.crPlane, w: cw, h: ch, stride1: (img1.width + 1) / 2, stride2: (img2.width + 1) / 2)
     
     let avg = (4.0 * psnrY + psnrU + psnrV) / 6.0
-    print("Plane PSNR: Y=\(psnrY), U=\(psnrU), V=\(psnrV), Avg=\(avg)")
     return avg
 }
 
