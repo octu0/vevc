@@ -36,11 +36,38 @@ final class QuantTests: XCTestCase {
         }
 
         if signedMapping {
-            quantizeSIMDSignedMapping(block, q: q)
-            dequantizeSIMDSignedMapping(block, q: q)
+            switch width {
+            case 8:
+                quantizeSIMDSignedMapping8(block, q: q)
+                dequantizeSIMDSignedMapping8(block, q: q)
+            case 16:
+                quantizeSIMDSignedMapping16(block, q: q)
+                dequantizeSIMDSignedMapping16(block, q: q)
+            case 32:
+                quantizeSIMDSignedMapping32(block, q: q)
+                dequantizeSIMDSignedMapping32(block, q: q)
+            default:
+                quantizeSIMDSignedMappingGeneric(block, q: q)
+                dequantizeSIMDSignedMappingGeneric(block, q: q)
+            }
         } else {
-            quantizeSIMD(block, q: q)
-            dequantizeSIMD(block, q: q)
+            switch width {
+            case 4:
+                quantizeSIMD4(block, q: q)
+                dequantizeSIMD4(block, q: q)
+            case 8:
+                quantizeSIMD8(block, q: q)
+                dequantizeSIMD8(block, q: q)
+            case 16:
+                quantizeSIMD16(block, q: q)
+                dequantizeSIMD16(block, q: q)
+            case 32:
+                quantizeSIMD32(block, q: q)
+                dequantizeSIMD32(block, q: q)
+            default:
+                quantizeSIMDGeneric(block, q: q)
+                dequantizeSIMDGeneric(block, q: q)
+            }
         }
 
         for y in 0..<height {

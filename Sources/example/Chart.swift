@@ -56,7 +56,7 @@ struct SpeedSizeChart: View {
                 .foregroundStyle(by: .value("Category", decodeCategory))
                 .position(by: .value("Type", "Decode Time"))
                 
-                LineMark(
+                PointMark(
                     x: .value("Codec", res.name),
                     y: .value("Time (ms)", normalizedSize)
                 )

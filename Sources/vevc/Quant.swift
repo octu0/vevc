@@ -148,16 +148,6 @@ struct QuantizationTable: Sendable {
 // MARK: - Quantization SIMD
 
 @inline(__always)
-internal func quantizeSIMD(_ block: BlockView, q: Quantizer) {
-    switch block.width {
-    case 8: quantizeSIMD8(block, q: q)
-    case 16: quantizeSIMD16(block, q: q)
-    case 32: quantizeSIMD32(block, q: q)
-    default: quantizeSIMDGeneric(block, q: q)
-    }
-}
-
-@inline(__always)
 internal func quantizeSIMD8(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
@@ -284,16 +274,6 @@ internal func quantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
             ptr[x] = Int16(clamping: res)
             x += 1
         }
-    }
-}
-
-@inline(__always)
-internal func quantizeSIMDSignedMapping(_ block: BlockView, q: Quantizer) {
-    switch block.width {
-    case 8: quantizeSIMDSignedMapping8(block, q: q)
-    case 16: quantizeSIMDSignedMapping16(block, q: q)
-    case 32: quantizeSIMDSignedMapping32(block, q: q)
-    default: quantizeSIMDSignedMappingGeneric(block, q: q)
     }
 }
 
@@ -438,17 +418,6 @@ internal func quantizeSIMDSignedMappingGeneric(_ block: BlockView, q: Quantizer)
 // MARK: - Dequantization SIMD
 
 @inline(__always)
-internal func dequantizeSIMD(_ block: BlockView, q: Quantizer) {
-    switch block.width {
-    case 4: dequantizeSIMD4(block, q: q)
-    case 8: dequantizeSIMD8(block, q: q)
-    case 16: dequantizeSIMD16(block, q: q)
-    case 32: dequantizeSIMD32(block, q: q)
-    default: dequantizeSIMDGeneric(block, q: q)
-    }
-}
-
-@inline(__always)
 internal func dequantizeSIMD8(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     for y in 0..<8 {
@@ -533,17 +502,6 @@ internal func dequantizeSIMDGeneric(_ block: BlockView, q: Quantizer) {
             ptr[x] = Int16(clamping: res)
             x += 1
         }
-    }
-}
-
-@inline(__always)
-internal func dequantizeSIMDSignedMapping(_ block: BlockView, q: Quantizer) {
-    switch block.width {
-    case 4: dequantizeSIMDSignedMapping4(block, q: q)
-    case 8: dequantizeSIMDSignedMapping8(block, q: q)
-    case 16: dequantizeSIMDSignedMapping16(block, q: q)
-    case 32: dequantizeSIMDSignedMapping32(block, q: q)
-    default: dequantizeSIMDSignedMappingGeneric(block, q: q)
     }
 }
 

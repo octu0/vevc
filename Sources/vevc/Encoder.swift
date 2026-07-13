@@ -622,10 +622,10 @@ private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) ->
     let view = block
     let sub = dwt2DBlock8Subbands(view)
     
-    quantizeSIMD(sub.ll, q: qt.qLow)
-    quantizeSIMD(sub.hl, q: qt.qMid)
-    quantizeSIMD(sub.lh, q: qt.qMid)
-    quantizeSIMD(sub.hh, q: qt.qHigh)
+    quantizeSIMD4(sub.ll, q: qt.qLow)
+    quantizeSIMD4(sub.hl, q: qt.qMid)
+    quantizeSIMD4(sub.lh, q: qt.qMid)
+    quantizeSIMD4(sub.hh, q: qt.qHigh)
     
     let isZero = isEffectivelyZeroBase4(data: block.base, threshold: 0)
     if isZero {

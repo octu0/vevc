@@ -258,10 +258,10 @@ final class ChromaBlockTests: XCTestCase {
             let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: blockSize)
             let lhView = BlockView(base: base.advanced(by: half * blockSize), width: half, height: half, stride: blockSize)
             let hhView = BlockView(base: base.advanced(by: half * blockSize + half), width: half, height: half, stride: blockSize)
-            dequantizeSIMD(llView, q: qt.qLow)
-            dequantizeSIMDSignedMapping(hlView, q: qt.qMid)
-            dequantizeSIMDSignedMapping(lhView, q: qt.qMid)
-            dequantizeSIMDSignedMapping(hhView, q: qt.qHigh)
+            dequantizeSIMD4(llView, q: qt.qLow)
+            dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
+            dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
+            dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
             inverseDWT2DBlock8(view)
 
             // MSE計算
