@@ -1,7 +1,7 @@
 import Foundation
 import VideoToolbox
 import CoreMedia
-import PNG
+import AppKit
 import vevc
 
 struct Config {
@@ -21,23 +21,8 @@ struct Config {
 
 struct ImageInput {
     let vevcImage: YCbCrImage
-    let rgbaFrames: [PNG.RGBA<UInt8>]
     let width: Int
     let height: Int
-}
-
-func readPNG(path: String) -> (image: YCbCrImage, rawData: [PNG.RGBA<UInt8>], width: Int, height: Int)? {
-    guard let image: PNG.Image = try? .decompress(path: path) else { return nil }
-    let rgba: [PNG.RGBA<UInt8>] = image.unpack(as: PNG.RGBA<UInt8>.self)
-    var data = [UInt8](repeating: 0, count: rgba.count * 4)
-    for j in 0..<rgba.count {
-        let offset = j * 4
-        data[offset + 0] = rgba[j].r
-        data[offset + 1] = rgba[j].g
-        data[offset + 2] = rgba[j].b
-        data[offset + 3] = rgba[j].a
-    }
-    return (vevc.rgbaToYCbCr(data: data, width: image.size.x, height: image.size.y), rgba, image.size.x, image.size.y)
 }
 
 func readY4M(path: String) -> [ImageInput]? {
@@ -57,21 +42,7 @@ func readY4M(path: String) -> [ImageInput]? {
         let width = reader.width
         let height = reader.height
         
-        let rawData = vevc.ycbcrToRGBA(img: img)
-        let pixelCount = width * height
-        var rgbaFrames = [PNG.RGBA<UInt8>](repeating: .init(0, 0, 0, 0), count: pixelCount)
-        
-        rawData.withUnsafeBufferPointer { rawPtr in
-            rgbaFrames.withUnsafeMutableBufferPointer { rgbaPtr in
-                guard let rawBase = rawPtr.baseAddress, let rgbaBase = rgbaPtr.baseAddress else { return }
-                for i in 0..<pixelCount {
-                    let offset = i * 4
-                    rgbaBase[i] = PNG.RGBA<UInt8>(rawBase[offset], rawBase[offset + 1], rawBase[offset + 2], rawBase[offset + 3])
-                }
-            }
-        }
-        
-        inputs.append(ImageInput(vevcImage: img, rgbaFrames: rgbaFrames, width: width, height: height))
+        inputs.append(ImageInput(vevcImage: img, width: width, height: height))
     }
     return inputs
 }
@@ -186,9 +157,6 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     
     return (encTime, outBytes, sizes, l0Dec, l1Dec, l2Dec)
 }
-
-
-
 
 func createPixelBuffer(from img: YCbCrImage) -> CVPixelBuffer? {
     let width = img.width
@@ -503,7 +471,6 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
         }
     }
     
-
     let encStart = Date()
     for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
@@ -522,13 +489,11 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
     encTime = Date().timeIntervalSince(encStart)
     
-
     for sample in frameBox.frames {
         if let dataBuffer = CMSampleBufferGetDataBuffer(sample) {
             compSize += CMBlockBufferGetDataLength(dataBuffer)
         }
     }
-    
 
     var decTime: Double = 0
     guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil, frameBox.frames) }
@@ -564,7 +529,6 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     guard decStatus == noErr, let decompressionSession = decompressionSessionOut else {
         throw NSError(domain: "VTDecompressionSessionCreate (HEVC)", code: Int(decStatus), userInfo: nil)
     }
-
 
     let decStart = Date()
     for sample in frameBox.frames {
@@ -665,7 +629,6 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         throw NSError(domain: "VTCompressionSessionCreate (MJPEG)", code: Int(status), userInfo: nil)
     }
     
-
     let bitRateBps = config.bitrate * 1000
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
     VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
@@ -682,7 +645,6 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         }
     }
     
-
     let encStart = Date()
     for (idx, pixelBuffer) in encodeBuffers.enumerated() {
         let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
@@ -708,7 +670,6 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
         }
     }
     
-
     var decTime: Double = 0
     guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil) }
     
@@ -799,7 +760,6 @@ func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) asy
     return (encTime, decTime, compSize, metrics)
 }
 
-
 @main
 struct CompareApp {
     static func main() async throws {
@@ -877,7 +837,7 @@ struct CompareApp {
     }
 
     if positionalArgs.isEmpty && y4mPath == nil {
-        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [-vevc-only] [<input1.png> input2.png ...]")
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [-vevc-only]")
         exit(1)
     }
 
@@ -887,14 +847,6 @@ struct CompareApp {
             images = y4mImages
         } else {
             print("Failed to read y4m: \(y4m)")
-        }
-    } else {
-        for p in positionalArgs {
-            if let imgData = readPNG(path: p) {
-                images.append(ImageInput(vevcImage: imgData.image, rgbaFrames: imgData.rawData, width: imgData.width, height: imgData.height))
-            } else {
-                print("Failed to read \(p)")
-            }
         }
     }
 
@@ -1185,78 +1137,56 @@ func saveVersusImage(idx: Int, orig: ImageInput, vevcF: YCbCrImage?, h264F: YCbC
     let w = orig.width
     let h = orig.height
     
-    // We will crop 400x400 from the center
+    // Crop center 400x400
     let cropW = 400
     let cropH = 400
     let cx = max(0, w / 2 - cropW / 2)
     let cy = max(0, h / 2 - cropH / 2)
+    let cropRect = CGRect(x: cx, y: cy, width: cropW, height: cropH)
     
-    func doCrop(rgba: [PNG.RGBA<UInt8>], width: Int, height: Int) -> [PNG.RGBA<UInt8>] {
-        var out = [PNG.RGBA<UInt8>](repeating: .init(0,0,0,255), count: cropW * cropH)
-        for y in 0..<cropH {
-            let sy = cy + y
-            if sy < 0 || height <= sy { continue }
-            for x in 0..<cropW {
-                let sx = cx + x
-                if sx < 0 || width <= sx { continue }
-                out[y * cropW + x] = rgba[sy * width + sx]
-                out[y * cropW + x].a = 255 // Force opaque
+    func createCroppedPNG(from ycbcr: YCbCrImage?, outPath: String) {
+        guard let f = ycbcr else { return }
+        var rgba = vevc.ycbcrToRGBA(img: f)
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bytesPerPixel = 4
+        let bytesPerRow = bytesPerPixel * f.width
+        
+        // Force opaque alpha
+        for i in stride(from: 3, to: rgba.count, by: 4) {
+            rgba[i] = 255
+        }
+        
+        rgba.withUnsafeMutableBytes { ptr in
+            guard let baseAddress = ptr.baseAddress else { return }
+            guard let context = CGContext(
+                data: baseAddress,
+                width: f.width,
+                height: f.height,
+                bitsPerComponent: 8,
+                bytesPerRow: bytesPerRow,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue
+            ) else { return }
+            
+            guard let cgImage = context.makeImage() else { return }
+            guard let croppedCGImage = cgImage.cropping(to: cropRect) else { return }
+            
+            let rep = NSBitmapImageRep(cgImage: croppedCGImage)
+            guard let pngData = rep.representation(using: .png, properties: [:]) else { return }
+            
+            let url = URL(fileURLWithPath: outPath)
+            do {
+                try pngData.write(to: url)
+                print("  -> Saved \(outPath)")
+            } catch {
+                print("  -> Failed to save \(outPath)")
             }
         }
-        return out
     }
     
-    // Convert to RGBA and crop
-    let origRGBA = orig.rgbaFrames
-    
-    // Helper to convert UInt8 array to PNG.RGBA
-    func toPNGRGBA(_ data: [UInt8]) -> [PNG.RGBA<UInt8>] {
-        let count = data.count / 4
-        var arr = [PNG.RGBA<UInt8>](repeating: .init(0,0,0,255), count: count)
-        data.withUnsafeBufferPointer { src in
-            arr.withUnsafeMutableBufferPointer { dst in
-                guard let s = src.baseAddress, let d = dst.baseAddress else { return }
-                for i in 0..<count {
-                    let off = i * 4
-                    d[i] = PNG.RGBA<UInt8>(s[off], s[off+1], s[off+2], 255)
-                }
-            }
-        }
-        return arr
-    }
-    
-    var vevcRGBA: [PNG.RGBA<UInt8>]? = nil
-    if let f = vevcF {
-        vevcRGBA = toPNGRGBA(vevc.ycbcrToRGBA(img: f))
-    }
-    var h264RGBA: [PNG.RGBA<UInt8>]? = nil
-    if let f = h264F {
-        h264RGBA = toPNGRGBA(vevc.ycbcrToRGBA(img: f))
-    }
-    var hevcRGBA: [PNG.RGBA<UInt8>]? = nil
-    if let f = hevcF {
-        hevcRGBA = toPNGRGBA(vevc.ycbcrToRGBA(img: f))
-    }
-    
-    let crops: [(name: String, data: [PNG.RGBA<UInt8>]?)] = [
-        ("orig", doCrop(rgba: origRGBA, width: w, height: h)),
-        ("vevc", vevcRGBA != nil ? doCrop(rgba: vevcRGBA!, width: w, height: h) : nil),
-        ("h264", h264RGBA != nil ? doCrop(rgba: h264RGBA!, width: w, height: h) : nil),
-        ("hevc", hevcRGBA != nil ? doCrop(rgba: hevcRGBA!, width: w, height: h) : nil),
-    ]
-    
-    for c in crops {
-        guard let data = c.data else { continue }
-        let filename = "docs/versus_\(prefix)_frame\(idx)_\(c.name).png"
-        let image = PNG.Image(
-            packing: data,
-            size: (x: cropW, y: cropH),
-            layout: .init(format: .rgba8(palette: [], fill: nil))
-        )
-        if (try? image.compress(path: filename, level: 6)) != nil {
-            print("  -> Saved \(filename)")
-        } else {
-            print("  -> Failed to save \(filename)")
-        }
-    }
+    createCroppedPNG(from: orig.vevcImage, outPath: "docs/versus_\(prefix)_frame\(idx)_orig.png")
+    createCroppedPNG(from: vevcF, outPath: "docs/versus_\(prefix)_frame\(idx)_vevc.png")
+    createCroppedPNG(from: h264F, outPath: "docs/versus_\(prefix)_frame\(idx)_h264.png")
+    createCroppedPNG(from: hevcF, outPath: "docs/versus_\(prefix)_frame\(idx)_hevc.png")
 }

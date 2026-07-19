@@ -1,5 +1,4 @@
 import Foundation
-import PNG
 import vevc
 
 let args = CommandLine.arguments
@@ -47,30 +46,35 @@ while i < args.count {
 }
 
 if positionalArgs.isEmpty {
-    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] <input1.png> [input2.png ...]")
+    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] <input1.y4m> [input2.y4m ...]")
     exit(1)
-}
-
-func readPNG(path: String) -> YCbCrImage? {
-    guard let image: PNG.Image = try? .decompress(path: path) else { return nil }
-    let rgba: [PNG.RGBA<UInt8>] = image.unpack(as: PNG.RGBA<UInt8>.self)
-    var data = [UInt8](repeating: 0, count: rgba.count * 4)
-    for j in 0..<rgba.count {
-        let offset = j * 4
-        data[offset + 0] = rgba[j].r
-        data[offset + 1] = rgba[j].g
-        data[offset + 2] = rgba[j].b
-        data[offset + 3] = rgba[j].a
-    }
-    return vevc.rgbaToYCbCr(data: data, width: image.size.x, height: image.size.y)
 }
 
 var images: [YCbCrImage] = []
 for p in positionalArgs {
-    if let img = readPNG(path: p) {
-        images.append(img)
+    let fileHandle: FileHandle
+    if p == "-" {
+        fileHandle = FileHandle.standardInput
     } else {
-        print("Failed to read \(p)")
+        guard let f = FileHandle(forReadingAtPath: p) else {
+            print("Failed to open \(p)")
+            continue
+        }
+        fileHandle = f
+    }
+    
+    guard let reader = try? Y4MReader(fileHandle: fileHandle) else {
+        print("Failed to read y4m header from \(p)")
+        if p != "-" { fileHandle.closeFile() }
+        continue
+    }
+    
+    while let img = try? reader.readFrame() {
+        images.append(img)
+    }
+    
+    if p != "-" {
+        fileHandle.closeFile()
     }
 }
 

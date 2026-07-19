@@ -1,5 +1,4 @@
 import Foundation
-import PNG
 import vevc
 
 let args = CommandLine.arguments
@@ -58,31 +57,22 @@ do {
         format: "Decoded %d frames in %.4fms (%.4fms/frame)",
         images.count,
         elapsed * 1000,
-        elapsed * 1000 / Double(images.count),
+        elapsed * 1000 / Double(images.count)
     ))
     
     let outputURL: URL = URL(fileURLWithPath: outDir).standardized
 
     try? FileManager.default.createDirectory(at: outputURL, withIntermediateDirectories: true)
-
-    for (idx, img) in images.enumerated() {
-        let rgba: [UInt8] = vevc.ycbcrToRGBA(img: img)
-        let imgSize: (x: Int, y: Int) = (x: img.width, y: img.height)
-        let layout: PNG.Layout = .init(format: .rgba8(palette: [], fill: nil))
-
-        var packed: [PNG.RGBA<UInt8>] = []
-        packed.reserveCapacity(img.width * img.height)
-        let total: Int = img.width * img.height
-        for j: Int in 0..<total {
-            let offset: Int = j * 4
-            packed.append(PNG.RGBA<UInt8>(rgba[offset], rgba[offset + 1], rgba[offset + 2], rgba[offset + 3]))
+    
+    let outputFile = outputURL.appendingPathComponent("output.y4m")
+    FileManager.default.createFile(atPath: outputFile.path, contents: nil)
+    if let fileHandle = FileHandle(forWritingAtPath: outputFile.path), let first = images.first {
+        let writer = try Y4MWriter(fileHandle: fileHandle, width: first.width, height: first.height, fpsHeader: "F60:1")
+        for img in images {
+            try writer.writeFrame(img)
         }
-
-        let ppng: PNG.Image = PNG.Image(packing: packed, size: imgSize, layout: layout)
-        let fileName: String = "frame_\(String(format: "%04d", idx)).png"
-        let fileURL: URL = outputURL.appendingPathComponent(fileName)
-        try ppng.compress(path: fileURL.path)
-        print("Saved \(fileURL.path)")
+        fileHandle.closeFile()
+        print("Saved \(outputFile.path)")
     }
 } catch {
     print("Failed to decode: \(error)")
