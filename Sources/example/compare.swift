@@ -76,14 +76,61 @@ func readY4M(path: String) -> [ImageInput]? {
     return inputs
 }
 
+func parseVEVCLayerSizes(bitstream: [UInt8]) -> (l0: Int, l1: Int, l2: Int) {
+    var offset = 0
+    var headerAndBase = 0
+    var l0 = 0
+    var l1 = 0
+    var l2 = 0
+    
+    while offset < bitstream.count {
+        if offset + 4 <= bitstream.count && bitstream[offset] == 0x56 && bitstream[offset+1] == 0x45 && bitstream[offset+2] == 0x56 && bitstream[offset+3] == 0x43 {
+            let start = offset
+            if let _ = try? VEVCFileHeader.deserialize(from: bitstream, offset: &offset) {
+                headerAndBase += (offset - start)
+            } else {
+                break
+            }
+        } else {
+            let start = offset
+            if let fh = try? VEVCFrameHeader.deserialize(from: bitstream, offset: &offset) {
+                let headerSize = offset - start
+                headerAndBase += headerSize
+                if !fh.isCopyFrame {
+                    headerAndBase += fh.mvsSize + fh.refDirSize
+                    l0 += fh.layer0Size
+                    l1 += fh.layer1Size
+                    l2 += fh.layer2Size
+                    offset += fh.payloadSize
+                }
+            } else {
+                break
+            }
+        }
+    }
+    
+    let layer0Total = headerAndBase + l0
+    let layer1Total = layer0Total + l1
+    let layer2Total = layer1Total + l2
+    
+    return (layer0Total, layer1Total, layer2Total)
+}
+
 // MARK: - VEVC Encode / Decode
-func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [UInt8]) {
+func runVEVC(images: [ImageInput], config: Config) async throws -> (
+    encTime: Double,
+    bitstream: [UInt8],
+    sizes: (l0: Int, l1: Int, l2: Int),
+    l0Dec: (time: Double, metrics: [QualityMetrics]?),
+    l1Dec: (time: Double, metrics: [QualityMetrics]?),
+    l2Dec: (time: Double, metrics: [QualityMetrics]?)
+) {
     let vevcImages = images.map { $0.vevcImage }
     
     // Encode
     print("  -> runVEVC Encoding...")
     let encStart = Date()
-    guard let first = vevcImages.first else { return (0, 0, 0, nil, []) }
+    guard let first = vevcImages.first else { return (0, [], (0,0,0), (0, nil), (0, nil), (0, nil)) }
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
         vevcEncoder = VEVCEncoder(
@@ -110,26 +157,34 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (encTime: Dou
     let encTime = Date().timeIntervalSince(encStart)
     print("  -> runVEVC Encoded \(outBytes.count) bytes")
     
-    // Decode
-    print("  -> runVEVC Decoding...")
-    let vevcDecoder = Decoder(maxLayer: config.maxLayer)
-    let decStart = Date()
-    let outFrames = try await vevcDecoder.decode(data: outBytes)
-    let decTime = Date().timeIntervalSince(decStart)
-    print("  -> runVEVC Decoded \(outFrames.count) frames")
+    let sizes = parseVEVCLayerSizes(bitstream: outBytes)
     
-    var metrics: [QualityMetrics]? = nil
-    if config.quality {
-        var mets = [QualityMetrics]()
-        for i in 0..<min(images.count, outFrames.count) {
-            let psnr = calculatePSNR(img1: images[i].vevcImage, img2: outFrames[i])
-            let ssim = calculateSSIM(img1: images[i].vevcImage, img2: outFrames[i])
-            mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+    func decodeAndMetrics(maxLayer: Int) async throws -> (time: Double, metrics: [QualityMetrics]?) {
+        print("  -> runVEVC Decoding Layer \(maxLayer)...")
+        let vevcDecoder = Decoder(maxLayer: maxLayer)
+        let decStart = Date()
+        let outFrames = try await vevcDecoder.decode(data: outBytes)
+        let decTime = Date().timeIntervalSince(decStart)
+        print("  -> runVEVC Decoded Layer \(maxLayer) \(outFrames.count) frames")
+        
+        var metrics: [QualityMetrics]? = nil
+        if config.quality && maxLayer == 2 {
+            var mets = [QualityMetrics]()
+            for i in 0..<min(images.count, outFrames.count) {
+                let psnr = calculatePSNR(img1: images[i].vevcImage, img2: outFrames[i])
+                let ssim = calculateSSIM(img1: images[i].vevcImage, img2: outFrames[i])
+                mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+            }
+            metrics = mets
         }
-        metrics = mets
+        return (decTime, metrics)
     }
     
-    return (encTime, decTime, outBytes.count, metrics, outBytes)
+    let l2Dec = try await decodeAndMetrics(maxLayer: 2)
+    let l1Dec = try await decodeAndMetrics(maxLayer: 1)
+    let l0Dec = try await decodeAndMetrics(maxLayer: 0)
+    
+    return (encTime, outBytes, sizes, l0Dec, l1Dec, l2Dec)
 }
 
 
@@ -933,7 +988,9 @@ struct CompareApp {
             
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
-            chartResults.append(printStats(name: "VEVC (Layers)", encTime: vevcResult.encTime, decTime: vevcResult.decTime, compSize: vevcResult.compSize, metrics: vevcResult.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (Layer 2)", encTime: vevcResult.encTime, decTime: vevcResult.l2Dec.time, compSize: vevcResult.sizes.l2, metrics: vevcResult.l2Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (Layer 1)", encTime: vevcResult.encTime, decTime: vevcResult.l1Dec.time, compSize: vevcResult.sizes.l1, metrics: vevcResult.l1Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (Layer 0)", encTime: vevcResult.encTime, decTime: vevcResult.l0Dec.time, compSize: vevcResult.sizes.l0, metrics: vevcResult.l0Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
             
             if localConfig.vevcOnly != true {
                 if let h264Sw = h264SwResult {
@@ -971,9 +1028,11 @@ struct CompareApp {
                     print(">> Bitrate: \(br) kbps")
                     
                     let vevcRes = try await runVEVC(images: localImages, config: sweepConfig)
-                    if let stats = calculateQualityStats(metrics: vevcRes.metrics ?? []) {
-                        chartPoints.append(.init(codec: "VEVC (Layers)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(vevcRes.compSize) / 1024.0))
+                    if let stats = calculateQualityStats(metrics: vevcRes.l2Dec.metrics ?? []) {
+                        chartPoints.append(.init(codec: "VEVC (Layer 2)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(vevcRes.sizes.l2) / 1024.0))
                     }
+                    chartPoints.append(.init(codec: "VEVC (Layer 1)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(vevcRes.sizes.l1) / 1024.0))
+                    chartPoints.append(.init(codec: "VEVC (Layer 0)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(vevcRes.sizes.l0) / 1024.0))
                     
                     if localConfig.vevcOnly != true {
                         let h264SwRes = try await runH264(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
@@ -996,7 +1055,7 @@ struct CompareApp {
             if localConfig.outputVersus {
                 print("\n--- Output Versus Images ---")
                 
-                let vevcMinIdx = vevcResult.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
+                let vevcMinIdx = vevcResult.l2Dec.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let h264MinIdx = h264SwResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let hevcMinIdx = hevcSwResult?.metrics?.enumerated().min(by: { $0.element.ssim < $1.element.ssim })?.offset ?? 0
                 let sec14Idx = min(14 * localConfig.framerate, localImages.count - 1)

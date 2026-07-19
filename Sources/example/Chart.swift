@@ -111,7 +111,7 @@ struct PsnrChart: View {
     let results: [CodecBenchmarkResult]
     
     var body: some View {
-        let validResults = results.filter { $0.stats != nil }
+        let validResults = results.filter { $0.stats != nil && $0.name != "VEVC (Layer 0)" && $0.name != "VEVC (Layer 1)" }
         
         VStack(alignment: .leading) {
             Text("PSNR Benchmark (Higher is better)")
@@ -159,7 +159,7 @@ struct SsimChart: View {
     let results: [CodecBenchmarkResult]
     
     var body: some View {
-        let validResults = results.filter { $0.stats != nil }
+        let validResults = results.filter { $0.stats != nil && $0.name != "VEVC (Layer 0)" && $0.name != "VEVC (Layer 1)" }
         
         VStack(alignment: .leading) {
             Text("SSIM Benchmark (Closer to 1.0 is better)")
@@ -274,7 +274,9 @@ struct BitrateSsimChart: View {
                 .opacity(0.3)
                 .annotation(position: .overlay, alignment: .bottom) {
                     let yOffset: CGFloat = {
-                        if pt.codec.contains("VEVC") { return -35 }
+                        if pt.codec == "VEVC (Layer 2)" { return -65 }
+                        if pt.codec == "VEVC (Layer 1)" { return -50 }
+                        if pt.codec == "VEVC (Layer 0)" { return -35 }
                         if pt.codec.contains("H.264") { return -20 }
                         return -5
                     }()
@@ -286,32 +288,36 @@ struct BitrateSsimChart: View {
                         .foregroundColor(.secondary)
                 }
                 
-                // SSIM Candlestick
-                RuleMark(
-                    x: .value("Bitrate", String(pt.bitrate)),
-                    yStart: .value("SSIM Min", pt.ssimMin * ratio),
-                    yEnd: .value("SSIM Max", pt.ssimMax * ratio)
-                )
-                .position(by: .value("Codec", pt.codec))
-                .foregroundStyle(by: .value("Codec", pt.codec))
-                
-                // SSIM Avg Point
-                PointMark(
-                    x: .value("Bitrate", String(pt.bitrate)),
-                    y: .value("SSIM Avg", pt.ssimAvg * ratio)
-                )
-                .position(by: .value("Codec", pt.codec))
-                .foregroundStyle(by: .value("Codec", pt.codec))
-                .symbol(.circle)
-                .annotation(position: .top, alignment: .center) {
-                    Text(String(format: "%.4f", pt.ssimAvg))
-                        .font(.caption2)
-                        .fontWeight(.regular)
-                        .foregroundColor(.primary)
+                if pt.codec != "VEVC (Layer 0)" && pt.codec != "VEVC (Layer 1)" {
+                    // SSIM Candlestick
+                    RuleMark(
+                        x: .value("Bitrate", String(pt.bitrate)),
+                        yStart: .value("SSIM Min", pt.ssimMin * ratio),
+                        yEnd: .value("SSIM Max", pt.ssimMax * ratio)
+                    )
+                    .position(by: .value("Codec", pt.codec))
+                    .foregroundStyle(by: .value("Codec", pt.codec))
+                    
+                    // SSIM Avg Point
+                    PointMark(
+                        x: .value("Bitrate", String(pt.bitrate)),
+                        y: .value("SSIM Avg", pt.ssimAvg * ratio)
+                    )
+                    .position(by: .value("Codec", pt.codec))
+                    .foregroundStyle(by: .value("Codec", pt.codec))
+                    .symbol(.circle)
+                    .annotation(position: .top, alignment: .center) {
+                        Text(String(format: "%.4f", pt.ssimAvg))
+                            .font(.caption2)
+                            .fontWeight(.regular)
+                            .foregroundColor(.primary)
+                    }
                 }
             }
             .chartForegroundStyleScale([
-                "VEVC (Layers)": Color.orange,
+                "VEVC (Layer 2)": Color.orange,
+                "VEVC (Layer 1)": Color.orange.opacity(0.8),
+                "VEVC (Layer 0)": Color.orange.opacity(0.5),
                 "HEVC (SW)": Color.blue,
                 "H.264 (SW)": Color.green
             ])
