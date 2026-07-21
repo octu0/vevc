@@ -41,12 +41,14 @@ public actor StreamingDecoderActor {
     private var firstReconstructed: PlaneData420?
     private var roundOffsetIndex = 0
     private var seenY = Set<UnsafeMutableRawPointer>()
+    let profile: UInt8
     
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
+        self.profile = profile
     }
     
     @inline(__always)
@@ -96,7 +98,7 @@ public actor StreamingDecoderActor {
         
         let img16 = try await decodeSpatialLayers(
             r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile
         )
         
         let pd = PlaneData420(img16: img16)
@@ -142,13 +144,13 @@ public struct Decoder: Sendable {
     private func createGOPTask(
         gopContinuation: AsyncStream<AsyncThrowingStream<YCbCrImage, Error>>.Continuation,
         limiter: ConcurrencyLimiter,
-        maxLayer: Int, width: Int, height: Int
+        maxLayer: Int, width: Int, height: Int, profile: UInt8
     ) -> AsyncStream<[UInt8]>.Continuation {
         let (chunkStream, chunkContinuation) = AsyncStream<[UInt8]>.makeStream()
         let (imgStream, imgContinuation) = AsyncThrowingStream<YCbCrImage, Error>.makeStream()
         gopContinuation.yield(imgStream)
         
-        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height)
+        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height, profile: profile)
         
         Task {
             await limiter.wait()
@@ -186,6 +188,7 @@ public struct Decoder: Sendable {
                     let effectiveFps = fileHeader.framerate
                     let maxConcurrency = self.maxConcurrency
                     let maxLayer = self.maxLayer
+                    let profile = fileHeader.profile
                     
                     let (gopStream, gopContinuation) = AsyncStream<AsyncThrowingStream<YCbCrImage, Error>>.makeStream()
                     
@@ -217,7 +220,7 @@ public struct Decoder: Sendable {
                             currentGOPInput = createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
-                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: profile
                             )
                         }
                         
@@ -227,7 +230,7 @@ public struct Decoder: Sendable {
                             let newInput = createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
-                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: profile
                             )
                             currentGOPInput = newInput
                             newInput.yield(chunk)

@@ -53,9 +53,11 @@ struct Layer0CodecFactory {
 }
 
 #if DEBUG
-struct Layer0DebugTracker: @unchecked Sendable {
+final class Layer0DebugTracker: @unchecked Sendable {
     static let shared = Layer0DebugTracker()
     var frameCount = 0
+    var lastLLBytes = 0
+    var lastHighBytes = 0
     let queue = DispatchQueue(label: "vevc.debug.dump")
 }
 #endif
@@ -214,6 +216,9 @@ final class Layer0DWTCodec: Layer0Codec {
         #endif
         
         async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+            #if DEBUG
+            Layer0DebugTracker.shared.queue.sync { Layer0DebugTracker.shared.lastLLBytes = 0; Layer0DebugTracker.shared.lastHighBytes = 0 }
+            #endif
             var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
             let isIFrame = (sads == nil)
             for i in blocks.indices {
@@ -236,12 +241,22 @@ final class Layer0DWTCodec: Layer0Codec {
                 encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
             }
             
+            #if DEBUG
+            Layer0DebugTracker.shared.queue.sync {
+                let frameType = isIFrame ? "I" : "P"
+                print("Layer0 Dump [\(frameType) Y] LL: \(Layer0DebugTracker.shared.lastLLBytes) bytes, High: \(Layer0DebugTracker.shared.lastHighBytes) bytes, Total: \(buf.count) bytes")
+            }
+            #endif
+            
             let quantizedBlocks = blocks
             let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
             return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
         }()
         
         async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+            #if DEBUG
+            Layer0DebugTracker.shared.queue.sync { Layer0DebugTracker.shared.lastLLBytes = 0; Layer0DebugTracker.shared.lastHighBytes = 0 }
+            #endif
             var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
             let isIFrame = (sads == nil)
             for i in blocks.indices {
@@ -255,12 +270,22 @@ final class Layer0DWTCodec: Layer0Codec {
                 encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
             }
             
+            #if DEBUG
+            Layer0DebugTracker.shared.queue.sync {
+                let frameType = isIFrame ? "I" : "P"
+                print("Layer0 Dump [\(frameType) Cb] LL: \(Layer0DebugTracker.shared.lastLLBytes) bytes, High: \(Layer0DebugTracker.shared.lastHighBytes) bytes, Total: \(buf.count) bytes")
+            }
+            #endif
+            
             let quantizedBlocks = blocks
             let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
             return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
         }()
         
         async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+            #if DEBUG
+            Layer0DebugTracker.shared.queue.sync { Layer0DebugTracker.shared.lastLLBytes = 0; Layer0DebugTracker.shared.lastHighBytes = 0 }
+            #endif
             var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
             let isIFrame = (sads == nil)
             for i in blocks.indices {
@@ -273,6 +298,13 @@ final class Layer0DWTCodec: Layer0Codec {
             } else {
                 encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
             }
+            
+            #if DEBUG
+            Layer0DebugTracker.shared.queue.sync {
+                let frameType = isIFrame ? "I" : "P"
+                print("Layer0 Dump [\(frameType) Cr] LL: \(Layer0DebugTracker.shared.lastLLBytes) bytes, High: \(Layer0DebugTracker.shared.lastHighBytes) bytes, Total: \(buf.count) bytes")
+            }
+            #endif
             
             let quantizedBlocks = blocks
             let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)

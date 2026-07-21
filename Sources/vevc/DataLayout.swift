@@ -1,16 +1,17 @@
 public struct VEVCFileHeader {
     public static let magic: [UInt8] = [0x56, 0x45, 0x56, 0x43]
-    public let profile: UInt8 = 0x01
+    public let profile: UInt8
     public let width: Int
     public let height: Int
     public let colorGamut: UInt8 = 0x01 // BT.709
     public let framerate: Int
     public let timescale: UInt8 = 0x00 // 1000ms
     
-    public init(width: Int, height: Int, framerate: Int) {
+    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01) {
         self.width = width
         self.height = height
         self.framerate = framerate
+        self.profile = profile
     }
     
     @inline(__always)
@@ -47,8 +48,8 @@ public struct VEVCFileHeader {
         }
         
         let readProfile = chunk[offset]
-        guard readProfile == 0x01 else {
-            throw DecodeError.insufficientDataContext("VEVC Profile MUST be 0x01, reading: \(readProfile)")
+        guard readProfile == 0x01 || readProfile == 0x02 else {
+            throw DecodeError.insufficientDataContext("VEVC Profile MUST be 0x01 or 0x02, reading: \(readProfile)")
         }
         offset += 1
         
@@ -76,7 +77,7 @@ public struct VEVCFileHeader {
         }
         
         offset = payloadEnd
-        return VEVCFileHeader(width: w, height: h, framerate: fps)
+        return VEVCFileHeader(width: w, height: h, framerate: fps, profile: readProfile)
     }
 }
 

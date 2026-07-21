@@ -11,12 +11,13 @@ public actor VEVCEncoder {
     public nonisolated let sceneChangeThreshold: Int
     public nonisolated let maxConcurrency: Int
     public nonisolated let qstep: Int?
+    public nonisolated let profile: UInt8
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -26,6 +27,7 @@ public actor VEVCEncoder {
         self.sceneChangeThreshold = sceneChangeThreshold
         self.maxConcurrency = maxConcurrency
         self.qstep = nil
+        self.profile = profile
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -37,11 +39,12 @@ public actor VEVCEncoder {
             keyint: keyint,
             sceneChangeThreshold: sceneChangeThreshold,
             pool: pool,
-            qstep: nil
+            qstep: nil,
+            profile: profile
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -51,6 +54,7 @@ public actor VEVCEncoder {
         self.sceneChangeThreshold = sceneChangeThreshold
         self.maxConcurrency = maxConcurrency
         self.qstep = qstep
+        self.profile = profile
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -62,7 +66,8 @@ public actor VEVCEncoder {
             keyint: keyint,
             sceneChangeThreshold: sceneChangeThreshold,
             pool: pool,
-            qstep: qstep
+            qstep: qstep,
+            profile: profile
         )
     }
     
@@ -104,7 +109,7 @@ public actor VEVCEncoder {
         
         var result: [UInt8] = []
         if frameIndex == 0 {
-            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate)
+            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate, profile: profile)
             result.append(contentsOf: fileHeader.serialize())
         }
         result.append(contentsOf: bytes)
@@ -143,6 +148,7 @@ actor LayersEncodeActor {
     let sceneChangeThreshold: Int
     let pool: BlockViewPool
     let qstep: Int?
+    let profile: UInt8
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
@@ -159,7 +165,7 @@ actor LayersEncodeActor {
     private var previousReconstructed: PlaneData420?
     private var releasePreviousRecon: (@Sendable () -> Void)?
     
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int?, profile: UInt8) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -169,6 +175,7 @@ actor LayersEncodeActor {
         self.sceneChangeThreshold = sceneChangeThreshold
         self.pool = pool
         self.qstep = qstep
+        self.profile = profile
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
@@ -182,6 +189,7 @@ actor LayersEncodeActor {
         self.sceneChangeThreshold = sceneChangeThreshold
         self.pool = BlockViewPool()
         self.qstep = nil
+        self.profile = 0x01
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
     }
     
@@ -228,7 +236,7 @@ actor LayersEncodeActor {
             
             let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, maxbitrate: maxbitrate,
-                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0
+                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile
             )
             
             if self.qstep == nil {
@@ -290,7 +298,7 @@ actor LayersEncodeActor {
         let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
             pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
             maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe
+            roundOffset: framesSinceKeyframe % 2, profile: profile, gopPosition: framesSinceKeyframe
         )
         
         // Using masked recon distortion for quality metric

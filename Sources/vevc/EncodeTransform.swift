@@ -563,6 +563,34 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
         }
     }
     
+    #if DEBUG
+    var debugLL = EntropyEncoder()
+    var debugHigh = EntropyEncoder()
+    var debugLastVal: Int16 = 0
+    nzCur = 0
+    for i in blocks.indices {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
+            let view = blocks[i]
+            let subs = getSubbands8(view: view)
+            blockEncodeDPCM4(encoder: &debugLL, block: subs.ll, lastVal: &debugLastVal)
+            blockEncode4V(encoder: &debugHigh, block: subs.hl)
+            blockEncode4H(encoder: &debugHigh, block: subs.lh)
+            blockEncode4H(encoder: &debugHigh, block: subs.hh)
+        } else {
+            debugLastVal = 0
+        }
+    }
+    debugLL.flush()
+    debugHigh.flush()
+    let llBytes = debugLL.getData(selectModel: unifiedSelectModel).count
+    let highBytes = debugHigh.getData(selectModel: unifiedSelectModel).count
+    Layer0DebugTracker.shared.queue.sync {
+        Layer0DebugTracker.shared.lastLLBytes += llBytes
+        Layer0DebugTracker.shared.lastHighBytes += highBytes
+    }
+    #endif
+    
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
@@ -612,6 +640,31 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
         }
     }
     
+    #if DEBUG
+    var debugLL = EntropyEncoder()
+    var debugHigh = EntropyEncoder()
+    nzCur = 0
+    for i in blocks.indices {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
+            let view = blocks[i]
+            let subs = getSubbands8(view: view)
+            blockEncode4H(encoder: &debugLL, block: subs.ll)
+            blockEncode4V(encoder: &debugHigh, block: subs.hl)
+            blockEncode4H(encoder: &debugHigh, block: subs.lh)
+            blockEncode4H(encoder: &debugHigh, block: subs.hh)
+        }
+    }
+    debugLL.flush()
+    debugHigh.flush()
+    let llBytes = debugLL.getData(selectModel: unifiedSelectModel).count
+    let highBytes = debugHigh.getData(selectModel: unifiedSelectModel).count
+    Layer0DebugTracker.shared.queue.sync {
+        Layer0DebugTracker.shared.lastLLBytes += llBytes
+        Layer0DebugTracker.shared.lastHighBytes += highBytes
+    }
+    #endif
+
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
