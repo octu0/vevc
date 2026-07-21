@@ -151,7 +151,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let img = generateNaturalImage(width: width, height: height, seed: 42)
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         let chunk = try await encoder.encodeFrame(image: img)
@@ -185,7 +185,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let frameCount = 8
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         var bottomCbPsnrs: [Double] = []
@@ -255,11 +255,11 @@ final class ChromaBottomQualityTests: XCTestCase {
 
         // I-Frame: encode → reconstruct
         let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(
-            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, profile: 1)
         defer { releaseI() }
 
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0, profile: 1)
         let iDecodedPd = PlaneData420(img16: iDecoded)
 
         // I-Frameのクロマ差分
@@ -277,11 +277,11 @@ final class ChromaBottomQualityTests: XCTestCase {
 
         // P-Frame: encode (without motion compensation since it's removed)
         let (pBytes, pRecon, _, _, releaseP) = try await encodeSpatialLayers(
-            pd: pd1, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+            pd: pd1, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, profile: 1)
         defer { releaseP() }
 
         // P-Frame: decode
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon, roundOffset: 0)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon, roundOffset: 0, profile: 1)
         let pDecodedPd = PlaneData420(img16: pDecoded)
 
         // P-Frameの残差のクロマ差分
@@ -358,7 +358,7 @@ final class ChromaBottomQualityTests: XCTestCase {
         let img = generateNaturalImage(width: width, height: height, seed: 42)
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         let chunk = try await encoder.encodeFrame(image: img)

@@ -50,10 +50,10 @@ final class ReconstructionDriftTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 6)
 
         let (bytes, encRecon, _, _, releaseFn) = try await encodeSpatialLayers(
-            pd: pd, pool: pool, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3, roundOffset: 0)
+            pd: pd, pool: pool, maxbitrate: 500 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 3, roundOffset: 0, profile: 1)
         defer { releaseFn() }
 
-        let decImg16 = try await decodeSpatialLayers(r: bytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
+        let decImg16 = try await decodeSpatialLayers(r: bytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0, profile: 1)
         let decRecon = PlaneData420(img16: decImg16)
 
         let encStats = stats(encRecon.y)
@@ -116,7 +116,7 @@ final class ReconstructionDriftTests: XCTestCase {
         let height = 480
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         var img0 = YCbCrImage(width: width, height: height)

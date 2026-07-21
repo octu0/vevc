@@ -129,7 +129,9 @@ final class ChromaBlockTests: XCTestCase {
             zeroThreshold: 3,
             keyint: 15,
             sceneChangeThreshold: 8,
-            pool: BlockViewPool()
+            pool: BlockViewPool(),
+            qstep: nil,
+            profile: 1
         )
         let decoder = StreamingDecoderActor(width: width, height: height)
 
@@ -178,7 +180,9 @@ final class ChromaBlockTests: XCTestCase {
             zeroThreshold: 3,
             keyint: 15,
             sceneChangeThreshold: 8,
-            pool: BlockViewPool()
+            pool: BlockViewPool(),
+            qstep: nil,
+            profile: 1
         )
         let decoder = StreamingDecoderActor(width: width, height: height)
 

@@ -73,7 +73,7 @@ final class VevcPerfTests: XCTestCase {
         let frameCount = 8
         
         // maxbitrateを10倍に
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 10000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 10000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
         
         var failedFrames: [(Int, Double)] = []
@@ -130,7 +130,7 @@ final class VevcPerfTests: XCTestCase {
         let height = 480
         let frameCount = 20 // GOPサイズ(15)を超えるフレーム数
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
         
         var failedFrames: [(Int, Double)] = []
@@ -187,7 +187,7 @@ final class VevcPerfTests: XCTestCase {
         let height = 1080
         let frameCount = 6
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 8, pool: BlockViewPool())
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 8, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
         
         for i in 0..<frameCount {

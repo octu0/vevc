@@ -144,7 +144,7 @@ final class BidirectionalPredictionTests: XCTestCase {
 
         let encoder = LayersEncodeActor(
             width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32,
-            pool: BlockViewPool()
+            pool: BlockViewPool(), qstep: nil, profile: 1
         )
         let decoder = StreamingDecoderActor(width: width, height: height)
 

@@ -99,7 +99,7 @@ final class VevcTests: XCTestCase {
         malformed += [0, 0, 0, 100]
 
         do {
-            _ = try await vevc.decodeSpatialLayers(r: malformed, pool: pool, maxLayer: 2, dx: 64, dy: 64, roundOffset: 0)
+            _ = try await vevc.decodeSpatialLayers(r: malformed, pool: pool, maxLayer: 2, dx: 64, dy: 64, roundOffset: 0, profile: 1)
             XCTFail("Should have thrown DecodeError.insufficientData")
         } catch DecodeError.insufficientData {
             // Success
@@ -150,7 +150,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 4
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         for i in 0..<frameCount {
@@ -193,7 +193,7 @@ final class VevcTests: XCTestCase {
         }
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         for i in 0..<frameCount {
@@ -213,7 +213,7 @@ final class VevcTests: XCTestCase {
         let frameCount = 5
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 1)
         let decoder = StreamingDecoderActor(width: width, height: height)
 
         for i in 0..<frameCount {
@@ -294,11 +294,11 @@ final class VevcTests: XCTestCase {
 
         // I-Frame: encode→reconstructを取得
         let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(
-            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, profile: 1)
         defer { releaseI() }
 
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0, profile: 1)
         let iPd = PlaneData420(img16: iDecoded)
 
         // I-Frame品質確認
@@ -307,7 +307,7 @@ final class VevcTests: XCTestCase {
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
 
         let (pBytes, _, _, _, releaseP) = try await encodeSpatialLayers(
-            pd: pd3, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+            pd: pd3, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, profile: 1)
         defer { releaseP() }
 
         // P-Frameのresidualの検証（省略して正常終了とする）
