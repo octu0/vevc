@@ -54,7 +54,7 @@ func forwardDCT8x8(block: UnsafeMutablePointer<Int16>, stride: Int) {
             for k in 0..<8 {
                 sum &+= DCT_C[j * 8 + k] &* Int32(block[i * stride + k])
             }
-            temp[i * 8 + j] = (sum + 4096) >> 13
+            temp[i * 8 + j] = (sum &+ 4096) >> 13
         }
     }
     
@@ -64,7 +64,7 @@ func forwardDCT8x8(block: UnsafeMutablePointer<Int16>, stride: Int) {
             for k in 0..<8 {
                 sum &+= DCT_C[i * 8 + k] &* temp[k * 8 + j]
             }
-            block[i * stride + j] = Int16(truncatingIfNeeded: (sum + 4096) >> 13)
+            block[i * stride + j] = Int16(truncatingIfNeeded: (sum &+ 4096) >> 13)
         }
     }
 }
@@ -79,7 +79,7 @@ func inverseDCT8x8(block: UnsafeMutablePointer<Int16>, stride: Int) {
             for k in 0..<8 {
                 sum &+= DCT_C[k * 8 + i] &* Int32(block[k * stride + j])
             }
-            temp[i * 8 + j] = (sum + 4096) >> 13
+            temp[i * 8 + j] = (sum &+ 4096) >> 13
         }
     }
     
@@ -89,7 +89,7 @@ func inverseDCT8x8(block: UnsafeMutablePointer<Int16>, stride: Int) {
             for k in 0..<8 {
                 sum &+= DCT_C[k * 8 + j] &* temp[i * 8 + k]
             }
-            block[i * stride + j] = Int16(truncatingIfNeeded: (sum + 4096) >> 13)
+            block[i * stride + j] = Int16(truncatingIfNeeded: (sum &+ 4096) >> 13)
         }
     }
 }
@@ -158,6 +158,10 @@ public func encodeL0PlaneDCT(plane: [Int16], width: Int, height: Int, stride: In
                 
                 dcEncoder.addPair(run: 0, val: diff, context: 4)
                 
+                // [SPEC DEVIATION]: 
+                // 仕様 (§3) ではブロック単位の EOB (End of Block) によるゼロラン処理が規定されていますが、
+                // 本実装では符号化効率とEntropyCodecの構造上、ブロック境界を越えて AC係数の zeroRun を累積し、
+                // プレーンの最後に一度だけ addTrailingZeros を呼び出す連続ストリームフォーマットを採用しています。
                 for i in 1..<64 {
                     let idx = ZIGZAG[i]
                     let row = idx / 8
