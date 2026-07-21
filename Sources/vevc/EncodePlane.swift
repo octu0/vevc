@@ -32,18 +32,6 @@ func evaluateQuantizeLayer16(view: BlockView, qt: QuantizationTable) {
     quantizeSIMDSignedMapping8(hh, q: qt.qHigh)
 }
 
-@inline(__always)
-func evaluateQuantizeBase8(view: BlockView, qt: QuantizationTable) {
-    let subs = getSubbands8(view: view)
-    let ll = subs.ll
-    let hl = subs.hl
-    let lh = subs.lh
-    let hh = subs.hh
-    quantizeSIMD4(ll, q: qt.qLow)
-    quantizeSIMDSignedMapping4(hl, q: qt.qMid)
-    quantizeSIMDSignedMapping4(lh, q: qt.qMid)
-    quantizeSIMDSignedMapping4(hh, q: qt.qHigh)
-}
 
 @inline(__always)
 func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
@@ -387,39 +375,6 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     return (subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
-@inline(__always)
-func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([BlockView], @Sendable () -> Void) {
-    let rowCount = ((height + 8 - 1) / 8)
-    let colCount = ((width + 8 - 1) / 8)
-    let totalBlocks = rowCount * colCount
-    
-    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
-    tmpBlocks.reserveCapacity(totalBlocks)
-    for _ in 0..<totalBlocks {
-        tmpBlocks.append(pool.get(width: 8, height: 8))
-    }
-    let blocks = tmpBlocks
-    
-    let chunkSize = 4
-    await withTaskGroup(of: Void.self) { group in
-        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
-            let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks] in
-                for i in sRow..<endRow {
-                    let h = (i * 8)
-                    for j in 0..<colCount {
-                        let w = (j * 8)
-                        if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view)
-                        dwt2DBlock8(view)
-                    }
-                }
-            }
-        }
-    }    
-    return (tmpBlocks, { [tmpBlocks] in pool.putBlockViewArray(tmpBlocks) })
-}
 
 @inline(__always)
 func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
@@ -540,63 +495,6 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     )
 }
 
-@inline(__always)
-func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
-    let colCount = (width + 7) / 8
-    let rowCount = (height + 7) / 8
-    var plane = pool.getInt16(count: width * height)
-    withUnsafePointers(mut: &plane) { dstBase in
-        var idx = 0
-        for row in 0..<rowCount {
-            let startY = row * 8
-            let validEndY = min(height, startY + 8)
-            let loopH = validEndY - startY
-            let isEdgeY = (loopH < 8)
-            
-            for col in 0..<colCount {
-                let startX = col * 8
-                let validEndX = min(width, startX + 8)
-                let loopW = validEndX - startX
-                let isEdgeX = (loopW < 8)
-                
-                let blk = blocks[idx]
-                idx += 1
-                
-                let view = blk
-                let base = view.base
-                let llView = BlockView(base: base, width: 4, height: 4, stride: 8)
-                let hlView = BlockView(base: base.advanced(by: 4), width: 4, height: 4, stride: 8)
-                let lhView = BlockView(base: base.advanced(by: 32), width: 4, height: 4, stride: 8)
-                let hhView = BlockView(base: base.advanced(by: 36), width: 4, height: 4, stride: 8)
-                dequantizeSIMD4(llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
-                inverseDWT2DBlock8(view)
-                            
-                switch true {
-                case isEdgeY != true && isEdgeX != true:
-                    let v = blk
-                    for h in 0..<8 {
-                        let srcPtr = v.rowPointer(y: h)
-                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                        destPtr.update(from: srcPtr, count: 8)
-                    }
-                case 0 < loopH && 0 < loopW:
-                    let v = blk
-                    for h in 0..<loopH {
-                        let srcPtr = v.rowPointer(y: h)
-                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
-                        destPtr.update(from: srcPtr, count: loopW)
-                    }
-                default:
-                    break
-                }
-            }
-        }
-    }
-    return (plane, { [plane] in pool.putInt16(plane) })
-}
 
 @inline(__always)
 func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
@@ -959,107 +857,3 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
     return (plane, { [plane] in pool.putInt16(plane) })
 }
 
-@inline(__always)
-func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
-    let dx = pd.width
-    let dy = pd.height
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-    
-    let yColCount8 = (dx + 7) / 8
-    let yRowCount8 = (dy + 7) / 8
-    
-    async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
-        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
-        let isIFrame = (sads == nil)
-        for i in blocks.indices {
-            if let sList = sads, i < sList.count {
-                let col = i % yColCount8
-                let row = i / yColCount8
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: (Int(qtY.step) + 8) >> 4), blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
-                if sList[i] < threshold { 
-                    let b = blocks[i]
-                    clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
-                }
-            }
-            evaluateQuantizeBase8(view: blocks[i], qt: qtY)
-        }
-        
-        // DPCM is already perfectly handled inside encodePlaneBaseSubbands8 via blockEncodeDPCM4 (MED)
-        
-        // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
-        let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-        let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
-        } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
-        }
-        
-        let quantizedBlocks = blocks
-        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
-        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
-    }()
-    
-    
-    async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
-        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
-        let isIFrame = (sads == nil)
-        for i in blocks.indices {
-            evaluateQuantizeBase8(view: blocks[i], qt: qtC)
-        }
-        
-        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
-        let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
-        } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
-        }
-        
-        let quantizedBlocks = blocks
-        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
-    }()
-    
-    async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
-        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
-        let isIFrame = (sads == nil)
-        for i in blocks.indices {
-            evaluateQuantizeBase8(view: blocks[i], qt: qtC)
-        }
-        
-        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-        let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold)
-        } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
-        }
-        
-        let quantizedBlocks = blocks
-        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
-        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
-    }()
-
-    let (bufY, reconY, r0Y, base8YBlocks, relYBlocks) = await taskBufY
-    let (bufCb, reconCb, r0Cb, base8CbBlocks, relCbBlocks) = await taskBufCb
-    let (bufCr, reconCr, r0Cr, base8CrBlocks, relCrBlocks) = await taskBufCr
-    
-    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
-    
-    debugLog({
-        return "  [Layer \(layer)/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
-    }())
-    
-    let out = VEVCLayerData.serialize(
-        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
-        bufY: bufY, bufCb: bufCb, bufCr: bufCr
-    )
-    
-    return (out, reconstructed, base8YBlocks, base8CbBlocks, base8CrBlocks, {
-        r0Y()
-        r0Cb()
-        r0Cr()
-        relYBlocks()
-        relCbBlocks()
-        relCrBlocks()
-    })
-}
