@@ -8,6 +8,7 @@ var zeroThreshold = 3
 var keyint = 30
 var sceneThreshold = 32
 var qstep: Int? = nil
+var profile: UInt8 = 0x01
 
 let args = CommandLine.arguments
 var i = 1
@@ -47,6 +48,11 @@ while i < args.count {
     case "-sceneThreshold":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { sceneThreshold = v }
+            i += 1
+        }
+    case "-profile":
+        if (i + 1) < args.count {
+            if let v = UInt8(args[i + 1]) { profile = v }
             i += 1
         }
     default:
@@ -104,7 +110,8 @@ do {
             framerate: Int(fps),
             zeroThreshold: zeroThreshold,
             keyint: keyint,
-            sceneChangeThreshold: sceneThreshold
+            sceneChangeThreshold: sceneThreshold,
+            profile: profile
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -114,7 +121,8 @@ do {
             framerate: Int(fps),
             zeroThreshold: zeroThreshold,
             keyint: keyint,
-            sceneChangeThreshold: sceneThreshold
+            sceneChangeThreshold: sceneThreshold,
+            profile: profile
         )
     }
 

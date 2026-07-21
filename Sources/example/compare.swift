@@ -17,6 +17,7 @@ struct Config {
     var outputBitrates: Bool = false
     var vevcOnly: Bool = false
     var qstep: Int? = nil
+    var profile: UInt8 = 0x01
 }
 
 struct ImageInput {
@@ -111,7 +112,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
             framerate: config.framerate,
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
-            sceneChangeThreshold: config.sceneThreshold
+            sceneChangeThreshold: config.sceneThreshold,
+            profile: config.profile
         )
     } else {
         vevcEncoder = VEVCEncoder(
@@ -121,7 +123,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
             framerate: config.framerate,
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
-            sceneChangeThreshold: config.sceneThreshold
+            sceneChangeThreshold: config.sceneThreshold,
+            profile: config.profile
         )
     }
     let outBytes = try await vevcEncoder.encodeToData(images: vevcImages)
@@ -828,6 +831,11 @@ struct CompareApp {
         case "-y4m":
             if (i + 1) < args.count {
                 y4mPath = args[i + 1]
+                i += 1
+            }
+        case "-profile", "--profile":
+            if (i + 1) < args.count {
+                if let v = UInt8(args[i + 1]) { config.profile = v }
                 i += 1
             }
         default:

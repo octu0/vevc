@@ -46,9 +46,117 @@ struct Layer0CodecFactory {
         switch profile {
         case 0x01:
             return Layer0DWTCodec()
+        case 0x02:
+            return Layer0Profile2Codec()
         default:
             return Layer0DWTCodec()
         }
+    }
+}
+
+final class Layer0Profile2Codec: Layer0Codec {
+    let dwtCodec = Layer0DWTCodec()
+    
+    private static func deriveDCTStep(qstep: Int) -> Int {
+        return max(1, qstep / 32)
+    }
+    
+    func encode(
+        pd: PlaneData420,
+        pool: BlockViewPool,
+        sads: [Int]?,
+        occlusionScores: [Int]?,
+        layer: UInt8,
+        qtY: QuantizationTable,
+        qtC: QuantizationTable,
+        zeroThreshold: Int
+    ) async throws -> (
+        encodedBytes: [UInt8],
+        reconstructed: PlaneData420,
+        yBlocks: [BlockView],
+        cbBlocks: [BlockView],
+        crBlocks: [BlockView],
+        releaseFn: @Sendable () -> Void
+    ) {
+        let isIFrame = (sads == nil)
+        if !isIFrame {
+            return try await dwtCodec.encode(pd: pd, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: layer, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold)
+        }
+        
+        let dx = pd.width
+        let dy = pd.height
+        let cbDx = ((dx + 1) / 2)
+        let cbDy = ((dy + 1) / 2)
+        
+        let stepY = Self.deriveDCTStep(qstep: Int(qtY.step))
+        let stepC = Self.deriveDCTStep(qstep: Int(qtC.step))
+        
+        let encY = encodeL0PlaneDCT(plane: pd.y, width: dx, height: dy, stride: dx, step: stepY)
+        let encCb = encodeL0PlaneDCT(plane: pd.cb, width: cbDx, height: cbDy, stride: cbDx, step: stepC)
+        let encCr = encodeL0PlaneDCT(plane: pd.cr, width: cbDx, height: cbDy, stride: cbDx, step: stepC)
+        
+        let recY = try decodeL0PlaneDCT(bytes: encY.bytes, width: dx, height: dy, step: stepY)
+        let recCb = try decodeL0PlaneDCT(bytes: encCb.bytes, width: cbDx, height: cbDy, step: stepC)
+        let recCr = try decodeL0PlaneDCT(bytes: encCr.bytes, width: cbDx, height: cbDy, step: stepC)
+        
+        let reconstructed = PlaneData420(width: dx, height: dy, y: recY, cb: recCb, cr: recCr)
+        
+        debugLog({
+            return "  [Layer \\(layer)/BaseDCT] Y=\\(encY.bytes.count) Cb=\\(encCb.bytes.count) Cr=\\(encCr.bytes.count) bytes"
+        }())
+        
+        let out = VEVCLayerData.serialize(
+            qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+            bufY: encY.bytes, bufCb: encCb.bytes, bufCr: encCr.bytes
+        )
+        
+        return (out, reconstructed, [], [], [], { })
+    }
+    
+    func decode(
+        r: [UInt8],
+        pool: BlockViewPool,
+        layer: UInt8,
+        dx: Int,
+        dy: Int,
+        isIFrame: Bool
+    ) async throws -> (
+        reconstructed: Image16,
+        yBlocks: [BlockView],
+        cbBlocks: [BlockView],
+        crBlocks: [BlockView],
+        qtYStep: Int,
+        qtCStep: Int
+    ) {
+        if !isIFrame {
+            return try await dwtCodec.decode(r: r, pool: pool, layer: layer, dx: dx, dy: dy, isIFrame: isIFrame)
+        }
+        
+        let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "BaseDCT")
+        
+        let stepY = Self.deriveDCTStep(qstep: Int(qtY.step))
+        let stepC = Self.deriveDCTStep(qstep: Int(qtC.step))
+        
+        let recY = try decodeL0PlaneDCT(bytes: bufY, width: dx, height: dy, step: stepY)
+        let cbDx = (dx + 1) / 2
+        let cbDy = (dy + 1) / 2
+        let recCb = try decodeL0PlaneDCT(bytes: bufCb, width: cbDx, height: cbDy, step: stepC)
+        let recCr = try decodeL0PlaneDCT(bytes: bufCr, width: cbDx, height: cbDy, step: stepC)
+        
+        var img = Image16(width: dx, height: dy, pool: pool)
+        
+        // Use withUnsafeMutableBufferPointer to copy efficiently
+        img.y.withUnsafeMutableBufferPointer { ptr in
+            _ = ptr.initialize(from: recY)
+        }
+        img.cb.withUnsafeMutableBufferPointer { ptr in
+            _ = ptr.initialize(from: recCb)
+        }
+        img.cr.withUnsafeMutableBufferPointer { ptr in
+            _ = ptr.initialize(from: recCr)
+        }
+        
+        return (img, [], [], [], Int(qtY.step), Int(qtC.step))
     }
 }
 
