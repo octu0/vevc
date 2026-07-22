@@ -58,7 +58,7 @@ final class Layer0Profile2Codec: Layer0Codec {
     let dwtCodec = Layer0DWTCodec()
     
     private static func deriveDCTStep(qstep: Int) -> Int {
-        return max(1, qstep / 64)
+        return max(1, qstep / 16)
     }
     
     func encode(
