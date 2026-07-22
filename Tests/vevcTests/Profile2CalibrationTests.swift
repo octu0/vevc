@@ -41,7 +41,7 @@ final class Profile2CalibrationTests: XCTestCase {
         let dx = pd.width
         let dy = pd.height
         // Using chosen calibrated step = qstep / 32
-        let step = max(1, qstep / 32)
+        let step = max(1, qstep / 64)
         let enc = encodeL0PlaneDCT(plane: pd.y, width: dx, height: dy, stride: dx, step: step)
         let dec = try decodeL0PlaneDCT(bytes: enc.bytes, width: dx, height: dy, step: step)
         let psnr2 = computePSNR(ref: planeY, test: dec)

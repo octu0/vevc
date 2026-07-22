@@ -26,20 +26,50 @@ let ZIGZAG: [Int] = [
 
 // MARK: - Quantization
 
+let DCT_WEIGHT_MATRIX_Q8: [Int32] = [
+    256, 292, 329, 365, 402, 438, 475, 512,
+    292, 329, 365, 402, 438, 475, 512, 548,
+    329, 365, 402, 438, 475, 512, 548, 585,
+    365, 402, 438, 475, 512, 548, 585, 621,
+    402, 438, 475, 512, 548, 585, 621, 658,
+    438, 475, 512, 548, 585, 621, 658, 694,
+    475, 512, 548, 585, 621, 658, 694, 731,
+    512, 548, 585, 621, 658, 694, 731, 768
+]
+
 @inline(__always)
 func quantize(val: Int16, step: Int) -> Int16 {
     let v = Int32(val)
     let s = Int32(step)
-    if v >= 0 {
-        return Int16((v + (s >> 1)) / s)
-    } else {
+    if v < 0 {
         return Int16((v - (s >> 1)) / s)
+    } else {
+        return Int16((v + (s >> 1)) / s)
     }
 }
 
 @inline(__always)
 func dequantize(qval: Int16, step: Int) -> Int16 {
     return Int16(truncatingIfNeeded: Int32(qval) &* Int32(step))
+}
+
+@inline(__always)
+func quantizeDCT(val: Int16, step: Int, idx: Int) -> Int16 {
+    let wQ8 = DCT_WEIGHT_MATRIX_Q8[idx]
+    let effectiveStep = max(1, (Int32(step) * wQ8 + 128) >> 8)
+    let v = Int32(val)
+    if v < 0 {
+        return Int16((v - (effectiveStep >> 1)) / effectiveStep)
+    } else {
+        return Int16((v + (effectiveStep >> 1)) / effectiveStep)
+    }
+}
+
+@inline(__always)
+func dequantizeDCT(qval: Int16, step: Int, idx: Int) -> Int16 {
+    let wQ8 = DCT_WEIGHT_MATRIX_Q8[idx]
+    let effectiveStep = max(1, (Int32(step) * wQ8 + 128) >> 8)
+    return Int16(truncatingIfNeeded: Int32(qval) &* effectiveStep)
 }
 
 // MARK: - DCT Functions
@@ -106,12 +136,13 @@ public struct DCTEncodeStats {
 
 /// Byte stream format:
 /// [VLQ: DC Bytes Length] [DC Stream Bytes...] [AC Stream Bytes...]
-/// Stream lengths natively included inside EntropyEncoder output.
+/// AC Coefficients are encoded Frequency-First: (coeff_idx 1..63 -> all blocks (by, bx))
 public func encodeL0PlaneDCT(plane: [Int16], width: Int, height: Int, stride: Int, step: Int) -> (bytes: [UInt8], stats: DCTEncodeStats) {
     let bw = (width + 7) / 8
     let bh = (height + 7) / 8
     let paddedWidth = bw * 8
     let paddedHeight = bh * 8
+    let totalBlocks = bw * bh
     
     var localPlane = [Int16](repeating: 0, count: paddedWidth * paddedHeight)
     for y in 0..<height {
@@ -128,55 +159,62 @@ public func encodeL0PlaneDCT(plane: [Int16], width: Int, height: Int, stride: In
         }
     }
     
-    var dcEncoder = EntropyEncoder()
-    var acEncoder = EntropyEncoder()
-    
-    var prevDC = [Int16](repeating: 0, count: bw)
-    var zeroRun: UInt32 = 0
+    var qBlocks = [[Int16]](repeating: Array(repeating: 0, count: 64), count: totalBlocks)
     
     localPlane.withUnsafeMutableBufferPointer { ptr in
         let base = ptr.baseAddress!
         
         for by in 0..<bh {
             for bx in 0..<bw {
+                let blockIdx = by * bw + bx
                 let blockBase = base.advanced(by: by * 8 * paddedWidth + bx * 8)
                 
                 forwardDCT8x8(block: blockBase, stride: paddedWidth)
                 
-                let rawDC = blockBase[0]
-                let qDC = quantize(val: rawDC, step: step)
-                blockBase[0] = qDC 
-                
-                var pred: Int16 = 0
-                if bx > 0 {
-                    pred = prevDC[bx - 1]
-                } else if by > 0 {
-                    pred = prevDC[bx]
+                for idx in 0..<64 {
+                    let val = blockBase[(idx / 8) * paddedWidth + (idx % 8)]
+                    qBlocks[blockIdx][idx] = quantizeDCT(val: val, step: step, idx: idx)
                 }
-                let diff = qDC - pred
-                prevDC[bx] = qDC
-                
-                dcEncoder.addPair(run: 0, val: diff, context: 4)
-                
-                // [SPEC DEVIATION]: 
-                // 仕様 (§3) ではブロック単位の EOB (End of Block) によるゼロラン処理が規定されていますが、
-                // 本実装では符号化効率とEntropyCodecの構造上、ブロック境界を越えて AC係数の zeroRun を累積し、
-                // プレーンの最後に一度だけ addTrailingZeros を呼び出す連続ストリームフォーマットを採用しています。
-                for i in 1..<64 {
-                    let idx = ZIGZAG[i]
-                    let row = idx / 8
-                    let col = idx % 8
-                    
-                    let val = blockBase[row * paddedWidth + col]
-                    let qVal = quantize(val: val, step: step)
-                    
-                    if qVal == 0 {
-                        zeroRun += 1
-                    } else {
-                        acEncoder.addPair(run: zeroRun, val: qVal, context: 0)
-                        zeroRun = 0
-                    }
-                }
+            }
+        }
+    }
+    
+    var dcEncoder = EntropyEncoder()
+    var acEncoder = EntropyEncoder()
+    
+    var prevDC = [Int16](repeating: 0, count: bw)
+    
+    // 1. Encode DC stream
+    for by in 0..<bh {
+        for bx in 0..<bw {
+            let blockIdx = by * bw + bx
+            let qDC = qBlocks[blockIdx][0]
+            
+            var pred: Int16 = 0
+            if 0 < bx {
+                pred = prevDC[bx - 1]
+            } else if 0 < by {
+                pred = prevDC[bx]
+            }
+            let diff = qDC - pred
+            prevDC[bx] = qDC
+            
+            dcEncoder.addPair(run: 0, val: diff, context: 4)
+        }
+    }
+    
+    // 2. Encode AC stream (Frequency-First: k=1..63 across all blocks)
+    var zeroRun: UInt32 = 0
+    for k in 1..<64 {
+        let idx = ZIGZAG[k]
+        
+        for blockIdx in 0..<totalBlocks {
+            let qVal = qBlocks[blockIdx][idx]
+            if qVal == 0 {
+                zeroRun += 1
+            } else {
+                acEncoder.addPair(run: zeroRun, val: qVal, context: 0)
+                zeroRun = 0
             }
         }
     }
@@ -213,12 +251,31 @@ public func decodeL0PlaneDCT(bytes: [UInt8], width: Int, height: Int, step: Int)
             let bh = (height + 7) / 8
             let paddedWidth = bw * 8
             let paddedHeight = bh * 8
+            let totalBlocks = bw * bh
             
-            var localPlane = [Int16](repeating: 0, count: paddedWidth * paddedHeight)
+            var qBlocks = [[Int16]](repeating: Array(repeating: 0, count: 64), count: totalBlocks)
             var prevDC = [Int16](repeating: 0, count: bw)
             
-            let totalAC = bw * bh * 63
-            var allAC = [Int16](repeating: 0, count: totalAC)
+            // 1. Decode DC stream
+            for by in 0..<bh {
+                for bx in 0..<bw {
+                    let blockIdx = by * bw + bx
+                    let dcPair = dcDecoder.readPair(context: 4)
+                    let diff = dcPair.val
+                    var pred: Int16 = 0
+                    if 0 < bx {
+                        pred = prevDC[bx - 1]
+                    } else if 0 < by {
+                        pred = prevDC[bx]
+                    }
+                    let qDC = pred + diff
+                    prevDC[bx] = qDC
+                    qBlocks[blockIdx][0] = qDC
+                }
+            }
+            
+            // 2. Decode AC stream (Frequency-First order)
+            let totalAC = totalBlocks * 63
             var acIndex = 0
             while acIndex < totalAC {
                 let pair = acDecoder.readPair(context: 0)
@@ -227,33 +284,24 @@ public func decodeL0PlaneDCT(bytes: [UInt8], width: Int, height: Int, step: Int)
                 }
                 acIndex += Int(pair.run)
                 if acIndex < totalAC {
-                    allAC[acIndex] = dequantize(qval: pair.val, step: step)
+                    let kCoeff = 1 + (acIndex / totalBlocks)
+                    let blockIdx = acIndex % totalBlocks
+                    let idx = ZIGZAG[kCoeff]
+                    qBlocks[blockIdx][idx] = pair.val
                     acIndex += 1
                 }
             }
             
-            var acOffset = 0
-            
+            // 3. Inverse DCT & Reconstruction
+            var localPlane = [Int16](repeating: 0, count: paddedWidth * paddedHeight)
             for by in 0..<bh {
                 for bx in 0..<bw {
-                    let dcPair = dcDecoder.readPair(context: 4)
-                    let diff = dcPair.val
-                    var pred: Int16 = 0
-                    if bx > 0 {
-                        pred = prevDC[bx - 1]
-                    } else if by > 0 {
-                        pred = prevDC[bx]
-                    }
-                    let qDC = pred + diff
-                    prevDC[bx] = qDC
-                    
+                    let blockIdx = by * bw + bx
                     var block = [Int16](repeating: 0, count: 64)
-                    block[0] = dequantize(qval: qDC, step: step)
                     
-                    for i in 1..<64 {
-                        let idx = ZIGZAG[i]
-                        block[idx] = allAC[acOffset]
-                        acOffset += 1
+                    for idx in 0..<64 {
+                        let qval = qBlocks[blockIdx][idx]
+                        block[idx] = dequantizeDCT(qval: qval, step: step, idx: idx)
                     }
                     
                     block.withUnsafeMutableBufferPointer { ptr in
