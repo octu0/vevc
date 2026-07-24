@@ -36,17 +36,19 @@ public actor StreamingDecoderActor {
     let width: Int
     let height: Int
     let pool: BlockViewPool
+    let profile: UInt8
     
     private var previousReconstructed: PlaneData420?
     private var firstReconstructed: PlaneData420?
     private var roundOffsetIndex = 0
     private var seenY = Set<UnsafeMutableRawPointer>()
     
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
+        self.profile = profile
     }
     
     @inline(__always)
@@ -54,7 +56,7 @@ public actor StreamingDecoderActor {
         guard chunk.isEmpty != true else { return nil }
         
         var offset = 0
-        let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
+        let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset, profile: profile)
         
         if frameHeader.isCopyFrame {
             guard let prev = previousReconstructed else {
@@ -96,7 +98,7 @@ public actor StreamingDecoderActor {
         
         let img16 = try await decodeSpatialLayers(
             r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile
         )
         
         let pd = PlaneData420(img16: img16)
@@ -142,13 +144,13 @@ public struct Decoder: Sendable {
     private func createGOPTask(
         gopContinuation: AsyncStream<AsyncThrowingStream<YCbCrImage, Error>>.Continuation,
         limiter: ConcurrencyLimiter,
-        maxLayer: Int, width: Int, height: Int
+        maxLayer: Int, width: Int, height: Int, profile: UInt8
     ) -> AsyncStream<[UInt8]>.Continuation {
         let (chunkStream, chunkContinuation) = AsyncStream<[UInt8]>.makeStream()
         let (imgStream, imgContinuation) = AsyncThrowingStream<YCbCrImage, Error>.makeStream()
         gopContinuation.yield(imgStream)
         
-        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height)
+        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height, profile: profile)
         
         Task {
             await limiter.wait()
@@ -184,6 +186,7 @@ public struct Decoder: Sendable {
                     let effectiveWidth = fileHeader.width
                     let effectiveHeight = fileHeader.height
                     let effectiveFps = fileHeader.framerate
+                    let effectiveProfile = fileHeader.profile
                     let maxConcurrency = self.maxConcurrency
                     let maxLayer = self.maxLayer
                     
@@ -209,7 +212,7 @@ public struct Decoder: Sendable {
                     
                     let processChunk: ([UInt8]) -> Void = { chunk in
                         var offset = 0
-                        let frameHeader = try? VEVCFrameHeader.deserialize(from: chunk, offset: &offset)
+                        let frameHeader = try? VEVCFrameHeader.deserialize(from: chunk, offset: &offset, profile: effectiveProfile)
                         let isIFrame = frameHeader?.isIFrame ?? false
                         
                         if isIFrame {
@@ -217,7 +220,7 @@ public struct Decoder: Sendable {
                             currentGOPInput = createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
-                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile
                             )
                         }
                         
@@ -227,7 +230,7 @@ public struct Decoder: Sendable {
                             let newInput = createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
-                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile
                             )
                             currentGOPInput = newInput
                             newInput.yield(chunk)
@@ -258,16 +261,20 @@ public struct Decoder: Sendable {
         var offset = 0
         var chunks: [[UInt8]] = []
         var headerChunk: [UInt8]? = nil
+        var currentProfile: UInt8 = 0x01
         while offset < data.count {
             if offset + 4 <= data.count && data[offset] == 0x56 && data[offset+1] == 0x45 && data[offset+2] == 0x56 && data[offset+3] == 0x43 {
                 let headerStart = offset
                 offset += 4
                 let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
+                if metadataSize > 0 {
+                    currentProfile = data[offset]
+                }
                 offset += metadataSize
                 headerChunk = Array(data[headerStart..<offset])
             } else {
                 let chunkStart = offset
-                let frameHeader = try VEVCFrameHeader.deserialize(from: data, offset: &offset)
+                let frameHeader = try VEVCFrameHeader.deserialize(from: data, offset: &offset, profile: currentProfile)
                 offset += frameHeader.payloadSize
                 let chunkEnd = offset
                 chunks.append(Array(data[chunkStart..<chunkEnd]))
@@ -310,6 +317,7 @@ public struct Decoder: Sendable {
         let stream = AsyncStream<[UInt8]> { continuation in
             Task {
                 do {
+                    var currentProfile: UInt8 = 0x01
                     while true {
                         let firstByteData = readFully(fileHandle: fileHandle, count: 1)
                         if firstByteData.isEmpty { break }
@@ -326,6 +334,10 @@ public struct Decoder: Sendable {
                                 let metadataSize = Int(try readUInt16BEFromBytes([UInt8](metaSizeData), offset: &msOffset))
                                 let metaData = readFully(fileHandle: fileHandle, count: metadataSize)
                                 guard metaData.count == metadataSize else { continuation.finish(); return }
+                                
+                                if metadataSize > 0 {
+                                    currentProfile = metaData[0]
+                                }
                                 
                                 var headerChunk: [UInt8] = [0x56, 0x45, 0x56, 0x43]
                                 headerChunk.append(contentsOf: metaSizeData)
@@ -344,18 +356,21 @@ public struct Decoder: Sendable {
                         if flag == copyFrameFlag {
                             continuation.yield(chunk)
                         } else {
-                            let headerBytes = readFully(fileHandle: fileHandle, count: 20)
-                            guard headerBytes.count == 20 else { continuation.finish(); return }
+                            let isPFrame = (flag & 0x0F) == 0x00
+                            let headerSize = (currentProfile == 0x02 && isPFrame) ? 24 : 20
+                            let headerBytes = readFully(fileHandle: fileHandle, count: headerSize)
+                            guard headerBytes.count == headerSize else { continuation.finish(); return }
                             chunk.append(contentsOf: headerBytes)
                             
                             var hsOffset = 0
+                            let skipMapSize = (currentProfile == 0x02 && isPFrame) ? Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset)) : 0
                             let mvsSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let refDirBytes = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer0Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer1Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer2Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             
-                            let payloadSize = mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
+                            let payloadSize = skipMapSize + mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
                             if 0 < payloadSize {
                                 let payloadBody = readFully(fileHandle: fileHandle, count: payloadSize)
                                 guard payloadBody.count == payloadSize else { continuation.finish(); return }

@@ -146,7 +146,7 @@ DWT Coefficients
 | Magic 'VEVC' (4B) | Metadata   | Frame Packet 0 | ... | Frame Packet N |
 +-------------------+------------+----------------+-----+----------------+
 
-    Metadata (Profile 1)
+    Metadata (Profile 1 / 2)
 +---------------------------------------------+
 | Metadata Size (2B) | Profile Version(1B)    |
 +------------+-------+-----+------------------+----------+----------------+
@@ -169,8 +169,10 @@ DWT Coefficients
     +--------------------------------------------------------------------------------------------------+
     | Frame Status (1B) (lower 4 bits: 0x00=P, 0x01=Copy, 0x02=I; bit4: hasRefDir)                    |
     +---- IF NOT CopyFrame ----------------------------------------------------------------------------+
-    | MVs Size (4B)    | RefDir Size (4B) | Layer0 Size (4B) | Layer1 Size (4B)  | Layer2 Size (4B)                        |
-    +------------------+------------------+------------------+-------------------+-----------------------------------------+
+    | SkipMap Size(4B) (Prof2 ONLY) | MVs Size (4B) | RefDir Size (4B) | Layer0 (4B) | Layer1 (4B) | Layer2 (4B) |
+    +--------------------------------------------------------------------------------------------------+
+    | SkipMap Data Payload (SkipMap Size bytes) (Prof2 ONLY)                                           |
+    +--------------------------------------------------------------------------------------------------+
     | MVs Data Payload (MVs Size bytes)                                                                |
     +--------------------------------------------------------------------------------------------------+
     | RefDir Data Payload (RefDir Size bytes)  (Only when hasRefDir bit is set)                        |

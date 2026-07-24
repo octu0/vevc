@@ -1,7 +1,7 @@
 // MARK: - Encode Spatial
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -68,7 +68,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -81,7 +81,23 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
-    let (mvs, sads, occlusionScores) = await computeMotionVectors(curr: pd, prev: predictedPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset)
+    let (mvs_original, sads, occlusionScores) = await computeMotionVectors(curr: pd, prev: predictedPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset)
+    var mvs = mvs_original
+    var skipMap = [BlockMode]()
+    if profile == 0x02 {
+        let blockThreshold = 256
+        let bw = (dx + 31) / 32
+        let bh = (dy + 31) / 32
+        skipMap = [BlockMode](repeating: .inter, count: bw * bh)
+        
+        for i in 0..<sads.count {
+            if sads[i] <= blockThreshold {
+                skipMap[i] = .skip_prev
+                mvs.dx[i] = 0
+                mvs.dy[i] = 0
+            }
+        }
+    }
     
     var mutPdY = pool.getInt16(count: pd.y.count)
     var mutPdCb = pool.getInt16(count: pd.cb.count)
@@ -89,11 +105,22 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
     mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-    
+
     // MV is layer0 precision -> mvScale=4 for applying to layer2 (full resolution)
     subtractScaledMotionCompensationLuma(plane: &mutPdY, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
     subtractScaledMotionCompensationChroma(plane: &mutPdCb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     subtractScaledMotionCompensationChroma(plane: &mutPdCr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    
+    if profile == 0x02 {
+        let bw = (dx + 31) / 32
+        for i in 0..<skipMap.count {
+            if skipMap[i] != .inter {
+                let bx = (i % bw) * 32
+                let by = (i / bw) * 32
+                clearResidualBlock(planeY: &mutPdY, planeCb: &mutPdCb, planeCr: &mutPdCr, bx: bx, by: by, width: dx, height: dy)
+            }
+        }
+    }
     
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
     let isPFrame = true
@@ -146,10 +173,15 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     }())
     
     var out: [UInt8] = []
-    let mvData = encodeMVs(mvs: mvs)
+    var skipMapData: [UInt8] = []
+    if profile == 0x02 {
+        skipMapData = encodeSkipMap(map: skipMap)
+    }
+    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, profile: profile)
     
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, mvsSize: mvData.count, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
-    out.append(contentsOf: frameHeader.serialize())
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    out.append(contentsOf: frameHeader.serialize(profile: profile))
+    out.append(contentsOf: skipMapData)
     out.append(contentsOf: mvData)
     out.append(contentsOf: layer0)
     out.append(contentsOf: layer1)
@@ -159,7 +191,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let pPd = predictedPd
     let nPd = nextPd
     
@@ -176,8 +208,55 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
     // bidirectional MV calculation: search MVs for both forward and backward and select the one with the smaller SAD for each block
-    let (mvs, sads, refDirs, occlusionScores) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition)
+    let (mvs_original, sads, refDirs_original, occlusionScores) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition)
+    var mvs = mvs_original
+    var refDirs = refDirs_original
     
+    var skipMap = [BlockMode]()
+    if profile == 0x02 {
+        let bw = (dx + 31) / 32
+        let bh = (dy + 31) / 32
+        let blockCount = bw * bh
+        skipMap = [BlockMode](repeating: .inter, count: blockCount)
+        let threshPerPixel = max(1, Int(qtY.step) / 4)
+        
+        pd.y.withUnsafeBufferPointer { currYPtr in
+        pd.cb.withUnsafeBufferPointer { currCbPtr in
+        pd.cr.withUnsafeBufferPointer { currCrPtr in
+        pPd.y.withUnsafeBufferPointer { prevYPtr in
+        pPd.cb.withUnsafeBufferPointer { prevCbPtr in
+        pPd.cr.withUnsafeBufferPointer { prevCrPtr in
+        nPd.y.withUnsafeBufferPointer { ltrYPtr in
+        nPd.cb.withUnsafeBufferPointer { ltrCbPtr in
+        nPd.cr.withUnsafeBufferPointer { ltrCrPtr in
+            for i in 0..<blockCount {
+                let bx = (i % bw) * 32
+                let by = (i / bw) * 32
+                let mw = min(32, dx - bx)
+                let mh = min(32, dy - by)
+                let mwc = min(16, cbDx - bx / 2)
+                let mhc = min(16, cbDy - by / 2)
+                let area = mw * mh + mwc * mhc * 2
+                let blockThreshold = threshPerPixel * area
+                
+                let sadPrev = computeZeroSADBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: bx, by: by, width: dx, height: dy)
+                let sadLtr = computeZeroSADBlock(cY: currYPtr.baseAddress!, rY: ltrYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: ltrCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: ltrCrPtr.baseAddress!, bx: bx, by: by, width: dx, height: dy)
+                
+                if sadPrev <= blockThreshold && sadPrev <= sadLtr {
+                    skipMap[i] = .skip_prev
+                    mvs.dx[i] = 0
+                    mvs.dy[i] = 0
+                    refDirs[i] = false // prev
+                } else if sadLtr <= blockThreshold {
+                    skipMap[i] = .skip_ltr
+                    mvs.dx[i] = 0
+                    mvs.dy[i] = 0
+                    refDirs[i] = true // next (ltr)
+                }
+            }
+        }}}}}}}}}
+    }
+
     // pixel level residual calculation based on reference direction
     var mutPdY = pool.getInt16(count: pd.y.count)
     var mutPdCb = pool.getInt16(count: pd.cb.count)
@@ -190,6 +269,18 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     subtractScaledBidirectionalMotionCompensationLuma(plane: &mutPdY, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
     subtractScaledBidirectionalMotionCompensationChroma(plane: &mutPdCb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     subtractScaledBidirectionalMotionCompensationChroma(plane: &mutPdCr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    
+    if profile == 0x02 {
+        let bw = (dx + 31) / 32
+        for i in 0..<skipMap.count {
+            if skipMap[i] != .inter {
+                let bx = (i % bw) * 32
+                let by = (i / bw) * 32
+                clearResidualBlock(planeY: &mutPdY, planeCb: &mutPdCb, planeCr: &mutPdCr, bx: bx, by: by, width: dx, height: dy)
+            }
+        }
+    }
+    
     let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
 
     let isPFrame = true
@@ -234,6 +325,19 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs)
     applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs)
     
+    if profile == 0x02 {
+        let bw = (dx + 31) / 32
+        for i in 0..<skipMap.count {
+            if skipMap[i] == .skip_ltr {
+                let bx = (i % bw) * 32
+                let by = (i / bw) * 32
+                copyBlock(from: nPd.y, to: &mutReconL2Y, bx: bx, by: by, width: dx, height: dy, blockSize: 32)
+                copyBlock(from: nPd.cb, to: &mutReconL2Cb, bx: bx/2, by: by/2, width: cbDx, height: cbDy, blockSize: 16)
+                copyBlock(from: nPd.cr, to: &mutReconL2Cr, bx: bx/2, by: by/2, width: cbDx, height: cbDy, blockSize: 16)
+            }
+        }
+    }
+    
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
     debugLog({
@@ -241,18 +345,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     }())
     
     var out: [UInt8] = []
-    let mvData = encodeMVs(mvs: mvs)
+    var skipMapData: [UInt8] = []
+    if profile == 0x02 {
+        skipMapData = encodeSkipMap(map: skipMap)
+    }
+    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, profile: profile)
     
     let refDirByteCount = (refDirs.count + 7) / 8
     var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
     for i in refDirs.indices {
+        // refDirs encode: skip_ltr -> true (1), skip_prev -> false (0)
+        // we've already set refDirs in skipMap logic.
         if refDirs[i] {
             refDirBuf[i / 8] |= UInt8(1 << (i % 8))
         }
     }
     
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, mvsSize: mvData.count, refDirSize: refDirBuf.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
-    out.append(contentsOf: frameHeader.serialize())
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    out.append(contentsOf: frameHeader.serialize(profile: profile))
+    out.append(contentsOf: skipMapData)
     out.append(contentsOf: mvData)
     out.append(contentsOf: refDirBuf)
     out.append(contentsOf: layer0)
@@ -260,4 +371,104 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     out.append(contentsOf: layer2)
     
     return (out, reconstructed, mvs, sads, { r2Y(); r2Cb(); r2Cr() })
+}
+
+@inline(__always)
+func computeZeroSADBlock(
+    cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
+    cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
+    cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
+    bx: Int, by: Int, width: Int, height: Int
+) -> Int {
+    var sad: Int = 0
+    let strideY = width
+    for y in 0..<32 {
+        let yy = by + y
+        if yy >= height { break }
+        let offset = yy * strideY + bx
+        let maxW = min(32, width - bx)
+        for x in 0..<maxW {
+            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
+        }
+    }
+    
+    let bxC = bx / 2
+    let byC = by / 2
+    let strideC = (width + 1) / 2
+    let heightC = (height + 1) / 2
+    for y in 0..<16 {
+        let yy = byC + y
+        if yy >= heightC { break }
+        let offset = yy * strideC + bxC
+        let maxW = min(16, strideC - bxC)
+        for x in 0..<maxW {
+            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
+            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
+        }
+    }
+    return sad
+}
+
+@inline(__always)
+func clearResidualBlock(
+    planeY: inout [Int16], planeCb: inout [Int16], planeCr: inout [Int16],
+    bx: Int, by: Int, width: Int, height: Int
+) {
+    let strideY = width
+    planeY.withUnsafeMutableBufferPointer { ptr in
+        for y in 0..<32 {
+            let yy = by + y
+            if yy >= height { break }
+            let offset = yy * strideY + bx
+            let maxW = min(32, width - bx)
+            for x in 0..<maxW {
+                ptr[offset + x] = 0
+            }
+        }
+    }
+    
+    let bxC = bx / 2
+    let byC = by / 2
+    let strideC = (width + 1) / 2
+    let heightC = (height + 1) / 2
+    planeCb.withUnsafeMutableBufferPointer { ptr in
+        for y in 0..<16 {
+            let yy = byC + y
+            if yy >= heightC { break }
+            let offset = yy * strideC + bxC
+            let maxW = min(16, strideC - bxC)
+            for x in 0..<maxW {
+                ptr[offset + x] = 0
+            }
+        }
+    }
+    planeCr.withUnsafeMutableBufferPointer { ptr in
+        for y in 0..<16 {
+            let yy = byC + y
+            if yy >= heightC { break }
+            let offset = yy * strideC + bxC
+            let maxW = min(16, strideC - bxC)
+            for x in 0..<maxW {
+                ptr[offset + x] = 0
+            }
+        }
+    }
+}
+
+@inline(__always)
+private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
+    let maxY = min(by + blockSize, height)
+    let maxX = min(bx + blockSize, width)
+    let copyCount = maxX - bx
+    if copyCount <= 0 { return }
+    
+    src.withUnsafeBufferPointer { sPtr in
+        dst.withUnsafeMutableBufferPointer { dPtr in
+            guard let sBase = sPtr.baseAddress, let dBase = dPtr.baseAddress else { return }
+            for y in by..<maxY {
+                let offset = y * width + bx
+                dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: copyCount)
+            }
+        }
+    }
 }

@@ -30,6 +30,18 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
     }
     
     var readOffset = 0
+    let fileHeader = try VEVCFileHeader.deserialize(from: input, offset: &readOffset)
+    let profile = fileHeader.profile
+    
+    // Copy the whole FileHeader to output
+    let headerSlice = input[0..<readOffset]
+    
+    // Pre-allocate output buffer
+    var output = [UInt8]()
+    output.reserveCapacity(input.count)
+    
+    // Write FileHeader to output
+    output.append(contentsOf: headerSlice)
     
     @inline(__always)
     func readFully(count: Int) throws -> ArraySlice<UInt8> {
@@ -42,117 +54,75 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
         return slice
     }
     
-    // 1. Read and copy FileHeader magic
-    let magicSlice = try readFully(count: 4)
-    guard magicSlice.elementsEqual([0x56, 0x45, 0x56, 0x43]) else {
-        throw SplitterError.invalidMagic
-    }
-    
-    // 2. Read metadataSize
-    let metadataSizeSlice = try readFully(count: 2)
-    let msOffset = metadataSizeSlice.startIndex
-    let metadataSize = Int(UInt16(metadataSizeSlice[msOffset]) << 8 | UInt16(metadataSizeSlice[msOffset + 1]))
-    
-    // 3. Read metadata payload
-    let metadataSlice = try readFully(count: metadataSize)
-    guard 5 <= metadataSize else { throw SplitterError.unexpectedEOF }
-    
-    // Pre-allocate output buffer
-    var output = [UInt8]()
-    output.reserveCapacity(input.count)
-    
-    // Write FileHeader to output
-    output.append(contentsOf: magicSlice)
-    output.append(contentsOf: metadataSizeSlice)
-    output.append(contentsOf: metadataSlice)
-    
     var processedFrames = 0
     var droppedLayer1Bytes = 0
     var droppedLayer2Bytes = 0
     
     while readOffset < input.count {
-        let flagSlice = try readFully(count: 1)
-        let flagByte = flagSlice[flagSlice.startIndex]
+        var frameOffset = readOffset
+        let frameHeader = try VEVCFrameHeader.deserialize(from: input, offset: &frameOffset, profile: profile)
+        readOffset = frameOffset
         
-        let frameTypeBits = flagByte & 0x0F
-        let hasRefDir = (flagByte & 0x10) != 0
-        
-        guard let fType = VEVCFrameHeader.FrameType(rawValue: frameTypeBits) else {
-            throw SplitterError.invalidFrameType(flagByte)
-        }
-        
-        // CopyFrame: write flag byte only
-        if fType == .copyFrame {
-            output.append(flagByte)
+        // CopyFrame
+        if frameHeader.isCopyFrame {
+            output.append(contentsOf: frameHeader.serialize(profile: profile))
             processedFrames += 1
             continue
         }
         
-        // Read 5 x UInt32BE = 20 bytes of frame header sizes
-        let sizesSlice = try readFully(count: 20)
-        var sizeBase = sizesSlice.startIndex
-        
-        @inline(__always)
-        func readU32() -> Int {
-            let v = Int(UInt32(input[sizeBase]) << 24 | UInt32(input[sizeBase+1]) << 16
-                        | UInt32(input[sizeBase+2]) << 8 | UInt32(input[sizeBase+3]))
-            sizeBase += 4
-            return v
-        }
-        
-        let mvsSize    = readU32()
-        let refDirSize = readU32()
-        let layer0Size = readU32()
-        let layer1Size = readU32()
-        let layer2Size = readU32()
-        
         // Rebuild header with trimmed layer sizes
-        let newLayer1Size = if 1 <= maxLayer { layer1Size } else { 0 }
-        let newLayer2Size = if 2 <= maxLayer { layer2Size } else { 0 }
+        let newLayer1Size = if 1 <= maxLayer { frameHeader.layer1Size } else { 0 }
+        let newLayer2Size = if 2 <= maxLayer { frameHeader.layer2Size } else { 0 }
         
         let newHeader = VEVCFrameHeader(
-            frameType: fType,
-            hasRefDir: hasRefDir,
-            mvsSize: mvsSize,
-            refDirSize: refDirSize,
-            layer0Size: layer0Size,
+            frameType: frameHeader.frameType,
+            hasRefDir: frameHeader.hasRefDir,
+            skipMapSize: frameHeader.skipMapSize,
+            mvsSize: frameHeader.mvsSize,
+            refDirSize: frameHeader.refDirSize,
+            layer0Size: frameHeader.layer0Size,
             layer1Size: newLayer1Size,
             layer2Size: newLayer2Size
         )
-        output.append(contentsOf: newHeader.serialize())
+        output.append(contentsOf: newHeader.serialize(profile: profile))
         
+        // SkipMap payload
+        if 0 < frameHeader.skipMapSize {
+            let payload = try readFully(count: frameHeader.skipMapSize)
+            output.append(contentsOf: payload)
+        }
         // MVs payload
-        if 0 < mvsSize {
-            let payload = try readFully(count: mvsSize)
+        if 0 < frameHeader.mvsSize {
+            let payload = try readFully(count: frameHeader.mvsSize)
             output.append(contentsOf: payload)
         }
         // RefDir payload
-        if 0 < refDirSize {
-            let payload = try readFully(count: refDirSize)
+        if 0 < frameHeader.refDirSize {
+            let payload = try readFully(count: frameHeader.refDirSize)
             output.append(contentsOf: payload)
         }
         // Layer 0 payload (always retained)
-        if 0 < layer0Size {
-            let payload = try readFully(count: layer0Size)
+        if 0 < frameHeader.layer0Size {
+            let payload = try readFully(count: frameHeader.layer0Size)
             output.append(contentsOf: payload)
         }
         
         // Layer 1 payload
-        if 0 < layer1Size {
-            let payload = try readFully(count: layer1Size)
+        if 0 < frameHeader.layer1Size {
+            let payload = try readFully(count: frameHeader.layer1Size)
             if 1 <= maxLayer {
                 output.append(contentsOf: payload)
             } else {
-                droppedLayer1Bytes += layer1Size
+                droppedLayer1Bytes += frameHeader.layer1Size
             }
         }
         // Layer 2 payload
-        if 0 < layer2Size {
-            let payload = try readFully(count: layer2Size)
+        if 0 < frameHeader.layer2Size {
+            let payload = try readFully(count: frameHeader.layer2Size)
             if 2 <= maxLayer {
                 output.append(contentsOf: payload)
             } else {
-                droppedLayer2Bytes += layer2Size
+                droppedLayer2Bytes += frameHeader.layer2Size
             }
         }
         processedFrames += 1

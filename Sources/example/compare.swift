@@ -17,6 +17,7 @@ struct Config {
     var outputBitrates: Bool = false
     var vevcOnly: Bool = false
     var qstep: Int? = nil
+    var profile: UInt8 = 0x01
 }
 
 struct ImageInput {
@@ -47,7 +48,7 @@ func readY4M(path: String) -> [ImageInput]? {
     return inputs
 }
 
-func parseVEVCLayerSizes(bitstream: [UInt8]) -> (l0: Int, l1: Int, l2: Int) {
+func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8) -> (l0: Int, l1: Int, l2: Int) {
     var offset = 0
     var headerAndBase = 0
     var l0 = 0
@@ -64,11 +65,11 @@ func parseVEVCLayerSizes(bitstream: [UInt8]) -> (l0: Int, l1: Int, l2: Int) {
             }
         } else {
             let start = offset
-            if let fh = try? VEVCFrameHeader.deserialize(from: bitstream, offset: &offset) {
+            if let fh = try? VEVCFrameHeader.deserialize(from: bitstream, offset: &offset, profile: profile) {
                 let headerSize = offset - start
                 headerAndBase += headerSize
                 if !fh.isCopyFrame {
-                    headerAndBase += fh.mvsSize + fh.refDirSize
+                    headerAndBase += fh.skipMapSize + fh.mvsSize + fh.refDirSize
                     l0 += fh.layer0Size
                     l1 += fh.layer1Size
                     l2 += fh.layer2Size
@@ -111,7 +112,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
             framerate: config.framerate,
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
-            sceneChangeThreshold: config.sceneThreshold
+            sceneChangeThreshold: config.sceneThreshold,
+            profile: config.profile
         )
     } else {
         vevcEncoder = VEVCEncoder(
@@ -121,14 +123,15 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
             framerate: config.framerate,
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
-            sceneChangeThreshold: config.sceneThreshold
+            sceneChangeThreshold: config.sceneThreshold,
+            profile: config.profile
         )
     }
     let outBytes = try await vevcEncoder.encodeToData(images: vevcImages)
     let encTime = Date().timeIntervalSince(encStart)
     print("  -> runVEVC Encoded \(outBytes.count) bytes")
     
-    let sizes = parseVEVCLayerSizes(bitstream: outBytes)
+    let sizes = parseVEVCLayerSizes(bitstream: outBytes, profile: config.profile)
     
     func decodeAndMetrics(maxLayer: Int) async throws -> (time: Double, metrics: [QualityMetrics]?) {
         print("  -> runVEVC Decoding Layer \(maxLayer)...")
@@ -825,6 +828,11 @@ struct CompareApp {
                 if let v = Int(args[i + 1]) { config.qstep = v }
                 i += 1
             }
+        case "-profile":
+            if (i + 1) < args.count {
+                if let v = UInt8(args[i + 1]) { config.profile = v }
+                i += 1
+            }
         case "-y4m":
             if (i + 1) < args.count {
                 y4mPath = args[i + 1]
@@ -837,7 +845,7 @@ struct CompareApp {
     }
 
     if positionalArgs.isEmpty && y4mPath == nil {
-        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-quality] [-output-graph] [-vevc-only]")
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-quality] [-output-graph] [-vevc-only]")
         exit(1)
     }
 
@@ -864,6 +872,7 @@ struct CompareApp {
     print("Target Bitrate : \(config.bitrate) kbps")
     print("Target FPS     : \(config.framerate)")
     print("Quality Check  : \(config.quality)")
+    print("Profile        : \(String(format: "0x%02X", config.profile))")
     print("----------------")
         // Top-level variables captured inside Task locally to avoid isolation errors
         let localImages = images

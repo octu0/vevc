@@ -1,16 +1,17 @@
 public struct VEVCFileHeader {
     public static let magic: [UInt8] = [0x56, 0x45, 0x56, 0x43]
-    public let profile: UInt8 = 0x01
+    public let profile: UInt8
     public let width: Int
     public let height: Int
     public let colorGamut: UInt8 = 0x01 // BT.709
     public let framerate: Int
     public let timescale: UInt8 = 0x00 // 1000ms
     
-    public init(width: Int, height: Int, framerate: Int) {
+    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01) {
         self.width = width
         self.height = height
         self.framerate = framerate
+        self.profile = profile
     }
     
     @inline(__always)
@@ -47,8 +48,8 @@ public struct VEVCFileHeader {
         }
         
         let readProfile = chunk[offset]
-        guard readProfile == 0x01 else {
-            throw DecodeError.insufficientDataContext("VEVC Profile MUST be 0x01, reading: \(readProfile)")
+        guard readProfile == 0x01 || readProfile == 0x02 else {
+            throw DecodeError.insufficientDataContext("VEVC Profile MUST be 0x01 or 0x02, reading: \(readProfile)")
         }
         offset += 1
         
@@ -76,7 +77,7 @@ public struct VEVCFileHeader {
         }
         
         offset = payloadEnd
-        return VEVCFileHeader(width: w, height: h, framerate: fps)
+        return VEVCFileHeader(width: w, height: h, framerate: fps, profile: readProfile)
     }
 }
 
@@ -89,15 +90,17 @@ public struct VEVCFrameHeader {
     
     public let frameType: FrameType
     public let hasRefDir: Bool
+    public let skipMapSize: Int
     public let mvsSize: Int
     public let refDirSize: Int
     public let layer0Size: Int
     public let layer1Size: Int
     public let layer2Size: Int
     
-    public init(frameType: FrameType, hasRefDir: Bool = false, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
+    public init(frameType: FrameType, hasRefDir: Bool = false, skipMapSize: Int = 0, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
+        self.skipMapSize = skipMapSize
         self.mvsSize = mvsSize
         self.refDirSize = refDirSize
         self.layer0Size = layer0Size
@@ -119,16 +122,19 @@ public struct VEVCFrameHeader {
     @inline(__always)
     public var payloadSize: Int {
         if frameType == .copyFrame { return 0 }
-        return mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
+        return skipMapSize + mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
     }
     
     @inline(__always)
-    public func serialize() -> [UInt8] {
+    public func serialize(profile: UInt8 = 0x01) -> [UInt8] {
         var out = [UInt8]()
         let refDirFlag: UInt8 = if hasRefDir { 0x10 } else { 0x00 }
         let flag = frameType.rawValue | refDirFlag
         out.append(flag)
         if frameType != .copyFrame {
+            if profile == 0x02 && frameType == .pFrame {
+                appendUInt32BE(&out, UInt32(skipMapSize))
+            }
             appendUInt32BE(&out, UInt32(mvsSize))
             appendUInt32BE(&out, UInt32(refDirSize))
             appendUInt32BE(&out, UInt32(layer0Size))
@@ -139,7 +145,7 @@ public struct VEVCFrameHeader {
     }
     
     @inline(__always)
-    public static func deserialize(from r: [UInt8], offset: inout Int) throws -> VEVCFrameHeader {
+    public static func deserialize(from r: [UInt8], offset: inout Int, profile: UInt8 = 0x01) throws -> VEVCFrameHeader {
         guard offset < r.count else { throw BinaryError.insufficientData(message: "VEVCFrameHeader flag") }
         let flag = r[offset]
         offset += 1
@@ -155,6 +161,7 @@ public struct VEVCFrameHeader {
             return VEVCFrameHeader(frameType: .copyFrame)
         }
         
+        let skipMapSize = (profile == 0x02 && fType == .pFrame) ? Int(try readUInt32BEFromBytes(r, offset: &offset)) : 0
         let mvsSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let refDirSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer0Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
@@ -165,7 +172,7 @@ public struct VEVCFrameHeader {
             throw DecodeError.invalidHeader
         }
         
-        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }
 
@@ -253,4 +260,10 @@ public struct VEVCLayerData {
         
         return (qtY, qtC, bufY, bufCb, bufCr)
     }
+}
+
+public enum BlockMode: UInt8 {
+    case inter = 0
+    case skip_prev = 1
+    case skip_ltr = 2
 }

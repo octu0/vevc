@@ -1,7 +1,7 @@
 // MARK: - Decode Spatial
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, profile: UInt8 = 0x01) async throws -> Image16 {
     var offset = 0
 
     // Compute per-layer dimensions matching encoder DWT subband sizes:
@@ -15,7 +15,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     let l0dx = (l1dx + 1) / 2
     let l0dy = (l1dy + 1) / 2
 
-    let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset)
+    let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset, profile: profile)
     if frameHeader.isCopyFrame {
         throw DecodeError.insufficientDataContext("decodeSpatialLayers passed copy frame")
     }
@@ -25,29 +25,39 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     
     let mvsCount = deriveMVCount(width: dx, height: dy)
     
+    var skipMap: [BlockMode]? = nil
+    if frameHeader.isIFrame != true && frameHeader.skipMapSize > 0 {
+        guard (offset + frameHeader.skipMapSize) <= r.count else { throw DecodeError.insufficientData }
+        let smData = Array(r[offset..<(offset + frameHeader.skipMapSize)])
+        skipMap = try decodeSkipMap(data: smData, count: mvsCount)
+        offset += frameHeader.skipMapSize
+    }
+    
     if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
         guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount)
+        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, profile: profile)
         offset += frameHeader.mvsSize
     }
     
     // Direction flag only exists for bidirectional prediction frames.
     // Indicates whether each block uses forward (prev) or backward (next) reference.
-    if frameHeader.hasRefDir && nextPd != nil {
+    if frameHeader.hasRefDir {
         let refDirByteCount = frameHeader.refDirSize
         guard (offset + refDirByteCount) <= r.count else { throw DecodeError.insufficientData }
         let refDirBuf = Array(r[offset..<(offset + refDirByteCount)])
         offset += refDirByteCount
         
-        var dirs = [Bool]()
-        dirs.reserveCapacity(mvsCount)
-        for i in 0..<mvsCount {
-            let byteIdx = i / 8
-            let bitIdx = i % 8
-            let isBackward = (byteIdx < refDirBuf.count) && ((refDirBuf[byteIdx] & UInt8(1 << bitIdx)) != 0)
-            dirs.append(isBackward)
+        if nextPd != nil {
+            var dirs = [Bool]()
+            dirs.reserveCapacity(mvsCount)
+            for i in 0..<mvsCount {
+                let byteIdx = i / 8
+                let bitIdx = i % 8
+                let isBackward = (byteIdx < refDirBuf.count) && ((refDirBuf[byteIdx] & UInt8(1 << bitIdx)) != 0)
+                dirs.append(isBackward)
+            }
+            refDirs = dirs
         }
-        refDirs = dirs
     }
     
     guard (offset + frameHeader.layer0Size) <= r.count else { throw DecodeError.insufficientData }
@@ -137,5 +147,48 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         }
     }
     
+    let targetDx = hasLayer2 ? l2dx : (hasLayer1 ? l1dx : l0dx)
+    let targetDy = hasLayer2 ? l2dy : (hasLayer1 ? l1dy : l0dy)
+    let targetBSize = hasLayer2 ? 32 : (hasLayer1 ? 16 : 8)
+
+    if profile == 0x02, let ltrPd = nextPd, let map = skipMap {
+        let bw = (dx + 31) / 32
+        let targetCbDx = (targetDx + 1) / 2
+        let targetCbDy = (targetDy + 1) / 2
+        let scale = hasLayer2 ? 1 : (hasLayer1 ? 2 : 4)
+        
+        for i in 0..<map.count {
+            if map[i] == .skip_ltr {
+                let bxL2 = (i % bw) * 32
+                let byL2 = (i / bw) * 32
+                
+                let bx = bxL2 / scale
+                let by = byL2 / scale
+                
+                copyBlock(from: ltrPd.y, to: &current.y, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
+                copyBlock(from: ltrPd.cb, to: &current.cb, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+                copyBlock(from: ltrPd.cr, to: &current.cr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+            }
+        }
+    }
+    
     return current
+}
+
+@inline(__always)
+private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
+    let maxY = min(by + blockSize, height)
+    let maxX = min(bx + blockSize, width)
+    let copyCount = maxX - bx
+    if copyCount <= 0 { return }
+    
+    src.withUnsafeBufferPointer { sPtr in
+        dst.withUnsafeMutableBufferPointer { dPtr in
+            guard let sBase = sPtr.baseAddress, let dBase = dPtr.baseAddress else { return }
+            for y in by..<maxY {
+                let offset = y * width + bx
+                dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: copyCount)
+            }
+        }
+    }
 }

@@ -48,10 +48,11 @@ Immediately following the File Metadata, "Frame Packets" are stored sequentially
 > The Frame Status byte encodes both the frame type (lower 4 bits) and the `hasRefDir` flag (bit 4, `0x10`). When bit 4 is set, the frame includes a Reference Direction bitset in the payload. This flag is only meaningful for P-Frames (`0x00`), yielding `0x10` for bidirectional P-Frames.
 
 ### 2.1. Frame Header (For I-Frames and P-Frames)
-If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes).
+If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes) for Profile 0x01, and **25 bytes fixed** for Profile 0x02.
 
 | Field Name | Size | Description |
 |---|---|---|
+| SkipMap Size | 4 Bytes (UInt32BE) | Byte size of the SkipMap payload. **(Profile 0x02 only)**. |
 | MVs Size | 4 Bytes (UInt32BE) | Byte size of the following MV Data payload. |
 | RefDir Size | 4 Bytes (UInt32BE) | Byte size of the Reference Direction payload. Stored as `0` if `hasRefDir` is false. |
 | Layer0 Size | 4 Bytes (UInt32BE) | Byte size of the Base Layer (8x8) payload. |
@@ -76,11 +77,12 @@ If the Status is not `0x01` (Copy-Frame), the following size information is stor
 ### 2.2. Frame Payload
 Data is stored continuously according to the sizes specified in the header.
 
-1. **MV Data** (`MVs Size` bytes)
-2. **RefDir Data** (`RefDir Size` bytes): A bitset of flags used for bidirectional prediction. Stored only when `RefDir Size > 0`.
-3. **Layer0 Data** (`Layer0 Size` bytes)
-4. **Layer1 Data** (`Layer1 Size` bytes)
-5. **Layer2 Data** (`Layer2 Size` bytes)
+1. **SkipMap Data** (`SkipMap Size` bytes): A bitset mapping each 32x32 block to its skip mode (`skip_none`, `skip_prev`, `skip_ltr`). Present only in Profile 0x02.
+2. **MV Data** (`MVs Size` bytes)
+3. **RefDir Data** (`RefDir Size` bytes): A bitset of flags used for bidirectional prediction or LTR direction. Stored only when `RefDir Size > 0`.
+4. **Layer0 Data** (`Layer0 Size` bytes)
+5. **Layer1 Data** (`Layer1 Size` bytes)
+6. **Layer2 Data** (`Layer2 Size` bytes)
 
 ---
 

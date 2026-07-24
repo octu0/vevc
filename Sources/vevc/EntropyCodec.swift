@@ -928,7 +928,7 @@ struct EntropyDecoder {
 // MARK: - Motion Vector rANS Codec
 
 @inline(__always)
-func encodeMVs(mvs: MotionVectors) -> [UInt8] {
+func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, profile: UInt8 = 0x01) -> [UInt8] {
     var tokensDx = [UInt8]()
     var tokensDy = [UInt8]()
     tokensDx.reserveCapacity(mvs.count)
@@ -939,6 +939,9 @@ func encodeMVs(mvs: MotionVectors) -> [UInt8] {
     var freqsDy = [UInt32](repeating: 0, count: 64)
     
     for i in 0..<mvs.count {
+        if profile == 0x02, let sm = skipMap, sm[i] != .inter {
+            continue
+        }
         let tx = valueTokenize(mvs.dx[i])
         tokensDx.append(tx.token)
         freqsDx[Int(tx.token)] += 1
@@ -959,6 +962,14 @@ func encodeMVs(mvs: MotionVectors) -> [UInt8] {
     
     var enc = rANSEncoder()
     for i in stride(from: mvs.count - 1, through: 0, by: -1) {
+        if profile == 0x02, let sm = skipMap, sm[i] != .inter {
+            continue
+        }
+        // mvs_idx -> tokens array idx
+        // since we push dynamically to tokens array, we can just pop from the back
+    }
+    
+    for i in stride(from: tokensDx.count - 1, through: 0, by: -1) {
         let ty = tokensDy[i]
         enc.encodeSymbol(cumFreq: modelDy.tokenCumFreqs[Int(ty)], freq: modelDy.tokenFreqs[Int(ty)])
         let tx = tokensDx[i]
@@ -979,7 +990,7 @@ func encodeMVs(mvs: MotionVectors) -> [UInt8] {
 }
 
 @inline(__always)
-func decodeMVs(data: [UInt8], count: Int) throws -> MotionVectors {
+func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, profile: UInt8 = 0x01) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 0
         let bufCount = data.count
@@ -1003,7 +1014,13 @@ func decodeMVs(data: [UInt8], count: Int) throws -> MotionVectors {
         mvsDx.reserveCapacity(count)
         mvsDy.reserveCapacity(count)
         
-        for _ in 0..<count {
+        for i in 0..<count {
+            if profile == 0x02, let sm = skipMap, sm[i] != .inter {
+                mvsDx.append(0)
+                mvsDy.append(0)
+                continue
+            }
+            
             let txCf = dec.getCumulativeFreq()
             let tx = modelDx.findToken(cf: txCf)
             dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
@@ -1026,4 +1043,74 @@ func decodeMVs(data: [UInt8], count: Int) throws -> MotionVectors {
         
         return MotionVectors(dx: mvsDx, dy: mvsDy)
     }
+}
+
+@inline(__always)
+func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
+    var bypass = BypassWriter()
+    
+    var runs = [(val: UInt8, count: UInt32)]()
+    var current: UInt8 = map.first?.rawValue ?? 0
+    var count: UInt32 = 0
+    for mode in map {
+        if mode.rawValue == current {
+            count += 1
+        } else {
+            runs.append((current, count))
+            current = mode.rawValue
+            count = 1
+        }
+    }
+    if count > 0 {
+        runs.append((current, count))
+    }
+    
+    var out = [UInt8]()
+    writeVLQSize(&out, runs.count)
+    
+    for run in runs {
+        bypass.writeBits(UInt32(run.val), count: 2)
+        let tokenInfo = valueTokenizeUnsigned(run.count)
+        bypass.writeBits(UInt32(tokenInfo.token), count: 6)
+        bypass.writeBits(tokenInfo.bypassBits, count: tokenInfo.bypassLen)
+    }
+    bypass.flush()
+    let bpData = bypass.bytes
+    writeVLQSize(&out, bpData.count)
+    out.append(contentsOf: bpData)
+    
+    return out
+}
+
+@inline(__always)
+func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
+    var offset = 0
+    let runCount = try readVLQSizeFromBytes(data, offset: &offset)
+    
+    let bpLen = try readVLQSizeFromBytes(data, offset: &offset)
+    guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
+    
+    var map = [BlockMode]()
+    map.reserveCapacity(count)
+    
+    try data.withUnsafeBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { throw DecodeError.insufficientData }
+        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
+        
+        for _ in 0..<runCount {
+            let valBits = bypassReader.readBits(count: 2)
+            guard let mode = BlockMode(rawValue: UInt8(valBits)) else { throw DecodeError.invalidBlockData }
+            let token = bypassReader.readBits(count: 6)
+            let bypassLen = valueBypassLengthUnsigned(for: UInt8(token))
+            let bypassBits = bypassReader.readBits(count: bypassLen)
+            let run = valueDetokenizeUnsigned(token: UInt8(token), bypassBits: bypassBits)
+            
+            for _ in 0..<run {
+                map.append(mode)
+            }
+        }
+    }
+    
+    guard map.count == count else { throw DecodeError.invalidBlockData }
+    return map
 }
