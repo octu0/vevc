@@ -228,7 +228,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01, staticCounters: inout [Int]) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let pPd = predictedPd
     let nPd = nextPd
     
@@ -260,21 +260,14 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in
         pd.cr.withUnsafeBufferPointer { currCrPtr in
-        pPd.y.withUnsafeBufferPointer { prevYPtr in
-        pPd.cb.withUnsafeBufferPointer { prevCbPtr in
-        pPd.cr.withUnsafeBufferPointer { prevCrPtr in
-        nPd.y.withUnsafeBufferPointer { ltrYPtr in
-        nPd.cb.withUnsafeBufferPointer { ltrCbPtr in
-        nPd.cr.withUnsafeBufferPointer { ltrCrPtr in
+        prevInput.y.withUnsafeBufferPointer { prevInYPtr in
+        prevInput.cb.withUnsafeBufferPointer { prevInCbPtr in
+        prevInput.cr.withUnsafeBufferPointer { prevInCrPtr in
             for i in 0..<blockCount {
                 let bx = (i % bw) * 32
                 let by = (i / bw) * 32
-                let bestSAD = sads[i]
                 
                 var allSubBlocksMatchPrev = true
-                var allSubBlocksMatchLTR = true
-                var sad0PrevTotal = 0
-                var sad0LTRTotal = 0
                 
                 for sy in 0..<2 {
                     for sx in 0..<2 {
@@ -288,32 +281,49 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                         let area = mw * mh + mwc * mhc * 2
                         let blockThreshold = skipThresholdPerPixel * area
                         
-                        let sadPrev = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
-                        if sadPrev > blockThreshold { allSubBlocksMatchPrev = false }
-                        sad0PrevTotal += sadPrev
+                        let sadPrevIn = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: prevInYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevInCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevInCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
                         
-                        let sadLTR = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: ltrYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: ltrCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: ltrCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
-                        if sadLTR > blockThreshold { allSubBlocksMatchLTR = false }
-                        sad0LTRTotal += sadLTR
+                        if sadPrevIn > blockThreshold { allSubBlocksMatchPrev = false }
                     }
                 }
                 
-                let hasMotionPrev = bestSAD < (sad0PrevTotal * 9 / 10)
-                let hasMotionLTR = bestSAD < (sad0LTRTotal * 9 / 10)
+                if allSubBlocksMatchPrev {
+                    staticCounters[i] += 1
+                } else {
+                    staticCounters[i] = 0
+                }
                 
-                if allSubBlocksMatchPrev && !hasMotionPrev {
-                    skipMap[i] = .skip_prev
-                    mvs.dx[i] = 0
-                    mvs.dy[i] = 0
-                    refDirs[i] = false // prev
-                } else if allSubBlocksMatchLTR && !hasMotionLTR {
-                    skipMap[i] = .skip_ltr
-                    mvs.dx[i] = 0
-                    mvs.dy[i] = 0
-                    refDirs[i] = true // next (ltr)
+                if staticCounters[i] > 0 {
+                    if staticCounters[i] == gopPosition {
+                        skipMap[i] = .skip_ltr
+                        mvs.dx[i] = 0
+                        mvs.dy[i] = 0
+                        refDirs[i] = true
+                    } else {
+                        skipMap[i] = .skip_prev
+                        mvs.dx[i] = 0
+                        mvs.dy[i] = 0
+                        refDirs[i] = false
+                    }
                 }
             }
-        }}}}}}}}}
+            if gopPosition == 10 {
+                print("--- Block Map (gopPosition=10) ---")
+                for y in 0..<bh {
+                    var line = ""
+                    for x in 0..<bw {
+                        let i = y * bw + x
+                        switch skipMap[i] {
+                        case .skip_ltr: line += "L"
+                        case .skip_prev: line += "P"
+                        default: line += "."
+                        }
+                    }
+                    print(line)
+                }
+                print("----------------------------------")
+            }
+        }}}}}}
     }
 
     // pixel level residual calculation based on reference direction

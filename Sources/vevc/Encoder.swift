@@ -165,6 +165,10 @@ actor LayersEncodeActor {
     private var previousReconstructed: PlaneData420?
     private var releasePreviousRecon: (@Sendable () -> Void)?
     
+    private var firstInputPlane: PlaneData420?
+    private var releaseFirstInput: (@Sendable () -> Void)?
+    private var staticCounters: [Int] = []
+    
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01) {
         self.width = width
         self.height = height
@@ -177,6 +181,10 @@ actor LayersEncodeActor {
         self.qstep = qstep
         self.profile = profile
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+        
+        let bw = (width + 31) / 32
+        let bh = (height + 31) / 32
+        self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01) {
@@ -191,12 +199,17 @@ actor LayersEncodeActor {
         self.qstep = nil
         self.profile = profile
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+        
+        let bw = (width + 31) / 32
+        let bh = (height + 31) / 32
+        self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
     deinit {
         releasePreviousInput?()
         releasePreviousRecon?()
         releaseFirstRecon?()
+        releaseFirstInput?()
     }
     
     @inline(__always)
@@ -247,6 +260,7 @@ actor LayersEncodeActor {
             releasePreviousInput?()
             releasePreviousRecon?()
             releaseFirstRecon?()
+            releaseFirstInput?()
             
             previousInputPlane = plane
             releasePreviousInput = releasePlane
@@ -256,6 +270,14 @@ actor LayersEncodeActor {
             
             previousReconstructed = reconstructed
             releasePreviousRecon = nil
+            
+            let (firstIn, releaseFirstIn) = toPlaneData420(image: image, pool: pool)
+            firstInputPlane = firstIn
+            releaseFirstInput = releaseFirstIn
+            
+            for i in 0..<self.staticCounters.count {
+                self.staticCounters[i] = 0
+            }
             
             previousMVs = mvs
             
@@ -276,11 +298,7 @@ actor LayersEncodeActor {
             }
         }
         
-        releasePreviousInput?()
-        previousInputPlane = plane
-        releasePreviousInput = releasePlane
-        
-        guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed else {
+        guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed, let firstIn = firstInputPlane, let prevIn = previousInputPlane else {
             throw EncodeError.missingReferenceFramesForPFrame
         }
         let baseStep = Int(baseQt.step)
@@ -295,11 +313,13 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
         
+        var localCounters = self.staticCounters
         let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
-            pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevMVs: previousMVs,
+            pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
             maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile
+            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, staticCounters: &localCounters
         )
+        self.staticCounters = localCounters
         
         // Using masked recon distortion for quality metric
         let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
@@ -308,6 +328,9 @@ actor LayersEncodeActor {
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
         }
         
+        releasePreviousInput?()
+        previousInputPlane = plane
+        releasePreviousInput = releasePlane
 
         let oldRecon = previousReconstructed!
         let oldRelease = releasePreviousRecon
