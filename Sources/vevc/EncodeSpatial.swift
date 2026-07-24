@@ -89,7 +89,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let threshPerPixel = max(1, Int(qtY.step) / 64) // qtY.step is in 1/16 pixel units (Q4). Divided by 4 per plane area approximation, so 16 * 4 = 64
+        let skipThresholdPerPixel = 2
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in
@@ -100,16 +100,33 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
             for i in 0..<blockCount {
                 let bx = (i % bw) * 32
                 let by = (i / bw) * 32
-                let mw = min(32, dx - bx)
-                let mh = min(32, dy - by)
-                let mwc = min(16, cbDx - bx / 2)
-                let mhc = min(16, cbDy - by / 2)
-                let area = mw * mh + mwc * mhc * 2
-                let blockThreshold = threshPerPixel * area
+                let bestSAD = sads[i]
                 
-                let sadPrev = computeZeroSADBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: bx, by: by, width: dx, height: dy)
+                var allSubBlocksMatchPrev = true
+                var sad0PrevTotal = 0
                 
-                if sadPrev <= blockThreshold {
+                for sy in 0..<2 {
+                    for sx in 0..<2 {
+                        let subX = bx + sx * 16
+                        let subY = by + sy * 16
+                        let mw = min(16, dx - subX)
+                        let mh = min(16, dy - subY)
+                        if mw <= 0 || mh <= 0 { continue }
+                        let mwc = min(8, cbDx - subX / 2)
+                        let mhc = min(8, cbDy - subY / 2)
+                        let area = mw * mh + mwc * mhc * 2
+                        let blockThreshold = skipThresholdPerPixel * area
+                        
+                        let sadPrev = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
+                        
+                        if sadPrev > blockThreshold { allSubBlocksMatchPrev = false }
+                        sad0PrevTotal += sadPrev
+                    }
+                }
+                
+                let hasMotionPrev = bestSAD < (sad0PrevTotal * 9 / 10)
+                
+                if allSubBlocksMatchPrev && !hasMotionPrev {
                     skipMap[i] = .skip_prev
                     mvs.dx[i] = 0
                     mvs.dy[i] = 0
@@ -237,7 +254,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let threshPerPixel = max(1, Int(qtY.step) / 64) // qtY.step is in 1/16 pixel units (Q4)
+        let skipThresholdPerPixel = 2
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in
@@ -251,22 +268,44 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
             for i in 0..<blockCount {
                 let bx = (i % bw) * 32
                 let by = (i / bw) * 32
-                let mw = min(32, dx - bx)
-                let mh = min(32, dy - by)
-                let mwc = min(16, cbDx - bx / 2)
-                let mhc = min(16, cbDy - by / 2)
-                let area = mw * mh + mwc * mhc * 2
-                let blockThreshold = threshPerPixel * area
+                let bestSAD = sads[i]
                 
-                let sadPrev = computeZeroSADBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: bx, by: by, width: dx, height: dy)
-                let sadLtr = computeZeroSADBlock(cY: currYPtr.baseAddress!, rY: ltrYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: ltrCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: ltrCrPtr.baseAddress!, bx: bx, by: by, width: dx, height: dy)
+                var allSubBlocksMatchPrev = true
+                var allSubBlocksMatchLTR = true
+                var sad0PrevTotal = 0
+                var sad0LTRTotal = 0
                 
-                if sadPrev <= blockThreshold && sadPrev <= sadLtr {
+                for sy in 0..<2 {
+                    for sx in 0..<2 {
+                        let subX = bx + sx * 16
+                        let subY = by + sy * 16
+                        let mw = min(16, dx - subX)
+                        let mh = min(16, dy - subY)
+                        if mw <= 0 || mh <= 0 { continue }
+                        let mwc = min(8, cbDx - subX / 2)
+                        let mhc = min(8, cbDy - subY / 2)
+                        let area = mw * mh + mwc * mhc * 2
+                        let blockThreshold = skipThresholdPerPixel * area
+                        
+                        let sadPrev = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
+                        if sadPrev > blockThreshold { allSubBlocksMatchPrev = false }
+                        sad0PrevTotal += sadPrev
+                        
+                        let sadLTR = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: ltrYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: ltrCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: ltrCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
+                        if sadLTR > blockThreshold { allSubBlocksMatchLTR = false }
+                        sad0LTRTotal += sadLTR
+                    }
+                }
+                
+                let hasMotionPrev = bestSAD < (sad0PrevTotal * 9 / 10)
+                let hasMotionLTR = bestSAD < (sad0LTRTotal * 9 / 10)
+                
+                if allSubBlocksMatchPrev && !hasMotionPrev {
                     skipMap[i] = .skip_prev
                     mvs.dx[i] = 0
                     mvs.dy[i] = 0
                     refDirs[i] = false // prev
-                } else if sadLtr <= blockThreshold {
+                } else if allSubBlocksMatchLTR && !hasMotionLTR {
                     skipMap[i] = .skip_ltr
                     mvs.dx[i] = 0
                     mvs.dy[i] = 0
@@ -393,20 +432,19 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 }
 
 @inline(__always)
-func computeZeroSADBlock(
+func computeZeroSADSubBlock(
     cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
     cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
     cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
-    bx: Int, by: Int, width: Int, height: Int
+    bx: Int, by: Int, width: Int, height: Int,
+    subWidth: Int, subHeight: Int, subWc: Int, subHc: Int
 ) -> Int {
     var sad: Int = 0
     let strideY = width
-    for y in 0..<32 {
+    for y in 0..<subHeight {
         let yy = by + y
-        if yy >= height { break }
         let offset = yy * strideY + bx
-        let maxW = min(32, width - bx)
-        for x in 0..<maxW {
+        for x in 0..<subWidth {
             sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
         }
     }
@@ -414,13 +452,10 @@ func computeZeroSADBlock(
     let bxC = bx / 2
     let byC = by / 2
     let strideC = (width + 1) / 2
-    let heightC = (height + 1) / 2
-    for y in 0..<16 {
+    for y in 0..<subHc {
         let yy = byC + y
-        if yy >= heightC { break }
         let offset = yy * strideC + bxC
-        let maxW = min(16, strideC - bxC)
-        for x in 0..<maxW {
+        for x in 0..<subWc {
             sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
             sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
         }

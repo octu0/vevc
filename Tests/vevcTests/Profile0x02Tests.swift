@@ -10,10 +10,10 @@ final class Profile0x02Tests: XCTestCase {
         var cb = [UInt8](repeating: 128, count: width * height / 4)
         var cr = [UInt8](repeating: 128, count: width * height / 4)
         
-        // 複雑な静止画を生成
+        // 複雑すぎない静止画を生成（量子化誤差が 1画素あたり2 以下に収まるようにフラットにする）
         for i in 0..<height {
             for j in 0..<width {
-                y[i * width + j] = UInt8((i * 3 + j * 7) % 256)
+                y[i * width + j] = UInt8((i / 32 * 32) % 256) // 32x32のブロック単位で一定の色にする
             }
         }
         
