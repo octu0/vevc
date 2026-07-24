@@ -89,7 +89,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let skipThresholdPerPixel = 2
+        let skipThresholdPerPixel = 8
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in
@@ -254,7 +254,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let skipThresholdPerPixel = 2
+        let skipThresholdPerPixel = 8
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in

@@ -48,7 +48,7 @@ func readY4M(path: String) -> [ImageInput]? {
     return inputs
 }
 
-func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height: Int) -> (l0: Int, l1: Int, l2: Int, skips: (prev: Int, ltr: Int, inter: Int, total: Int)) {
+func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height: Int) -> (l0: Int, l1: Int, l2: Int, skips: (prev: Int, ltr: Int, inter: Int, copy: Int, total: Int)) {
     var offset = 0
     var headerAndBase = 0
     var l0 = 0
@@ -58,6 +58,7 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height:
     var skipPrev = 0
     var skipLtr = 0
     var inter = 0
+    var copyPrev = 0
     var totalBlocks = 0
     
     let bw = (width + 31) / 32
@@ -102,7 +103,7 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height:
                     l2 += fh.layer2Size
                     offset += fh.payloadSize
                 } else {
-                    skipPrev += blockCount
+                    copyPrev += blockCount
                     totalBlocks += blockCount
                 }
             } else {
@@ -115,7 +116,7 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height:
     let layer1Total = layer0Total + l1
     let layer2Total = layer1Total + l2
     
-    return (layer0Total, layer1Total, layer2Total, (skipPrev, skipLtr, inter, totalBlocks))
+    return (layer0Total, layer1Total, layer2Total, (skipPrev, skipLtr, inter, copyPrev, totalBlocks))
 }
 
 // MARK: - VEVC Encode / Decode
@@ -123,7 +124,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     encTime: Double,
     bitstream: [UInt8],
     sizes: (l0: Int, l1: Int, l2: Int),
-    skips: (prev: Int, ltr: Int, inter: Int, total: Int),
+    skips: (prev: Int, ltr: Int, inter: Int, copy: Int, total: Int),
     l0Dec: (time: Double, metrics: [QualityMetrics]?),
     l1Dec: (time: Double, metrics: [QualityMetrics]?),
     l2Dec: (time: Double, metrics: [QualityMetrics]?)
@@ -133,7 +134,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     // Encode
     print("  -> runVEVC Encoding...")
     let encStart = Date()
-    guard let first = vevcImages.first else { return (0, [], (0,0,0), (0, 0, 0, 0), (0, nil), (0, nil), (0, nil)) }
+    guard let first = vevcImages.first else { return (0, [], (0,0,0), (0, 0, 0, 0, 0), (0, nil), (0, nil), (0, nil)) }
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
         vevcEncoder = VEVCEncoder(
@@ -956,7 +957,7 @@ struct CompareApp {
                 mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
             }
             
-            func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double, skips: (prev: Int, ltr: Int, inter: Int, total: Int)? = nil) -> CodecBenchmarkResult {
+            func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double, skips: (prev: Int, ltr: Int, inter: Int, copy: Int, total: Int)? = nil) -> CodecBenchmarkResult {
                 let encMs = encTime * 1000
                 let decMs = decTime * 1000
                 let encFps = Double(count) / encTime
@@ -968,10 +969,16 @@ struct CompareApp {
                 print(String(format: "  Decode : %7.2f ms (%.2f fps) - %.2f ms / frame", decMs, decFps, decMs / Double(count)))
                 print(String(format: "  Size   : %7.2f KB (%.2f%% of raw %.2f KB)", sizeKB, (sizeKB / rawSizeKB) * 100.0, rawSizeKB))
                 if let s = skips, s.total > 0 {
-                    let prevRatio = Double(s.prev) / Double(s.total) * 100.0
-                    let ltrRatio = Double(s.ltr) / Double(s.total) * 100.0
-                    let interRatio = Double(s.inter) / Double(s.total) * 100.0
-                    print(String(format: "  Skips  : Prev: %.2f%% | LTR: %.2f%% | Inter: %.2f%%", prevRatio, ltrRatio, interRatio))
+                    let nonCopyTotal = s.total - s.copy
+                    let copyRatio = Double(s.copy) / Double(s.total) * 100.0
+                    if nonCopyTotal > 0 {
+                        let prevRatio = Double(s.prev) / Double(nonCopyTotal) * 100.0
+                        let ltrRatio = Double(s.ltr) / Double(nonCopyTotal) * 100.0
+                        let interRatio = Double(s.inter) / Double(nonCopyTotal) * 100.0
+                        print(String(format: "  Skips  : CopyFrame: %5.2f%% | Non-Copy Skips: Prev: %5.2f%% | LTR: %5.2f%% | Inter: %5.2f%%", copyRatio, prevRatio, ltrRatio, interRatio))
+                    } else {
+                        print(String(format: "  Skips  : CopyFrame: %5.2f%% | Non-Copy Skips: N/A", copyRatio))
+                    }
                 }
                 
                 var statsOut: QualityStats? = nil
