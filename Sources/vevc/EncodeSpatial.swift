@@ -1,4 +1,5 @@
 // MARK: - Encode Spatial
+import Foundation
 
 @inline(__always)
 func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
@@ -89,7 +90,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let skipThresholdPerPixel = 8
+        let skipThresholdPerPixel = ProcessInfo.processInfo.environment["VEVC_SKIP_THRESH"].flatMap { Int($0) } ?? 2
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in
@@ -254,7 +255,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let skipThresholdPerPixel = 8
+        let skipThresholdPerPixel = ProcessInfo.processInfo.environment["VEVC_SKIP_THRESH"].flatMap { Int($0) } ?? 2
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in
