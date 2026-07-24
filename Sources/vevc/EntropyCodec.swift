@@ -1083,7 +1083,7 @@ func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
 }
 
 @inline(__always)
-func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
+public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
     var offset = 0
     let runCount = try readVLQSizeFromBytes(data, offset: &offset)
     

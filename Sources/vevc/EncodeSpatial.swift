@@ -85,18 +85,37 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mvs = mvs_original
     var skipMap = [BlockMode]()
     if profile == 0x02 {
-        let blockThreshold = 256
         let bw = (dx + 31) / 32
         let bh = (dy + 31) / 32
-        skipMap = [BlockMode](repeating: .inter, count: bw * bh)
+        let blockCount = bw * bh
+        skipMap = [BlockMode](repeating: .inter, count: blockCount)
+        let threshPerPixel = max(1, Int(qtY.step) / 64) // qtY.step is in 1/16 pixel units (Q4). Divided by 4 per plane area approximation, so 16 * 4 = 64
         
-        for i in 0..<sads.count {
-            if sads[i] <= blockThreshold {
-                skipMap[i] = .skip_prev
-                mvs.dx[i] = 0
-                mvs.dy[i] = 0
+        pd.y.withUnsafeBufferPointer { currYPtr in
+        pd.cb.withUnsafeBufferPointer { currCbPtr in
+        pd.cr.withUnsafeBufferPointer { currCrPtr in
+        predictedPd.y.withUnsafeBufferPointer { prevYPtr in
+        predictedPd.cb.withUnsafeBufferPointer { prevCbPtr in
+        predictedPd.cr.withUnsafeBufferPointer { prevCrPtr in
+            for i in 0..<blockCount {
+                let bx = (i % bw) * 32
+                let by = (i / bw) * 32
+                let mw = min(32, dx - bx)
+                let mh = min(32, dy - by)
+                let mwc = min(16, cbDx - bx / 2)
+                let mhc = min(16, cbDy - by / 2)
+                let area = mw * mh + mwc * mhc * 2
+                let blockThreshold = threshPerPixel * area
+                
+                let sadPrev = computeZeroSADBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: bx, by: by, width: dx, height: dy)
+                
+                if sadPrev <= blockThreshold {
+                    skipMap[i] = .skip_prev
+                    mvs.dx[i] = 0
+                    mvs.dy[i] = 0
+                }
             }
-        }
+        }}}}}}
     }
     
     var mutPdY = pool.getInt16(count: pd.y.count)
@@ -218,7 +237,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let threshPerPixel = max(1, Int(qtY.step) / 4)
+        let threshPerPixel = max(1, Int(qtY.step) / 64) // qtY.step is in 1/16 pixel units (Q4)
         
         pd.y.withUnsafeBufferPointer { currYPtr in
         pd.cb.withUnsafeBufferPointer { currCbPtr in

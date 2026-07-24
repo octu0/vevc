@@ -48,12 +48,21 @@ func readY4M(path: String) -> [ImageInput]? {
     return inputs
 }
 
-func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8) -> (l0: Int, l1: Int, l2: Int) {
+func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height: Int) -> (l0: Int, l1: Int, l2: Int, skips: (prev: Int, ltr: Int, inter: Int, total: Int)) {
     var offset = 0
     var headerAndBase = 0
     var l0 = 0
     var l1 = 0
     var l2 = 0
+    
+    var skipPrev = 0
+    var skipLtr = 0
+    var inter = 0
+    var totalBlocks = 0
+    
+    let bw = (width + 31) / 32
+    let bh = (height + 31) / 32
+    let blockCount = bw * bh
     
     while offset < bitstream.count {
         if offset + 4 <= bitstream.count && bitstream[offset] == 0x56 && bitstream[offset+1] == 0x45 && bitstream[offset+2] == 0x56 && bitstream[offset+3] == 0x43 {
@@ -69,11 +78,32 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8) -> (l0: Int, l1: In
                 let headerSize = offset - start
                 headerAndBase += headerSize
                 if !fh.isCopyFrame {
+                    if profile == 0x02 && fh.skipMapSize > 0 {
+                        let smData = Array(bitstream[offset..<(offset + fh.skipMapSize)])
+                        if let map = try? decodeSkipMap(data: smData, count: blockCount) {
+                            for m in map {
+                                if m == .skip_prev { skipPrev += 1 }
+                                else if m == .skip_ltr { skipLtr += 1 }
+                                else { inter += 1 }
+                                totalBlocks += 1
+                            }
+                        }
+                    } else if profile == 0x01 && !fh.isIFrame {
+                        inter += blockCount
+                        totalBlocks += blockCount
+                    } else if fh.isIFrame {
+                        inter += blockCount
+                        totalBlocks += blockCount
+                    }
+                    
                     headerAndBase += fh.skipMapSize + fh.mvsSize + fh.refDirSize
                     l0 += fh.layer0Size
                     l1 += fh.layer1Size
                     l2 += fh.layer2Size
                     offset += fh.payloadSize
+                } else {
+                    skipPrev += blockCount
+                    totalBlocks += blockCount
                 }
             } else {
                 break
@@ -85,7 +115,7 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8) -> (l0: Int, l1: In
     let layer1Total = layer0Total + l1
     let layer2Total = layer1Total + l2
     
-    return (layer0Total, layer1Total, layer2Total)
+    return (layer0Total, layer1Total, layer2Total, (skipPrev, skipLtr, inter, totalBlocks))
 }
 
 // MARK: - VEVC Encode / Decode
@@ -93,6 +123,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     encTime: Double,
     bitstream: [UInt8],
     sizes: (l0: Int, l1: Int, l2: Int),
+    skips: (prev: Int, ltr: Int, inter: Int, total: Int),
     l0Dec: (time: Double, metrics: [QualityMetrics]?),
     l1Dec: (time: Double, metrics: [QualityMetrics]?),
     l2Dec: (time: Double, metrics: [QualityMetrics]?)
@@ -102,7 +133,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     // Encode
     print("  -> runVEVC Encoding...")
     let encStart = Date()
-    guard let first = vevcImages.first else { return (0, [], (0,0,0), (0, nil), (0, nil), (0, nil)) }
+    guard let first = vevcImages.first else { return (0, [], (0,0,0), (0, 0, 0, 0), (0, nil), (0, nil), (0, nil)) }
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
         vevcEncoder = VEVCEncoder(
@@ -131,7 +162,9 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     let encTime = Date().timeIntervalSince(encStart)
     print("  -> runVEVC Encoded \(outBytes.count) bytes")
     
-    let sizes = parseVEVCLayerSizes(bitstream: outBytes, profile: config.profile)
+    let res = parseVEVCLayerSizes(bitstream: outBytes, profile: config.profile, width: first.width, height: first.height)
+    let sizes = (l0: res.l0, l1: res.l1, l2: res.l2)
+    let skips = res.skips
     
     func decodeAndMetrics(maxLayer: Int) async throws -> (time: Double, metrics: [QualityMetrics]?) {
         print("  -> runVEVC Decoding Layer \(maxLayer)...")
@@ -158,7 +191,7 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
     let l1Dec = try await decodeAndMetrics(maxLayer: 1)
     let l0Dec = try await decodeAndMetrics(maxLayer: 0)
     
-    return (encTime, outBytes, sizes, l0Dec, l1Dec, l2Dec)
+    return (encTime, outBytes, sizes, skips, l0Dec, l1Dec, l2Dec)
 }
 
 func createPixelBuffer(from img: YCbCrImage) -> CVPixelBuffer? {
@@ -923,7 +956,7 @@ struct CompareApp {
                 mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
             }
             
-            func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double) -> CodecBenchmarkResult {
+            func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double, skips: (prev: Int, ltr: Int, inter: Int, total: Int)? = nil) -> CodecBenchmarkResult {
                 let encMs = encTime * 1000
                 let decMs = decTime * 1000
                 let encFps = Double(count) / encTime
@@ -934,6 +967,12 @@ struct CompareApp {
                 print(String(format: "  Encode : %7.2f ms (%.2f fps) - %.2f ms / frame", encMs, encFps, encMs / Double(count)))
                 print(String(format: "  Decode : %7.2f ms (%.2f fps) - %.2f ms / frame", decMs, decFps, decMs / Double(count)))
                 print(String(format: "  Size   : %7.2f KB (%.2f%% of raw %.2f KB)", sizeKB, (sizeKB / rawSizeKB) * 100.0, rawSizeKB))
+                if let s = skips, s.total > 0 {
+                    let prevRatio = Double(s.prev) / Double(s.total) * 100.0
+                    let ltrRatio = Double(s.ltr) / Double(s.total) * 100.0
+                    let interRatio = Double(s.inter) / Double(s.total) * 100.0
+                    print(String(format: "  Skips  : Prev: %.2f%% | LTR: %.2f%% | Inter: %.2f%%", prevRatio, ltrRatio, interRatio))
+                }
                 
                 var statsOut: QualityStats? = nil
                 if let stats = calculateQualityStats(metrics: metrics ?? []) {
@@ -949,9 +988,9 @@ struct CompareApp {
             
             print("\n--- Results ---")
             var chartResults: [CodecBenchmarkResult] = []
-            chartResults.append(printStats(name: "VEVC (Layer 2)", encTime: vevcResult.encTime, decTime: vevcResult.l2Dec.time, compSize: vevcResult.sizes.l2, metrics: vevcResult.l2Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "VEVC (Layer 1)", encTime: vevcResult.encTime, decTime: vevcResult.l1Dec.time, compSize: vevcResult.sizes.l1, metrics: vevcResult.l1Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-            chartResults.append(printStats(name: "VEVC (Layer 0)", encTime: vevcResult.encTime, decTime: vevcResult.l0Dec.time, compSize: vevcResult.sizes.l0, metrics: vevcResult.l0Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
+            chartResults.append(printStats(name: "VEVC (Layer 2)", encTime: vevcResult.encTime, decTime: vevcResult.l2Dec.time, compSize: vevcResult.sizes.l2, metrics: vevcResult.l2Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB, skips: vevcResult.skips))
+            chartResults.append(printStats(name: "VEVC (Layer 1)", encTime: vevcResult.encTime, decTime: vevcResult.l1Dec.time, compSize: vevcResult.sizes.l1, metrics: vevcResult.l1Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB, skips: vevcResult.skips))
+            chartResults.append(printStats(name: "VEVC (Layer 0)", encTime: vevcResult.encTime, decTime: vevcResult.l0Dec.time, compSize: vevcResult.sizes.l0, metrics: vevcResult.l0Dec.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB, skips: vevcResult.skips))
             
             if localConfig.vevcOnly != true {
                 if let h264Sw = h264SwResult {
