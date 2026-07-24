@@ -82,8 +82,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
-    let (mvs_original, sads, occlusionScores) = await computeMotionVectors(curr: pd, prev: predictedPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset)
-    var mvs = mvs_original
     var skipMap = [BlockMode]()
     if profile == 0x02 {
         let bw = (dx + 31) / 32
@@ -101,10 +99,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
             for i in 0..<blockCount {
                 let bx = (i % bw) * 32
                 let by = (i / bw) * 32
-                let bestSAD = sads[i]
                 
                 var allSubBlocksMatchPrev = true
-                var sad0PrevTotal = 0
                 
                 for sy in 0..<2 {
                     for sx in 0..<2 {
@@ -121,19 +117,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                         let sadPrev = computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
                         
                         if sadPrev > blockThreshold { allSubBlocksMatchPrev = false }
-                        sad0PrevTotal += sadPrev
                     }
                 }
                 
-                let hasMotionPrev = bestSAD < (sad0PrevTotal * 9 / 10)
-                
-                if allSubBlocksMatchPrev && !hasMotionPrev {
+                if allSubBlocksMatchPrev {
                     skipMap[i] = .skip_prev
-                    mvs.dx[i] = 0
-                    mvs.dy[i] = 0
                 }
             }
         }}}}}}
+    }
+    
+    let (mvs_original, sads, occlusionScores) = await computeMotionVectors(curr: pd, prev: predictedPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset, skipMap: profile == 0x02 ? skipMap : nil)
+    var mvs = mvs_original
+    if profile == 0x02 {
+        for i in 0..<skipMap.count {
+            if skipMap[i] != .inter {
+                mvs.dx[i] = 0
+                mvs.dy[i] = 0
+            }
+        }
     }
     
     var mutPdY = pool.getInt16(count: pd.y.count)
@@ -244,11 +246,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
     
-    // bidirectional MV calculation: search MVs for both forward and backward and select the one with the smaller SAD for each block
-    let (mvs_original, sads, refDirs_original, occlusionScores) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition)
-    var mvs = mvs_original
-    var refDirs = refDirs_original
-    
     var skipMap = [BlockMode]()
     if profile == 0x02 {
         let bw = (dx + 31) / 32
@@ -296,34 +293,30 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                 if staticCounters[i] > 0 {
                     if staticCounters[i] == gopPosition {
                         skipMap[i] = .skip_ltr
-                        mvs.dx[i] = 0
-                        mvs.dy[i] = 0
-                        refDirs[i] = true
                     } else {
                         skipMap[i] = .skip_prev
-                        mvs.dx[i] = 0
-                        mvs.dy[i] = 0
-                        refDirs[i] = false
                     }
                 }
-            }
-            if gopPosition == 10 {
-                print("--- Block Map (gopPosition=10) ---")
-                for y in 0..<bh {
-                    var line = ""
-                    for x in 0..<bw {
-                        let i = y * bw + x
-                        switch skipMap[i] {
-                        case .skip_ltr: line += "L"
-                        case .skip_prev: line += "P"
-                        default: line += "."
-                        }
-                    }
-                    print(line)
-                }
-                print("----------------------------------")
             }
         }}}}}}
+    }
+    
+    // bidirectional MV calculation: search MVs for both forward and backward and select the one with the smaller SAD for each block
+    let (mvs_original, sads, refDirs_original, occlusionScores) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: profile == 0x02 ? skipMap : nil)
+    var mvs = mvs_original
+    var refDirs = refDirs_original
+    if profile == 0x02 {
+        for i in 0..<skipMap.count {
+            if skipMap[i] == .skip_ltr {
+                mvs.dx[i] = 0
+                mvs.dy[i] = 0
+                refDirs[i] = true
+            } else if skipMap[i] == .skip_prev {
+                mvs.dx[i] = 0
+                mvs.dy[i] = 0
+                refDirs[i] = false
+            }
+        }
     }
 
     // pixel level residual calculation based on reference direction

@@ -98,7 +98,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let layer2Data = Array(r[offset..<(offset + frameHeader.layer2Size)])
         offset += frameHeader.layer2Size
         
-        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset)
+        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap)
     } else {
         offset += frameHeader.layer2Size
         
@@ -151,23 +151,30 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     let targetDy = hasLayer2 ? l2dy : (hasLayer1 ? l1dy : l0dy)
     let targetBSize = hasLayer2 ? 32 : (hasLayer1 ? 16 : 8)
 
-    if profile == 0x02, let ltrPd = nextPd, let map = skipMap {
+    if profile == 0x02, let map = skipMap {
         let bw = (dx + 31) / 32
         let targetCbDx = (targetDx + 1) / 2
         let targetCbDy = (targetDy + 1) / 2
         let scale = hasLayer2 ? 1 : (hasLayer1 ? 2 : 4)
         
         for i in 0..<map.count {
-            if map[i] == .skip_ltr {
+            let mode = map[i]
+            if mode != .inter {
                 let bxL2 = (i % bw) * 32
                 let byL2 = (i / bw) * 32
                 
                 let bx = bxL2 / scale
                 let by = byL2 / scale
                 
-                copyBlock(from: ltrPd.y, to: &current.y, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
-                copyBlock(from: ltrPd.cb, to: &current.cb, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
-                copyBlock(from: ltrPd.cr, to: &current.cr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+                if mode == .skip_ltr, let ltrPd = nextPd {
+                    copyBlock(from: ltrPd.y, to: &current.y, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
+                    copyBlock(from: ltrPd.cb, to: &current.cb, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+                    copyBlock(from: ltrPd.cr, to: &current.cr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+                } else if mode == .skip_prev, let prevPd = predictedPd {
+                    copyBlock(from: prevPd.y, to: &current.y, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
+                    copyBlock(from: prevPd.cb, to: &current.cb, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+                    copyBlock(from: prevPd.cr, to: &current.cr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+                }
             }
         }
     }

@@ -59,6 +59,19 @@ func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
 }
 
 @inline(__always)
+func isZeroBlock(view: BlockView) -> Bool {
+    let ptr = view.base
+    let w = view.width
+    let s = view.stride
+    for y in 0..<view.height {
+        let row = ptr.advanced(by: y * s)
+        for x in 0..<w {
+            if row[x] != 0 { return false }
+        }
+    }
+    return true
+}
+
 func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
@@ -89,7 +102,11 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        dwt2DBlock32(view)
+                        let isZero = isZeroBlock(view: view)
+                        
+                        if !isZero {
+                            dwt2DBlock32(view)
+                        }
                         
                         let destStartX = (w / 2)
                         let destStartY = (h / 2)
@@ -129,7 +146,9 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                             }
                         }
                         
-                        evaluateQuantizeLayer32(view: view, qt: qt)
+                        if !isZero {
+                            evaluateQuantizeLayer32(view: view, qt: qt)
+                        }
                     }
                 }
             }
@@ -261,7 +280,11 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
-                        dwt2DBlock16(view)
+                        let isZero = isZeroBlock(view: view)
+                        
+                        if !isZero {
+                            dwt2DBlock16(view)
+                        }
                         
                         let destStartX = (w / 2)
                         let destStartY = (h / 2)
@@ -293,7 +316,9 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                             }
                         }
                         
-                        evaluateQuantizeLayer16(view: view, qt: qt)
+                        if !isZero {
+                            evaluateQuantizeLayer16(view: view, qt: qt)
+                        }
                     }
                 }
             }
@@ -412,7 +437,10 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 8, height: 8, into: view)
-                        dwt2DBlock8(view)
+                        let isZero = isZeroBlock(view: view)
+                        if !isZero {
+                            dwt2DBlock8(view)
+                        }
                     }
                 }
             }

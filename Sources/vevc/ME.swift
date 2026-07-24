@@ -918,7 +918,7 @@ struct MotionEstimation {
 }
 
 @inline(__always)
-func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int) async -> (MotionVectors, [Int], [Int]) {
+func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int, skipMap: [BlockMode]? = nil) async -> (MotionVectors, [Int], [Int]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -967,6 +967,14 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
             let row = idx / colCount
             let bx = col * 8
             let by = row * 8
+            
+            if let map = skipMap, map[idx] != .inter {
+                ptrDx[idx] = 0
+                ptrDy[idx] = 0
+                ptrSADs[idx] = 0
+                continue
+            }
+            
             let rawPmvDx = if 0 < col { ptrDx[idx - 1] } else { Int16(0) }
             let rawPmvDy = if 0 < col { ptrDy[idx - 1] } else { Int16(0) }
             let pmv = MotionVector(dx: Int16(Int(rawPmvDx) >> 2), dy: Int16(Int(rawPmvDy) >> 2))
@@ -1041,7 +1049,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
 /// and selects the one with smaller SAD per block.
 /// - Returns: (mvs, SADs, refDirs) where refDirs is the reference direction flag per block (false=forward, true=backward)
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int, gopPosition: Int) async -> (MotionVectors, [Int], [Bool], [Int]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors?, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode]? = nil) async -> (MotionVectors, [Int], [Bool], [Int]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1101,6 +1109,14 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let row = idx / colCount
             let bx = col * 8
             let by = row * 8
+            
+            if let map = skipMap, map[idx] != .inter {
+                ptrDx[idx] = 0
+                ptrDy[idx] = 0
+                ptrSADs[idx] = 0
+                ptrRefDirs[idx] = false
+                continue
+            }
             
             // Since ptrMVs is stored in Layer2 qpel,
             // divide by 4 to convert back to Layer0 qpel before passing to searchPixels (which operates in Layer0 space)
