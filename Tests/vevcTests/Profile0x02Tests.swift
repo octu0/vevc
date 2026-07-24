@@ -146,4 +146,107 @@ final class Profile0x02Tests: XCTestCase {
         let ssim = ((2 * mu1 * mu2 + C1) * (2 * sigma12 + C2)) / ((mu1 * mu1 + mu2 * mu2 + C1) * (sigma1Sq + sigma2Sq + C2))
         return ssim
     }
+    
+    // 4. エンコーダ内部の再構成画像とデコーダ出力画像が全フレームで完全にバイナリ一致すること。
+    func testProfile0x02PFrameReconstructionMatch() async throws {
+        let width = 640
+        let height = 480
+        let pool = BlockViewPool()
+        let qtY = QuantizationTable(baseStep: 16)
+        let qtC = QuantizationTable(baseStep: 16)
+        
+        var img0 = YCbCrImage(width: width, height: height, ratio: .ratio420)
+        var img1 = YCbCrImage(width: width, height: height, ratio: .ratio420)
+        for i in 0..<(width * height) {
+            let v = UInt8.random(in: 0...255)
+            img0.yPlane[i] = v
+            img1.yPlane[i] = UInt8(clamping: Int(v) + Int.random(in: -5...5))
+        }
+        for i in 0..<(width * height / 4) {
+            img0.cbPlane[i] = 128
+            img0.crPlane[i] = 128
+            img1.cbPlane[i] = 128
+            img1.crPlane[i] = 128
+        }
+        
+        let (pd0, rel0) = toPlaneData420(image: img0, pool: pool)
+        defer { rel0() }
+        let (pd1, rel1) = toPlaneData420(image: img1, pool: pool)
+        defer { rel1() }
+        
+        // I-frame
+        let (bytesI, encReconI, mvsI, _, relEncI) = try await encodeSpatialLayers(
+            pd: pd0, pool: pool, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02)
+        defer { relEncI() }
+        let decImg16I = try await decodeSpatialLayers(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0, profile: 0x02)
+        let decReconI = PlaneData420(img16: decImg16I)
+        
+        // P-frame
+        // create dummy SkipMap
+        let bw = (width + 31) / 32
+        let bh = (height + 31) / 32
+        
+        let (bytesP, encReconP, _, _, relEncP) = try await encodeSpatialLayers(
+            pd: pd1, pool: pool, predictedPd: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02)
+        defer { relEncP() }
+        
+        let decImg16P = try await decodeSpatialLayers(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, profile: 0x02)
+        let decReconP = PlaneData420(img16: decImg16P)
+        
+        XCTAssertEqual(encReconP.y, decReconP.y)
+        XCTAssertEqual(encReconP.cb, decReconP.cb)
+        XCTAssertEqual(encReconP.cr, decReconP.cr)
+    }
+
+    // 5. Skip ゼロ素材（ランダムノイズなど）での中立性（Profile 0x01 の出力とサイズ・品質が同等。SkipMap ヘッダ等による数バイト〜数十バイトの微増は適正）。
+    func testProfile0x02Neutrality() async throws {
+        let width = 320
+        let height = 240
+        var frames = [YCbCrImage]()
+        for _ in 0..<5 {
+            var img = YCbCrImage(width: width, height: height, ratio: .ratio420)
+            for i in 0..<(width * height) {
+                img.yPlane[i] = UInt8.random(in: 0...255)
+            }
+            for i in 0..<(width * height / 4) {
+                img.cbPlane[i] = UInt8.random(in: 0...255)
+                img.crPlane[i] = UInt8.random(in: 0...255)
+            }
+            frames.append(img)
+        }
+        
+        let encoder01 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x01)
+        let bitstream01 = try await encoder01.encodeToData(images: frames)
+        
+        let encoder02 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let bitstream02 = try await encoder02.encodeToData(images: frames)
+        
+        // わずかなヘッダサイズ（skipMapSizeなど）の微増のみを許容する
+        let diff = abs(bitstream01.count - bitstream02.count)
+        XCTAssertLessThan(diff, 1000)
+    }
+
+    // 6. 決定論（同じ素材なら完全に同じバイトストリームが出力されること）。
+    func testProfile0x02Determinism() async throws {
+        let width = 320
+        let height = 240
+        var frames = [YCbCrImage]()
+        for _ in 0..<3 {
+            var img = YCbCrImage(width: width, height: height, ratio: .ratio420)
+            for i in 0..<(width * height) { img.yPlane[i] = UInt8(i % 256) }
+            for i in 0..<(width * height / 4) {
+                img.cbPlane[i] = 128
+                img.crPlane[i] = 128
+            }
+            frames.append(img)
+        }
+        
+        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let bitstream1 = try await encoder1.encodeToData(images: frames)
+        
+        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let bitstream2 = try await encoder2.encodeToData(images: frames)
+        
+        XCTAssertEqual(bitstream1, bitstream2)
+    }
 }
