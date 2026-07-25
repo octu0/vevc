@@ -8,19 +8,18 @@ enum DecodeTask32 {
 fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>, pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
     guard let base = buf.baseAddress else { return [] }
     let count = buf.count
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity(blockCount)
+    var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
         blocks.append(pool.get(width: 32, height: 32))
     }
     
     var brFlags = BypassReader(base: base, count: count)
-    var tasks: [(Int, DecodeTask32)] = []
-    tasks.reserveCapacity(blockCount)
+    var tasks = pool.getInt16(count: blockCount)
+    defer { pool.putInt16(tasks) }
     for i in 0..<blockCount {
         let isZero = brFlags.readBit()
         if isZero {
-            tasks.append((i, .skip))
+            tasks[i] = 0
         } else {
             let mbType = brFlags.readBit()
             if mbType {
@@ -36,14 +35,9 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
                 let brZero = brFlags.readBit()
                 if brZero != true { brFlags.skipBit() }
                 
-                tasks.append((i, .split8(
-                    tlZero != true, 
-                    trZero != true, 
-                    blZero != true, 
-                    brZero != true
-                )))
+                tasks[i] = 2 + (tlZero != true ? 1 : 0) + (trZero != true ? 2 : 0) + (blZero != true ? 4 : 0) + (brZero != true ? 8 : 0)
             } else {
-                tasks.append((i, .decode16))
+                tasks[i] = 1
             }
         }
     }
@@ -57,17 +51,15 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
     
     var lastVal: Int16 = 0
     
-    for (i, task) in tasks {
+    for i in 0..<blockCount {
+        let task = tasks[i]
         let view = blocks[i]
         let llBase = view.base
         let hlBase = view.base.advanced(by: half)
         let lhBase = view.base.advanced(by: half * 32)
         let hhBase = view.base.advanced(by: half * 32 + half)
         
-        switch task {
-        case .skip:
-            break
-        case .decode16:
+        if task == 0 { } else if task == 1 { // .decode16
             let llView = BlockView(base: llBase, width: half, height: half, stride: 32)
             try blockDecodeDPCM16(decoder: &decoder, block: llView, lastVal: &lastVal)
             
@@ -79,7 +71,12 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
             
             let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
             try blockDecode16H(decoder: &decoder, block: hhView)
-        case .split8(let tl, let tr, let bl, let br):
+        } else { // .split8
+            let v = task - 2
+            let tl = (v & 1) != 0
+            let tr = (v & 2) != 0
+            let bl = (v & 4) != 0
+            let br = (v & 8) != 0
             if tl {
                 let ll = BlockView(base: llBase, width: 8, height: 8, stride: 32)
                 let hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
@@ -137,19 +134,18 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) 
 fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBufferPointer<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
     guard let base = buf.baseAddress else { return [] }
     let count = buf.count
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity(blockCount)
+    var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
         blocks.append(pool.get(width: 32, height: 32))
     }
     
     var brFlags = BypassReader(base: base, count: count)
-    var tasks: [(Int, DecodeTask32)] = []
-    tasks.reserveCapacity(blockCount)
+    var tasks = pool.getInt16(count: blockCount)
+    defer { pool.putInt16(tasks) }
     for i in 0..<blockCount {
         let isZero = brFlags.readBit()
         if isZero {
-            tasks.append((i, .skip))
+            tasks[i] = 0
         } else {
             let mbType = brFlags.readBit()
             if mbType {
@@ -165,14 +161,9 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                 let brZero = brFlags.readBit()
                 if brZero != true { brFlags.skipBit() }
                 
-                tasks.append((i, .split8(
-                    tlZero != true, 
-                    trZero != true, 
-                    blZero != true, 
-                    brZero != true
-                )))
+                tasks[i] = 2 + (tlZero != true ? 1 : 0) + (trZero != true ? 2 : 0) + (blZero != true ? 4 : 0) + (brZero != true ? 8 : 0)
             } else {
-                tasks.append((i, .decode16))
+                tasks[i] = 1
             }
         }
     }
@@ -184,7 +175,8 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
     let half = 32 / 2
     var lastVal: Int16 = 0
     
-    for (i, task) in tasks {
+    for i in 0..<blockCount {
+        let task = tasks[i]
         if i < parentBlocks.count {
             let pSubs = getSubbands16(view: parentBlocks[i])
             let parentHL = pSubs.hl
@@ -195,10 +187,7 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
             let lhBase = view.base.advanced(by: half * 32)
             let hhBase = view.base.advanced(by: half * 32 + half)
             
-            switch task {
-            case .skip:
-                break
-            case .decode16:
+            if task == 0 { } else if task == 1 { // .decode16
                 let hlView = BlockView(base: hlBase, width: half, height: half, stride: 32)
                 try blockDecode16VWithParentBlock(decoder: &decoder, block: hlView, parentBlock: parentHL)
                 
@@ -207,7 +196,12 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                 
                 let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
                 try blockDecode16HWithParentBlock(decoder: &decoder, block: hhView, parentBlock: parentHH)
-            case .split8(let tl, let tr, let bl, let br):
+            } else { // .split8
+            let v = task - 2
+            let tl = (v & 1) != 0
+            let tr = (v & 2) != 0
+            let bl = (v & 4) != 0
+            let br = (v & 8) != 0
                 if tl {
                     let pbHL = BlockView(base: parentHL.base, width: 4, height: 4, stride: parentHL.stride)
                     let pbLH = BlockView(base: parentLH.base, width: 4, height: 4, stride: parentLH.stride)
@@ -260,10 +254,7 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
             let lhBase = view.base.advanced(by: half * 32)
             let hhBase = view.base.advanced(by: half * 32 + half)
             
-            switch task {
-            case .skip:
-                break
-            case .decode16:
+            if task == 0 { } else if task == 1 { // .decode16
                 let llView = BlockView(base: llBase, width: half, height: half, stride: 32)
                 try blockDecodeDPCM16(decoder: &decoder, block: llView, lastVal: &lastVal)
                 
@@ -275,7 +266,12 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
                 
                 let hhView = BlockView(base: hhBase, width: half, height: half, stride: 32)
                 try blockDecode16H(decoder: &decoder, block: hhView)
-            case .split8(let tl, let tr, let bl, let br):
+            } else { // .split8
+            let v = task - 2
+            let tl = (v & 1) != 0
+            let tr = (v & 2) != 0
+            let bl = (v & 4) != 0
+            let br = (v & 8) != 0
                 if tl {
                     let ll = BlockView(base: llBase, width: 8, height: 8, stride: 32)
                     let hl = BlockView(base: hlBase, width: 8, height: 8, stride: 32)
@@ -340,22 +336,21 @@ enum DecodeTask16 {
 fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>, pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
     guard let base = buf.baseAddress else { return [] }
     let count = buf.count
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity(blockCount)
+    var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
         blocks.append(pool.get(width: 16, height: 16))
     }
     
     var brFlags = BypassReader(base: base, count: count)
-    var tasks: [(Int, DecodeTask16)] = []
-    tasks.reserveCapacity(blockCount)
+    var tasks = pool.getInt16(count: blockCount)
+    defer { pool.putInt16(tasks) }
     for i in 0..<blockCount {
         if count < brFlags.consumedBytes {
             throw DecodeError.outOfBits
         }
         let isZero = brFlags.readBit()
         if isZero {
-            tasks.append((i, .skip))
+            tasks[i] = 0
         } else {
             let mbType = brFlags.readBit()
             if mbType {
@@ -371,14 +366,9 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
                 let brZero = brFlags.readBit()
                 if brZero != true { brFlags.skipBit() }
                 
-                tasks.append((i, .split4(
-                    tlZero != true, 
-                    trZero != true, 
-                    blZero != true, 
-                    brZero != true,
-                )))
+                tasks[i] = 2 + (tlZero != true ? 1 : 0) + (trZero != true ? 2 : 0) + (blZero != true ? 4 : 0) + (brZero != true ? 8 : 0)
             } else {
-                tasks.append((i, .decode8))
+                tasks[i] = 1
             }
         }
     }
@@ -390,16 +380,14 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
     
     let half = 16 / 2
 
-    for (i, task) in tasks {
+    for i in 0..<blockCount {
+        let task = tasks[i]
         let view = blocks[i]
         let hlBase = view.base.advanced(by: half)
         let lhBase = view.base.advanced(by: half * 16)
         let hhBase = view.base.advanced(by: half * 16 + half)
         
-        switch task {
-        case .skip:
-            break
-        case .decode8:
+        if task == 0 { } else if task == 1 { // .decode8
             let hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
             try blockDecode8V(decoder: &decoder, block: hlView)
             
@@ -408,7 +396,12 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
             
             let hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
             try blockDecode8H(decoder: &decoder, block: hhView)
-        case .split4(let tl, let tr, let bl, let br):
+        } else { // .split4
+            let v = task - 2
+            let tl = (v & 1) != 0
+            let tr = (v & 2) != 0
+            let bl = (v & 4) != 0
+            let br = (v & 8) != 0
             if tl {
                 let hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
                 let lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
@@ -458,22 +451,21 @@ func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int) 
 fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBufferPointer<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
     guard let base = buf.baseAddress else { return [] }
     let count = buf.count
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity(blockCount)
+    var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
         blocks.append(pool.get(width: 16, height: 16))
     }
     
     var brFlags = BypassReader(base: base, count: count)
-    var tasks: [(Int, DecodeTask16)] = []
-    tasks.reserveCapacity(blockCount)
+    var tasks = pool.getInt16(count: blockCount)
+    defer { pool.putInt16(tasks) }
     for i in 0..<blockCount {
         if count < brFlags.consumedBytes {
             throw DecodeError.outOfBits
         }
         let isZero = brFlags.readBit()
         if isZero {
-            tasks.append((i, .skip))
+            tasks[i] = 0
         } else {
             let mbType = brFlags.readBit()
             if mbType {
@@ -489,14 +481,9 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                 let brZero = brFlags.readBit()
                 if brZero != true { brFlags.skipBit() }
                 
-                tasks.append((i, .split4(
-                    tlZero != true, 
-                    trZero != true, 
-                    blZero != true, 
-                    brZero != true,
-                )))
+                tasks[i] = 2 + (tlZero != true ? 1 : 0) + (trZero != true ? 2 : 0) + (blZero != true ? 4 : 0) + (brZero != true ? 8 : 0)
             } else {
-                tasks.append((i, .decode8))
+                tasks[i] = 1
             }
         }
     }
@@ -508,7 +495,8 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
     
     let half = 16 / 2
 
-    for (i, task) in tasks {
+    for i in 0..<blockCount {
+        let task = tasks[i]
         if i < parentBlocks.count {
             let pSubs = getSubbands8(view: parentBlocks[i])
             let parentHL = pSubs.hl
@@ -519,10 +507,7 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
             let lhBase = view.base.advanced(by: half * 16)
             let hhBase = view.base.advanced(by: half * 16 + half)
         
-            switch task {
-            case .skip:
-                break
-            case .decode8:
+            if task == 0 { } else if task == 1 { // .decode8
                 let hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
                 try blockDecode8VWithParentBlock(decoder: &decoder, block: hlView, parentBlock: parentHL)
                 
@@ -531,7 +516,12 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                 
                 let hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
                 try blockDecode8HWithParentBlock(decoder: &decoder, block: hhView, parentBlock: parentHH)
-            case .split4(let tl, let tr, let bl, let br):
+            } else { // .split4
+            let v = task - 2
+            let tl = (v & 1) != 0
+            let tr = (v & 2) != 0
+            let bl = (v & 4) != 0
+            let br = (v & 8) != 0
                 if tl {
                     let pbHL = BlockView(base: parentHL.base, width: 2, height: 2, stride: parentHL.stride)
                     let pbLH = BlockView(base: parentLH.base, width: 2, height: 2, stride: parentLH.stride)
@@ -583,10 +573,7 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
             let lhBase = view.base.advanced(by: half * 16)
             let hhBase = view.base.advanced(by: half * 16 + half)
             
-            switch task {
-            case .skip:
-                break
-            case .decode8:
+            if task == 0 { } else if task == 1 { // .decode8
                 let hlView = BlockView(base: hlBase, width: half, height: half, stride: 16)
                 try blockDecode8V(decoder: &decoder, block: hlView)
                 
@@ -595,7 +582,12 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
                 
                 let hhView = BlockView(base: hhBase, width: half, height: half, stride: 16)
                 try blockDecode8H(decoder: &decoder, block: hhView)
-            case .split4(let tl, let tr, let bl, let br):
+            } else { // .split4
+            let v = task - 2
+            let tl = (v & 1) != 0
+            let tr = (v & 2) != 0
+            let bl = (v & 4) != 0
+            let br = (v & 8) != 0
                 if tl {
                     let hl = BlockView(base: hlBase, width: 4, height: 4, stride: 16)
                     let lh = BlockView(base: lhBase, width: 4, height: 4, stride: 16)
@@ -646,8 +638,7 @@ func decodePlaneSubbands16WithParentBlocks(data: [UInt8], pool: BlockViewPool, b
 fileprivate func decodePlaneBaseSubbands8BlockView(buf: UnsafeBufferPointer<UInt8>, pool: BlockViewPool, blockCount: Int, isIFrame: Bool) throws -> [BlockView] {
     guard let base = buf.baseAddress else { return [] }
     let count = buf.count
-    var blocks: [BlockView] = []
-    blocks.reserveCapacity(blockCount)
+    var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
         blocks.append(pool.get(width: 8, height: 8))
     }

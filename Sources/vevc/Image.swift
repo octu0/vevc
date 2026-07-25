@@ -438,7 +438,20 @@ struct Image16: Sendable {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
-                    dstPtr.update(from: srcPtr, count: size)
+                    if size == 32 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                    } else if size == 16 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    } else if size == 8 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                    } else {
+                        dstPtr.update(from: srcPtr, count: size)
+                    }
                 }
             } else {
                 for h in 0..<size {
@@ -462,7 +475,20 @@ struct Image16: Sendable {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                    dstPtr.update(from: srcPtr, count: size)
+                    if size == 32 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                    } else if size == 16 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    } else if size == 8 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                    } else {
+                        dstPtr.update(from: srcPtr, count: size)
+                    }
                 }
             } else {
                 for h in 0..<size {
@@ -486,7 +512,20 @@ struct Image16: Sendable {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                    dstPtr.update(from: srcPtr, count: size)
+                    if size == 32 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                    } else if size == 16 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    } else if size == 8 {
+                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                    } else {
+                        dstPtr.update(from: srcPtr, count: size)
+                    }
                 }
             } else {
                 for h in 0..<size {
@@ -520,7 +559,20 @@ struct Image16: Sendable {
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * width + validStartX)
-                destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                if loopW == 32 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                    } else if loopW == 16 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    } else if loopW == 8 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                    } else {
+                        destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                    }
             }
         }
     }
@@ -548,7 +600,20 @@ struct Image16: Sendable {
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
-                destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                if loopW == 32 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                    } else if loopW == 16 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    } else if loopW == 8 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                    } else {
+                        destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                    }
             }
         }
     }
@@ -576,7 +641,20 @@ struct Image16: Sendable {
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
-                destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                if loopW == 32 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                    } else if loopW == 16 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    } else if loopW == 8 {
+                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
+                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                    } else {
+                        destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                    }
             }
         }
     }
