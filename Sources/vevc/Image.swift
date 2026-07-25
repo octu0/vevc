@@ -7,32 +7,46 @@ struct Int16Reader {
     
 
     @inline(__always)
-    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
-        withUnsafePointers(data) { srcBase in
+    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView, srcBase: UnsafePointer<Int16>) {
+        if 0 <= x && 0 <= y && (y + blockHeight) <= height && (x + blockWidth) <= width {
             for line in 0..<blockHeight {
-                let currentY = y + line
-                let safeY = min(currentY, self.height - 1)
-                
                 let dstPtr = view.rowPointer(y: line)
-                let limit = min(blockWidth, self.width - x)
+                let srcPtr = srcBase.advanced(by: (y + line) * self.width + x)
+                dstPtr.update(from: srcPtr, count: blockWidth)
+            }
+            return
+        }
+
+        for line in 0..<blockHeight {
+            let currentY = y + line
+            let safeY = min(currentY, self.height - 1)
+            
+            let dstPtr = view.rowPointer(y: line)
+            let limit = min(blockWidth, self.width - x)
+            
+            if 0 < limit {
+                let srcPtr = srcBase.advanced(by: safeY * self.width + x)
+                dstPtr.update(from: srcPtr, count: limit)
                 
-                if 0 < limit {
-                    let srcPtr = srcBase.advanced(by: safeY * self.width + x)
-                    dstPtr.update(from: srcPtr, count: limit)
-                    
-                    if limit < blockWidth {
-                        let lastVal = dstPtr[limit - 1]
-                        for i in limit..<blockWidth {
-                            dstPtr[i] = lastVal
-                        }
-                    }
-                } else {
-                    let lastVal = srcBase[safeY * self.width + (self.width - 1)]
-                    for i in 0..<blockWidth {
+                if limit < blockWidth {
+                    let lastVal = dstPtr[limit - 1]
+                    for i in limit..<blockWidth {
                         dstPtr[i] = lastVal
                     }
                 }
+            } else {
+                let lastVal = srcBase[safeY * self.width + (self.width - 1)]
+                for i in 0..<blockWidth {
+                    dstPtr[i] = lastVal
+                }
             }
+        }
+    }
+
+    @inline(__always)
+    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
+        withUnsafePointers(data) { srcBase in
+            readBlock(x: x, y: y, width: blockWidth, height: blockHeight, into: view, srcBase: srcBase)
         }
     }
 }
@@ -333,6 +347,19 @@ struct ImageReader: Sendable {
     @inline(__always)
     func readBlockCb(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         let is444 = (img.ratio == .ratio444)
+        if !is444 && 0 <= x && 0 <= y && (y + blockHeight) <= (height / 2) && (x + blockWidth) <= (width / 2) {
+            withUnsafePointers(img.cbPlane) { srcBase in
+                for h in 0..<blockHeight {
+                    let destPtr = view.rowPointer(y: h)
+                    let offset = img.cOffset(x, y + h)
+                    for w in 0..<blockWidth {
+                        destPtr[w] = Int16(srcBase[offset + w]) - 128
+                    }
+                }
+            }
+            return
+        }
+
         withUnsafePointers(img.cbPlane) { srcBase in
             for h in 0..<blockHeight {
                 let destPtr = view.rowPointer(y: h)
@@ -350,6 +377,19 @@ struct ImageReader: Sendable {
     @inline(__always)
     func readBlockCr(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         let is444 = (img.ratio == .ratio444)
+        if !is444 && 0 <= x && 0 <= y && (y + blockHeight) <= (height / 2) && (x + blockWidth) <= (width / 2) {
+            withUnsafePointers(img.crPlane) { srcBase in
+                for h in 0..<blockHeight {
+                    let destPtr = view.rowPointer(y: h)
+                    let offset = img.cOffset(x, y + h)
+                    for w in 0..<blockWidth {
+                        destPtr[w] = Int16(srcBase[offset + w]) - 128
+                    }
+                }
+            }
+            return
+        }
+
         withUnsafePointers(img.crPlane) { srcBase in
             for h in 0..<blockHeight {
                 let destPtr = view.rowPointer(y: h)

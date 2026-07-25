@@ -262,7 +262,7 @@ public struct VEVCLayerData {
     }
 }
 
-public enum BlockMode: UInt8 {
+public enum BlockMode: UInt8, Sendable {
     case inter = 0
     case skip_prev = 1
     case skip_ltr = 2

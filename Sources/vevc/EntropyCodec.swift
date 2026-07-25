@@ -369,10 +369,6 @@ struct EntropyEncoder {
         pairVals.append(val)
         pairContexts.append(context)
         coeffCount += Int(run) + 1
-        
-        if ModelTrainer.shared.isTrainingMode {
-            ModelTrainer.shared.record(run: run, val: val, context: context)
-        }
     }
 
     @inline(__always)
@@ -658,43 +654,6 @@ internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     }
 }
 
-// MARK: - ModelTrainer
-
-public final class ModelTrainer: @unchecked Sendable {
-    public static let shared = ModelTrainer()
-    
-    public var isTrainingMode = false
-    
-    // 5 contexts (0-3: AC, 4: DPCM), 64 tokens each
-    public var runFreqs: [[UInt32]]
-    public var valFreqs: [[UInt32]]
-    
-    private init() {
-        self.runFreqs = Array(repeating: Array(repeating: 0, count: 64), count: kEntropyContextCount)
-        self.valFreqs = Array(repeating: Array(repeating: 0, count: 64), count: kEntropyContextCount)
-    }
-    
-    @inline(__always)
-    public func reset() {
-        self.runFreqs = Array(repeating: Array(repeating: 0, count: 64), count: kEntropyContextCount)
-        self.valFreqs = Array(repeating: Array(repeating: 0, count: 64), count: kEntropyContextCount)
-    }
-    
-    @inline(__always)
-    public func record(run: UInt32, val: Int16, context: UInt8) {
-        let ctx = Int(context)
-        guard 0 <= ctx && ctx < kEntropyContextCount else { return }
-        
-        let runToken = min(run, 63)
-        let valToken = valueTokenize(val).token
-        
-        runFreqs[ctx][Int(runToken)] &+= 1
-        
-        if valToken < 64 {
-            valFreqs[ctx][Int(valToken)] &+= 1
-        }
-    }
-}
 
 // MARK: - EntropyDecoder
 

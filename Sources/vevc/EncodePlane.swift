@@ -11,6 +11,21 @@ final class ConcurrentBox<T>: @unchecked Sendable {
 }
 
 @inline(__always)
+func isBlockAllSkip(skipMap: [BlockMode], mapWidth: Int, lxStart: Int, lyStart: Int, countX: Int, countY: Int) -> Bool {
+    for y in 0..<countY {
+        let ly = lyStart + y
+        for x in 0..<countX {
+            let lx = lxStart + x
+            let idx = ly * mapWidth + lx
+            if idx < skipMap.count, skipMap[idx] == .inter {
+                return false
+            }
+        }
+    }
+    return true
+}
+
+@inline(__always)
 func evaluateQuantizeLayer32(view: BlockView, qt: QuantizationTable) {
     let subs = getSubbands32(view: view)
     let hl = subs.hl
@@ -72,11 +87,13 @@ func isZeroBlock(view: BlockView) -> Bool {
     return true
 }
 
-func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0, isChroma: Bool = false) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
+    subband.withUnsafeMutableBufferPointer { ptr in
+        ptr.initialize(repeating: 0)
+    }
     
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
@@ -88,66 +105,95 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
         tmpBlocks.append(pool.get(width: 32, height: 32))
     }
     let blocks = tmpBlocks
-    let chunkSize = 8
+    let chunkSize = 4
     
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, safeDst, qt] in
-                let dstBase = safeDst.ptr
-                for i in sRow..<endRow {
-                    let h = (i * 32)
-                    for j in 0..<colCount {
-                        let w = (j * 32)
-                        if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        let isZero = isZeroBlock(view: view)
-                        
-                        if !isZero {
-                            dwt2DBlock32(view)
-                        }
-                        
-                        let destStartX = (w / 2)
-                        let destStartY = (h / 2)
-                        let subSize = (32 / 2)
-                        let subs = getSubbands32(view: view)
-                        let srcBase = subs.ll.base
-                        let limit = min(subSize, (subWidth - destStartX))
-                        
-                        if 0 < limit {
-                            if limit == subSize && (destStartY + subSize) <= subHeight {
-                                let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                                dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                                dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
+            group.addTask { [blocks, qt, skipMap, r] in
+                r.data.withUnsafeBufferPointer { srcBuf in
+                    let srcBase = srcBuf.baseAddress!
+                    for i in sRow..<endRow {
+                        let h = (i * 32)
+                        for j in 0..<colCount {
+                            let w = (j * 32)
+                            if width <= w || height <= h { continue }
+                            let view = blocks[(i * colCount) + j]
+                            
+                            var isSkip = false
+                            if let sMap = skipMap, skipMapWidth > 0 {
+                                let lx = isChroma ? (j * 4) : (j * 2)
+                                let ly = isChroma ? (i * 4) : (i * 2)
+                                let count = isChroma ? 4 : 2
+                                isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
+                            }
+                            
+                            if isSkip {
+                                clearBlockRegion(base: view.base, width: 32, height: 32, stride: view.stride)
                             } else {
-                                for blockY in 0..<subSize {
-                                    let dstY = (destStartY + blockY)
-                                    if dstY < subHeight {
-                                        let srcPtr = srcBase.advanced(by: (blockY * 32))
-                                        let dstIdx = ((dstY * subWidth) + destStartX)
-                                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                                    }
-                                }
+                                r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
+                            }
+                            
+                            let isZero = isSkip || isZeroBlock(view: view)
+                            
+                            if !isZero {
+                                dwt2DBlock32(view)
+                                evaluateQuantizeLayer32(view: view, qt: qt)
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+    
+    withUnsafePointers(mut: &subband) { dstBase in
+        for i in 0..<rowCount {
+            for j in 0..<colCount {
+                let view = blocks[(i * colCount) + j]
+                
+                var isSkip = false
+                if let sMap = skipMap, skipMapWidth > 0 {
+                    let lx = isChroma ? (j * 4) : (j * 2)
+                    let ly = isChroma ? (i * 4) : (i * 2)
+                    let count = isChroma ? 4 : 2
+                    isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
+                }
+                
+                let isZero = isSkip || isZeroBlock(view: view)
+                if isZero { continue }
+                
+                let w = (j * 32)
+                let h = (i * 32)
+                if width <= w || height <= h { continue }
+
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (32 / 2)
+                let subs = getSubbands32(view: view)
+                let srcBase = subs.ll.base
+                let limit = min(subSize, (subWidth - destStartX))
+                
+                if 0 < limit {
+                    if limit == subSize && (destStartY + subSize) <= subHeight {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                        let dstRaw = UnsafeMutableRawPointer(dstBasePtr)
+                        let srcRaw = UnsafeRawPointer(srcBase)
                         
-                        if !isZero {
-                            evaluateQuantizeLayer32(view: view, qt: qt)
+                        // unrolled SIMD copy
+                        for row in 0..<16 {
+                            let sRow = srcRaw.advanced(by: row * 32 * 2).assumingMemoryBound(to: SIMD16<Int16>.self)
+                            let dRow = dstRaw.advanced(by: row * subWidth * 2).assumingMemoryBound(to: SIMD16<Int16>.self)
+                            dRow.pointee = sRow.pointee
+                        }
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if dstY < subHeight {
+                                let srcPtr = srcBase.advanced(by: (blockY * 32))
+                                let dstIdx = ((dstY * subWidth) + destStartX)
+                                dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                            }
                         }
                     }
                 }
@@ -164,97 +210,88 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
+    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
+    
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
-    let totalBlocks = rowCount * colCount
     
-    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
-    tmpBlocks.reserveCapacity(totalBlocks)
-    for _ in 0..<totalBlocks {
-        tmpBlocks.append(pool.get(width: 32, height: 32))
-    }
-    let blocks = tmpBlocks
-    
-    let chunkSize = 8
+    let chunkSize = 4
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks] in
+            group.addTask { [safeDst] in
+                let dstBase = safeDst.ptr
+                let view = pool.get(width: 32, height: 32)
+                defer { pool.put(view) }
+                
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     for j in 0..<colCount {
                         let w = (j * 32)
                         if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view)
-                        dwt2DBlock32(view)
+                        
+                        let destStartX = (w / 2)
+                        let destStartY = (h / 2)
+                        let subSize = (32 / 2)
+                        let limit = min(subSize, (subWidth - destStartX))
+                        if limit <= 0 { continue }
+                        
+                        let srcBase = view.base
+                        if limit == 16 && (destStartY + 16) <= subHeight {
+                            for blockY in 0..<16 {
+                                let dstIdx = ((destStartY + blockY) * subWidth) + destStartX
+                                let dstPtr = dstBase.advanced(by: dstIdx)
+                                let sy = blockY * 2
+                                let srcRow0 = srcBase.advanced(by: sy * 32)
+                                let srcRow1 = srcBase.advanced(by: (sy + 1) * 32)
+                                for blockX in 0..<16 {
+                                    let sx = blockX * 2
+                                    let p0 = Int(srcRow0[sx])
+                                    let p1 = Int(srcRow0[sx + 1])
+                                    let p2 = Int(srcRow1[sx])
+                                    let p3 = Int(srcRow1[sx + 1])
+                                    dstPtr[blockX] = Int16((p0 + p1 + p2 + p3) >> 2)
+                                }
+                            }
+                        } else {
+                            for blockY in 0..<subSize {
+                                let dstY = destStartY + blockY
+                                if dstY < subHeight {
+                                    let dstIdx = (dstY * subWidth) + destStartX
+                                    let dstPtr = dstBase.advanced(by: dstIdx)
+                                    let sy = blockY * 2
+                                    let srcRow0 = srcBase.advanced(by: sy * 32)
+                                    let srcRow1 = srcBase.advanced(by: (sy + 1) * 32)
+                                    for blockX in 0..<limit {
+                                        let sx = blockX * 2
+                                        let p0 = Int(srcRow0[sx])
+                                        let p1 = Int(srcRow0[sx + 1])
+                                        let p2 = Int(srcRow1[sx])
+                                        let p3 = Int(srcRow1[sx + 1])
+                                        dstPtr[blockX] = Int16((p0 + p1 + p2 + p3) >> 2)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    
-    withUnsafePointers(mut: &subband) { dstBase in
-        for i in 0..<rowCount {
-            let h = (i * 32)
-            for j in 0..<colCount {
-                let w = (j * 32)
-                if width <= w || height <= h { continue }
-                let llBlock = blocks[(i * colCount) + j]
-                
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (32 / 2)
-
-                let view = llBlock
-                let subs = getSubbands32(view: view)
-                let srcBase = subs.ll.base
-                let limit = min(subSize, (subWidth - destStartX))
-
-                guard 0 < limit else { continue }
-
-                if limit == subSize && (destStartY + subSize) <= subHeight {
-                    let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                    dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 32 * 0), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 32 * 1), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 32 * 2), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 32 * 3), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 32 * 4), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 32 * 5), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 32 * 6), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 32 * 7), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 8).update(from: srcBase.advanced(by: 32 * 8), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 9).update(from: srcBase.advanced(by: 32 * 9), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 10).update(from: srcBase.advanced(by: 32 * 10), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 11).update(from: srcBase.advanced(by: 32 * 11), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 12).update(from: srcBase.advanced(by: 32 * 12), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 13).update(from: srcBase.advanced(by: 32 * 13), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 14).update(from: srcBase.advanced(by: 32 * 14), count: 16)
-                    dstBasePtr.advanced(by: subWidth * 15).update(from: srcBase.advanced(by: 32 * 15), count: 16)
-                } else {
-                    for blockY in 0..<subSize {
-                        let dstY = (destStartY + blockY)
-                        if subHeight <= dstY { continue }
-                        let srcPtr = srcBase.advanced(by: (blockY * 32))
-                        let dstIdx = ((dstY * subWidth) + destStartX)
-                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                    }
-                }
-            }
-        }
-    }
-    
     
     withExtendedLifetime(subband) {}
-    return (subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
+    return (subband, { [subband] in pool.putInt16(subband) })
 }
 
 @inline(__always)
-func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, sads: [Int]? = nil, occlusionScores: [Int]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, sads: [Int]? = nil, occlusionScores: [Int]? = nil, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0, isChroma: Bool = false) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
+    subband.withUnsafeMutableBufferPointer { ptr in
+        ptr.initialize(repeating: 0)
+    }
     
     let rowCount = ((height + 16 - 1) / 16)
     let colCount = ((width + 16 - 1) / 16)
@@ -271,53 +308,39 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, safeDst, qt] in
-                let dstBase = safeDst.ptr
-                for i in sRow..<endRow {
-                    let h = (i * 16)
-                    for j in 0..<colCount {
-                        let w = (j * 16)
-                        if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
-                        let isZero = isZeroBlock(view: view)
-                        
-                        if !isZero {
-                            dwt2DBlock16(view)
-                        }
-                        
-                        let destStartX = (w / 2)
-                        let destStartY = (h / 2)
-                        let subSize = (16 / 2)
-                        let subs = getSubbands16(view: view)
-                        let srcBase = subs.ll.base
-                        let limit = min(subSize, (subWidth - destStartX))
-                        
-                        if 0 < limit {
-                            if limit == subSize && (destStartY + subSize) <= subHeight {
-                                let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                                dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
-                                dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
-                            } else {
-                                for blockY in 0..<subSize {
-                                    let dstY = (destStartY + blockY)
-                                    if dstY < subHeight {
-                                        let srcPtr = srcBase.advanced(by: (blockY * 16))
-                                        let dstIdx = ((dstY * subWidth) + destStartX)
-                                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                                    }
-                                }
+            group.addTask { [blocks, qt, skipMap, r] in
+                r.data.withUnsafeBufferPointer { srcBuf in
+                    let srcBase = srcBuf.baseAddress!
+                    for i in sRow..<endRow {
+                        let h = (i * 16)
+                        for j in 0..<colCount {
+                            let w = (j * 16)
+                            if width <= w || height <= h { continue }
+                            let view = blocks[(i * colCount) + j]
+                            
+                            var isSkip = false
+                            if let sMap = skipMap, skipMapWidth > 0 {
+                                let lx = isChroma ? (j * 4) : (j * 2)
+                                let ly = isChroma ? (i * 4) : (i * 2)
+                                let count = isChroma ? 4 : 2
+                                isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
                             }
-                        }
-                        
-                        if !isZero {
-                            evaluateQuantizeLayer16(view: view, qt: qt)
+                            
+                            if isSkip {
+                                clearBlockRegion(base: view.base, width: 16, height: 16, stride: view.stride)
+                            } else {
+                                r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
+                            }
+                            
+                            let isZero = isSkip || isZeroBlock(view: view)
+                            
+                            if !isZero {
+                                dwt2DBlock16(view)
+                            }
+                            
+                            if !isZero {
+                                evaluateQuantizeLayer16(view: view, qt: qt)
+                            }
                         }
                     }
                 }
@@ -325,6 +348,59 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
         }
     }
     
+    withUnsafePointers(mut: &subband) { dstBase in
+        for i in 0..<rowCount {
+            for j in 0..<colCount {
+                let view = blocks[(i * colCount) + j]
+                
+                var isSkip = false
+                if let sMap = skipMap, skipMapWidth > 0 {
+                    let lx = isChroma ? (j * 4) : (j * 2)
+                    let ly = isChroma ? (i * 4) : (i * 2)
+                    let count = isChroma ? 4 : 2
+                    isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
+                }
+                
+                let isZero = isSkip || isZeroBlock(view: view)
+                if isZero { continue }
+                
+                let w = (j * 16)
+                let h = (i * 16)
+                if width <= w || height <= h { continue }
+                
+                let destStartX = (w / 2)
+                let destStartY = (h / 2)
+                let subSize = (16 / 2)
+                let subs = getSubbands16(view: view)
+                let srcBase = subs.ll.base
+                let limit = min(subSize, (subWidth - destStartX))
+                
+                if 0 < limit {
+                    if limit == subSize && (destStartY + subSize) <= subHeight {
+                        let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
+                        let dstRaw = UnsafeMutableRawPointer(dstBasePtr)
+                        let srcRaw = UnsafeRawPointer(srcBase)
+                        
+                        // unrolled SIMD copy
+                        for row in 0..<8 {
+                            let sRow = srcRaw.advanced(by: row * 16 * 2).assumingMemoryBound(to: SIMD8<Int16>.self)
+                            let dRow = dstRaw.advanced(by: row * subWidth * 2).assumingMemoryBound(to: SIMD8<Int16>.self)
+                            dRow.pointee = sRow.pointee
+                        }
+                    } else {
+                        for blockY in 0..<subSize {
+                            let dstY = (destStartY + blockY)
+                            if dstY < subHeight {
+                                let srcPtr = srcBase.advanced(by: (blockY * 16))
+                                let dstIdx = ((dstY * subWidth) + destStartX)
+                                dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
@@ -335,85 +411,82 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     let subWidth = (width + 1) / 2
     let subHeight = (height + 1) / 2
     var subband = pool.getInt16(count: subWidth * subHeight)
+    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
+    
     let rowCount = (height + (16 - 1)) / 16
     let colCount = (width + (16 - 1)) / 16
-    let totalBlocks = rowCount * colCount
-    
-    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
-    tmpBlocks.reserveCapacity(totalBlocks)
-    for _ in 0..<totalBlocks {
-        tmpBlocks.append(pool.get(width: 16, height: 16))
-    }
-    let blocks = tmpBlocks
     
     let chunkSize = 8
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks] in
+            group.addTask { [safeDst] in
+                let dstBase = safeDst.ptr
+                let view = pool.get(width: 16, height: 16)
+                defer { pool.put(view) }
+                
                 for i in sRow..<endRow {
                     let h = (i * 16)
                     for j in 0..<colCount {
                         let w = (j * 16)
                         if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view)
-                        dwt2DBlock16(view)
+                        
+                        let destStartX = (w / 2)
+                        let destStartY = (h / 2)
+                        let subSize = (16 / 2)
+                        let limit = min(subSize, (subWidth - destStartX))
+                        if limit <= 0 { continue }
+                        
+                        let srcBase = view.base
+                        if limit == 8 && (destStartY + 8) <= subHeight {
+                            for blockY in 0..<8 {
+                                let dstIdx = ((destStartY + blockY) * subWidth) + destStartX
+                                let dstPtr = dstBase.advanced(by: dstIdx)
+                                let sy = blockY * 2
+                                let srcRow0 = srcBase.advanced(by: sy * 16)
+                                let srcRow1 = srcBase.advanced(by: (sy + 1) * 16)
+                                for blockX in 0..<8 {
+                                    let sx = blockX * 2
+                                    let p0 = Int(srcRow0[sx])
+                                    let p1 = Int(srcRow0[sx + 1])
+                                    let p2 = Int(srcRow1[sx])
+                                    let p3 = Int(srcRow1[sx + 1])
+                                    dstPtr[blockX] = Int16((p0 + p1 + p2 + p3) >> 2)
+                                }
+                            }
+                        } else {
+                            for blockY in 0..<subSize {
+                                let dstY = destStartY + blockY
+                                if dstY < subHeight {
+                                    let dstIdx = (dstY * subWidth) + destStartX
+                                    let dstPtr = dstBase.advanced(by: dstIdx)
+                                    let sy = blockY * 2
+                                    let srcRow0 = srcBase.advanced(by: sy * 16)
+                                    let srcRow1 = srcBase.advanced(by: (sy + 1) * 16)
+                                    for blockX in 0..<limit {
+                                        let sx = blockX * 2
+                                        let p0 = Int(srcRow0[sx])
+                                        let p1 = Int(srcRow0[sx + 1])
+                                        let p2 = Int(srcRow1[sx])
+                                        let p3 = Int(srcRow1[sx + 1])
+                                        dstPtr[blockX] = Int16((p0 + p1 + p2 + p3) >> 2)
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    
-    withUnsafePointers(mut: &subband) { dstBase in
-        for i in 0..<rowCount {
-            let h = (i * 16)
-            for j in 0..<colCount {
-                let w = (j * 16)
-                if width <= w || height <= h { continue }
-                let llBlock = blocks[(i * colCount) + j]
-                
-                let destStartX = (w / 2)
-                let destStartY = (h / 2)
-                let subSize = (16 / 2)
-
-                let view = llBlock
-                let subs = getSubbands16(view: view)
-                let srcBase = subs.ll.base
-                let limit = min(subSize, (subWidth - destStartX))
-
-                guard 0 < limit else { continue }
-
-                if limit == subSize && (destStartY + subSize) <= subHeight {
-                    let dstBasePtr = dstBase.advanced(by: (destStartY * subWidth) + destStartX)
-                    dstBasePtr.advanced(by: subWidth * 0).update(from: srcBase.advanced(by: 16 * 0), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 1).update(from: srcBase.advanced(by: 16 * 1), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 2).update(from: srcBase.advanced(by: 16 * 2), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 3).update(from: srcBase.advanced(by: 16 * 3), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 4).update(from: srcBase.advanced(by: 16 * 4), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 5).update(from: srcBase.advanced(by: 16 * 5), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 6).update(from: srcBase.advanced(by: 16 * 6), count: 8)
-                    dstBasePtr.advanced(by: subWidth * 7).update(from: srcBase.advanced(by: 16 * 7), count: 8)
-                } else {
-                    for blockY in 0..<subSize {
-                        let dstY = (destStartY + blockY)
-                        if subHeight <= dstY { continue }
-                        let srcPtr = srcBase.advanced(by: (blockY * 16))
-                        let dstIdx = ((dstY * subWidth) + destStartX)
-                        dstBase.advanced(by: dstIdx).update(from: srcPtr, count: limit)
-                    }
-                }
-            }
-        }
-    }
-    
     
     withExtendedLifetime(subband) {}
-    return (subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
+    return (subband, { [subband] in pool.putInt16(subband) })
 }
 
 @inline(__always)
-func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([BlockView], @Sendable () -> Void) {
+func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0, isChroma: Bool = false) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
     let totalBlocks = rowCount * colCount
@@ -429,17 +502,35 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks] in
-                for i in sRow..<endRow {
-                    let h = (i * 8)
-                    for j in 0..<colCount {
-                        let w = (j * 8)
-                        if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view)
-                        let isZero = isZeroBlock(view: view)
-                        if !isZero {
-                            dwt2DBlock8(view)
+            group.addTask { [blocks, skipMap, r] in
+                r.data.withUnsafeBufferPointer { srcBuf in
+                    let srcBase = srcBuf.baseAddress!
+                    for i in sRow..<endRow {
+                        let h = (i * 8)
+                        for j in 0..<colCount {
+                            let w = (j * 8)
+                            if width <= w || height <= h { continue }
+                            let view = blocks[(i * colCount) + j]
+                            
+                            var isSkip = false
+                            if let sMap = skipMap, skipMapWidth > 0 {
+                                let lx = isChroma ? (j * 4) : (j * 2)
+                                let ly = isChroma ? (i * 4) : (i * 2)
+                                let count = isChroma ? 4 : 2
+                                isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
+                            }
+                            
+                            if isSkip {
+                                clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
+                            } else {
+                                r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
+                            }
+                            
+                            let isZero = isSkip || isZeroBlock(view: view)
+                            
+                            if !isZero {
+                                dwt2DBlock8(view)
+                            }
                         }
                     }
                 }
@@ -450,24 +541,24 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
 }
 
 @inline(__always)
-func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: false)
         return (subband, blocks, r)
     }()
     
     async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: true)
         return (subband, blocks, r)
     }()
     
     async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        let (blocks, subband, r) = await extractSingleTransformBlocks32(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: true)
         return (subband, blocks, r)
     }()
 
@@ -480,24 +571,24 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, la
 }
 
 @inline(__always)
-func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0) async throws -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
     let cbDy = ((dy + 1) / 2)
     
     async let taskBufY = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, sads: sads, occlusionScores: occlusionScores)
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, sads: sads, occlusionScores: occlusionScores, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: false)
         return (subband, blocks, r)
     }()
     
     async let taskBufCb = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: true)
         return (subband, blocks, r)
     }()
     
     async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
+        let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: true)
         return (subband, blocks, r)
     }()
 
@@ -988,7 +1079,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -998,7 +1089,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
     let yRowCount8 = (dy + 7) / 8
     
     async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
-        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: false)
         let isIFrame = (sads == nil)
         for i in blocks.indices {
             if let sList = sads, i < sList.count {
@@ -1030,7 +1121,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
     
     
     async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
-        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: true)
         let isIFrame = (sads == nil)
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
@@ -1049,7 +1140,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
     }()
     
     async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
-        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, skipMap: skipMap, skipMapWidth: skipMapWidth, isChroma: true)
         let isIFrame = (sads == nil)
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)

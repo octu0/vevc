@@ -324,36 +324,12 @@ func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep
 
 @inline(__always)
 private func deblockFilterVerticalEdge16SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    let off0 = (y * width) + x
-    
-    var vP1 = SIMD16<Int16>()
-    var vP0 = SIMD16<Int16>()
-    var vQ0 = SIMD16<Int16>()
-    var vQ1 = SIMD16<Int16>()
-    
-    var off = off0
-    for i in 0..<16 {
-        vP1[i] = base[off - 2]
-        vP0[i] = base[off - 1]
-        vQ0[i] = base[off + 0]
-        vQ1[i] = base[off + 1]
-        off += width
-    }
-    
-    let (nP0, nQ0) = deblockComputeFilter(p1: vP1, p0: vP0, q0: vQ0, q1: vQ1, tc: tc, beta: beta)
-    
-    off = off0
-    for i in 0..<16 {
-        base[off - 1] = nP0[i]
-        base[off + 0] = nQ0[i]
-        off += width
-    }
+    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
 }
 
 @inline(__always)
 private func deblockFilterVerticalEdge32SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
-    deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y + 16, tc: tc, beta: beta)
+    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
 }
 
 @inline(__always)

@@ -110,13 +110,13 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                 let cbDx1 = (l1dx + 1) / 2
                 let cbDy1 = (l1dy + 1) / 2
                 if let tNext = nextPd, let dirs = refDirs {
-                    applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 } else {
-                    applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+                    await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+                    await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 }
                 
                 applyDeblockingFilterN(plane: &current.y, width: l1dx, height: l1dy, qStep: qtYStep, blockSize: 16)
@@ -130,13 +130,13 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                 let cbDx0 = (l0dx + 1) / 2
                 let cbDy0 = (l0dy + 1) / 2
                 if let tNext = nextPd, let dirs = refDirs {
-                    applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                 } else {
-                    applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
-                    applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+                    await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
+                    await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                 }
                 
                 applyDeblockingFilterN(plane: &current.y, width: l0dx, height: l0dy, qStep: qtYStep, blockSize: 8)
@@ -157,45 +157,126 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let targetCbDy = (targetDy + 1) / 2
         let scale = hasLayer2 ? 1 : (hasLayer1 ? 2 : 4)
         
-        for i in 0..<map.count {
-            let mode = map[i]
-            if mode != .inter {
-                let bxL2 = (i % bw) * 32
-                let byL2 = (i / bw) * 32
-                
-                let bx = bxL2 / scale
-                let by = byL2 / scale
-                
-                if mode == .skip_ltr, let ltrPd = nextPd {
-                    copyBlock(from: ltrPd.y, to: &current.y, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
-                    copyBlock(from: ltrPd.cb, to: &current.cb, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
-                    copyBlock(from: ltrPd.cr, to: &current.cr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
-                } else if mode == .skip_prev, let prevPd = predictedPd {
-                    copyBlock(from: prevPd.y, to: &current.y, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
-                    copyBlock(from: prevPd.cb, to: &current.cb, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
-                    copyBlock(from: prevPd.cr, to: &current.cr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: targetBSize/2)
+        let tCbSize = targetBSize / 2
+        let pPd = predictedPd ?? PlaneData420(width: dx, height: dy, y: [], cb: [], cr: [])
+        let lPd = nextPd ?? pPd
+        
+        lPd.y.withUnsafeBufferPointer { ltrY in
+        lPd.cb.withUnsafeBufferPointer { ltrCb in
+        lPd.cr.withUnsafeBufferPointer { ltrCr in
+        pPd.y.withUnsafeBufferPointer { prevY in
+        pPd.cb.withUnsafeBufferPointer { prevCb in
+        pPd.cr.withUnsafeBufferPointer { prevCr in
+        current.y.withUnsafeMutableBufferPointer { currY in
+        current.cb.withUnsafeMutableBufferPointer { currCb in
+        current.cr.withUnsafeMutableBufferPointer { currCr in
+            guard let currYPtr = currY.baseAddress, let currCbPtr = currCb.baseAddress, let currCrPtr = currCr.baseAddress,
+                  let ltrYPtr = ltrY.baseAddress, let ltrCbPtr = ltrCb.baseAddress, let ltrCrPtr = ltrCr.baseAddress,
+                  let prevYPtr = prevY.baseAddress, let prevCbPtr = prevCb.baseAddress, let prevCrPtr = prevCr.baseAddress else { return }
+            
+            for i in 0..<map.count {
+                let mode = map[i]
+                if mode != .inter {
+                    let bxL2 = (i % bw) * 32
+                    let byL2 = (i / bw) * 32
+                    
+                    let bx = bxL2 / scale
+                    let by = byL2 / scale
+                    
+                    if bx + targetBSize <= targetDx && by + targetBSize <= targetDy {
+                        if mode == .skip_ltr && nextPd != nil {
+                            copyBlockPointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx, blockSize: targetBSize)
+                            copyBlockPointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                            copyBlockPointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        } else if mode == .skip_prev {
+                            copyBlockPointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx, blockSize: targetBSize)
+                            copyBlockPointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                            copyBlockPointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        }
+                    } else {
+                        if mode == .skip_ltr && nextPd != nil {
+                            copyBlockSafe(from: ltrYPtr, to: currYPtr, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
+                            copyBlockSafe(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                            copyBlockSafe(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                        } else if mode == .skip_prev {
+                            copyBlockSafe(from: prevYPtr, to: currYPtr, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
+                            copyBlockSafe(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                            copyBlockSafe(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                        }
+                    }
                 }
             }
-        }
+        }}}}}}}}}
     }
     
     return current
 }
 
 @inline(__always)
-private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
+private func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int, blockSize: Int) {
+    if blockSize == 32 {
+        for y in 0..<32 {
+            let offset = (by + y) * stride + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        }
+    } else if blockSize == 16 {
+        for y in 0..<16 {
+            let offset = (by + y) * stride + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        }
+    } else if blockSize == 8 {
+        for y in 0..<8 {
+            let offset = (by + y) * stride + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+        }
+    } else {
+        for y in 0..<blockSize {
+            let offset = (by + y) * stride + bx
+            dst.advanced(by: offset).update(from: src.advanced(by: offset), count: blockSize)
+        }
+    }
+}
+
+@inline(__always)
+private func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
     let maxY = min(by + blockSize, height)
     let maxX = min(bx + blockSize, width)
     let copyCount = maxX - bx
     if copyCount <= 0 { return }
     
-    src.withUnsafeBufferPointer { sPtr in
-        dst.withUnsafeMutableBufferPointer { dPtr in
-            guard let sBase = sPtr.baseAddress, let dBase = dPtr.baseAddress else { return }
-            for y in by..<maxY {
-                let offset = y * width + bx
-                dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: copyCount)
-            }
+    if copyCount == 32 {
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        }
+    } else if copyCount == 16 {
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        }
+    } else if copyCount == 8 {
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+        }
+    } else {
+        for y in by..<maxY {
+            let offset = y * width + bx
+            dst.advanced(by: offset).update(from: src.advanced(by: offset), count: copyCount)
         }
     }
 }

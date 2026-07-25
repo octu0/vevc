@@ -76,23 +76,11 @@ struct BlockView: @unchecked Sendable {
 
 @inline(__always)
 func clearBlockRegion(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, stride: Int) {
-    if stride == width {
-        let total = width * height
-        UnsafeMutableRawPointer(base).initializeMemory(as: UInt8.self, repeating: 0, count: total * 2)
-        return
-    }
-    var i = 0
-    let zero16 = SIMD16<Int16>.zero
-    for y in 0..<height {
-        let ptr = base.advanced(by: y * stride)
-        i = 0
-        while i + 16 <= width {
-            UnsafeMutableRawPointer(ptr + i).storeBytes(of: zero16, as: SIMD16<Int16>.self)
-            i += 16
-        }
-        while i < width {
-            ptr[i] = 0
-            i += 1
+    if width == stride {
+        memset(base, 0, width * height * 2)
+    } else {
+        for y in 0..<height {
+            memset(base.advanced(by: y * stride), 0, width * 2)
         }
     }
 }
@@ -184,9 +172,8 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        if var bucket = pools[key], bucket.isEmpty != true {
-            let block = bucket.removeLast()
-            pools[key] = bucket
+        if pools[key]?.isEmpty == false {
+            let block = pools[key]!.removeLast()
             _lock.unlock()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
@@ -218,10 +205,18 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        var bucket = pools[key] ?? []
-        if bucket.count < maxPerSize {
-            bucket.append(block)
-            pools[key] = bucket
+        if pools[key] == nil {
+            pools[key] = []
+        }
+        let limit: Int
+        switch key {
+        case 1024: limit = 4096
+        case 256: limit = 16384
+        case 64: limit = 65536
+        default: limit = 4096
+        }
+        if pools[key]!.count < limit {
+            pools[key]!.append(block)
         } else {
             block.deallocate()
         }
@@ -246,9 +241,8 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        if var bucket = int16Pools[count], bucket.isEmpty != true {
-            let arr = bucket.removeLast()
-            int16Pools[count] = bucket
+        if int16Pools[count]?.isEmpty == false {
+            let arr = int16Pools[count]!.removeLast()
             _lock.unlock()
             return arr
         }
@@ -268,10 +262,11 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        var bucket = int16Pools[count] ?? []
-        if bucket.count < maxPerSize {
-            bucket.append(array)
-            int16Pools[count] = bucket
+        if int16Pools[count] == nil {
+            int16Pools[count] = []
+        }
+        if int16Pools[count]!.count < 4096 {
+            int16Pools[count]!.append(array)
         }
         _lock.unlock()
         #endif
@@ -287,9 +282,8 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        if var bucket = arrayPools[capacity], bucket.isEmpty != true {
-            let arr = bucket.removeLast()
-            arrayPools[capacity] = bucket
+        if arrayPools[capacity]?.isEmpty == false {
+            let arr = arrayPools[capacity]!.removeLast()
             _lock.unlock()
             return arr
         }
@@ -317,10 +311,11 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        var bucket = arrayPools[capacity] ?? []
-        if bucket.count < maxPerSize {
-            bucket.append(arr)
-            arrayPools[capacity] = bucket
+        if arrayPools[capacity] == nil {
+            arrayPools[capacity] = []
+        }
+        if arrayPools[capacity]!.count < 4096 {
+            arrayPools[capacity]!.append(arr)
         }
         _lock.unlock()
         #endif
