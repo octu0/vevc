@@ -102,7 +102,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
-        tmpBlocks.append(pool.get(width: 32, height: 32))
+        tmpBlocks.append(pool.get1024())
     }
     let blocks = tmpBlocks
     let chunkSize = 4
@@ -221,7 +221,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
             let endRow = min(sRow + chunkSize, rowCount)
             group.addTask { [safeDst] in
                 let dstBase = safeDst.ptr
-                let view = pool.get(width: 32, height: 32)
+                let view = pool.get1024()
                 defer { pool.put(view) }
                 
                 for i in sRow..<endRow {
@@ -300,7 +300,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
-        tmpBlocks.append(pool.get(width: 16, height: 16))
+        tmpBlocks.append(pool.get256())
     }
     let blocks = tmpBlocks
     
@@ -422,7 +422,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
             let endRow = min(sRow + chunkSize, rowCount)
             group.addTask { [safeDst] in
                 let dstBase = safeDst.ptr
-                let view = pool.get(width: 16, height: 16)
+                let view = pool.get256()
                 defer { pool.put(view) }
                 
                 for i in sRow..<endRow {
@@ -494,7 +494,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
     var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
     tmpBlocks.reserveCapacity(totalBlocks)
     for _ in 0..<totalBlocks {
-        tmpBlocks.append(pool.get(width: 8, height: 8))
+        tmpBlocks.append(pool.get64())
     }
     let blocks = tmpBlocks
     

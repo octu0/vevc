@@ -1050,9 +1050,9 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
     var mvs = MotionVectors(count: blocks8Count)
     var sads = [Int](repeating: 0, count: blocks8Count)
     
-    let tmpC = pool.get(width: 8, height: 8)
-    let tmpO = pool.get(width: 8, height: 8)
-    let tmpT = pool.get(width: 8, height: 8)
+    let tmpC = pool.get64()
+    let tmpO = pool.get64()
+    let tmpT = pool.get64()
     defer {
         pool.put(tmpC)
         pool.put(tmpO)
@@ -1247,9 +1247,9 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let sliceBlocksCount = (endRow - startRow) * colCount
             
             group.addTask {
-                let tmpC = pool.get(width: 8, height: 8)
-                let tmpO = pool.get(width: 8, height: 8)
-                let tmpT = pool.get(width: 8, height: 8)
+                let tmpC = pool.get64()
+                let tmpO = pool.get64()
+                let tmpT = pool.get64()
                 defer {
                     pool.put(tmpC)
                     pool.put(tmpO)

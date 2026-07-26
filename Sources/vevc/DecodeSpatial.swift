@@ -85,9 +85,9 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         
         let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
         
-        if let y = parentYBlocks { pool.putBlockViewArray(y) }
-        if let cb = parentCbBlocks { pool.putBlockViewArray(cb) }
-        if let cr = parentCrBlocks { pool.putBlockViewArray(cr) }
+        if let y = parentYBlocks { pool.putBlockViewArray64(y) }
+        if let cb = parentCbBlocks { pool.putBlockViewArray64(cb) }
+        if let cr = parentCrBlocks { pool.putBlockViewArray64(cr) }
         
         current = l16Img
         parentYBlocks = l16YBlocks
@@ -105,9 +105,18 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         
         current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap)
         
-        if let y = parentYBlocks { pool.putBlockViewArray(y) }
-        if let cb = parentCbBlocks { pool.putBlockViewArray(cb) }
-        if let cr = parentCrBlocks { pool.putBlockViewArray(cr) }
+        if let y = parentYBlocks {
+            if hasLayer1 { pool.putBlockViewArray256(y) }
+            else { pool.putBlockViewArray64(y) }
+        }
+        if let cb = parentCbBlocks {
+            if hasLayer1 { pool.putBlockViewArray256(cb) }
+            else { pool.putBlockViewArray64(cb) }
+        }
+        if let cr = parentCrBlocks {
+            if hasLayer1 { pool.putBlockViewArray256(cr) }
+            else { pool.putBlockViewArray64(cr) }
+        }
         parentYBlocks = nil
         parentCbBlocks = nil
         parentCrBlocks = nil
@@ -159,9 +168,18 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         }
     }
     
-    if let y = parentYBlocks { pool.putBlockViewArray(y) }
-    if let cb = parentCbBlocks { pool.putBlockViewArray(cb) }
-    if let cr = parentCrBlocks { pool.putBlockViewArray(cr) }
+    if let y = parentYBlocks {
+        if hasLayer1 { pool.putBlockViewArray256(y) }
+        else { pool.putBlockViewArray64(y) }
+    }
+    if let cb = parentCbBlocks {
+        if hasLayer1 { pool.putBlockViewArray256(cb) }
+        else { pool.putBlockViewArray64(cb) }
+    }
+    if let cr = parentCrBlocks {
+        if hasLayer1 { pool.putBlockViewArray256(cr) }
+        else { pool.putBlockViewArray64(cr) }
+    }
     
     let targetDx = hasLayer2 ? l2dx : (hasLayer1 ? l1dx : l0dx)
     let targetDy = hasLayer2 ? l2dy : (hasLayer1 ? l1dy : l0dy)

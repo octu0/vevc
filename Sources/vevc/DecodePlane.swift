@@ -10,7 +10,7 @@ fileprivate func decodePlaneSubbands32BlockView(buf: UnsafeBufferPointer<UInt8>,
     let count = buf.count
     var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
-        blocks.append(pool.get(width: 32, height: 32))
+        blocks.append(pool.get1024())
     }
     
     var brFlags = BypassReader(base: base, count: count)
@@ -136,7 +136,7 @@ fileprivate func decodePlaneSubbands32BlockViewWithParentBlocks(buf: UnsafeBuffe
     let count = buf.count
     var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
-        blocks.append(pool.get(width: 32, height: 32))
+        blocks.append(pool.get1024())
     }
     
     var brFlags = BypassReader(base: base, count: count)
@@ -338,7 +338,7 @@ fileprivate func decodePlaneSubbands16BlockView(buf: UnsafeBufferPointer<UInt8>,
     let count = buf.count
     var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
-        blocks.append(pool.get(width: 16, height: 16))
+        blocks.append(pool.get256())
     }
     
     var brFlags = BypassReader(base: base, count: count)
@@ -453,7 +453,7 @@ fileprivate func decodePlaneSubbands16BlockViewWithParentBlocks(buf: UnsafeBuffe
     let count = buf.count
     var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
-        blocks.append(pool.get(width: 16, height: 16))
+        blocks.append(pool.get256())
     }
     
     var brFlags = BypassReader(base: base, count: count)
@@ -640,7 +640,7 @@ fileprivate func decodePlaneBaseSubbands8BlockView(buf: UnsafeBufferPointer<UInt
     let count = buf.count
     var blocks = pool.getBlockViewArray(capacity: blockCount)
     for _ in 0..<blockCount {
-        blocks.append(pool.get(width: 8, height: 8))
+        blocks.append(pool.get64())
     }
     
     var brFlags = BypassReader(base: base, count: count)

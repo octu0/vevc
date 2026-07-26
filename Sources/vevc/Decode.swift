@@ -574,9 +574,9 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     }
     defer {
-        pool.putBlockViewArray(yBlocks)
-        pool.putBlockViewArray(cbBlocks)
-        pool.putBlockViewArray(crBlocks)
+        pool.putBlockViewArray1024(yBlocks)
+        pool.putBlockViewArray1024(cbBlocks)
+        pool.putBlockViewArray1024(crBlocks)
     }
     
     decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, skipMap: skipMap, sub: &sub)

@@ -27,17 +27,17 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         // Vertical Edges
         for x in stride(from: 32, to: width, by: 32) {
             for y in stride(from: 0, to: hFast, by: 32) {
-                deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
             }
-            deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: hFast, count: hRem, tc: tc, beta: beta)
+            deblockFilterVerticalEdge(base: base, width: width, x: x, y: hFast, count: hRem, tc: tc, beta: beta)
         }
         
         // Horizontal Edges
         for y in stride(from: 32, to: height, by: 32) {
             for x in stride(from: 0, to: wFast, by: 32) {
-                deblockFilterHorizontalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
             }
-            deblockFilterHorizontalEdgeScalar(base: base, width: width, x: wFast, y: y, count: wRem, tc: tc, beta: beta)
+            deblockFilterHorizontalEdge(base: base, width: width, x: wFast, y: y, count: wRem, tc: tc, beta: beta)
         }
     }
 }
@@ -107,10 +107,10 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
                     
                     if y < hFast {
-                        deblockFilterVerticalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
                     } else {
                         let safeH = min(hRem, height - y)
-                        deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
                     }
                 }
             }
@@ -134,10 +134,10 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
                     
                     if x < wFast {
-                        deblockFilterHorizontalEdge32SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
                     } else {
                         let safeW = min(wRem, width - x)
-                        deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
                     }
                 }
             }
@@ -210,10 +210,10 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
                     
                     if y < hFast {
-                        deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
                     } else {
                         let safeH = min(hRem, height - y)
-                        deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
                     }
                 }
             }
@@ -237,10 +237,10 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
                     
                     if x < wFast {
-                        deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
                     } else {
                         let safeW = min(wRem, width - x)
-                        deblockFilterHorizontalEdgeScalar(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
                     }
                 }
             }
@@ -274,17 +274,17 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
         // Vertical Edges
         for x in stride(from: 16, to: width, by: 16) {
             for y in stride(from: 0, to: hFast, by: 16) {
-                deblockFilterVerticalEdge16SIMD(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
             }
-            deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: hFast, count: hRem, tc: tc, beta: beta)
+            deblockFilterVerticalEdge(base: base, width: width, x: x, y: hFast, count: hRem, tc: tc, beta: beta)
         }
         
         // Horizontal Edges
         for y in stride(from: 16, to: height, by: 16) {
             for x in stride(from: 0, to: wFast, by: 16) {
-                deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
+                deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
             }
-            deblockFilterHorizontalEdgeScalar(base: base, width: width, x: wFast, y: y, count: wRem, tc: tc, beta: beta)
+            deblockFilterHorizontalEdge(base: base, width: width, x: wFast, y: y, count: wRem, tc: tc, beta: beta)
         }
     }
 }
@@ -309,31 +309,31 @@ func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep
         // Vertical Edges
         for x in stride(from: blockSize, to: width, by: blockSize) {
             if x >= 2 && x + 1 < width {
-                deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: 0, count: height, tc: tc, beta: beta)
+                deblockFilterVerticalEdge(base: base, width: width, x: x, y: 0, count: height, tc: tc, beta: beta)
             }
         }
         
         // Horizontal Edges
         for y in stride(from: blockSize, to: height, by: blockSize) {
             if y >= 2 && y + 1 < height {
-                deblockFilterHorizontalEdgeScalar(base: base, width: width, x: 0, y: y, count: width, tc: tc, beta: beta)
+                deblockFilterHorizontalEdge(base: base, width: width, x: 0, y: y, count: width, tc: tc, beta: beta)
             }
         }
     }
 }
 
 @inline(__always)
-private func deblockFilterVerticalEdge16SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
+private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 16, tc: Int16, beta: Int32) {
+    deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
 }
 
 @inline(__always)
-private func deblockFilterVerticalEdge32SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    deblockFilterVerticalEdgeScalar(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
+private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 32, tc: Int16, beta: Int32) {
+    deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
 }
 
 @inline(__always)
-private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
     let betah = beta >> 1
     var offset = y * width + x
     for _ in 0..<count {
@@ -368,34 +368,12 @@ private func deblockFilterVerticalEdgeScalar(base: UnsafeMutablePointer<Int16>, 
 }
 
 @inline(__always)
-private func deblockFilterHorizontalEdgeSIMD16(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    let offP0 = (y - 1) * width + x
-    let offQ0 = (y + 0) * width + x
-    
-    let offP1 = (y - 2) * width + x
-    let offQ1 = (y + 1) * width + x
-    
-    let p1Ptr = UnsafeRawPointer(base.advanced(by: offP1))
-    let p0Ptr = UnsafeRawPointer(base.advanced(by: offP0))
-    let q0Ptr = UnsafeRawPointer(base.advanced(by: offQ0))
-    let q1Ptr = UnsafeRawPointer(base.advanced(by: offQ1))
-    
-    let p1 = p1Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
-    let p0 = p0Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
-    let q0 = q0Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
-    let q1 = q1Ptr.loadUnaligned(fromByteOffset: 0, as: SIMD16<Int16>.self)
-    
-    let (newP0, newQ0) = deblockComputeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
-    
-    let p0MutPtr = UnsafeMutableRawPointer(base.advanced(by: offP0))
-    let q0MutPtr = UnsafeMutableRawPointer(base.advanced(by: offQ0))
-    
-    p0MutPtr.storeBytes(of: newP0, toByteOffset: 0, as: SIMD16<Int16>.self)
-    q0MutPtr.storeBytes(of: newQ0, toByteOffset: 0, as: SIMD16<Int16>.self)
+private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 16, tc: Int16, beta: Int32) {
+    deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
 }
 
 @inline(__always)
-private func deblockFilterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
     let betah = beta >> 1
     var offset = (y * width) + x
     for _ in 0..<count {
@@ -430,9 +408,8 @@ private func deblockFilterHorizontalEdgeScalar(base: UnsafeMutablePointer<Int16>
 }
 
 @inline(__always)
-private func deblockFilterHorizontalEdge32SIMD(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, tc: Int16, beta: Int32) {
-    deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x, y: y, tc: tc, beta: beta)
-    deblockFilterHorizontalEdgeSIMD16(base: base, width: width, x: x + 16, y: y, tc: tc, beta: beta)
+private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 32, tc: Int16, beta: Int32) {
+    deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
 }
 
 @inline(__always)

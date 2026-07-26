@@ -158,6 +158,187 @@ final class BaseBlockViewPool: @unchecked Sendable {
             }
         }
     }
+    @inline(__always)
+    func get1024() -> BlockView {
+        #if arch(wasm32)
+        if pools1024.isEmpty == false {
+            let block = pools1024.removeLast()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
+            return block
+        }
+        #else
+        _lock.lock()
+        if pools1024.isEmpty == false {
+            let block = pools1024.removeLast()
+            _lock.unlock()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
+            return block
+        }
+        _lock.unlock()
+        #endif
+        return BlockView.allocate(width: 32, height: 32)
+    }
+
+    @inline(__always)
+    func get256() -> BlockView {
+        #if arch(wasm32)
+        if pools256.isEmpty == false {
+            let block = pools256.removeLast()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
+            return block
+        }
+        #else
+        _lock.lock()
+        if pools256.isEmpty == false {
+            let block = pools256.removeLast()
+            _lock.unlock()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
+            return block
+        }
+        _lock.unlock()
+        #endif
+        return BlockView.allocate(width: 16, height: 16)
+    }
+
+    @inline(__always)
+    func get64() -> BlockView {
+        #if arch(wasm32)
+        if pools64.isEmpty == false {
+            let block = pools64.removeLast()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
+            return block
+        }
+        #else
+        _lock.lock()
+        if pools64.isEmpty == false {
+            let block = pools64.removeLast()
+            _lock.unlock()
+            clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
+            return block
+        }
+        _lock.unlock()
+        #endif
+        return BlockView.allocate(width: 8, height: 8)
+    }
+
+    @inline(__always)
+    func put1024(_ block: BlockView) {
+        #if arch(wasm32)
+        if pools1024.count < 8000 {
+            pools1024.append(block)
+        } else {
+            block.deallocate()
+        }
+        #else
+        _lock.lock()
+        if pools1024.count < 4096 {
+            pools1024.append(block)
+        } else {
+            block.deallocate()
+        }
+        _lock.unlock()
+        #endif
+    }
+
+    @inline(__always)
+    func put256(_ block: BlockView) {
+        #if arch(wasm32)
+        if pools256.count < 30000 {
+            pools256.append(block)
+        } else {
+            block.deallocate()
+        }
+        #else
+        _lock.lock()
+        if pools256.count < 16384 {
+            pools256.append(block)
+        } else {
+            block.deallocate()
+        }
+        _lock.unlock()
+        #endif
+    }
+
+    @inline(__always)
+    func put64(_ block: BlockView) {
+        #if arch(wasm32)
+        if pools64.count < 100000 {
+            pools64.append(block)
+        } else {
+            block.deallocate()
+        }
+        #else
+        _lock.lock()
+        if pools64.count < 65536 {
+            pools64.append(block)
+        } else {
+            block.deallocate()
+        }
+        _lock.unlock()
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray1024(_ array: [BlockView]) {
+        for block in array { self.put1024(block) }
+        let capacity = array.capacity
+        var arr = array
+        arr.removeAll(keepingCapacity: true)
+        #if arch(wasm32)
+        var bucket = arrayPools[capacity] ?? []
+        if bucket.count < 16 {
+            bucket.append(arr)
+            arrayPools[capacity] = bucket
+        }
+        #else
+        _lock.lock()
+        if arrayPools[capacity] == nil { arrayPools[capacity] = [] }
+        if arrayPools[capacity]!.count < 4096 { arrayPools[capacity]!.append(arr) }
+        _lock.unlock()
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray256(_ array: [BlockView]) {
+        for block in array { self.put256(block) }
+        let capacity = array.capacity
+        var arr = array
+        arr.removeAll(keepingCapacity: true)
+        #if arch(wasm32)
+        var bucket = arrayPools[capacity] ?? []
+        if bucket.count < 16 {
+            bucket.append(arr)
+            arrayPools[capacity] = bucket
+        }
+        #else
+        _lock.lock()
+        if arrayPools[capacity] == nil { arrayPools[capacity] = [] }
+        if arrayPools[capacity]!.count < 4096 { arrayPools[capacity]!.append(arr) }
+        _lock.unlock()
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray64(_ array: [BlockView]) {
+        for block in array { self.put64(block) }
+        let capacity = array.capacity
+        var arr = array
+        arr.removeAll(keepingCapacity: true)
+        #if arch(wasm32)
+        var bucket = arrayPools[capacity] ?? []
+        if bucket.count < 16 {
+            bucket.append(arr)
+            arrayPools[capacity] = bucket
+        }
+        #else
+        _lock.lock()
+        if arrayPools[capacity] == nil { arrayPools[capacity] = [] }
+        if arrayPools[capacity]!.count < 4096 { arrayPools[capacity]!.append(arr) }
+        _lock.unlock()
+        #endif
+    }
+
+
 
     @inline(__always)
     func get(width: Int, height: Int) -> BlockView {
@@ -349,6 +530,97 @@ final class BlockViewPool: @unchecked Sendable {
         #else
         self.shardCount = shardCount
         self.shards = (0..<shardCount).map { _ in BaseBlockViewPool(maxPerSize: maxPerSize) }
+        #endif
+    }
+
+    
+    @inline(__always)
+    func get1024() -> BlockView {
+        #if arch(wasm32)
+        return pool.get1024()
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        return shards[idx].get1024()
+        #endif
+    }
+
+    @inline(__always)
+    func get256() -> BlockView {
+        #if arch(wasm32)
+        return pool.get256()
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        return shards[idx].get256()
+        #endif
+    }
+
+    @inline(__always)
+    func get64() -> BlockView {
+        #if arch(wasm32)
+        return pool.get64()
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        return shards[idx].get64()
+        #endif
+    }
+
+    @inline(__always)
+    func put1024(_ block: BlockView) {
+        #if arch(wasm32)
+        pool.put1024(block)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].put1024(block)
+        #endif
+    }
+
+    @inline(__always)
+    func put256(_ block: BlockView) {
+        #if arch(wasm32)
+        pool.put256(block)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].put256(block)
+        #endif
+    }
+
+    @inline(__always)
+    func put64(_ block: BlockView) {
+        #if arch(wasm32)
+        pool.put64(block)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].put64(block)
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray1024(_ array: [BlockView]) {
+        #if arch(wasm32)
+        pool.putBlockViewArray1024(array)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].putBlockViewArray1024(array)
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray256(_ array: [BlockView]) {
+        #if arch(wasm32)
+        pool.putBlockViewArray256(array)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].putBlockViewArray256(array)
+        #endif
+    }
+
+    @inline(__always)
+    func putBlockViewArray64(_ array: [BlockView]) {
+        #if arch(wasm32)
+        pool.putBlockViewArray64(array)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].putBlockViewArray64(array)
         #endif
     }
 
