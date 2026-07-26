@@ -106,40 +106,46 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     }
     let blocks = tmpBlocks
     let chunkSize = 4
+
+    var isSkipMap = [Bool](repeating: false, count: totalBlocks)
+    if let sMap = skipMap, 0 < skipMapWidth {
+        for i in 0..<rowCount {
+            for j in 0..<colCount {
+                let lx = isChroma ? (j * 4) : (j * 2)
+                let ly = isChroma ? (i * 4) : (i * 2)
+                let count = isChroma ? 4 : 2
+                let idx = i * colCount + j
+                isSkipMap[idx] = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
+            }
+        }
+    }
     
+    let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, skipMap, r] in
-                r.data.withUnsafeBufferPointer { srcBuf in
-                    let srcBase = srcBuf.baseAddress!
-                    for i in sRow..<endRow {
-                        let h = (i * 32)
-                        for j in 0..<colCount {
-                            let w = (j * 32)
-                            if width <= w || height <= h { continue }
-                            let view = blocks[(i * colCount) + j]
-                            
-                            var isSkip = false
-                            if let sMap = skipMap, skipMapWidth > 0 {
-                                let lx = isChroma ? (j * 4) : (j * 2)
-                                let ly = isChroma ? (i * 4) : (i * 2)
-                                let count = isChroma ? 4 : 2
-                                isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
-                            }
-                            
-                            if isSkip {
-                                clearBlockRegion(base: view.base, width: 32, height: 32, stride: view.stride)
-                            } else {
-                                r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
-                            }
-                            
-                            let isZero = isSkip || isZeroBlock(view: view)
-                            
-                            if !isZero {
-                                dwt2DBlock32(view)
-                                evaluateQuantizeLayer32(view: view, qt: qt)
-                            }
+            group.addTask { [blocks, qt, isSkipMap, safeSrc] in
+                let srcBase = safeSrc.ptr
+                for i in sRow..<endRow {
+                    let h = (i * 32)
+                    for j in 0..<colCount {
+                        let w = (j * 32)
+                        if width <= w || height <= h { continue }
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
+                        let isSkip = isSkipMap[blockIdx]
+                        
+                        if isSkip {
+                            clearBlockRegion(base: view.base, width: 32, height: 32, stride: view.stride)
+                        } else {
+                            r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
+                        }
+                        
+                        let isZero = isSkip || isZeroBlock(view: view)
+                        
+                        if isZero != true {
+                            dwt2DBlock32(view)
+                            evaluateQuantizeLayer32(view: view, qt: qt)
                         }
                     }
                 }
@@ -150,15 +156,9 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     withUnsafePointers(mut: &subband) { dstBase in
         for i in 0..<rowCount {
             for j in 0..<colCount {
-                let view = blocks[(i * colCount) + j]
-                
-                var isSkip = false
-                if let sMap = skipMap, skipMapWidth > 0 {
-                    let lx = isChroma ? (j * 4) : (j * 2)
-                    let ly = isChroma ? (i * 4) : (i * 2)
-                    let count = isChroma ? 4 : 2
-                    isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
-                }
+                let blockIdx = (i * colCount) + j
+                let view = blocks[blockIdx]
+                let isSkip = isSkipMap[blockIdx]
                 
                 let isZero = isSkip || isZeroBlock(view: view)
                 if isZero { continue }
@@ -303,44 +303,47 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
         tmpBlocks.append(pool.get256())
     }
     let blocks = tmpBlocks
-    
     let chunkSize = 4
+
+    var isSkipMap = [Bool](repeating: false, count: totalBlocks)
+    if let sMap = skipMap, 0 < skipMapWidth {
+        for i in 0..<rowCount {
+            for j in 0..<colCount {
+                let lx = isChroma ? (j * 4) : (j * 2)
+                let ly = isChroma ? (i * 4) : (i * 2)
+                let count = isChroma ? 4 : 2
+                let idx = i * colCount + j
+                isSkipMap[idx] = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
+            }
+        }
+    }
+    
+    let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, skipMap, r] in
-                r.data.withUnsafeBufferPointer { srcBuf in
-                    let srcBase = srcBuf.baseAddress!
-                    for i in sRow..<endRow {
-                        let h = (i * 16)
-                        for j in 0..<colCount {
-                            let w = (j * 16)
-                            if width <= w || height <= h { continue }
-                            let view = blocks[(i * colCount) + j]
-                            
-                            var isSkip = false
-                            if let sMap = skipMap, skipMapWidth > 0 {
-                                let lx = isChroma ? (j * 4) : (j * 2)
-                                let ly = isChroma ? (i * 4) : (i * 2)
-                                let count = isChroma ? 4 : 2
-                                isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
-                            }
-                            
-                            if isSkip {
-                                clearBlockRegion(base: view.base, width: 16, height: 16, stride: view.stride)
-                            } else {
-                                r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
-                            }
-                            
-                            let isZero = isSkip || isZeroBlock(view: view)
-                            
-                            if !isZero {
-                                dwt2DBlock16(view)
-                            }
-                            
-                            if !isZero {
-                                evaluateQuantizeLayer16(view: view, qt: qt)
-                            }
+            group.addTask { [blocks, qt, isSkipMap, safeSrc] in
+                let srcBase = safeSrc.ptr
+                for i in sRow..<endRow {
+                    let h = (i * 16)
+                    for j in 0..<colCount {
+                        let w = (j * 16)
+                        if width <= w || height <= h { continue }
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
+                        let isSkip = isSkipMap[blockIdx]
+                        
+                        if isSkip {
+                            clearBlockRegion(base: view.base, width: 16, height: 16, stride: view.stride)
+                        } else {
+                            r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
+                        }
+                        
+                        let isZero = isSkip || isZeroBlock(view: view)
+                        
+                        if isZero != true {
+                            dwt2DBlock16(view)
+                            evaluateQuantizeLayer16(view: view, qt: qt)
                         }
                     }
                 }
@@ -351,15 +354,9 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     withUnsafePointers(mut: &subband) { dstBase in
         for i in 0..<rowCount {
             for j in 0..<colCount {
-                let view = blocks[(i * colCount) + j]
-                
-                var isSkip = false
-                if let sMap = skipMap, skipMapWidth > 0 {
-                    let lx = isChroma ? (j * 4) : (j * 2)
-                    let ly = isChroma ? (i * 4) : (i * 2)
-                    let count = isChroma ? 4 : 2
-                    isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
-                }
+                let blockIdx = (i * colCount) + j
+                let view = blocks[blockIdx]
+                let isSkip = isSkipMap[blockIdx]
                 
                 let isZero = isSkip || isZeroBlock(view: view)
                 if isZero { continue }

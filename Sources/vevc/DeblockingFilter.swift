@@ -480,13 +480,11 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
     let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
     
     var d = (delta &+ 1) &>> 1
-    
     d.replace(with: tcV, where: tcV .< d)
     d.replace(with: ntcV, where: d .< ntcV)
     
     var newP0 = p0
     var newQ0 = q0
-    
     newP0.replace(with: p0 &+ d, where: mask)
     newQ0.replace(with: q0 &- d, where: mask)
     

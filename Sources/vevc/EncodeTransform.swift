@@ -9,18 +9,16 @@ func isEffectivelyZero32(data base: UnsafeMutablePointer<Int16>, threshold: Int)
     let lowerHalfBase = base + 16 * 32
     for i in stride(from: 0, to: 512, by: 16) {
         let vec: SIMD16<Int16> = UnsafeRawPointer(lowerHalfBase + i).loadUnaligned(as: SIMD16<Int16>.self)
-        let overPos = vec .> thPos
+        let overPos = thPos .< vec
         let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(overPos .| underNeg) { return false }
     }
     for y in 0..<16 {
         let ptr = base + y * 32 + 16
         let vec: SIMD16<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
-        let overPos = vec .> thPos
+        let overPos = thPos .< vec
         let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(overPos .| underNeg) { return false }
     }
 
     let zeroVec = SIMD16<Int16>(repeating: 0)
@@ -44,18 +42,16 @@ func isEffectivelyZero16(data base: UnsafeMutablePointer<Int16>, threshold: Int)
     let lowerHalfBase = base + 8 * 16
     for i in stride(from: 0, to: 128, by: 8) {
         let vec: SIMD8<Int16> = UnsafeRawPointer(lowerHalfBase + i).loadUnaligned(as: SIMD8<Int16>.self)
-        let overPos = vec .> thPos
+        let overPos = thPos .< vec
         let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(overPos .| underNeg) { return false }
     }
     for y in 0..<8 {
         let ptr = base + y * 16 + 8
         let vec: SIMD8<Int16> = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
-        let overPos = vec .> thPos
+        let overPos = thPos .< vec
         let underNeg = vec .< thNeg
-        let mask = overPos .| underNeg
-        if any(mask) { return false }
+        if any(overPos .| underNeg) { return false }
     }
 
     let zeroVec = SIMD8<Int16>(repeating: 0)

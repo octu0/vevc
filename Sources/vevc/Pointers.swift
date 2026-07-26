@@ -1,3 +1,7 @@
+internal struct UnsafeSendablePointer<T>: @unchecked Sendable {
+    internal let ptr: UnsafePointer<T>
+}
+
 @inline(__always)
 internal func withUnsafePointers<T, R>(
     _ a: [T],
