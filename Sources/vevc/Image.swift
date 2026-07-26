@@ -91,22 +91,22 @@ extension PlaneData420 {
                 let offset128v16 = SIMD16<Int16>(repeating: 128)
                 let zero16 = SIMD16<Int16>.zero
                 let max255v16 = SIMD16<Int16>(repeating: 255)
-                while i + 16 <= count {
+                while i &+ 16 <= count {
                     let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD16<Int16>.self)
                     let clamped = (vals &+ offset128v16).clamped(lowerBound: zero16, upperBound: max255v16)
                     let narrowed = SIMD16<UInt8>(truncatingIfNeeded: clamped)
                     UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD16<UInt8>.self)
-                    i += 16
+                    i &+= 16
                 }
                 let offset128v8 = SIMD8<Int16>(repeating: 128)
                 let zero8 = SIMD8<Int16>.zero
                 let max255v8 = SIMD8<Int16>(repeating: 255)
-                while i + 8 <= count {
+                while i &+ 8 <= count {
                     let vals = UnsafeRawPointer(srcPtr.advanced(by: i)).load(as: SIMD8<Int16>.self)
                     let clamped = (vals &+ offset128v8).clamped(lowerBound: zero8, upperBound: max255v8)
                     let narrowed = SIMD8<UInt8>(truncatingIfNeeded: clamped)
                     UnsafeMutableRawPointer(dstPtr.advanced(by: i)).storeBytes(of: narrowed, as: SIMD8<UInt8>.self)
-                    i += 8
+                    i &+= 8
                 }
                 while i < count {
                     let v = srcPtr[i]

@@ -578,11 +578,15 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         pool.putBlockViewArray1024(crBlocks)
     }
     
-    decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, skipMap: skipMap, sub: &sub)
+    if let sMap = skipMap {
+        decodeLayer32ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, skipMap: sMap, sub: &sub)
+    } else {
+        decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, sub: &sub)
+    }
     
-    decodeLayer32ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, skipMap: skipMap, sub: &sub)
+    decodeLayer32ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, sub: &sub)
         
-    decodeLayer32ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, skipMap: skipMap, sub: &sub)
+    decodeLayer32ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, sub: &sub)
     
     // MC: MV is layer0 precision -> layer2 (full resolution) mvScale=4
     if let tPrev = predictedPd, let mvs = mvs {
@@ -680,22 +684,24 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode]?, sub: inout Image16) {
+func decodeLayer32ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }
     let subConst = sub
+    let sCount = skipMap.count
     sub.withUnsafeY { destBase in
         for i in startRow..<endRow {
             let h: Int = i * 32
+            let rowOffset = i * colCount
             for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                let isSkip = skipMap?[blockIndex] != nil && skipMap?[blockIndex] != .inter
+                let blockIndex: Int = rowOffset &+ xIdx
+                let isSkip = blockIndex < sCount && skipMap[blockIndex] != .inter
                 if isSkip {
                     continue
                 }
                 let block: BlockView = blocks[blockIndex]
-                let half: Int = 32 / 2
+                let half: Int = 16
                 let view = block
                 let base = view.base
                 let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
@@ -715,7 +721,39 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode]?, sub: inout Image16) {
+func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
+    let startRow: Int = taskIdx * chunkSize
+    let endRow: Int = min(startRow + chunkSize, rowCount)
+    guard startRow < endRow else { return }
+    let subConst = sub
+    sub.withUnsafeY { destBase in
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            let rowOffset = i * colCount
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = blocks[blockIndex]
+                let half: Int = 16
+                let view = block
+                let base = view.base
+                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
+                let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+                let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                
+                prev.readY(x: w / 2, y: h / 2, size: half, into: block)
+                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
+                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                inverseDWT2DBlock32(view)
+                var blk = block
+                subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
+    }
+}
+
+@Sendable @inline(__always)
+func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }
@@ -745,7 +783,7 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode]?, sub: inout Image16) {
+func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
     let startRow: Int = taskIdx * chunkSize
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }

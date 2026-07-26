@@ -414,7 +414,7 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
     let q0Row = base.advanced(by: y * width)
     let q1Row = base.advanced(by: (y + 1) * width)
     
-    while curX + 16 <= endX {
+    while curX &+ 16 <= endX {
         let p1 = UnsafeRawPointer(p1Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
         let p0 = UnsafeRawPointer(p0Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
         let q0 = UnsafeRawPointer(q0Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
@@ -424,8 +424,10 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
         
         UnsafeMutableRawPointer(p0Row.advanced(by: curX)).storeBytes(of: newP0, as: SIMD16<Int16>.self)
         UnsafeMutableRawPointer(q0Row.advanced(by: curX)).storeBytes(of: newQ0, as: SIMD16<Int16>.self)
-        curX += 16
+        curX &+= 16
     }
+    
+    if curX == endX { return }
     
     let betah = beta >> 1
     while curX < endX {
