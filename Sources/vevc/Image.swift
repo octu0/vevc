@@ -430,114 +430,126 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
+    func readYDirect(srcBase: UnsafePointer<Int16>, x: Int, y yPos: Int, size: Int, into view: BlockView) {
+        if 0 <= x && 0 <= yPos && (x &+ size) <= width && (yPos &+ size) <= height {
+            for h in 0..<size {
+                let dstPtr = view.rowPointer(y: h)
+                let srcPtr = srcBase.advanced(by: (yPos &+ h) * width &+ x)
+                switch size {
+                case 32:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                    let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                case 16:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                case 8:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                default:
+                    dstPtr.update(from: srcPtr, count: size)
+                }
+            }
+        } else {
+            for h in 0..<size {
+                let dstPtr = view.rowPointer(y: h)
+                for w in 0..<size {
+                    let (px, py) = boundaryRepeat(width, height, (x + w), (yPos + h))
+                    dstPtr[w] = srcBase[py * width + px]
+                }
+            }
+        }
+    }
+
+    @inline(__always)
     func readY(x: Int, y yPos: Int, size: Int, into view: BlockView) {
         withUnsafePointers(self.y) { srcBase in
-            // Fast path: block entirely within bounds → bulk row copy
-            if 0 <= x && 0 <= yPos && (x + size) <= width && (yPos + size) <= height {
-                for h in 0..<size {
-                    let dstPtr = view.rowPointer(y: h)
-                    let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
-                    switch size {
-                    case 32:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    case 16:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    case 8:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    default:
-                        dstPtr.update(from: srcPtr, count: size)
-                    }
+            readYDirect(srcBase: srcBase, x: x, y: yPos, size: size, into: view)
+        }
+    }
+    
+    @inline(__always)
+    func readCbDirect(srcBase: UnsafePointer<Int16>, x: Int, y yPos: Int, size: Int, into view: BlockView) {
+        let cWidth = (width + 1) / 2
+        let cHeight = (height + 1) / 2
+        if 0 <= x && 0 <= yPos && (x &+ size) <= cWidth && (yPos &+ size) <= cHeight {
+            for h in 0..<size {
+                let dstPtr = view.rowPointer(y: h)
+                let srcPtr = srcBase.advanced(by: (yPos &+ h) * cWidth &+ x)
+                switch size {
+                case 32:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                    let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                case 16:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                case 8:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                default:
+                    dstPtr.update(from: srcPtr, count: size)
                 }
-            } else {
-                for h in 0..<size {
-                    let dstPtr = view.rowPointer(y: h)
-                    for w in 0..<size {
-                        let (px, py) = boundaryRepeat(width, height, (x + w), (yPos + h))
-                        dstPtr[w] = srcBase[py * width + px]
-                    }
+            }
+        } else {
+            for h in 0..<size {
+                let dstPtr = view.rowPointer(y: h)
+                for w in 0..<size {
+                    let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
+                    dstPtr[w] = srcBase[py * cWidth + px]
                 }
             }
         }
     }
-    
+
     @inline(__always)
     func readCb(x: Int, y yPos: Int, size: Int, into view: BlockView) {
+        withUnsafePointers(self.cb) { srcBase in
+            readCbDirect(srcBase: srcBase, x: x, y: yPos, size: size, into: view)
+        }
+    }
+
+    @inline(__always)
+    func readCrDirect(srcBase: UnsafePointer<Int16>, x: Int, y yPos: Int, size: Int, into view: BlockView) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        withUnsafePointers(self.cb) { srcBase in
-            // Fast path: block entirely within bounds → bulk row copy
-            if 0 <= x && 0 <= yPos && (x + size) <= cWidth && (yPos + size) <= cHeight {
-                for h in 0..<size {
-                    let dstPtr = view.rowPointer(y: h)
-                    let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                    switch size {
-                    case 32:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    case 16:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    case 8:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    default:
-                        dstPtr.update(from: srcPtr, count: size)
-                    }
+        if 0 <= x && 0 <= yPos && (x &+ size) <= cWidth && (yPos &+ size) <= cHeight {
+            for h in 0..<size {
+                let dstPtr = view.rowPointer(y: h)
+                let srcPtr = srcBase.advanced(by: (yPos &+ h) * cWidth &+ x)
+                switch size {
+                case 32:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                    let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                case 16:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                case 8:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                default:
+                    dstPtr.update(from: srcPtr, count: size)
                 }
-            } else {
-                for h in 0..<size {
-                    let dstPtr = view.rowPointer(y: h)
-                    for w in 0..<size {
-                        let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
-                        dstPtr[w] = srcBase[py * cWidth + px]
-                    }
+            }
+        } else {
+            for h in 0..<size {
+                let dstPtr = view.rowPointer(y: h)
+                for w in 0..<size {
+                    let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
+                    dstPtr[w] = srcBase[py * cWidth + px]
                 }
             }
         }
     }
-    
+
     @inline(__always)
     func readCr(x: Int, y yPos: Int, size: Int, into view: BlockView) {
-        let cWidth = (width + 1) / 2
-        let cHeight = (height + 1) / 2
         withUnsafePointers(self.cr) { srcBase in
-            // Fast path: block entirely within bounds → bulk row copy
-            if 0 <= x && 0 <= yPos && (x + size) <= cWidth && (yPos + size) <= cHeight {
-                for h in 0..<size {
-                    let dstPtr = view.rowPointer(y: h)
-                    let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                    switch size {
-                    case 32:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    case 16:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    case 8:
-                        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
-                        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    default:
-                        dstPtr.update(from: srcPtr, count: size)
-                    }
-                }
-            } else {
-                for h in 0..<size {
-                    let dstPtr = view.rowPointer(y: h)
-                    for w in 0..<size {
-                        let (px, py) = boundaryRepeat(cWidth, cHeight, (x + w), (yPos + h))
-                        dstPtr[w] = srcBase[py * cWidth + px]
-                    }
-                }
-            }
+            readCrDirect(srcBase: srcBase, x: x, y: yPos, size: size, into: view)
         }
     }
     
@@ -656,6 +668,21 @@ struct Image16: Sendable {
                     destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
                 }
             }
+    }
+
+    @inline(__always)
+    func withUnsafeYReadOnly<R>(_ body: (UnsafePointer<Int16>) throws -> R) rethrows -> R {
+        return try withUnsafePointers(self.y) { try body($0) }
+    }
+
+    @inline(__always)
+    func withUnsafeCbReadOnly<R>(_ body: (UnsafePointer<Int16>) throws -> R) rethrows -> R {
+        return try withUnsafePointers(self.cb) { try body($0) }
+    }
+
+    @inline(__always)
+    func withUnsafeCrReadOnly<R>(_ body: (UnsafePointer<Int16>) throws -> R) rethrows -> R {
+        return try withUnsafePointers(self.cr) { try body($0) }
     }
 
     @inline(__always)

@@ -715,7 +715,9 @@ fileprivate func addMCBlockLuma32(
     let bh = min(blockSize, height - blockY)
     if bw <= 0 || bh <= 0 { return }
     
-    let safe = (0 <= blockX + shiftX - 1) && (0 <= blockY + shiftY - 1) && (blockX + shiftX + bw + 2 < width) && (blockY + shiftY + bh + 2 < height)
+    let srcX = blockX + shiftX
+    let srcY = blockY + shiftY
+    let safe = 1 <= srcX && 1 <= srcY && (srcX &+ bw &+ 2) < width && (srcY &+ bh &+ 2) < height
     if safe {
         addMCBlockLuma32Inner(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: blockX, blockY: blockY, shiftX: shiftX, shiftY: shiftY, fractX: fractX, fractY: fractY, bw: bw, bh: bh, roundOffset: roundOffset)
     } else {
