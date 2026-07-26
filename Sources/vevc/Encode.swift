@@ -13,7 +13,7 @@ func getContext(prevVal: Int16, isParentZero: Bool) -> UInt8 {
 
 @inline(__always)
 func getDPCMContext(prevVal: Int16) -> UInt8 {
-    return kDPCMContext
+    return dpcmContext
 }
 
 @inline(__always)

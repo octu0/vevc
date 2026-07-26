@@ -56,6 +56,11 @@ func readUInt64BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt64 {
     return (UInt64(high) << 32) | UInt64(low)
 }
 
+
+
+
+
+
 @inline(__always)
 internal func readUInt16BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt16 {
     guard offset + 2 <= count else { throw BinaryError.insufficientData(message: "readUInt16BEFromPtr") }

@@ -3,15 +3,15 @@
 /// Number of rANS contexts in the unified entropy stream.
 /// Contexts 0-3: AC coefficients (HL/LH/HH subbands, context selected by getContext())
 /// Context 4:    DPCM coefficients (LL subband)
-let kEntropyContextCount = 6
-let kDPCMContext: UInt8 = 4
+private let entropyContextCount = 6
+let dpcmContext: UInt8 = 4
 
 // MARK: - EntropyModelSelection
 
 /// Result of model selection: contains the chosen models and flags for the encoder/decoder.
 struct EntropyModelSelection {
-    let runModels: [rANSModel]  // always kEntropyContextCount elements (may be identical for merged)
-    let valModels: [rANSModel]  // always kEntropyContextCount elements
+    let runModels: [rANSModel]  // always entropyContextCount elements (may be identical for merged)
+    let valModels: [rANSModel]  // always entropyContextCount elements
     let isStatic: Bool
     let isMerged: Bool
 }
@@ -130,9 +130,9 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         var dynValModels = [rANSModel]()
         var dynamic4CostQ8: Int = 0
         var dynamic4HeaderBits: Int = 0
-        dynRunModels.reserveCapacity(kEntropyContextCount)
-        dynValModels.reserveCapacity(kEntropyContextCount)
-        for c in 0..<kEntropyContextCount {
+        dynRunModels.reserveCapacity(entropyContextCount)
+        dynValModels.reserveCapacity(entropyContextCount)
+        for c in 0..<entropyContextCount {
             var rm = rANSModel()
             var vm = rANSModel()
             rm.normalize(tokenCounts: runTokenCounts[c])
@@ -180,8 +180,8 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
             )
         }
         if minCost == mergedCostQ8 {
-            let mergedRun6 = [rANSModel](repeating: mergedRunModel, count: kEntropyContextCount)
-            let mergedVal6 = [rANSModel](repeating: mergedValModel, count: kEntropyContextCount)
+            let mergedRun6 = [rANSModel](repeating: mergedRunModel, count: entropyContextCount)
+            let mergedVal6 = [rANSModel](repeating: mergedValModel, count: entropyContextCount)
             return EntropyModelSelection(
                 runModels: mergedRun6, valModels: mergedVal6,
                 isStatic: false, isMerged: true
@@ -259,9 +259,9 @@ func unifiedSelectModel(
     var dynValModels = [rANSModel]()
     var dynamic5CostQ8: Int = 0
     var dynamic5HeaderBits: Int = 0
-    dynRunModels.reserveCapacity(kEntropyContextCount)
-    dynValModels.reserveCapacity(kEntropyContextCount)
-    for c in 0..<kEntropyContextCount {
+    dynRunModels.reserveCapacity(entropyContextCount)
+    dynValModels.reserveCapacity(entropyContextCount)
+    for c in 0..<entropyContextCount {
         var rm = rANSModel(buildLUT: false)
         var vm = rANSModel(buildLUT: false)
         rm.normalize(tokenCounts: runTokenCounts[c])
@@ -278,7 +278,7 @@ func unifiedSelectModel(
     // --- Option 3: Dynamic merged (2 tables header cost) ---
     var mergedRunCounts = [Int](repeating: 0, count: 64)
     var mergedValCounts = [Int](repeating: 0, count: 64)
-    for c in 0..<kEntropyContextCount {
+    for c in 0..<entropyContextCount {
         for t in 0..<64 {
             mergedRunCounts[t] += runTokenCounts[c][t]
             mergedValCounts[t] += valTokenCounts[c][t]
@@ -290,7 +290,7 @@ func unifiedSelectModel(
     mergedValModel.normalize(tokenCounts: mergedValCounts)
 
     var mergedCostQ8: Int = 0
-    for c in 0..<kEntropyContextCount {
+    for c in 0..<entropyContextCount {
         mergedCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: mergedRunModel)
         mergedCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[c], model: mergedValModel)
     }
@@ -308,8 +308,8 @@ func unifiedSelectModel(
         )
     }
     if minCost == mergedCostQ8 {
-        let merged5Run = [rANSModel](repeating: mergedRunModel, count: kEntropyContextCount)
-        let merged5Val = [rANSModel](repeating: mergedValModel, count: kEntropyContextCount)
+        let merged5Run = [rANSModel](repeating: mergedRunModel, count: entropyContextCount)
+        let merged5Val = [rANSModel](repeating: mergedValModel, count: entropyContextCount)
         return EntropyModelSelection(
             runModels: merged5Run, valModels: merged5Val,
             isStatic: false, isMerged: true
@@ -436,8 +436,8 @@ struct EntropyEncoder {
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
-        var runTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: kEntropyContextCount)
-        var valTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: kEntropyContextCount)
+        var runTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: entropyContextCount)
+        var valTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: entropyContextCount)
         
         for lane in 0..<4 {
             let start = chunkStarts[lane]
@@ -473,7 +473,7 @@ struct EntropyEncoder {
             chunkBypassWriters[lane].flush()
         }
         // Cap frequencies to 16-bit to ensure bitstream serialization perfectly matches what the decoder reads
-        for c in 0..<kEntropyContextCount {
+        for c in 0..<entropyContextCount {
             for i in 0..<64 {
                 if 65535 < runTokenCounts[c][i] { runTokenCounts[c][i] = 65535 }
                 if 65535 < valTokenCounts[c][i] { valTokenCounts[c][i] = 65535 }
@@ -506,7 +506,7 @@ struct EntropyEncoder {
                 writeCompressedFreqTable(&out, freqs: valModels[0].tokenFreqs)
             } else {
                 // N-context: 2*N tables (run + val for each context)
-                for i in 0..<kEntropyContextCount {
+                for i in 0..<entropyContextCount {
                     writeCompressedFreqTable(&out, freqs: runModels[i].tokenFreqs)
                     writeCompressedFreqTable(&out, freqs: valModels[i].tokenFreqs)
                 }
@@ -762,13 +762,13 @@ struct EntropyDecoder {
             let runM = rANSModel(tokenFreqs: runFreqs)
             let valFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             let valM = rANSModel(tokenFreqs: valFreqs)
-            self.runModels = [rANSModel](repeating: runM, count: kEntropyContextCount)
-            self.valModels = [rANSModel](repeating: valM, count: kEntropyContextCount)
+            self.runModels = [rANSModel](repeating: runM, count: entropyContextCount)
+            self.valModels = [rANSModel](repeating: valM, count: entropyContextCount)
         default:
             // Dynamic N-context: read 2*N tables
             var rModels = [rANSModel]()
             var vModels = [rANSModel]()
-            for _ in 0..<kEntropyContextCount {
+            for _ in 0..<entropyContextCount {
                 let runFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
                 rModels.append(rANSModel(tokenFreqs: runFreqs))
                 
@@ -1001,7 +1001,6 @@ func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, profile: 
 @inline(__always)
 func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
     var bypass = BypassWriter()
-    
     var runs = [(val: UInt8, count: UInt32)]()
     var current: UInt8 = map.first?.rawValue ?? 0
     var count: UInt32 = 0
@@ -1039,7 +1038,6 @@ func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
 public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
     var offset = 0
     let runCount = try readVLQSizeFromBytes(data, offset: &offset)
-    
     let bpLen = try readVLQSizeFromBytes(data, offset: &offset)
     guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
     
@@ -1067,3 +1065,4 @@ public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
     guard map.count == count else { throw DecodeError.invalidBlockData }
     return map
 }
+

@@ -9,10 +9,6 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) 
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
-        var blocks = pool.getBlockViewArray(capacity: blockCount)
-        for _ in 0..<blockCount {
-            blocks.append(pool.get1024())
-        }
         
         var brFlags = BypassReader(base: base, count: count)
         var tasks = pool.getInt16(count: blockCount)
@@ -45,6 +41,11 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) 
         
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
+        
+        var blocks = pool.getBlockViewArray(capacity: blockCount)
+        for _ in 0..<blockCount {
+            blocks.append(pool.get1024())
+        }
         
         var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
         let half = 32 / 2
@@ -127,10 +128,6 @@ func decodePlaneSubbands32WithParentBlocks(data: [UInt8], pool: BlockViewPool, b
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
-        var blocks = pool.getBlockViewArray(capacity: blockCount)
-        for _ in 0..<blockCount {
-            blocks.append(pool.get1024())
-        }
         
         var brFlags = BypassReader(base: base, count: count)
         var tasks = pool.getInt16(count: blockCount)
@@ -163,6 +160,11 @@ func decodePlaneSubbands32WithParentBlocks(data: [UInt8], pool: BlockViewPool, b
         
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
+        
+        var blocks = pool.getBlockViewArray(capacity: blockCount)
+        for _ in 0..<blockCount {
+            blocks.append(pool.get1024())
+        }
         
         var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed)
         let half = 32 / 2

@@ -538,6 +538,9 @@ final class BlockViewPool: @unchecked Sendable {
     }
 
     
+
+
+
     @inline(__always)
     func get1024() -> BlockView {
         #if arch(wasm32)
