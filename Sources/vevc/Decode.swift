@@ -51,7 +51,7 @@ func decodeCoeffRun(decoder: inout EntropyDecoder, context: UInt8) throws -> (In
 }
 
 @inline(__always)
-func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
+func blockDecode16V(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -59,11 +59,11 @@ func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
+    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockDataContext("blockDecode16V lscp out of range: (\(lscpX), \(lscpY))") }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 16 + lscpY
+    let lscpIdx = (lscpX << 4) + lscpY
     while currentIdx <= lscpIdx {
         let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
@@ -71,10 +71,45 @@ func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let x = currentIdx / 16
-            let y = currentIdx % 16
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let x = currentIdx >> 4
+            let y = currentIdx & 15
+            base[y * stride + x] = val
+        }
+        currentIdx += 1
+    }
+}
+
+@inline(__always)
+func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
+    try blockDecode16V(decoder: &decoder, ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func blockDecode16VWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    if hasNonZero == 0 {
+        return
+    }
+
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
+    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockDataContext("blockDecode16VParent lscp out of range: (\(lscpX), \(lscpY))") }
+
+    var currentIdx = 0
+    var prevVal: Int16 = 0
+    let lscpIdx = (lscpX << 4) + lscpY
+    while currentIdx <= lscpIdx {
+        let startX = currentIdx >> 4
+        let startY = currentIdx & 15
+        let isParentZero = parentPtr[(startY >> 1) * parentStride + (startX >> 1)] == 0
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
+
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            let x = currentIdx >> 4
+            let y = currentIdx & 15
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -82,6 +117,11 @@ func blockDecode16V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
 @inline(__always)
 func blockDecode16VWithParentBlock(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView) throws {
+    try blockDecode16VWithParentBlock(decoder: &decoder, ptr: block.base, stride: block.stride, parentPtr: UnsafePointer(parentBlock.base), parentStride: parentBlock.stride)
+}
+
+@inline(__always)
+func blockDecode16H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -89,24 +129,21 @@ func blockDecode16VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
+    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockDataContext("blockDecode16H lscp out of range: (\(lscpX), \(lscpY))") }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 16 + lscpY
+    let lscpIdx = (lscpY << 4) + lscpX
     while currentIdx <= lscpIdx {
-        let startX = currentIdx / 16
-        let startY = currentIdx % 16
-        let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let x = currentIdx / 16
-            let y = currentIdx % 16
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 4
+            let x = currentIdx & 15
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -114,6 +151,11 @@ func blockDecode16VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
 
 @inline(__always)
 func blockDecode16H(decoder: inout EntropyDecoder, block: BlockView) throws {
+    try blockDecode16H(decoder: &decoder, ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func blockDecode16HWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -121,22 +163,23 @@ func blockDecode16H(decoder: inout EntropyDecoder, block: BlockView) throws {
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
+    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockDataContext("blockDecode16HParent lscp out of range: (\(lscpX), \(lscpY))") }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 16 + lscpX
+    let lscpIdx = (lscpY << 4) + lscpX
     while currentIdx <= lscpIdx {
-        let isParentZero = false
+        let startY = currentIdx >> 4
+        let startX = currentIdx & 15
+        let isParentZero = parentPtr[(startY >> 1) * parentStride + (startX >> 1)] == 0
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 16
-            let x = currentIdx % 16
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 4
+            let x = currentIdx & 15
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -144,6 +187,11 @@ func blockDecode16H(decoder: inout EntropyDecoder, block: BlockView) throws {
 
 @inline(__always)
 func blockDecode16HWithParentBlock(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView) throws {
+    try blockDecode16HWithParentBlock(decoder: &decoder, ptr: block.base, stride: block.stride, parentPtr: UnsafePointer(parentBlock.base), parentStride: parentBlock.stride)
+}
+
+@inline(__always)
+func blockDecode8V(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -151,24 +199,20 @@ func blockDecode16HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 16 + lscpX
+    let lscpIdx = (lscpX << 3) + lscpY
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 16
-        let startX = currentIdx % 16
-        let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 16
-            let x = currentIdx % 16
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let x = currentIdx >> 3
+            let y = currentIdx & 7
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -176,6 +220,11 @@ func blockDecode16HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVi
 
 @inline(__always)
 func blockDecode8V(decoder: inout EntropyDecoder, block: BlockView) throws {
+    try blockDecode8V(decoder: &decoder, ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func blockDecode8VWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -186,18 +235,19 @@ func blockDecode8V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 8 + lscpY
+    let lscpIdx = (lscpX << 3) + lscpY
     while currentIdx <= lscpIdx {
-        let isParentZero = false
+        let startX = currentIdx >> 3
+        let startY = currentIdx & 7
+        let isParentZero = parentPtr[(startY >> 1) * parentStride + (startX >> 1)] == 0
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let x = currentIdx / 8
-            let y = currentIdx % 8
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let x = currentIdx >> 3
+            let y = currentIdx & 7
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -205,6 +255,11 @@ func blockDecode8V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
 @inline(__always)
 func blockDecode8VWithParentBlock(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView) throws {
+    try blockDecode8VWithParentBlock(decoder: &decoder, ptr: block.base, stride: block.stride, parentPtr: UnsafePointer(parentBlock.base), parentStride: parentBlock.stride)
+}
+
+@inline(__always)
+func blockDecode8H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -215,20 +270,17 @@ func blockDecode8VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 8 + lscpY
+    let lscpIdx = (lscpY << 3) + lscpX
     while currentIdx <= lscpIdx {
-        let startX = currentIdx / 8
-        let startY = currentIdx % 8
-        let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let x = currentIdx / 8
-            let y = currentIdx % 8
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 3
+            let x = currentIdx & 7
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -236,6 +288,11 @@ func blockDecode8VWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
 
 @inline(__always)
 func blockDecode8H(decoder: inout EntropyDecoder, block: BlockView) throws {
+    try blockDecode8H(decoder: &decoder, ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -246,18 +303,19 @@ func blockDecode8H(decoder: inout EntropyDecoder, block: BlockView) throws {
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 8 + lscpX
+    let lscpIdx = (lscpY << 3) + lscpX
     while currentIdx <= lscpIdx {
-        let isParentZero = false
+        let startY = currentIdx >> 3
+        let startX = currentIdx & 7
+        let isParentZero = parentPtr[(startY >> 1) * parentStride + (startX >> 1)] == 0
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 8
-            let x = currentIdx % 8
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 3
+            let x = currentIdx & 7
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -265,6 +323,11 @@ func blockDecode8H(decoder: inout EntropyDecoder, block: BlockView) throws {
 
 @inline(__always)
 func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView) throws {
+    try blockDecode8HWithParentBlock(decoder: &decoder, ptr: block.base, stride: block.stride, parentPtr: UnsafePointer(parentBlock.base), parentStride: parentBlock.stride)
+}
+
+@inline(__always)
+func blockDecode4V(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -272,23 +335,21 @@ func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
+    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("blockDecode4V lscp out of range: (\(lscpX), \(lscpY))") }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 8 + lscpX
+    let lscpIdx = (lscpX << 2) + lscpY
     while currentIdx <= lscpIdx {
-        let startY = currentIdx / 8
-        let startX = currentIdx % 8
-        let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
+        let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 8
-            let x = currentIdx % 8
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let x = currentIdx >> 2
+            let y = currentIdx & 3
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -296,6 +357,11 @@ func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, block: BlockVie
 
 @inline(__always)
 func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
+    try blockDecode4V(decoder: &decoder, ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func blockDecode4VWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -303,11 +369,42 @@ func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
+    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("blockDecode4VParent lscp out of range: (\(lscpX), \(lscpY))") }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpX * 4 + lscpY
+    let lscpIdx = (lscpX << 2) + lscpY
+    while currentIdx <= lscpIdx {
+        let startX = currentIdx >> 2
+        let startY = currentIdx & 3
+        let isParentZero = parentPtr[(startY >> 1) * parentStride + (startX >> 1)] == 0
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
+
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            let x = currentIdx >> 2
+            let y = currentIdx & 3
+            base[y * stride + x] = val
+        }
+        currentIdx += 1
+    }
+}
+
+@inline(__always)
+func blockDecode4H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    if hasNonZero == 0 {
+        return
+    }
+
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    let lscpY = Int(decoder.readPair(context: 5).run)
+    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("blockDecode4H lscp out of range: (\(lscpX), \(lscpY))") }
+
+    var currentIdx = 0
+    var prevVal: Int16 = 0
+    let lscpIdx = (lscpY << 2) + lscpX
     while currentIdx <= lscpIdx {
         let isParentZero = false
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
@@ -315,10 +412,9 @@ func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let x = currentIdx / 4
-            let y = currentIdx % 4
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 2
+            let x = currentIdx & 3
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -326,6 +422,11 @@ func blockDecode4V(decoder: inout EntropyDecoder, block: BlockView) throws {
 
 @inline(__always)
 func blockDecode4H(decoder: inout EntropyDecoder, block: BlockView) throws {
+    try blockDecode4H(decoder: &decoder, ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {
         return
@@ -333,22 +434,23 @@ func blockDecode4H(decoder: inout EntropyDecoder, block: BlockView) throws {
 
     let lscpX = Int(decoder.readPair(context: 5).run)
     let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
+    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("blockDecode4HParent lscp out of range: (\(lscpX), \(lscpY))") }
 
     var currentIdx = 0
     var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 4 + lscpX
+    let lscpIdx = (lscpY << 2) + lscpX
     while currentIdx <= lscpIdx {
-        let isParentZero = false
+        let startY = currentIdx >> 2
+        let startX = currentIdx & 3
+        let isParentZero = parentPtr[(startY >> 1) * parentStride + (startX >> 1)] == 0
         let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
         prevVal = val
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 4
-            let x = currentIdx % 4
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 2
+            let x = currentIdx & 3
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
@@ -356,45 +458,18 @@ func blockDecode4H(decoder: inout EntropyDecoder, block: BlockView) throws {
 
 @inline(__always)
 func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, block: BlockView, parentBlock: BlockView) throws {
-    let hasNonZero = try decoder.decodeBypass()
-    if hasNonZero == 0 {
-        return
-    }
-
-    let lscpX = Int(decoder.readPair(context: 5).run)
-    let lscpY = Int(decoder.readPair(context: 5).run)
-    guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockData }
-
-    var currentIdx = 0
-    var prevVal: Int16 = 0
-    let lscpIdx = lscpY * 4 + lscpX
-    while currentIdx <= lscpIdx {
-        let startY = currentIdx / 4
-        let startX = currentIdx % 4
-        let isParentZero = parentBlock.rowPointer(y: startY >> 1)[startX >> 1] == 0
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
-        prevVal = val
-
-        currentIdx += run
-        if currentIdx <= lscpIdx {
-            let y = currentIdx / 4
-            let x = currentIdx % 4
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
-        }
-        currentIdx += 1
-    }
+    try blockDecode4HWithParentBlock(decoder: &decoder, ptr: block.base, stride: block.stride, parentPtr: UnsafePointer(parentBlock.base), parentStride: parentBlock.stride)
 }
 
 @inline(__always)
-func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM4(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
         let lscpX = Int(decoder.readPair(context: 5).run)
         let lscpY = Int(decoder.readPair(context: 5).run)
         guard lscpX < 4 && lscpY < 4 else { throw DecodeError.invalidBlockDataContext("DPCM4 lscp out of range: (\(lscpX), \(lscpY))") }
-        lscpIdx = lscpY * 4 + lscpX
+        lscpIdx = (lscpY << 2) + lscpX
     }
 
     var currentIdx = 0
@@ -405,28 +480,26 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 4
-            let x = currentIdx % 4
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 2
+            let x = currentIdx & 3
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
 
-    let ptr0 = block.rowPointer(y: 0)
-    let ptr1 = block.rowPointer(y: 1)
-    let ptr2 = block.rowPointer(y: 2)
-    let ptr3 = block.rowPointer(y: 3)
+    let ptr1 = base + stride
+    let ptr2 = base + 2 * stride
+    let ptr3 = base + 3 * stride
 
-    ptr0[0] = ptr0[0] &+ lastVal
-    ptr0[1] = ptr0[1] &+ ptr0[0]
-    ptr0[2] = ptr0[2] &+ ptr0[1]
-    ptr0[3] = ptr0[3] &+ ptr0[2]
+    base[0] = base[0] &+ lastVal
+    base[1] = base[1] &+ base[0]
+    base[2] = base[2] &+ base[1]
+    base[3] = base[3] &+ base[2]
 
-    ptr1[0] = ptr1[0] &+ ptr0[0]
-    ptr1[1] = ptr1[1] &+ predictMED(ptr1[0], ptr0[1], ptr0[0])
-    ptr1[2] = ptr1[2] &+ predictMED(ptr1[1], ptr0[2], ptr0[1])
-    ptr1[3] = ptr1[3] &+ predictMED(ptr1[2], ptr0[3], ptr0[2])
+    ptr1[0] = ptr1[0] &+ base[0]
+    ptr1[1] = ptr1[1] &+ predictMED(ptr1[0], base[1], base[0])
+    ptr1[2] = ptr1[2] &+ predictMED(ptr1[1], base[2], base[1])
+    ptr1[3] = ptr1[3] &+ predictMED(ptr1[2], base[3], base[2])
 
     ptr2[0] = ptr2[0] &+ ptr1[0]
     ptr2[1] = ptr2[1] &+ predictMED(ptr2[0], ptr1[1], ptr1[0])
@@ -442,14 +515,19 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
 }
 
 @inline(__always)
-func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM4(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
+    try blockDecodeDPCM4(decoder: &decoder, ptr: block.base, stride: block.stride, lastVal: &lastVal)
+}
+
+@inline(__always)
+func blockDecodeDPCM8(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
         let lscpX = Int(decoder.readPair(context: 5).run)
         let lscpY = Int(decoder.readPair(context: 5).run)
         guard lscpX < 8 && lscpY < 8 else { throw DecodeError.invalidBlockDataContext("DPCM8 lscp out of range: (\(lscpX), \(lscpY))") }
-        lscpIdx = lscpY * 8 + lscpX
+        lscpIdx = (lscpY << 3) + lscpX
     }
 
     var currentIdx = 0
@@ -460,24 +538,22 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 8
-            let x = currentIdx % 8
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 3
+            let x = currentIdx & 7
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
 
-    let ptrY0 = block.rowPointer(y: 0)
-    ptrY0[0] = ptrY0[0] &+ lastVal
+    base[0] = base[0] &+ lastVal
     for x in 1..<8 {
-        ptrY0[x] = ptrY0[x] &+ ptrY0[x - 1]
+        base[x] = base[x] &+ base[x - 1]
     }
     
-    var last = ptrY0[7]
+    var last = base[7]
     for y in 1..<8 {
-        let ptrY = block.rowPointer(y: y)
-        let ptrPrevY = block.rowPointer(y: y - 1)
+        let ptrY = base + y * stride
+        let ptrPrevY = base + (y - 1) * stride
         
         ptrY[0] = ptrY[0] &+ ptrPrevY[0]
         for x in 1..<8 {
@@ -489,14 +565,19 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: 
 }
 
 @inline(__always)
-func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
+func blockDecodeDPCM8(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
+    try blockDecodeDPCM8(decoder: &decoder, ptr: block.base, stride: block.stride, lastVal: &lastVal)
+}
+
+@inline(__always)
+func blockDecodeDPCM16(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
         let lscpX = Int(decoder.readPair(context: 5).run)
         let lscpY = Int(decoder.readPair(context: 5).run)
         guard lscpX < 16 && lscpY < 16 else { throw DecodeError.invalidBlockData }
-        lscpIdx = lscpY * 16 + lscpX
+        lscpIdx = (lscpY << 4) + lscpX
     }
 
     var currentIdx = 0
@@ -507,24 +588,22 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
 
         currentIdx += run
         if currentIdx <= lscpIdx {
-            let y = currentIdx / 16
-            let x = currentIdx % 16
-            let ptr = block.rowPointer(y: y)
-            ptr[x] = val
+            let y = currentIdx >> 4
+            let x = currentIdx & 15
+            base[y * stride + x] = val
         }
         currentIdx += 1
     }
 
-    let ptrY0 = block.rowPointer(y: 0)
-    ptrY0[0] = ptrY0[0] &+ lastVal
+    base[0] = base[0] &+ lastVal
     for x in 1..<16 {
-        ptrY0[x] = ptrY0[x] &+ ptrY0[x - 1]
+        base[x] = base[x] &+ base[x - 1]
     }
     
-    var last = ptrY0[15]
+    var last = base[15]
     for y in 1..<16 {
-        let ptrY = block.rowPointer(y: y)
-        let ptrPrevY = block.rowPointer(y: y - 1)
+        let ptrY = base + y * stride
+        let ptrPrevY = base + (y - 1) * stride
         
         ptrY[0] = ptrY[0] &+ ptrPrevY[0]
         for x in 1..<16 {
@@ -533,6 +612,11 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal:
         last = ptrY[15]
     }
     lastVal = last
+}
+
+@inline(__always)
+func blockDecodeDPCM16(decoder: inout EntropyDecoder, block: BlockView, lastVal: inout Int16) throws {
+    try blockDecodeDPCM16(decoder: &decoder, ptr: block.base, stride: block.stride, lastVal: &lastVal)
 }
 
 // MARK: - Internal Decode Functions
@@ -690,11 +774,17 @@ func decodeLayer32ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSi
     guard startRow < endRow else { return }
     let subConst = sub
     let sCount = skipMap.count
+    let pWidth = prev.width
+    let pHeight = prev.height
+    let sWidth = sub.width
+    let sHeight = sub.height
+    
     prev.withUnsafeYReadOnly { prevBase in
         sub.withUnsafeY { destBase in
             for i in startRow..<endRow {
                 let h: Int = i * 32
                 let rowOffset = i * colCount
+                let py = h / 2
                 for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                     let blockIndex: Int = rowOffset &+ xIdx
                     let isSkip = blockIndex < sCount && skipMap[blockIndex] != .inter
@@ -703,17 +793,51 @@ func decodeLayer32ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSi
                     }
                     let block: BlockView = blocks[blockIndex]
                     let base = block.base
+                    let px = w / 2
                     
-                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
-                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                    inverseDWT2DBlock32(block)
-                    var blk = block
-                    subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+                    if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
+                        copy16x16ContiguousDirect(srcBase: prevBase, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destBase, destWidth: sWidth, x: w, y: h)
+                    } else {
+                        prev.readYDirect(srcBase: prevBase, x: px, y: py, size: 16, into: block)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        var blk = block
+                        subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+                    }
                 }
             }
         }
+    }
+}
+
+@inline(__always)
+private func copy16x16ContiguousDirect(srcBase: UnsafePointer<Int16>, srcWidth: Int, x: Int, y: Int, dstBase: UnsafeMutablePointer<Int16>, dstStride: Int) {
+    let srcStart = srcBase.advanced(by: y * srcWidth + x)
+    for h in 0..<16 {
+        let srcPtr = srcStart.advanced(by: h * srcWidth)
+        let dstPtr = dstBase.advanced(by: h * dstStride)
+        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+        UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+    }
+}
+
+@inline(__always)
+private func copy32x32ContiguousDirect(srcBase: UnsafePointer<Int16>, srcStride: Int, destBase: UnsafeMutablePointer<Int16>, destWidth: Int, x: Int, y: Int) {
+    let destStart = destBase.advanced(by: y * destWidth + x)
+    for h in 0..<32 {
+        let srcPtr = srcBase.advanced(by: h * srcStride)
+        let destPtr = destStart.advanced(by: h * destWidth)
+        let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
+        let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
     }
 }
 
@@ -723,23 +847,39 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }
     let subConst = sub
+    let pWidth = prev.width
+    let pHeight = prev.height
+    let sWidth = sub.width
+    let sHeight = sub.height
+    
     prev.withUnsafeYReadOnly { prevBase in
         sub.withUnsafeY { destBase in
             for i in startRow..<endRow {
                 let h: Int = i * 32
                 let rowOffset = i * colCount
+                let py = h / 2
                 for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                     let blockIndex: Int = rowOffset &+ xIdx
                     let block: BlockView = blocks[blockIndex]
                     let base = block.base
+                    let px = w / 2
                     
-                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
-                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                    inverseDWT2DBlock32(block)
-                    var blk = block
-                    subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+                    if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
+                        copy16x16ContiguousDirect(srcBase: prevBase, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destBase, destWidth: sWidth, x: w, y: h)
+                    } else {
+                        prev.readYDirect(srcBase: prevBase, x: px, y: py, size: 16, into: block)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        var blk = block
+                        subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+                    }
                 }
             }
         }
@@ -765,7 +905,7 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                     dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
                     dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
                     dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                    inverseDWT2DBlock32(block)
+                    inverseDWT2DBlock32(ptr: base, stride: 32)
                     var blk = block
                     subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
                 }
@@ -793,7 +933,7 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                     dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
                     dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
                     dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                    inverseDWT2DBlock32(block)
+                    inverseDWT2DBlock32(ptr: base, stride: 32)
                     var blk = block
                     subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
                 }
@@ -822,7 +962,7 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                     dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
                     dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
                     dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                    inverseDWT2DBlock16(block)
+                    inverseDWT2DBlock16(ptr: base, stride: 16)
                     var blk = block
                     subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
                 }
@@ -851,7 +991,7 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                     dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
                     dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
                     dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                    inverseDWT2DBlock16(block)
+                    inverseDWT2DBlock16(ptr: base, stride: 16)
                     var blk = block
                     subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
                 }
@@ -880,7 +1020,7 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                     dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
                     dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
                     dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                    inverseDWT2DBlock16(block)
+                    inverseDWT2DBlock16(ptr: base, stride: 16)
                     var blk = block
                     subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
                 }
@@ -908,7 +1048,7 @@ func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowC
                 dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(block)
+                inverseDWT2DBlock8(ptr: base, stride: 8)
                 var blk = block
                 subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
             }
@@ -935,7 +1075,7 @@ func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
                 dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(block)
+                inverseDWT2DBlock8(ptr: base, stride: 8)
                 var blk = block
                 subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
             }
@@ -962,7 +1102,7 @@ func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
                 dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(block)
+                inverseDWT2DBlock8(ptr: base, stride: 8)
                 var blk = block
                 subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
             }

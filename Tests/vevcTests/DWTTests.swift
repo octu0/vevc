@@ -18,10 +18,10 @@ final class DWTTests: XCTestCase {
                 switch size {
                 case 8:
                     lift53Block8(ptr, stride: 1)
-                    inverseLift53Block8(ptr, stride: 1)
+                    inverseLift53Block8(base: ptr.baseAddress!)
                 case 16:
                     lift53Block16(ptr, stride: 1)
-                    inverseLift53Block16(ptr, stride: 1)
+                    inverseLift53Block16(base: ptr.baseAddress!)
                 case 32:
                     lift53Block32(ptr, stride: 1)
                     inverseLift53Block32(base: ptr.baseAddress!)
@@ -82,10 +82,10 @@ final class DWTTests: XCTestCase {
                     switch size {
                     case 8:
                         lift53Block8(ptr, stride: 1)
-                        inverseLift53Block8(ptr, stride: 1)
+                        inverseLift53Block8(base: ptr.baseAddress!)
                     case 16:
                         lift53Block16(ptr, stride: 1)
-                        inverseLift53Block16(ptr, stride: 1)
+                        inverseLift53Block16(base: ptr.baseAddress!)
                     case 32:
                         lift53Block32(ptr, stride: 1)
                         inverseLift53Block32(base: ptr.baseAddress!)

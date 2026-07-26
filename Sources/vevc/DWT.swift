@@ -108,8 +108,7 @@ func lift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func inverseLift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    guard let base = buffer.baseAddress else { return }
+func inverseLift53Block8(base: UnsafeMutablePointer<Int16>) {
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var low = SIMD4<Int16>(raw[0], raw[1], raw[2], raw[3])
     var high = SIMD4<Int16>(raw[4], raw[5], raw[6], raw[7])
@@ -127,8 +126,7 @@ func inverseLift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: In
 }
 
 @inline(__always)
-func inverseLift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    guard let base = buffer.baseAddress else { return }
+func inverseLift53Block16(base: UnsafeMutablePointer<Int16>) {
     var low = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var high = UnsafeRawPointer(base + 8).loadUnaligned(as: SIMD8<Int16>.self)
 
@@ -467,85 +465,152 @@ func dwt2DBlock32(_ block: BlockView) {
 }
 
 @inline(__always)
-func inverseDWT2DBlock8(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+func inverseDWT2DBlock8(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     // Inverse column lifting via transpose: transpose -> inverseLift rows -> transpose back
     transpose8x8InPlace(base, stride: width)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (0 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (1 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (2 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (3 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (4 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (5 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (6 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (7 * width), count: 8), stride: 1)
+    inverseLift53Block8(base: base + (0 * width))
+    inverseLift53Block8(base: base + (1 * width))
+    inverseLift53Block8(base: base + (2 * width))
+    inverseLift53Block8(base: base + (3 * width))
+    inverseLift53Block8(base: base + (4 * width))
+    inverseLift53Block8(base: base + (5 * width))
+    inverseLift53Block8(base: base + (6 * width))
+    inverseLift53Block8(base: base + (7 * width))
     transpose8x8InPlace(base, stride: width)
     // Inverse row lifting (stride=1, contiguous)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (0 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (1 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (2 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (3 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (4 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (5 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (6 * width), count: 8), stride: 1)
-    inverseLift53Block8(UnsafeMutableBufferPointer(start: base + (7 * width), count: 8), stride: 1)
+    inverseLift53Block8(base: base + (0 * width))
+    inverseLift53Block8(base: base + (1 * width))
+    inverseLift53Block8(base: base + (2 * width))
+    inverseLift53Block8(base: base + (3 * width))
+    inverseLift53Block8(base: base + (4 * width))
+    inverseLift53Block8(base: base + (5 * width))
+    inverseLift53Block8(base: base + (6 * width))
+    inverseLift53Block8(base: base + (7 * width))
+}
+
+@inline(__always)
+func inverseDWT2DBlock8(_ block: BlockView) {
+    inverseDWT2DBlock8(ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func inverseDWT2DBlock16(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
+    // Inverse column lifting via transpose
+    transpose16x16InPlace(base, stride: width)
+    inverseLift53Block16(base: base + (0 * width))
+    inverseLift53Block16(base: base + (1 * width))
+    inverseLift53Block16(base: base + (2 * width))
+    inverseLift53Block16(base: base + (3 * width))
+    inverseLift53Block16(base: base + (4 * width))
+    inverseLift53Block16(base: base + (5 * width))
+    inverseLift53Block16(base: base + (6 * width))
+    inverseLift53Block16(base: base + (7 * width))
+    inverseLift53Block16(base: base + (8 * width))
+    inverseLift53Block16(base: base + (9 * width))
+    inverseLift53Block16(base: base + (10 * width))
+    inverseLift53Block16(base: base + (11 * width))
+    inverseLift53Block16(base: base + (12 * width))
+    inverseLift53Block16(base: base + (13 * width))
+    inverseLift53Block16(base: base + (14 * width))
+    inverseLift53Block16(base: base + (15 * width))
+    transpose16x16InPlace(base, stride: width)
+    // Inverse row lifting (stride=1, contiguous)
+    inverseLift53Block16(base: base + (0 * width))
+    inverseLift53Block16(base: base + (1 * width))
+    inverseLift53Block16(base: base + (2 * width))
+    inverseLift53Block16(base: base + (3 * width))
+    inverseLift53Block16(base: base + (4 * width))
+    inverseLift53Block16(base: base + (5 * width))
+    inverseLift53Block16(base: base + (6 * width))
+    inverseLift53Block16(base: base + (7 * width))
+    inverseLift53Block16(base: base + (8 * width))
+    inverseLift53Block16(base: base + (9 * width))
+    inverseLift53Block16(base: base + (10 * width))
+    inverseLift53Block16(base: base + (11 * width))
+    inverseLift53Block16(base: base + (12 * width))
+    inverseLift53Block16(base: base + (13 * width))
+    inverseLift53Block16(base: base + (14 * width))
+    inverseLift53Block16(base: base + (15 * width))
 }
 
 @inline(__always)
 func inverseDWT2DBlock16(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+    inverseDWT2DBlock16(ptr: block.base, stride: block.stride)
+}
+
+@inline(__always)
+func inverseDWT2DBlock32(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     // Inverse column lifting via transpose
-    transpose16x16InPlace(base, stride: width)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (0 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (1 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (2 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (3 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (4 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (5 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (6 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (7 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (8 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (9 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (10 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (11 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (12 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (13 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (14 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (15 * width), count: 16), stride: 1)
-    transpose16x16InPlace(base, stride: width)
+    transpose32x32InPlace(base, stride: width)
+    inverseLift53Block32(base: base + (0 * width))
+    inverseLift53Block32(base: base + (1 * width))
+    inverseLift53Block32(base: base + (2 * width))
+    inverseLift53Block32(base: base + (3 * width))
+    inverseLift53Block32(base: base + (4 * width))
+    inverseLift53Block32(base: base + (5 * width))
+    inverseLift53Block32(base: base + (6 * width))
+    inverseLift53Block32(base: base + (7 * width))
+    inverseLift53Block32(base: base + (8 * width))
+    inverseLift53Block32(base: base + (9 * width))
+    inverseLift53Block32(base: base + (10 * width))
+    inverseLift53Block32(base: base + (11 * width))
+    inverseLift53Block32(base: base + (12 * width))
+    inverseLift53Block32(base: base + (13 * width))
+    inverseLift53Block32(base: base + (14 * width))
+    inverseLift53Block32(base: base + (15 * width))
+    inverseLift53Block32(base: base + (16 * width))
+    inverseLift53Block32(base: base + (17 * width))
+    inverseLift53Block32(base: base + (18 * width))
+    inverseLift53Block32(base: base + (19 * width))
+    inverseLift53Block32(base: base + (20 * width))
+    inverseLift53Block32(base: base + (21 * width))
+    inverseLift53Block32(base: base + (22 * width))
+    inverseLift53Block32(base: base + (23 * width))
+    inverseLift53Block32(base: base + (24 * width))
+    inverseLift53Block32(base: base + (25 * width))
+    inverseLift53Block32(base: base + (26 * width))
+    inverseLift53Block32(base: base + (27 * width))
+    inverseLift53Block32(base: base + (28 * width))
+    inverseLift53Block32(base: base + (29 * width))
+    inverseLift53Block32(base: base + (30 * width))
+    inverseLift53Block32(base: base + (31 * width))
+    transpose32x32InPlace(base, stride: width)
     // Inverse row lifting (stride=1, contiguous)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (0 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (1 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (2 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (3 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (4 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (5 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (6 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (7 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (8 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (9 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (10 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (11 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (12 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (13 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (14 * width), count: 16), stride: 1)
-    inverseLift53Block16(UnsafeMutableBufferPointer(start: base + (15 * width), count: 16), stride: 1)
+    inverseLift53Block32(base: base + (0 * width))
+    inverseLift53Block32(base: base + (1 * width))
+    inverseLift53Block32(base: base + (2 * width))
+    inverseLift53Block32(base: base + (3 * width))
+    inverseLift53Block32(base: base + (4 * width))
+    inverseLift53Block32(base: base + (5 * width))
+    inverseLift53Block32(base: base + (6 * width))
+    inverseLift53Block32(base: base + (7 * width))
+    inverseLift53Block32(base: base + (8 * width))
+    inverseLift53Block32(base: base + (9 * width))
+    inverseLift53Block32(base: base + (10 * width))
+    inverseLift53Block32(base: base + (11 * width))
+    inverseLift53Block32(base: base + (12 * width))
+    inverseLift53Block32(base: base + (13 * width))
+    inverseLift53Block32(base: base + (14 * width))
+    inverseLift53Block32(base: base + (15 * width))
+    inverseLift53Block32(base: base + (16 * width))
+    inverseLift53Block32(base: base + (17 * width))
+    inverseLift53Block32(base: base + (18 * width))
+    inverseLift53Block32(base: base + (19 * width))
+    inverseLift53Block32(base: base + (20 * width))
+    inverseLift53Block32(base: base + (21 * width))
+    inverseLift53Block32(base: base + (22 * width))
+    inverseLift53Block32(base: base + (23 * width))
+    inverseLift53Block32(base: base + (24 * width))
+    inverseLift53Block32(base: base + (25 * width))
+    inverseLift53Block32(base: base + (26 * width))
+    inverseLift53Block32(base: base + (27 * width))
+    inverseLift53Block32(base: base + (28 * width))
+    inverseLift53Block32(base: base + (29 * width))
+    inverseLift53Block32(base: base + (30 * width))
+    inverseLift53Block32(base: base + (31 * width))
 }
 
 @inline(__always)
 func inverseDWT2DBlock32(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
-    // Inverse column lifting via transpose
-    transpose32x32InPlace(base, stride: width)
-    for i in 0..<32 {
-        inverseLift53Block32(base: base + (i * width))
-    }
-    transpose32x32InPlace(base, stride: width)
-    // Inverse row lifting (stride=1, contiguous)
-    for i in 0..<32 {
-        inverseLift53Block32(base: base + (i * width))
-    }
+    inverseDWT2DBlock32(ptr: block.base, stride: block.stride)
 }
