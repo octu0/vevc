@@ -190,7 +190,6 @@ struct rANSModel {
     
     @inline(__always)
     mutating func normalize(tokenCounts: [Int]) {
-        
         let totalTokens = tokenCounts.reduce(0, +)
         if totalTokens == 0 {
             self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)

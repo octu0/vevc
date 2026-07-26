@@ -212,8 +212,6 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
     }
 }
 
-
-
 // MARK: - Unified Model (5-context: AC 0-3 + DPCM 4)
 
 /// Unified model selection for the single-stream encoder.
@@ -557,8 +555,6 @@ struct EntropyEncoder {
         
         return out
     }
-    
-
 }
 
 @inline(__always)
@@ -654,7 +650,6 @@ internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     }
 }
 
-
 // MARK: - EntropyDecoder
 
 struct EntropyDecoder {
@@ -748,7 +743,8 @@ struct EntropyDecoder {
         
         let isMergedContext = (flags & 0x10) != 0
         
-        if isStaticTable {
+        switch true {
+        case isStaticTable:
             // Static 6-context: AC models for ctx 0-3, DPCM model for ctx 4, LSCP for ctx 5
             self.runModels = [
                 StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
@@ -760,7 +756,7 @@ struct EntropyDecoder {
                 StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
                 StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
             ]
-        } else if isMergedContext {
+        case isMergedContext:
             // Dynamic merged: read 2 tables (run + val), replicate to all 5 contexts
             let runFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
             let runM = rANSModel(tokenFreqs: runFreqs)
@@ -768,7 +764,7 @@ struct EntropyDecoder {
             let valM = rANSModel(tokenFreqs: valFreqs)
             self.runModels = [rANSModel](repeating: runM, count: kEntropyContextCount)
             self.valModels = [rANSModel](repeating: valM, count: kEntropyContextCount)
-        } else {
+        default:
             // Dynamic N-context: read 2*N tables
             var rModels = [rANSModel]()
             var vModels = [rANSModel]()
@@ -797,8 +793,6 @@ struct EntropyDecoder {
         self.ransDecoder = Interleaved4rANSDecoder(base: base.advanced(by: offset), count: count - offset)
     }
     
-
-
     @inline(__always)
     internal static func readCompressedFreqTable(_ base: UnsafePointer<UInt8>, at offset: inout Int, count: Int) throws -> [UInt32] {
         let bitmap = try readUInt64BEFromPtr(base, offset: &offset, count: count)

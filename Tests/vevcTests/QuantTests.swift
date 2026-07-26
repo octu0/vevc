@@ -65,8 +65,7 @@ final class QuantTests: XCTestCase {
                 quantizeSIMD32(block, q: q)
                 dequantizeSIMD32(block, q: q)
             default:
-                quantizeSIMDGeneric(block, q: q)
-                dequantizeSIMDGeneric(block, q: q)
+                fatalError("Unsupported size: \(width)")
             }
         }
 

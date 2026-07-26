@@ -161,17 +161,18 @@ final class BaseBlockViewPool: @unchecked Sendable {
             }
         }
     }
+    
     @inline(__always)
     func get1024() -> BlockView {
         #if arch(wasm32)
-        if pools1024.isEmpty == false {
+        if pools1024.isEmpty != true {
             let block = pools1024.removeLast()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
         }
         #else
         _lock.lock()
-        if pools1024.isEmpty == false {
+        if pools1024.isEmpty != true {
             let block = pools1024.removeLast()
             _lock.unlock()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
@@ -185,14 +186,14 @@ final class BaseBlockViewPool: @unchecked Sendable {
     @inline(__always)
     func get256() -> BlockView {
         #if arch(wasm32)
-        if pools256.isEmpty == false {
+        if pools256.isEmpty != true {
             let block = pools256.removeLast()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
         }
         #else
         _lock.lock()
-        if pools256.isEmpty == false {
+        if pools256.isEmpty != true {
             let block = pools256.removeLast()
             _lock.unlock()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
@@ -206,14 +207,14 @@ final class BaseBlockViewPool: @unchecked Sendable {
     @inline(__always)
     func get64() -> BlockView {
         #if arch(wasm32)
-        if pools64.isEmpty == false {
+        if pools64.isEmpty != true {
             let block = pools64.removeLast()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
             return block
         }
         #else
         _lock.lock()
-        if pools64.isEmpty == false {
+        if pools64.isEmpty != true {
             let block = pools64.removeLast()
             _lock.unlock()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
@@ -356,7 +357,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        if pools[key]?.isEmpty == false {
+        if let pool = pools[key], pool.isEmpty != true {
             let block = pools[key]!.removeLast()
             _lock.unlock()
             clearBlockRegion(base: block.base, width: block.width, height: block.height, stride: block.stride)
@@ -425,7 +426,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        if int16Pools[count]?.isEmpty == false {
+        if let pool = int16Pools[count], pool.isEmpty != true {
             let arr = int16Pools[count]!.removeLast()
             _lock.unlock()
             return arr
@@ -466,7 +467,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         #else
         _lock.lock()
-        if arrayPools[capacity]?.isEmpty == false {
+        if let pool = arrayPools[capacity], pool.isEmpty != true {
             let arr = arrayPools[capacity]!.removeLast()
             _lock.unlock()
             return arr

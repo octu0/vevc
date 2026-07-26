@@ -218,24 +218,28 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                     let by = byL2 / scale
                     
                     if bx + targetBSize <= targetDx && by + targetBSize <= targetDy {
-                        if mode == .skip_ltr && nextPd != nil {
+                        switch mode {
+                        case .skip_ltr where nextPd != nil:
                             copyBlockPointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx, blockSize: targetBSize)
                             copyBlockPointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
                             copyBlockPointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
-                        } else if mode == .skip_prev {
+                        case .skip_prev:
                             copyBlockPointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx, blockSize: targetBSize)
                             copyBlockPointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
                             copyBlockPointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        default: break
                         }
                     } else {
-                        if mode == .skip_ltr && nextPd != nil {
+                        switch mode {
+                        case .skip_ltr where nextPd != nil:
                             copyBlockSafe(from: ltrYPtr, to: currYPtr, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
                             copyBlockSafe(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
                             copyBlockSafe(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
-                        } else if mode == .skip_prev {
+                        case .skip_prev:
                             copyBlockSafe(from: prevYPtr, to: currYPtr, bx: bx, by: by, width: targetDx, height: targetDy, blockSize: targetBSize)
                             copyBlockSafe(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
                             copyBlockSafe(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                        default: break
                         }
                     }
                 }
@@ -248,7 +252,8 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
 
 @inline(__always)
 private func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int, blockSize: Int) {
-    if blockSize == 32 {
+    switch blockSize {
+    case 32:
         for y in 0..<32 {
             let offset = (by + y) * stride + bx
             let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
@@ -256,21 +261,21 @@ private func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMuta
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
             dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
         }
-    } else if blockSize == 16 {
+    case 16:
         for y in 0..<16 {
             let offset = (by + y) * stride + bx
             let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
             let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
         }
-    } else if blockSize == 8 {
+    case 8:
         for y in 0..<8 {
             let offset = (by + y) * stride + bx
             let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
             let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
         }
-    } else {
+    default:
         for y in 0..<blockSize {
             let offset = (by + y) * stride + bx
             dst.advanced(by: offset).update(from: src.advanced(by: offset), count: blockSize)
@@ -285,7 +290,8 @@ private func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutable
     let copyCount = maxX - bx
     if copyCount <= 0 { return }
     
-    if copyCount == 32 {
+    switch copyCount {
+    case 32:
         for y in by..<maxY {
             let offset = y * width + bx
             let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
@@ -293,21 +299,21 @@ private func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutable
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
             dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
         }
-    } else if copyCount == 16 {
+    case 16:
         for y in by..<maxY {
             let offset = y * width + bx
             let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
             let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
         }
-    } else if copyCount == 8 {
+    case 8:
         for y in by..<maxY {
             let offset = y * width + bx
             let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
             let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
         }
-    } else {
+    default:
         for y in by..<maxY {
             let offset = y * width + bx
             dst.advanced(by: offset).update(from: src.advanced(by: offset), count: copyCount)

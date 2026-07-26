@@ -5,7 +5,6 @@ struct Int16Reader {
     let width: Int
     let height: Int
     
-
     @inline(__always)
     func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView, srcBase: UnsafePointer<Int16>) {
         if 0 <= x && 0 <= y && (y + blockHeight) <= height && (x + blockWidth) <= width {
@@ -438,18 +437,19 @@ struct Image16: Sendable {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * width + x)
-                    if size == 32 {
+                    switch size {
+                    case 32:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                         let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    } else if size == 16 {
+                    case 16:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    } else if size == 8 {
+                    case 8:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    } else {
+                    default:
                         dstPtr.update(from: srcPtr, count: size)
                     }
                 }
@@ -475,18 +475,19 @@ struct Image16: Sendable {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                    if size == 32 {
+                    switch size {
+                    case 32:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                         let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    } else if size == 16 {
+                    case 16:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    } else if size == 8 {
+                    case 8:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    } else {
+                    default:
                         dstPtr.update(from: srcPtr, count: size)
                     }
                 }
@@ -512,18 +513,19 @@ struct Image16: Sendable {
                 for h in 0..<size {
                     let dstPtr = view.rowPointer(y: h)
                     let srcPtr = srcBase.advanced(by: (yPos + h) * cWidth + x)
-                    if size == 32 {
+                    switch size {
+                    case 32:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                         let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    } else if size == 16 {
+                    case 16:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    } else if size == 8 {
+                    case 8:
                         let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                         UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    } else {
+                    default:
                         dstPtr.update(from: srcPtr, count: size)
                     }
                 }
@@ -540,7 +542,7 @@ struct Image16: Sendable {
     }
     
     @inline(__always)
-    mutating func updateY(data: inout BlockView, startX: Int, startY: Int, size: Int) {
+    func updateY(destBase: UnsafeMutablePointer<Int16>, data: inout BlockView, startX: Int, startY: Int, size: Int) {
         let validStartY = max(0, startY)
         let validStartX = max(0, startX)
         let validEndY = min(height, startY + size)
@@ -554,31 +556,30 @@ struct Image16: Sendable {
         let dataOffsetY = validStartY - startY
         let dataOffsetX = validStartX - startX
         
-        withUnsafePointers(mut: &self.y) { destBase in
-            let v = data
+        let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * width + validStartX)
-                if loopW == 32 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
-                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    } else if loopW == 16 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    } else if loopW == 8 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    } else {
-                        destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
-                    }
+                switch loopW {
+                case 32:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                case 16:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                case 8:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                default:
+                    destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                }
             }
-        }
     }
     
     @inline(__always)
-    mutating func updateCb(data: inout BlockView, startX: Int, startY: Int, size: Int) {
+    func updateCb(destBase: UnsafeMutablePointer<Int16>, data: inout BlockView, startX: Int, startY: Int, size: Int) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         
@@ -595,31 +596,30 @@ struct Image16: Sendable {
         let dataOffsetY = validStartY - startY
         let dataOffsetX = validStartX - startX
         
-        withUnsafePointers(mut: &self.cb) { destBase in
-            let v = data
+        let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
-                if loopW == 32 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
-                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    } else if loopW == 16 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    } else if loopW == 8 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    } else {
-                        destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
-                    }
+                switch loopW {
+                case 32:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                case 16:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                case 8:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                default:
+                    destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                }
             }
-        }
     }
     
     @inline(__always)
-    mutating func updateCr(data: inout BlockView, startX: Int, startY: Int, size: Int) {
+    func updateCr(destBase: UnsafeMutablePointer<Int16>, data: inout BlockView, startX: Int, startY: Int, size: Int) {
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
         
@@ -636,27 +636,41 @@ struct Image16: Sendable {
         let dataOffsetY = validStartY - startY
         let dataOffsetX = validStartX - startX
         
-        withUnsafePointers(mut: &self.cr) { destBase in
-            let v = data
+        let v = data
             for h in 0..<loopH {
                 let srcPtr = v.rowPointer(y: dataOffsetY + h)
                 let destPtr = destBase.advanced(by: (validStartY + h) * cWidth + validStartX)
-                if loopW == 32 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
-                        let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
-                    } else if loopW == 16 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
-                    } else if loopW == 8 {
-                        let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
-                        UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
-                    } else {
-                        destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
-                    }
+                switch loopW {
+                case 32:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    let s1 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX).advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr.advanced(by: 16)).storeBytes(of: s1, as: SIMD16<Int16>.self)
+                case 16:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD16<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
+                case 8:
+                    let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                default:
+                    destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
+                }
             }
-        }
+    }
+
+    @inline(__always)
+    mutating func withUnsafeY<R>(_ body: (UnsafeMutablePointer<Int16>) throws -> R) rethrows -> R {
+        return try withUnsafePointers(mut: &self.y) { try body($0) }
+    }
+    
+    @inline(__always)
+    mutating func withUnsafeCb<R>(_ body: (UnsafeMutablePointer<Int16>) throws -> R) rethrows -> R {
+        return try withUnsafePointers(mut: &self.cb) { try body($0) }
+    }
+    
+    @inline(__always)
+    mutating func withUnsafeCr<R>(_ body: (UnsafeMutablePointer<Int16>) throws -> R) rethrows -> R {
+        return try withUnsafePointers(mut: &self.cr) { try body($0) }
     }
 }
 

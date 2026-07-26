@@ -391,8 +391,8 @@ private func estimateFastSAD(a: PlaneData420, b: PlaneData420) -> Int {
 private func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Int {
     let width = current.width
     let height = current.height
-    guard 0 < width && 0 < height else { return 0 }
     
+
     let blockSize = 32
     let bw = min(blockSize, width)
     let bh = min(blockSize, height)
@@ -439,7 +439,6 @@ func computeMaskedReconDistortion(
 ) -> Int {
     let width = original.width
     let height = original.height
-    guard 0 < width && 0 < height else { return 0 }
     
     let blockSize = 32
     let colCount = (width + 31) / 32
@@ -450,9 +449,7 @@ func computeMaskedReconDistortion(
     var totalFallbackSAD: Int = 0
     var totalPixels: Int = 0
     
-    original.y.withUnsafeBufferPointer { origPtr in
-        reconstructed.y.withUnsafeBufferPointer { reconPtr in
-            guard let oBase = origPtr.baseAddress, let rBase = reconPtr.baseAddress else { return }
+    withUnsafePointers(original.y, reconstructed.y) { oBase, rBase in
             
             for r in 0..<rowCount {
                 let sy = r * blockSize
@@ -486,7 +483,6 @@ func computeMaskedReconDistortion(
                 }
             }
         }
-    }
     
     // Fallback: Use full block average if active blocks are less than 5% of total
     if sads == nil || activePixels < (totalPixels / 20) {

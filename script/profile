@@ -57,6 +57,9 @@ def main():
     
     stdout, stderr = sample_proc.communicate()
     
+    with open("sample.txt", "w") as f:
+        f.write(stdout)
+    
     print("\n" + "="*80)
     print(" Performance Profile (Top User Functions Sorted by Top of Stack)")
     print("="*80)
@@ -84,6 +87,7 @@ def main():
             print(line)
             
     print("="*80)
+    print("Saved full output to sample.txt")
     sys.exit(target_exit_code)
 
 if __name__ == "__main__":

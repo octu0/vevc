@@ -1063,12 +1063,7 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
     let tPtr = tmpT.base
 
     let hasSkipMap = skipMap.count > 0
-    cS1.withUnsafeBufferPointer { currSub1Ptr in
-    pS1.withUnsafeBufferPointer { prevSub1Ptr in
-    let cBase = currSub1Ptr.baseAddress!
-    let pBase = prevSub1Ptr.baseAddress!
-    
-    skipMap.withUnsafeBufferPointer { skipPtr in
+    withUnsafePointers(cS1, pS1, skipMap) { cBase, pBase, skipPtr in
     withUnsafePointers(mut: &mvs.dx, mut: &mvs.dy, mut: &sads) { ptrDx, ptrDy, ptrSADs in
         for idx in 0..<blocks8Count {
             let col = idx % colCount
@@ -1149,8 +1144,6 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
             }
             ptrSADs[idx] = sad
         }
-    }
-    }
     }
     }
     let occlusionScores = MotionEstimation.computeOcclusionScores(currPlane: cS1, prevPlane: pS1, width: targetWidth, height: targetHeight, globalPrior: MotionVector(dx: 0, dy: 0))
@@ -1393,13 +1386,14 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     }
                     dynamicThreshold = max(1024, currContrast * 48)
                     let finalSAD = dir ? (mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: intNextDx, refDy: intNextDy) / 4)) : prevSAD
-                    if dynamicThreshold < finalSAD {
+                    switch true {
+                    case dynamicThreshold < finalSAD:
                         dx[i] = 0
                         dy[i] = 0
-                    } else if finalSAD < 256 {
+                    case finalSAD < 256:
                         dx[i] = bestMV.dx * 4
                         dy[i] = bestMV.dy * 4
-                    } else {
+                    default:
                         let refPlane = if dir { nextConst.y } else { prevConst.y }
                         let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
                             currPlane: currConst.y, prevPlane: refPlane,

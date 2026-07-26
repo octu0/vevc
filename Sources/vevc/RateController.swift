@@ -42,7 +42,15 @@ struct RateController {
         if avgDistortionQ8 == 0 { return false }
         return (avgDistortionQ8 * 2) < lastDistortionQ8 && (32 * 256) < lastDistortionQ8
     }
-    
+
+    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 690) {
+        self.baseMaxBitrate = maxbitrate
+        self.maxbitrate = (maxbitrate * 410) / 256
+        self.framerate = framerate
+        self.keyint = keyint
+        self.targetDistortionQ8 = targetDistortion
+    }
+
     @inline(__always)
     private mutating func updateSaturationState() {
         if self.isQualitySaturated {
@@ -56,14 +64,6 @@ struct RateController {
                 self.saturationAnchorStep = max(16, self.lastPFrameQStep)
             }
         }
-    }
-
-    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 690) {
-        self.baseMaxBitrate = maxbitrate
-        self.maxbitrate = (maxbitrate * 410) / 256
-        self.framerate = framerate
-        self.keyint = keyint
-        self.targetDistortionQ8 = targetDistortion
     }
     
     @inline(__always)
@@ -183,14 +183,15 @@ struct RateController {
         // this allows near-lossless P-frame quality.
         var minStep = max(16, baseStep)
 
-        if budgetRatioQ8 < 192 {
+        switch true {
+        case budgetRatioQ8 < 192:
             // Budget tight (<0.75): Allow coarser quantization
             maxStep = min(8192, baseStep * 8)
-        } else if 320 < budgetRatioQ8 {
+        case 320 < budgetRatioQ8:
             // Budget surplus (>1.25): Allow finer quantization than I-frame
             minStep = max(16, (baseStep * 3) / 4)
+        default: break
         }
-        
 
         // Quality ceiling by Distortion target D*
         if self.isQualitySaturated && 0 < self.saturationAnchorStep {

@@ -90,12 +90,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
         let skipThresholdPerPixel = ProcessInfo.processInfo.environment["VEVC_SKIP_THRESH"].flatMap { Int($0) } ?? 2
         
-        pd.y.withUnsafeBufferPointer { currYPtr in
-        pd.cb.withUnsafeBufferPointer { currCbPtr in
-        pd.cr.withUnsafeBufferPointer { currCrPtr in
-        predictedPd.y.withUnsafeBufferPointer { prevYPtr in
-        predictedPd.cb.withUnsafeBufferPointer { prevCbPtr in
-        predictedPd.cr.withUnsafeBufferPointer { prevCrPtr in
+        withUnsafePointers(pd.y, pd.cb, pd.cr, predictedPd.y, predictedPd.cb, predictedPd.cr) { (currYPtr: UnsafePointer<Int16>, currCbPtr: UnsafePointer<Int16>, currCrPtr: UnsafePointer<Int16>, prevYPtr: UnsafePointer<Int16>, prevCbPtr: UnsafePointer<Int16>, prevCrPtr: UnsafePointer<Int16>) -> Void in
             for i in 0..<blockCount {
                 let bx = (i % bw) * 32
                 let by = (i / bw) * 32
@@ -115,9 +110,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                         let blockThreshold = skipThresholdPerPixel * area
                         
                         let sadPrev = if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                            computeZeroSAD16x16(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: subX, by: subY, width: dx)
+                            computeZeroSAD16x16(cY: currYPtr, rY: prevYPtr, cCb: currCbPtr, rCb: prevCbPtr, cCr: currCrPtr, rCr: prevCrPtr, bx: subX, by: subY, width: dx)
                         } else {
-                            computeZeroSADSubBlock(cY: currYPtr.baseAddress!, rY: prevYPtr.baseAddress!, cCb: currCbPtr.baseAddress!, rCb: prevCbPtr.baseAddress!, cCr: currCrPtr.baseAddress!, rCr: prevCrPtr.baseAddress!, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
+                            computeZeroSADSubBlock(cY: currYPtr, rY: prevYPtr, cCb: currCbPtr, rCb: prevCbPtr, cCr: currCrPtr, rCr: prevCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
                         }
                         
                         if sadPrev > blockThreshold { allSubBlocksMatchPrev = false }
@@ -128,7 +123,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                     skipMap[i] = .skip_prev
                 }
             }
-        }}}}}}
+        }
     }
     
     let (mvs_original, sads, occlusionScores) = await computeMotionVectors(curr: pd, prev: predictedPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, skipMap: profile == 0x02 ? skipMap : [])
@@ -147,30 +142,30 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutPdCr = pool.getInt16(count: pd.cr.count)
     
     if profile == 0x02 {
-        _ = mutPdY.withUnsafeMutableBufferPointer { dst in memset(dst.baseAddress!, 0, dst.count * 2) }
-        _ = mutPdCb.withUnsafeMutableBufferPointer { dst in memset(dst.baseAddress!, 0, dst.count * 2) }
-        _ = mutPdCr.withUnsafeMutableBufferPointer { dst in memset(dst.baseAddress!, 0, dst.count * 2) }
+        mutPdY.withUnsafeMutableBufferPointer { dst in _ = memset(dst.baseAddress!, 0, dst.count * 2) }
+        mutPdCb.withUnsafeMutableBufferPointer { dst in _ = memset(dst.baseAddress!, 0, dst.count * 2) }
+        mutPdCr.withUnsafeMutableBufferPointer { dst in _ = memset(dst.baseAddress!, 0, dst.count * 2) }
         
         let bw = (dx + 31) / 32
         let cbBw = (cbDx + 15) / 16
-        mutPdY.withUnsafeMutableBufferPointer { yDst in pd.y.withUnsafeBufferPointer { ySrc in
-        mutPdCb.withUnsafeMutableBufferPointer { cbDst in pd.cb.withUnsafeBufferPointer { cbSrc in
-        mutPdCr.withUnsafeMutableBufferPointer { crDst in pd.cr.withUnsafeBufferPointer { crSrc in
+        let yDstCount = mutPdY.count
+        let cbDstCount = mutPdCb.count
+        withUnsafePointers(pd.y, pd.cb, pd.cr, mut: &mutPdY, mut: &mutPdCb, mut: &mutPdCr) { (ySrc: UnsafePointer<Int16>, cbSrc: UnsafePointer<Int16>, crSrc: UnsafePointer<Int16>, yDst: UnsafeMutablePointer<Int16>, cbDst: UnsafeMutablePointer<Int16>, crDst: UnsafeMutablePointer<Int16>) -> Void in
             for i in 0..<skipMap.count {
                 if skipMap[i] == .inter {
                     let bx = (i % bw) * 32
                     let by = (i / bw) * 32
                     for r in 0..<32 {
                         let offset = (by + r) * dx + bx
-                        if offset < yDst.count && offset + 32 <= yDst.count {
+                        if offset < yDstCount && offset + 32 <= yDstCount {
                             let count = min(32, dx - bx)
                             if count == 32 {
-                                let dPtr = UnsafeMutableRawPointer(yDst.baseAddress!.advanced(by: offset))
-                                let sPtr = UnsafeRawPointer(ySrc.baseAddress!.advanced(by: offset))
+                                let dPtr = UnsafeMutableRawPointer(yDst.advanced(by: offset))
+                                let sPtr = UnsafeRawPointer(ySrc.advanced(by: offset))
                                 dPtr.storeBytes(of: sPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
                                 dPtr.advanced(by: 32).storeBytes(of: sPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
                             } else {
-                                yDst.baseAddress!.advanced(by: offset).update(from: ySrc.baseAddress!.advanced(by: offset), count: count)
+                                yDst.advanced(by: offset).update(from: ySrc.advanced(by: offset), count: count)
                             }
                         }
                     }
@@ -179,25 +174,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                     let cBy = (i / cbBw) * 16
                     for r in 0..<16 {
                         let offset = (cBy + r) * cbDx + cBx
-                        if offset < cbDst.count && offset + 16 <= cbDst.count {
+                        if offset < cbDstCount && offset + 16 <= cbDstCount {
                             let count = min(16, cbDx - cBx)
                             if count == 16 {
-                                let cbDPtr = UnsafeMutableRawPointer(cbDst.baseAddress!.advanced(by: offset))
-                                let cbSPtr = UnsafeRawPointer(cbSrc.baseAddress!.advanced(by: offset))
+                                let cbDPtr = UnsafeMutableRawPointer(cbDst.advanced(by: offset))
+                                let cbSPtr = UnsafeRawPointer(cbSrc.advanced(by: offset))
                                 cbDPtr.storeBytes(of: cbSPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
                                 
-                                let crDPtr = UnsafeMutableRawPointer(crDst.baseAddress!.advanced(by: offset))
-                                let crSPtr = UnsafeRawPointer(crSrc.baseAddress!.advanced(by: offset))
+                                let crDPtr = UnsafeMutableRawPointer(crDst.advanced(by: offset))
+                                let crSPtr = UnsafeRawPointer(crSrc.advanced(by: offset))
                                 crDPtr.storeBytes(of: crSPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
                             } else {
-                                cbDst.baseAddress!.advanced(by: offset).update(from: cbSrc.baseAddress!.advanced(by: offset), count: count)
-                                crDst.baseAddress!.advanced(by: offset).update(from: crSrc.baseAddress!.advanced(by: offset), count: count)
+                                cbDst.advanced(by: offset).update(from: cbSrc.advanced(by: offset), count: count)
+                                crDst.advanced(by: offset).update(from: crSrc.advanced(by: offset), count: count)
                             }
                         }
                     }
                 }
             }
-        }}}}}}
+        }
     } else {
         mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
         mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
@@ -396,14 +391,16 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var refDirs = refDirs_original
     if profile == 0x02 {
         for i in 0..<skipMap.count {
-            if skipMap[i] == .skip_ltr {
+            switch skipMap[i] {
+            case .skip_ltr:
                 mvs.dx[i] = 0
                 mvs.dy[i] = 0
                 refDirs[i] = true
-            } else if skipMap[i] == .skip_prev {
+            case .skip_prev:
                 mvs.dx[i] = 0
                 mvs.dy[i] = 0
                 refDirs[i] = false
+            default: break
             }
         }
     }
@@ -696,9 +693,9 @@ private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: In
     let copyCount = maxX - bx
     if copyCount <= 0 { return }
     
-    src.withUnsafeBufferPointer { sPtr in
-        dst.withUnsafeMutableBufferPointer { dPtr in
-            guard let sBase = sPtr.baseAddress, let dBase = dPtr.baseAddress else { return }
+    withUnsafePointers(src, mut: &dst) { (sPtr: UnsafePointer<Int16>, dPtr: UnsafeMutablePointer<Int16>) in
+            let sBase = sPtr
+            let dBase = dPtr
             if bx + blockSize <= width && by + blockSize <= height {
                 for y in 0..<blockSize {
                     let offset = (by + y) * width + bx
@@ -712,4 +709,4 @@ private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: In
             }
         }
     }
-}
+

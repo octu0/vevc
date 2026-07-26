@@ -248,7 +248,6 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
     }
 }
 
-
 /// In-place applies deblocking filter to the reconstructed image (16x16 block resolution).
 @inline(__always)
 func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
@@ -322,7 +321,6 @@ func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep
     }
 }
 
-
 @inline(__always)
 private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
     let betah = beta >> 1
@@ -358,7 +356,6 @@ private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width:
     }
 }
 
-
 @inline(__always)
 private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
     let betah = beta >> 1
@@ -393,7 +390,6 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
         offset += 1
     }
 }
-
 
 @inline(__always)
 private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>) {
