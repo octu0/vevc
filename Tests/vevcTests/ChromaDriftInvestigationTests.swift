@@ -102,7 +102,7 @@ final class ChromaDriftInvestigationTests: XCTestCase {
     }
 
     // MC FIR バイアス測定
-    func testMCFIRBias() {
+    func testMCFIRBias() async {
         let size = 32
         let chromaBlockSize = 16
         let numIterations = 500
@@ -128,7 +128,7 @@ final class ChromaDriftInvestigationTests: XCTestCase {
                         let mvs = MotionVectors(dx: [Int16(fractX)], dy: [Int16(fractY)])
                         
                         // 動き補償を適用
-                        applyScaledChromaMCForTest(
+                        await applyScaledChromaMCForTest(
                             plane: &plane,
                             prevPlane: prevPlane,
                             mvs: mvs,
@@ -175,8 +175,8 @@ final class ChromaDriftInvestigationTests: XCTestCase {
         height: Int,
         chromaBlockSize: Int,
         roundOffset: Int
-    ) {
-        applyScaledMotionCompensationChroma(
+    ) async {
+        await applyScaledMotionCompensationChroma(
             plane: &plane,
             prevPlane: prevPlane,
             mvs: mvs,

@@ -719,6 +719,19 @@ fileprivate func addMCBlockLuma32(
     let srcY = blockY + shiftY
     let safe = 1 <= srcX && 1 <= srcY && (srcX &+ bw &+ 2) < width && (srcY &+ bh &+ 2) < height
     if safe {
+        if fractX == 0 && fractY == 0 && bw == 32 && bh == 32 {
+            for y in 0..<32 {
+                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+                let r = srcBase.advanced(by: (srcY + y) * width + srcX)
+                let d0 = UnsafeRawPointer(dstPtr).loadUnaligned(as: SIMD16<Int16>.self)
+                let s0 = UnsafeRawPointer(r).loadUnaligned(as: SIMD16<Int16>.self)
+                let d1 = UnsafeRawPointer(dstPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                let s1 = UnsafeRawPointer(r.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                UnsafeMutableRawPointer(dstPtr).storeBytes(of: d0 &+ s0, as: SIMD16<Int16>.self)
+                UnsafeMutableRawPointer(dstPtr.advanced(by: 16)).storeBytes(of: d1 &+ s1, as: SIMD16<Int16>.self)
+            }
+            return
+        }
         addMCBlockLuma32Inner(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: blockX, blockY: blockY, shiftX: shiftX, shiftY: shiftY, fractX: fractX, fractY: fractY, bw: bw, bh: bh, roundOffset: roundOffset)
     } else {
         addMCBlockLuma32Edge(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: blockX, blockY: blockY, shiftX: shiftX, shiftY: shiftY, fractX: fractX, fractY: fractY, bw: bw, bh: bh, roundOffset: roundOffset)

@@ -1011,7 +1011,7 @@ struct MotionEstimation {
 }
 
 @inline(__always)
-func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, skipMap: [BlockMode]) async -> (MotionVectors, [Int], [Int]) {
+func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: MotionVectors? = nil, pool: BlockViewPool, roundOffset: Int, skipMap: [BlockMode]? = nil) async -> (MotionVectors, [Int], [Int]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1062,8 +1062,9 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
     let oPtr = tmpO.base
     let tPtr = tmpT.base
 
-    let hasSkipMap = skipMap.count > 0
-    withUnsafePointers(cS1, pS1, skipMap) { cBase, pBase, skipPtr in
+    let sm = skipMap ?? []
+    let hasSkipMap = sm.count > 0
+    withUnsafePointers(cS1, pS1, sm) { cBase, pBase, skipPtr in
     withUnsafePointers(mut: &mvs.dx, mut: &mvs.dy, mut: &sads) { ptrDx, ptrDy, ptrSADs in
         for idx in 0..<blocks8Count {
             let col = idx % colCount
@@ -1090,8 +1091,8 @@ func computeMotionVectors(curr: PlaneData420, prev: PlaneData420, prevMVs: Motio
                 roundOffset: roundOffset
             )
             
-            if 512 < sad && idx < prevMVs.count {
-                let tmv = MotionVector(dx: Int16(Int(prevMVs.dx[idx]) >> 2), dy: Int16(Int(prevMVs.dy[idx]) >> 2))
+            if 512 < sad, let pmvs = prevMVs, idx < pmvs.count {
+                let tmv = MotionVector(dx: Int16(Int(pmvs.dx[idx]) >> 2), dy: Int16(Int(pmvs.dy[idx]) >> 2))
                 let (tmvMv, tmvSad) = MotionEstimation.searchPixels(
                     cBase: cBase, pBase: pBase, 
                     cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,

@@ -702,18 +702,13 @@ func decodeLayer32ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSi
                         continue
                     }
                     let block: BlockView = blocks[blockIndex]
-                    let half: Int = 16
-                    let view = block
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    let base = block.base
                     
-                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: half, into: block)
-                    dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                    inverseDWT2DBlock32(view)
+                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                    inverseDWT2DBlock32(block)
                     var blk = block
                     subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
                 }
@@ -736,18 +731,13 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
                 for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                     let blockIndex: Int = rowOffset &+ xIdx
                     let block: BlockView = blocks[blockIndex]
-                    let half: Int = 16
-                    let view = block
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+                    let base = block.base
                     
-                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: half, into: block)
-                    dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                    inverseDWT2DBlock32(view)
+                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                    inverseDWT2DBlock32(block)
                     var blk = block
                     subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
                 }
@@ -770,17 +760,12 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                     let blockIndex: Int = rowOffset &+ xIdx
                     let block: BlockView = blocks[blockIndex]
-                    let half: Int = 16
-                    prev.readCbDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: half, into: block)
-                    let view = block
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                    inverseDWT2DBlock32(view)
+                    let base = block.base
+                    prev.readCbDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                    inverseDWT2DBlock32(block)
                     var blk = block
                     subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
                 }
@@ -803,17 +788,12 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                 for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                     let blockIndex: Int = rowOffset &+ xIdx
                     let block: BlockView = blocks[blockIndex]
-                    let half: Int = 16
-                    prev.readCrDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: half, into: block)
-                    let view = block
-                    let base = view.base
-                    let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 32)
-                    let lhView = BlockView(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
-                    let hhView = BlockView(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
-                    dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                    dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
-                    inverseDWT2DBlock32(view)
+                    let base = block.base
+                    prev.readCrDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                    inverseDWT2DBlock32(block)
                     var blk = block
                     subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
                 }
@@ -828,25 +808,24 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }
     let subConst = sub
-    sub.withUnsafeY { destBase in
-        for i in startRow..<endRow {
-            let h: Int = i * 16
-            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                let block: BlockView = blocks[blockIndex]
-                let half: Int = 16 / 2
-                prev.readY(x: w / 2, y: h / 2, size: half, into: block)
-                let view = block
-                let base = view.base
-                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                inverseDWT2DBlock16(view)
-                var blk = block
-                subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+    prev.withUnsafeYReadOnly { prevBase in
+        sub.withUnsafeY { destBase in
+            for i in startRow..<endRow {
+                let h: Int = i * 16
+                let rowOffset = i * colCount
+                for xIdx in 0..<colCount {
+                    let w = xIdx * 16
+                    let blockIndex: Int = rowOffset &+ xIdx
+                    let block: BlockView = blocks[blockIndex]
+                    let base = block.base
+                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 8, into: block)
+                    dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                    dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                    dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                    inverseDWT2DBlock16(block)
+                    var blk = block
+                    subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+                }
             }
         }
     }
@@ -858,25 +837,24 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }
     let subConst = sub
-    sub.withUnsafeCb { destBase in
-        for i in startRow..<endRow {
-            let h: Int = i * 16
-            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                let block: BlockView = blocks[blockIndex]
-                let half: Int = 16 / 2
-                prev.readCb(x: w / 2, y: h / 2, size: half, into: block)
-                let view = block
-                let base = view.base
-                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                inverseDWT2DBlock16(view)
-                var blk = block
-                subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+    prev.withUnsafeCbReadOnly { prevBase in
+        sub.withUnsafeCb { destBase in
+            for i in startRow..<endRow {
+                let h: Int = i * 16
+                let rowOffset = i * colCount
+                for xIdx in 0..<colCount {
+                    let w = xIdx * 16
+                    let blockIndex: Int = rowOffset &+ xIdx
+                    let block: BlockView = blocks[blockIndex]
+                    let base = block.base
+                    prev.readCbDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 8, into: block)
+                    dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                    dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                    dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                    inverseDWT2DBlock16(block)
+                    var blk = block
+                    subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+                }
             }
         }
     }
@@ -888,25 +866,24 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
     let endRow: Int = min(startRow + chunkSize, rowCount)
     guard startRow < endRow else { return }
     let subConst = sub
-    sub.withUnsafeCr { destBase in
-        for i in startRow..<endRow {
-            let h: Int = i * 16
-            for (xIdx, w) in stride(from: 0, to: dx, by: 16).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
-                let block: BlockView = blocks[blockIndex]
-                let half: Int = 16 / 2
-                prev.readCr(x: w / 2, y: h / 2, size: half, into: block)
-                let view = block
-                let base = view.base
-                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 16)
-                let lhView = BlockView(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
-                let hhView = BlockView(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
-                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
-                inverseDWT2DBlock16(view)
-                var blk = block
-                subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+    prev.withUnsafeCrReadOnly { prevBase in
+        sub.withUnsafeCr { destBase in
+            for i in startRow..<endRow {
+                let h: Int = i * 16
+                let rowOffset = i * colCount
+                for xIdx in 0..<colCount {
+                    let w = xIdx * 16
+                    let blockIndex: Int = rowOffset &+ xIdx
+                    let block: BlockView = blocks[blockIndex]
+                    let base = block.base
+                    prev.readCrDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 8, into: block)
+                    dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                    dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                    dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                    inverseDWT2DBlock16(block)
+                    var blk = block
+                    subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+                }
             }
         }
     }
@@ -921,21 +898,17 @@ func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowC
     sub.withUnsafeY { destBase in
         for i in startRow..<endRow {
             let h: Int = i * 8
-            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 8
+                let blockIndex: Int = rowOffset &+ xIdx
                 let block: BlockView = blocks[blockIndex]
-                let half: Int = 8 / 2
-                let view = block
-                let base = view.base
-                let llView = BlockView(base: base, width: half, height: half, stride: 8)
-                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                let lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                let hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeSIMD4(llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
-                inverseDWT2DBlock8(view)
+                let base = block.base
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                inverseDWT2DBlock8(block)
                 var blk = block
                 subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
             }
@@ -952,21 +925,17 @@ func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
     sub.withUnsafeCb { destBase in
         for i in startRow..<endRow {
             let h: Int = i * 8
-            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 8
+                let blockIndex: Int = rowOffset &+ xIdx
                 let block: BlockView = blocks[blockIndex]
-                let half: Int = 8 / 2
-                let view = block
-                let base = view.base
-                let llView = BlockView(base: base, width: half, height: half, stride: 8)
-                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                let lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                let hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeSIMD4(llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
-                inverseDWT2DBlock8(view)
+                let base = block.base
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                inverseDWT2DBlock8(block)
                 var blk = block
                 subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
             }
@@ -983,21 +952,17 @@ func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
     sub.withUnsafeCr { destBase in
         for i in startRow..<endRow {
             let h: Int = i * 8
-            for (xIdx, w) in stride(from: 0, to: dx, by: 8).enumerated() {
-                let blockIndex: Int = i * colCount + xIdx
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 8
+                let blockIndex: Int = rowOffset &+ xIdx
                 let block: BlockView = blocks[blockIndex]
-                let half: Int = 8 / 2
-                let view = block
-                let base = view.base
-                let llView = BlockView(base: base, width: half, height: half, stride: 8)
-                let hlView = BlockView(base: base.advanced(by: half), width: half, height: half, stride: 8)
-                let lhView = BlockView(base: base.advanced(by: half * 8), width: half, height: half, stride: 8)
-                let hhView = BlockView(base: base.advanced(by: half * 8 + half), width: half, height: half, stride: 8)
-                dequantizeSIMD4(llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
-                inverseDWT2DBlock8(view)
+                let base = block.base
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                inverseDWT2DBlock8(block)
                 var blk = block
                 subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
             }

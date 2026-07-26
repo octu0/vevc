@@ -24,7 +24,7 @@ final class DWTTests: XCTestCase {
                     inverseLift53Block16(ptr, stride: 1)
                 case 32:
                     lift53Block32(ptr, stride: 1)
-                    inverseLift53Block32(ptr, stride: 1)
+                    inverseLift53Block32(base: ptr.baseAddress!)
                 default:
                     XCTFail("Unsupported size: \(size)")
                 }
@@ -88,7 +88,7 @@ final class DWTTests: XCTestCase {
                         inverseLift53Block16(ptr, stride: 1)
                     case 32:
                         lift53Block32(ptr, stride: 1)
-                        inverseLift53Block32(ptr, stride: 1)
+                        inverseLift53Block32(base: ptr.baseAddress!)
                     default:
                         XCTFail("Unsupported size: \(size)")
                     }

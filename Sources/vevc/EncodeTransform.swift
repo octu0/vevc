@@ -239,7 +239,9 @@ func isEffectivelyZeroBase4PFrame(data base: UnsafeMutablePointer<Int16>, thresh
         let ptr = base.advanced(by: y * 8)
         let vec = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
         let mask = (vec .> SIMD8<Int16>(repeating: th)) .| (vec .< SIMD8<Int16>(repeating: -th))
-        if any(mask) {   return false }
+        if any(mask) {
+            return false
+        }
     }
     return true
 }

@@ -53,7 +53,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         return
     }
     
-    withUnsafePointers(mut: &plane) { base in
+    withUnsafePointers(mut: &plane, mvs.dx) { base, mvDxBase in
         let rawTc = (qStep / 2) + 3
         let defaultTc: Int16 = switch true {
             case qStep <= 3: 0
@@ -89,9 +89,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         let wFast = (width / 32) * 32
         let hRem = height - hFast
         let wRem = width - wFast
-        
-        withUnsafePointers(mvs.dx) { mvDxBase in
-            let mvCount = mvs.dx.count
+        let mvCount = mvs.dx.count
             
             // Vertical Edges
             for col in 1..<colCount {
@@ -166,7 +164,6 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
                     }
                 }
             }
-        }
     }
 }
 
@@ -178,7 +175,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         return
     }
     
-    withUnsafePointers(mut: &plane) { base in
+    withUnsafePointers(mut: &plane, mvs.dx) { base, mvDxBase in
         let rawTc = (qStep / 2) + 3
         let defaultTc: Int16 = switch true {
             case qStep <= 3: 0
@@ -215,9 +212,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         let wFast = (width / 16) * 16
         let hRem = height - hFast
         let wRem = width - wFast
-        
-        withUnsafePointers(mvs.dx) { mvDxBase in
-            let mvCount = mvs.dx.count
+        let mvCount = mvs.dx.count
             
             // Vertical Edges
             for col in 1..<colCountC {
@@ -292,7 +287,6 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                     }
                 }
             }
-        }
     }
 }
 

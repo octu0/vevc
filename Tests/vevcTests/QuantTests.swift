@@ -37,35 +37,28 @@ final class QuantTests: XCTestCase {
 
         if signedMapping {
             switch width {
+            case 4:
+                quantize4(block, q: q)
+                dequantize4(ptr: block.base, stride: block.stride, q: q)
             case 8:
-                quantizeSIMDSignedMapping8(block, q: q)
-                dequantizeSIMDSignedMapping8(block, q: q)
+                quantize8(block, q: q)
+                dequantize8(ptr: block.base, stride: block.stride, q: q)
             case 16:
-                quantizeSIMDSignedMapping16(block, q: q)
-                dequantizeSIMDSignedMapping16(block, q: q)
+                quantize16(block, q: q)
+                dequantize16(ptr: block.base, stride: block.stride, q: q)
             case 32:
-                quantizeSIMDSignedMapping32(block, q: q)
-                dequantizeSIMDSignedMapping32(block, q: q)
+                quantize32(block, q: q)
+                dequantize32(block, q: q)
             default:
-                quantizeSIMDSignedMappingGeneric(block, q: q)
-                dequantizeSIMDSignedMappingGeneric(block, q: q)
+                fatalError("Unsupported size: \(width)")
             }
         } else {
             switch width {
             case 4:
-                quantizeSIMD4(block, q: q)
-                dequantizeSIMD4(block, q: q)
-            case 8:
-                quantizeSIMD8(block, q: q)
-                dequantizeSIMD8(block, q: q)
-            case 16:
-                quantizeSIMD16(block, q: q)
-                dequantizeSIMD16(block, q: q)
-            case 32:
-                quantizeSIMD32(block, q: q)
-                dequantizeSIMD32(block, q: q)
+                quantizeDPCM(block, q: q)
+                dequantizeDPCM(ptr: block.base, stride: block.stride, q: q)
             default:
-                fatalError("Unsupported size: \(width)")
+                return
             }
         }
 

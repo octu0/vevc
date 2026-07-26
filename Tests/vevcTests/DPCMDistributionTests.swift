@@ -71,7 +71,11 @@ final class DPCMDistributionTests: XCTestCase {
             let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
             defer { rel() }
             for i in blocks.indices {
-                evaluateQuantizeBase32(view: blocks[i], qt: qtY)
+                let subs = getSubbands32(view: blocks[i])
+                quantizeDPCM(subs.ll, q: qtY.qLow)
+                quantize16(subs.hl, q: qtY.qMid)
+                quantize16(subs.lh, q: qtY.qMid)
+                quantize16(subs.hh, q: qtY.qHigh)
             }
 
             // encode with AdaptiveEntropyModel to get actual pairs

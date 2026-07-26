@@ -57,7 +57,6 @@ public actor StreamingDecoderActor {
         
         var offset = 0
         let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset, profile: profile)
-        
         if frameHeader.isCopyFrame {
             guard let prev = previousReconstructed else {
                 throw DecodeError.insufficientDataContext("Copy frame without previous frame")
@@ -95,7 +94,6 @@ public actor StreamingDecoderActor {
         let isPFrame = (previousReconstructed != nil)
         let useBidirectional = isPFrame && firstReconstructed != nil
         let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
-        
         let img16 = try await decodeSpatialLayers(
             r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
             predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile

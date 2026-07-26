@@ -195,19 +195,11 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let pPd = predictedPd ?? PlaneData420(width: dx, height: dy, y: [], cb: [], cr: [])
         let lPd = nextPd ?? pPd
         
-        lPd.y.withUnsafeBufferPointer { ltrY in
-        lPd.cb.withUnsafeBufferPointer { ltrCb in
-        lPd.cr.withUnsafeBufferPointer { ltrCr in
-        pPd.y.withUnsafeBufferPointer { prevY in
-        pPd.cb.withUnsafeBufferPointer { prevCb in
-        pPd.cr.withUnsafeBufferPointer { prevCr in
-        current.y.withUnsafeMutableBufferPointer { currY in
-        current.cb.withUnsafeMutableBufferPointer { currCb in
-        current.cr.withUnsafeMutableBufferPointer { currCr in
-            guard let currYPtr = currY.baseAddress, let currCbPtr = currCb.baseAddress, let currCrPtr = currCr.baseAddress,
-                  let ltrYPtr = ltrY.baseAddress, let ltrCbPtr = ltrCb.baseAddress, let ltrCrPtr = ltrCr.baseAddress,
-                  let prevYPtr = prevY.baseAddress, let prevCbPtr = prevCb.baseAddress, let prevCrPtr = prevCr.baseAddress else { return }
-            
+        withUnsafePointers(
+            lPd.y, lPd.cb, lPd.cr,
+            pPd.y, pPd.cb, pPd.cr,
+            mut: &current.y, mut: &current.cb, mut: &current.cr
+        ) { ltrYPtr, ltrCbPtr, ltrCrPtr, prevYPtr, prevCbPtr, prevCrPtr, currYPtr, currCbPtr, currCrPtr in
             for i in 0..<map.count {
                 let mode = map[i]
                 if mode != .inter {
@@ -244,7 +236,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                     }
                 }
             }
-        }}}}}}}}}
+        }
     }
     
     return current

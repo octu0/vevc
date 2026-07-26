@@ -31,9 +31,9 @@ func evaluateQuantizeLayer32(view: BlockView, qt: QuantizationTable) {
     let hl = subs.hl
     let lh = subs.lh
     let hh = subs.hh
-    quantizeSIMDSignedMapping16(hl, q: qt.qMid)
-    quantizeSIMDSignedMapping16(lh, q: qt.qMid)
-    quantizeSIMDSignedMapping16(hh, q: qt.qHigh)
+    quantize16(hl, q: qt.qMid)
+    quantize16(lh, q: qt.qMid)
+    quantize16(hh, q: qt.qHigh)
 }
 
 @inline(__always)
@@ -42,9 +42,9 @@ func evaluateQuantizeLayer16(view: BlockView, qt: QuantizationTable) {
     let hl = subs.hl
     let lh = subs.lh
     let hh = subs.hh
-    quantizeSIMDSignedMapping8(hl, q: qt.qMid)
-    quantizeSIMDSignedMapping8(lh, q: qt.qMid)
-    quantizeSIMDSignedMapping8(hh, q: qt.qHigh)
+    quantize8(hl, q: qt.qMid)
+    quantize8(lh, q: qt.qMid)
+    quantize8(hh, q: qt.qHigh)
 }
 
 @inline(__always)
@@ -54,23 +54,10 @@ func evaluateQuantizeBase8(view: BlockView, qt: QuantizationTable) {
     let hl = subs.hl
     let lh = subs.lh
     let hh = subs.hh
-    quantizeSIMD4(ll, q: qt.qLow)
-    quantizeSIMDSignedMapping4(hl, q: qt.qMid)
-    quantizeSIMDSignedMapping4(lh, q: qt.qMid)
-    quantizeSIMDSignedMapping4(hh, q: qt.qHigh)
-}
-
-@inline(__always)
-func evaluateQuantizeBase32(view: BlockView, qt: QuantizationTable) {
-    let subs = getSubbands32(view: view)
-    let ll = subs.ll
-    let hl = subs.hl
-    let lh = subs.lh
-    let hh = subs.hh
-    quantizeSIMD16(ll, q: qt.qLow)
-    quantizeSIMDSignedMapping16(hl, q: qt.qMid)
-    quantizeSIMDSignedMapping16(lh, q: qt.qMid)
-    quantizeSIMDSignedMapping16(hh, q: qt.qHigh)
+    quantizeDPCM(ll, q: qt.qLow)
+    quantize4(hl, q: qt.qMid)
+    quantize4(lh, q: qt.qMid)
+    quantize4(hh, q: qt.qHigh)
 }
 
 @inline(__always)
@@ -680,14 +667,10 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
                 
                 let view = blk
                 let base = view.base
-                let llView = BlockView(base: base, width: 4, height: 4, stride: 8)
-                let hlView = BlockView(base: base.advanced(by: 4), width: 4, height: 4, stride: 8)
-                let lhView = BlockView(base: base.advanced(by: 32), width: 4, height: 4, stride: 8)
-                let hhView = BlockView(base: base.advanced(by: 36), width: 4, height: 4, stride: 8)
-                dequantizeSIMD4(llView, q: qt.qLow)
-                dequantizeSIMDSignedMapping4(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping4(hhView, q: qt.qHigh)
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
                 inverseDWT2DBlock8(view)
                             
                 switch true {
@@ -742,13 +725,9 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                                         
                 let view = blk
                 let base = view.base
-                let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
-                let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
-                let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
-                
-                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
                 inverseDWT2DBlock32(view)
                             
                 switch true {
@@ -803,12 +782,9 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                                         
                 let view = blk
                 let base = view.base
-                let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
-                let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
-                let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
-                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
                 inverseDWT2DBlock32(view)
                             
                 switch true {
@@ -863,12 +839,9 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                                         
                 let view = blk
                 let base = view.base
-                let hlView = BlockView(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
-                let lhView = BlockView(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
-                let hhView = BlockView(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
-                dequantizeSIMDSignedMapping16(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping16(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping16(hhView, q: qt.qHigh)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
                 inverseDWT2DBlock32(view)
                             
                 switch true {
@@ -923,12 +896,9 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
                                         
                 let view = blk
                 let base = view.base
-                let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+                dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
                 inverseDWT2DBlock16(view)
                             
                 switch true {
@@ -983,12 +953,9 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                                         
                 let view = blk
                 let base = view.base
-                let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+                dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
                 inverseDWT2DBlock16(view)
                             
                 switch true {
@@ -1043,12 +1010,9 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                                         
                 let view = blk
                 let base = view.base
-                let hlView = BlockView(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
-                let lhView = BlockView(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
-                let hhView = BlockView(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
-                dequantizeSIMDSignedMapping8(hlView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(lhView, q: qt.qMid)
-                dequantizeSIMDSignedMapping8(hhView, q: qt.qHigh)
+                dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
                 inverseDWT2DBlock16(view)
                             
                 switch true {
