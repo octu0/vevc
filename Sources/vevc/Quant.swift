@@ -546,30 +546,29 @@ internal func dequantizeSIMDSignedMapping4(_ block: BlockView, q: Quantizer) {
 @inline(__always)
 internal func dequantizeSIMDSignedMapping16(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
+    let vStep = SIMD8<Int32>(repeating: step)
+    let v8 = SIMD8<Int32>(repeating: 8)
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
         let v = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<UInt16>.self)
         let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
         let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
-        let v0 = Int16(clamping: (Int32(v16[0]) &* step &+ 8) >> 4)
-        let v1 = Int16(clamping: (Int32(v16[1]) &* step &+ 8) >> 4)
-        let v2 = Int16(clamping: (Int32(v16[2]) &* step &+ 8) >> 4)
-        let v3 = Int16(clamping: (Int32(v16[3]) &* step &+ 8) >> 4)
-        let v4 = Int16(clamping: (Int32(v16[4]) &* step &+ 8) >> 4)
-        let v5 = Int16(clamping: (Int32(v16[5]) &* step &+ 8) >> 4)
-        let v6 = Int16(clamping: (Int32(v16[6]) &* step &+ 8) >> 4)
-        let v7 = Int16(clamping: (Int32(v16[7]) &* step &+ 8) >> 4)
-        let v8 = Int16(clamping: (Int32(v16[8]) &* step &+ 8) >> 4)
-        let v9 = Int16(clamping: (Int32(v16[9]) &* step &+ 8) >> 4)
-        let v10 = Int16(clamping: (Int32(v16[10]) &* step &+ 8) >> 4)
-        let v11 = Int16(clamping: (Int32(v16[11]) &* step &+ 8) >> 4)
-        let v12 = Int16(clamping: (Int32(v16[12]) &* step &+ 8) >> 4)
-        let v13 = Int16(clamping: (Int32(v16[13]) &* step &+ 8) >> 4)
-        let v14 = Int16(clamping: (Int32(v16[14]) &* step &+ 8) >> 4)
-        let v15 = Int16(clamping: (Int32(v16[15]) &* step &+ 8) >> 4)
-        let res16 = SIMD16<Int16>(
-            v0, v1, v2, v3, v4, v5, v6, v7,
-            v8, v9, v10, v11, v12, v13, v14, v15
+        
+        let low8 = SIMD8<Int16>(v16[0], v16[1], v16[2], v16[3], v16[4], v16[5], v16[6], v16[7])
+        let high8 = SIMD8<Int16>(v16[8], v16[9], v16[10], v16[11], v16[12], v16[13], v16[14], v16[15])
+        
+        let l32 = SIMD8<Int32>(truncatingIfNeeded: low8)
+        let h32 = SIMD8<Int32>(truncatingIfNeeded: high8)
+        
+        let resLow8 = (l32 &* vStep &+ v8) &>> 4
+        let resHigh8 = (h32 &* vStep &+ v8) &>> 4
+        
+        let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: SIMD8(repeating: -32768), upperBound: SIMD8(repeating: 32767)))
+        let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: SIMD8(repeating: -32768), upperBound: SIMD8(repeating: 32767)))
+        
+                let res16 = SIMD16<Int16>(
+            cLow8[0], cLow8[1], cLow8[2], cLow8[3], cLow8[4], cLow8[5], cLow8[6], cLow8[7],
+            cHigh8[0], cHigh8[1], cHigh8[2], cHigh8[3], cHigh8[4], cHigh8[5], cHigh8[6], cHigh8[7]
         )
         UnsafeMutableRawPointer(ptr).storeBytes(of: res16, as: SIMD16<Int16>.self)
     }
@@ -578,6 +577,8 @@ internal func dequantizeSIMDSignedMapping16(_ block: BlockView, q: Quantizer) {
 @inline(__always)
 internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
+    let vStep = SIMD8<Int32>(repeating: step)
+    let v8 = SIMD8<Int32>(repeating: 8)
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
         let ptrRaw0 = UnsafeRawPointer(ptr)
@@ -588,42 +589,40 @@ internal func dequantizeSIMDSignedMapping32(_ block: BlockView, q: Quantizer) {
         let decodedUInt1 = ((v1 &>> 1) ^ (.zero &- (v1 & 1)))
         let v16_0 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt0)
         let v16_1 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt1)
-
-        let a0 = Int16(clamping: (Int32(v16_0[0]) &* step &+ 8) >> 4)
-        let a1 = Int16(clamping: (Int32(v16_0[1]) &* step &+ 8) >> 4)
-        let a2 = Int16(clamping: (Int32(v16_0[2]) &* step &+ 8) >> 4)
-        let a3 = Int16(clamping: (Int32(v16_0[3]) &* step &+ 8) >> 4)
-        let a4 = Int16(clamping: (Int32(v16_0[4]) &* step &+ 8) >> 4)
-        let a5 = Int16(clamping: (Int32(v16_0[5]) &* step &+ 8) >> 4)
-        let a6 = Int16(clamping: (Int32(v16_0[6]) &* step &+ 8) >> 4)
-        let a7 = Int16(clamping: (Int32(v16_0[7]) &* step &+ 8) >> 4)
-        let a8 = Int16(clamping: (Int32(v16_0[8]) &* step &+ 8) >> 4)
-        let a9 = Int16(clamping: (Int32(v16_0[9]) &* step &+ 8) >> 4)
-        let a10 = Int16(clamping: (Int32(v16_0[10]) &* step &+ 8) >> 4)
-        let a11 = Int16(clamping: (Int32(v16_0[11]) &* step &+ 8) >> 4)
-        let a12 = Int16(clamping: (Int32(v16_0[12]) &* step &+ 8) >> 4)
-        let a13 = Int16(clamping: (Int32(v16_0[13]) &* step &+ 8) >> 4)
-        let a14 = Int16(clamping: (Int32(v16_0[14]) &* step &+ 8) >> 4)
-        let a15 = Int16(clamping: (Int32(v16_0[15]) &* step &+ 8) >> 4)
-        let res16_0 = SIMD16<Int16>(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15)
-
-        let b0 = Int16(clamping: (Int32(v16_1[0]) &* step &+ 8) >> 4)
-        let b1 = Int16(clamping: (Int32(v16_1[1]) &* step &+ 8) >> 4)
-        let b2 = Int16(clamping: (Int32(v16_1[2]) &* step &+ 8) >> 4)
-        let b3 = Int16(clamping: (Int32(v16_1[3]) &* step &+ 8) >> 4)
-        let b4 = Int16(clamping: (Int32(v16_1[4]) &* step &+ 8) >> 4)
-        let b5 = Int16(clamping: (Int32(v16_1[5]) &* step &+ 8) >> 4)
-        let b6 = Int16(clamping: (Int32(v16_1[6]) &* step &+ 8) >> 4)
-        let b7 = Int16(clamping: (Int32(v16_1[7]) &* step &+ 8) >> 4)
-        let b8 = Int16(clamping: (Int32(v16_1[8]) &* step &+ 8) >> 4)
-        let b9 = Int16(clamping: (Int32(v16_1[9]) &* step &+ 8) >> 4)
-        let b10 = Int16(clamping: (Int32(v16_1[10]) &* step &+ 8) >> 4)
-        let b11 = Int16(clamping: (Int32(v16_1[11]) &* step &+ 8) >> 4)
-        let b12 = Int16(clamping: (Int32(v16_1[12]) &* step &+ 8) >> 4)
-        let b13 = Int16(clamping: (Int32(v16_1[13]) &* step &+ 8) >> 4)
-        let b14 = Int16(clamping: (Int32(v16_1[14]) &* step &+ 8) >> 4)
-        let b15 = Int16(clamping: (Int32(v16_1[15]) &* step &+ 8) >> 4)
-        let res16_1 = SIMD16<Int16>(b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, b15)
+        
+        let low8_0 = SIMD8<Int16>(v16_0[0], v16_0[1], v16_0[2], v16_0[3], v16_0[4], v16_0[5], v16_0[6], v16_0[7])
+        let high8_0 = SIMD8<Int16>(v16_0[8], v16_0[9], v16_0[10], v16_0[11], v16_0[12], v16_0[13], v16_0[14], v16_0[15])
+        
+        let low8_1 = SIMD8<Int16>(v16_1[0], v16_1[1], v16_1[2], v16_1[3], v16_1[4], v16_1[5], v16_1[6], v16_1[7])
+        let high8_1 = SIMD8<Int16>(v16_1[8], v16_1[9], v16_1[10], v16_1[11], v16_1[12], v16_1[13], v16_1[14], v16_1[15])
+        
+        let l32_0 = SIMD8<Int32>(truncatingIfNeeded: low8_0)
+        let h32_0 = SIMD8<Int32>(truncatingIfNeeded: high8_0)
+        let l32_1 = SIMD8<Int32>(truncatingIfNeeded: low8_1)
+        let h32_1 = SIMD8<Int32>(truncatingIfNeeded: high8_1)
+        
+        let resLow8_0 = (l32_0 &* vStep &+ v8) &>> 4
+        let resHigh8_0 = (h32_0 &* vStep &+ v8) &>> 4
+        let resLow8_1 = (l32_1 &* vStep &+ v8) &>> 4
+        let resHigh8_1 = (h32_1 &* vStep &+ v8) &>> 4
+        
+        let limitMin = SIMD8<Int32>(repeating: -32768)
+        let limitMax = SIMD8<Int32>(repeating: 32767)
+        
+        let cLow8_0 = SIMD8<Int16>(truncatingIfNeeded: resLow8_0.clamped(lowerBound: limitMin, upperBound: limitMax))
+        let cHigh8_0 = SIMD8<Int16>(truncatingIfNeeded: resHigh8_0.clamped(lowerBound: limitMin, upperBound: limitMax))
+        let cLow8_1 = SIMD8<Int16>(truncatingIfNeeded: resLow8_1.clamped(lowerBound: limitMin, upperBound: limitMax))
+        let cHigh8_1 = SIMD8<Int16>(truncatingIfNeeded: resHigh8_1.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let res16_0 = SIMD16<Int16>(
+            cLow8_0[0], cLow8_0[1], cLow8_0[2], cLow8_0[3], cLow8_0[4], cLow8_0[5], cLow8_0[6], cLow8_0[7],
+            cHigh8_0[0], cHigh8_0[1], cHigh8_0[2], cHigh8_0[3], cHigh8_0[4], cHigh8_0[5], cHigh8_0[6], cHigh8_0[7]
+        )
+        let res16_1 = SIMD16<Int16>(
+            cLow8_1[0], cLow8_1[1], cLow8_1[2], cLow8_1[3], cLow8_1[4], cLow8_1[5], cLow8_1[6], cLow8_1[7],
+            cHigh8_1[0], cHigh8_1[1], cHigh8_1[2], cHigh8_1[3], cHigh8_1[4], cHigh8_1[5], cHigh8_1[6], cHigh8_1[7]
+        )
+        
         UnsafeMutableRawPointer(ptr).storeBytes(of: res16_0, as: SIMD16<Int16>.self)
         UnsafeMutableRawPointer(ptr.advanced(by: 16)).storeBytes(of: res16_1, as: SIMD16<Int16>.self)
     }

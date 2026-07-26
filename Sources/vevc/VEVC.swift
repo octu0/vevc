@@ -135,6 +135,9 @@ final class BaseBlockViewPool: @unchecked Sendable {
     private var pools: [Int: [BlockView]] = [:]
     private var int16Pools: [Int: [[Int16]]] = [:]
     private var arrayPools: [Int: [[BlockView]]] = [:]
+    private var pools1024: [BlockView] = []
+    private var pools256: [BlockView] = []
+    private var pools64: [BlockView] = []
     
     private let maxPerSize: Int
     

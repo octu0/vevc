@@ -322,15 +322,6 @@ func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep
     }
 }
 
-@inline(__always)
-private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 16, tc: Int16, beta: Int32) {
-    deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
-}
-
-@inline(__always)
-private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 32, tc: Int16, beta: Int32) {
-    deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
-}
 
 @inline(__always)
 private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
@@ -367,10 +358,6 @@ private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width:
     }
 }
 
-@inline(__always)
-private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 16, tc: Int16, beta: Int32) {
-    deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
-}
 
 @inline(__always)
 private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
@@ -407,10 +394,6 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
     }
 }
 
-@inline(__always)
-private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: 32, tc: Int16, beta: Int32) {
-    deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
-}
 
 @inline(__always)
 private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>) {
