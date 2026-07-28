@@ -575,7 +575,7 @@ func computeZeroSAD16x16(
     cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
     bx: Int, by: Int, width: Int
 ) -> Int {
-    var sad: Int = 0
+    var acc16 = SIMD16<Int32>(repeating: 0)
     let strideY = width
     let strideC = (width + 1) / 2
     let bxC = bx / 2
@@ -583,18 +583,34 @@ func computeZeroSAD16x16(
 
     for y in 0..<16 {
         let offset = (by + y) * strideY + bx
-        for x in 0..<16 {
-            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
-        }
+        let cv = UnsafeRawPointer(cY.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+        let rv = UnsafeRawPointer(rY.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+        let d1 = cv &- rv
+        let d2 = rv &- cv
+        let diff = d1.replacing(with: d2, where: cv .< rv)
+        acc16 &+= SIMD16<Int32>(clamping: diff)
     }
+    var sad = Int(acc16.wrappedSum())
     
+    var acc8 = SIMD8<Int32>(repeating: 0)
     for y in 0..<8 {
         let offset = (byC + y) * strideC + bxC
-        for x in 0..<8 {
-            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
-            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
-        }
+        
+        let cvCb = UnsafeRawPointer(cCb.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let rvCb = UnsafeRawPointer(rCb.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let d1Cb = cvCb &- rvCb
+        let d2Cb = rvCb &- cvCb
+        let diffCb = d1Cb.replacing(with: d2Cb, where: cvCb .< rvCb)
+        acc8 &+= SIMD8<Int32>(clamping: diffCb)
+        
+        let cvCr = UnsafeRawPointer(cCr.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let rvCr = UnsafeRawPointer(rCr.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let d1Cr = cvCr &- rvCr
+        let d2Cr = rvCr &- cvCr
+        let diffCr = d1Cr.replacing(with: d2Cr, where: cvCr .< rvCr)
+        acc8 &+= SIMD8<Int32>(clamping: diffCr)
     }
+    sad += Int(acc8.wrappedSum())
     return sad
 }
 
