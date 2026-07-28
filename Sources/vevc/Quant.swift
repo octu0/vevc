@@ -306,8 +306,8 @@ internal func dequantize16(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Qua
         let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
         let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
         
-        let low8 = SIMD8<Int16>(v16[0], v16[1], v16[2], v16[3], v16[4], v16[5], v16[6], v16[7])
-        let high8 = SIMD8<Int16>(v16[8], v16[9], v16[10], v16[11], v16[12], v16[13], v16[14], v16[15])
+        let low8 = v16.lowHalf
+        let high8 = v16.highHalf
         
         let l32 = SIMD8<Int32>(truncatingIfNeeded: low8)
         let h32 = SIMD8<Int32>(truncatingIfNeeded: high8)
@@ -318,10 +318,7 @@ internal func dequantize16(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Qua
         let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: SIMD8(repeating: -32768), upperBound: SIMD8(repeating: 32767)))
         let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: SIMD8(repeating: -32768), upperBound: SIMD8(repeating: 32767)))
         
-        let res16 = SIMD16<Int16>(
-            cLow8[0], cLow8[1], cLow8[2], cLow8[3], cLow8[4], cLow8[5], cLow8[6], cLow8[7],
-            cHigh8[0], cHigh8[1], cHigh8[2], cHigh8[3], cHigh8[4], cHigh8[5], cHigh8[6], cHigh8[7]
-        )
+        let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
         UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
         rowPtr = rowPtr.advanced(by: stride)
     }
@@ -343,11 +340,11 @@ internal func dequantize32(_ block: BlockView, q: Quantizer) {
         let v16_0 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt0)
         let v16_1 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt1)
         
-        let low8_0 = SIMD8<Int16>(v16_0[0], v16_0[1], v16_0[2], v16_0[3], v16_0[4], v16_0[5], v16_0[6], v16_0[7])
-        let high8_0 = SIMD8<Int16>(v16_0[8], v16_0[9], v16_0[10], v16_0[11], v16_0[12], v16_0[13], v16_0[14], v16_0[15])
+        let low8_0 = v16_0.lowHalf
+        let high8_0 = v16_0.highHalf
         
-        let low8_1 = SIMD8<Int16>(v16_1[0], v16_1[1], v16_1[2], v16_1[3], v16_1[4], v16_1[5], v16_1[6], v16_1[7])
-        let high8_1 = SIMD8<Int16>(v16_1[8], v16_1[9], v16_1[10], v16_1[11], v16_1[12], v16_1[13], v16_1[14], v16_1[15])
+        let low8_1 = v16_1.lowHalf
+        let high8_1 = v16_1.highHalf
         
         let l32_0 = SIMD8<Int32>(truncatingIfNeeded: low8_0)
         let h32_0 = SIMD8<Int32>(truncatingIfNeeded: high8_0)
@@ -367,14 +364,8 @@ internal func dequantize32(_ block: BlockView, q: Quantizer) {
         let cLow8_1 = SIMD8<Int16>(truncatingIfNeeded: resLow8_1.clamped(lowerBound: limitMin, upperBound: limitMax))
         let cHigh8_1 = SIMD8<Int16>(truncatingIfNeeded: resHigh8_1.clamped(lowerBound: limitMin, upperBound: limitMax))
         
-        let res16_0 = SIMD16<Int16>(
-            cLow8_0[0], cLow8_0[1], cLow8_0[2], cLow8_0[3], cLow8_0[4], cLow8_0[5], cLow8_0[6], cLow8_0[7],
-            cHigh8_0[0], cHigh8_0[1], cHigh8_0[2], cHigh8_0[3], cHigh8_0[4], cHigh8_0[5], cHigh8_0[6], cHigh8_0[7]
-        )
-        let res16_1 = SIMD16<Int16>(
-            cLow8_1[0], cLow8_1[1], cLow8_1[2], cLow8_1[3], cLow8_1[4], cLow8_1[5], cLow8_1[6], cLow8_1[7],
-            cHigh8_1[0], cHigh8_1[1], cHigh8_1[2], cHigh8_1[3], cHigh8_1[4], cHigh8_1[5], cHigh8_1[6], cHigh8_1[7]
-        )
+        let res16_0 = SIMD16<Int16>(lowHalf: cLow8_0, highHalf: cHigh8_0)
+        let res16_1 = SIMD16<Int16>(lowHalf: cLow8_1, highHalf: cHigh8_1)
         
         UnsafeMutableRawPointer(ptr).storeBytes(of: res16_0, as: SIMD16<Int16>.self)
         UnsafeMutableRawPointer(ptr.advanced(by: 16)).storeBytes(of: res16_1, as: SIMD16<Int16>.self)
