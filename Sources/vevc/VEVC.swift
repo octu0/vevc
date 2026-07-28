@@ -180,7 +180,9 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         _lock.unlock()
         #endif
-        return BlockView.allocate(width: 32, height: 32)
+        let fresh = BlockView.allocate(width: 32, height: 32)
+        clearBlockRegion(base: fresh.base, width: fresh.width, height: fresh.height, stride: fresh.stride)
+        return fresh
     }
 
     @inline(__always)
@@ -201,7 +203,9 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         _lock.unlock()
         #endif
-        return BlockView.allocate(width: 16, height: 16)
+        let fresh = BlockView.allocate(width: 16, height: 16)
+        clearBlockRegion(base: fresh.base, width: fresh.width, height: fresh.height, stride: fresh.stride)
+        return fresh
     }
 
     @inline(__always)
@@ -222,7 +226,9 @@ final class BaseBlockViewPool: @unchecked Sendable {
         }
         _lock.unlock()
         #endif
-        return BlockView.allocate(width: 8, height: 8)
+        let fresh = BlockView.allocate(width: 8, height: 8)
+        clearBlockRegion(base: fresh.base, width: fresh.width, height: fresh.height, stride: fresh.stride)
+        return fresh
     }
 
     @inline(__always)
@@ -366,7 +372,9 @@ final class BaseBlockViewPool: @unchecked Sendable {
         _lock.unlock()
         #endif
         
-        return BlockView.allocate(width: width, height: height)
+        let fresh = BlockView.allocate(width: width, height: height)
+        clearBlockRegion(base: fresh.base, width: fresh.width, height: fresh.height, stride: fresh.stride)
+        return fresh
     }
     
     @inline(__always)
@@ -418,22 +426,27 @@ final class BaseBlockViewPool: @unchecked Sendable {
 
     @inline(__always)
     func getInt16(count: Int) -> [Int16] {
+        // プールは常にゼロ初期化済みメモリを返す。
+        // 未初期化のまま返すと「書き込まれなかった領域を読む消費者」の出力が
+        // ヒープ状態・スケジューリング依存になり、エンコード結果が非決定になる。
         #if arch(wasm32)
         if var bucket = int16Pools[count], bucket.isEmpty != true {
-            let arr = bucket.removeLast()
+            var arr = bucket.removeLast()
             int16Pools[count] = bucket
+            arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
             return arr
         }
         #else
         _lock.lock()
         if let pool = int16Pools[count], pool.isEmpty != true {
-            let arr = int16Pools[count]!.removeLast()
+            var arr = int16Pools[count]!.removeLast()
             _lock.unlock()
+            arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
             return arr
         }
         _lock.unlock()
         #endif
-        return [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+        return [Int16](repeating: 0, count: count)
     }
     
     @inline(__always)

@@ -298,34 +298,26 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
         let skipThresholdPerPixel = ProcessInfo.processInfo.environment["VEVC_SKIP_THRESH"].flatMap { Int($0) } ?? 2
         
-        var cYAddr = 0
-        var cCbAddr = 0
-        var cCrAddr = 0
-        var pYAddr = 0
-        var pCbAddr = 0
-        var pCrAddr = 0
-        
-        pd.y.withUnsafeBufferPointer { cYAddr = Int(bitPattern: $0.baseAddress!) }
-        pd.cb.withUnsafeBufferPointer { cCbAddr = Int(bitPattern: $0.baseAddress!) }
-        pd.cr.withUnsafeBufferPointer { cCrAddr = Int(bitPattern: $0.baseAddress!) }
-        prevInput.y.withUnsafeBufferPointer { pYAddr = Int(bitPattern: $0.baseAddress!) }
-        prevInput.cb.withUnsafeBufferPointer { pCbAddr = Int(bitPattern: $0.baseAddress!) }
-        prevInput.cr.withUnsafeBufferPointer { pCrAddr = Int(bitPattern: $0.baseAddress!) }
-        
         let matchResults = await withTaskGroup(of: [(Int, Bool)].self) { group in
             let batchSize = 128
             for batchStart in stride(from: 0, to: blockCount, by: batchSize) {
                 let batchEnd = min(batchStart + batchSize, blockCount)
-                group.addTask { [cYAddr, cCbAddr, cCrAddr, pYAddr, pCbAddr, pCrAddr] in
-                    let cYPtr = UnsafePointer<Int16>(bitPattern: cYAddr)!
-                    let cCbPtr = UnsafePointer<Int16>(bitPattern: cCbAddr)!
-                    let cCrPtr = UnsafePointer<Int16>(bitPattern: cCrAddr)!
-                    let pYPtr = UnsafePointer<Int16>(bitPattern: pYAddr)!
-                    let pCbPtr = UnsafePointer<Int16>(bitPattern: pCbAddr)!
-                    let pCrPtr = UnsafePointer<Int16>(bitPattern: pCrAddr)!
-                    
+                group.addTask {
                     var results = [(Int, Bool)]()
                     results.reserveCapacity(batchEnd - batchStart)
+                    // ポインタ取得はタスク内・クロージャスコープ内で行う（外へ持ち出すと未定義動作）
+                    pd.y.withUnsafeBufferPointer { cYBuf in
+                    pd.cb.withUnsafeBufferPointer { cCbBuf in
+                    pd.cr.withUnsafeBufferPointer { cCrBuf in
+                    prevInput.y.withUnsafeBufferPointer { pYBuf in
+                    prevInput.cb.withUnsafeBufferPointer { pCbBuf in
+                    prevInput.cr.withUnsafeBufferPointer { pCrBuf in
+                    let cYPtr = cYBuf.baseAddress!
+                    let cCbPtr = cCbBuf.baseAddress!
+                    let cCrPtr = cCrBuf.baseAddress!
+                    let pYPtr = pYBuf.baseAddress!
+                    let pCbPtr = pCbBuf.baseAddress!
+                    let pCrPtr = pCrBuf.baseAddress!
                     
                     for i in batchStart..<batchEnd {
                         let bx = (i % bw) * 32
@@ -357,6 +349,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                         }
                         results.append((i, allSubBlocksMatchPrev))
                     }
+                    }}}}}}
                     return results
                 }
             }

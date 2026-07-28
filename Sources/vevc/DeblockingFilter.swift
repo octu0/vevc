@@ -28,6 +28,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         
         // Vertical Edges
         for x in stride(from: 32, to: width, by: 32) {
+            if width <= x + 1 { continue }  // 右隣 q1 の読みが範囲外になる境界位置を除外
             for y in stride(from: 0, to: hFast, by: 32) {
                 deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
             }
@@ -36,6 +37,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         
         // Horizontal Edges
         for y in stride(from: 32, to: height, by: 32) {
+            if height <= y + 1 { continue }  // 下隣 q1 の行読みが範囲外になる境界位置を除外
             for x in stride(from: 0, to: wFast, by: 32) {
                 deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
             }
@@ -94,6 +96,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
             // Vertical Edges
             for col in 1..<colCount {
                 let x = col * 32
+                if width <= x + 1 { continue }  // 右隣 q1 の読みが範囲外になる境界位置を除外
                 for row in 0..<rowCount {
                     let y = row * 32
                     let idx = row * colCount + col
@@ -131,6 +134,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
             // Horizontal Edges
             for row in 1..<rowCount {
                 let y = row * 32
+                if height <= y + 1 { continue }  // 下隣 q1 の行読みが範囲外になる境界位置を除外
                 for col in 0..<colCount {
                     let x = col * 32
                     let idx = row * colCount + col
@@ -217,6 +221,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
             // Vertical Edges
             for col in 1..<colCountC {
                 let x = col * 16
+                if width <= x + 1 { continue }  // 右隣 q1 の読みが範囲外になる境界位置を除外
                 for row in 0..<rowCountC {
                     let y = row * 16
                     let idx = row * mvColCount + col
@@ -254,6 +259,7 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
             // Horizontal Edges
             for row in 1..<rowCountC {
                 let y = row * 16
+                if height <= y + 1 { continue }  // 下隣 q1 の行読みが範囲外になる境界位置を除外
                 for col in 0..<colCountC {
                     let x = col * 16
                     let idx = row * mvColCount + col
@@ -314,6 +320,7 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
         
         // Vertical Edges
         for x in stride(from: 16, to: width, by: 16) {
+            if width <= x + 1 { continue }  // 右隣 q1 の読みが範囲外になる境界位置を除外
             for y in stride(from: 0, to: hFast, by: 16) {
                 deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
             }
@@ -322,6 +329,7 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
         
         // Horizontal Edges
         for y in stride(from: 16, to: height, by: 16) {
+            if height <= y + 1 { continue }  // 下隣 q1 の行読みが範囲外になる境界位置を除外
             for x in stride(from: 0, to: wFast, by: 16) {
                 deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
             }
