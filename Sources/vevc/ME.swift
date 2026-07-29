@@ -197,38 +197,91 @@ struct MotionEstimation {
 
     @inline(__always)
     static func compute64PointSADBlocksWithStride(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>, pStride: Int) -> Int {
-        var acc = SIMD8<Int32>(repeating: 0)
+        var sad: Int32 = 0
         for ry in 0..<8 {
             let cRow = cBase.advanced(by: ry * 8)
             let pRow = pBase.advanced(by: ry * pStride)
             
-            let cVec = UnsafeRawPointer(cRow).loadUnaligned(as: SIMD8<Int16>.self)
-            let pVec = UnsafeRawPointer(pRow).loadUnaligned(as: SIMD8<Int16>.self)
-            
-            let d1 = cVec &- pVec
-            let d2 = pVec &- cVec
-            let diff = d1.replacing(with: d2, where: cVec .< pVec)
-            acc &+= SIMD8<Int32>(clamping: diff)
+            sad &+= Int32((Int32(cRow[0]) - Int32(pRow[0])).magnitude)
+            sad &+= Int32((Int32(cRow[1]) - Int32(pRow[1])).magnitude)
+            sad &+= Int32((Int32(cRow[2]) - Int32(pRow[2])).magnitude)
+            sad &+= Int32((Int32(cRow[3]) - Int32(pRow[3])).magnitude)
+            sad &+= Int32((Int32(cRow[4]) - Int32(pRow[4])).magnitude)
+            sad &+= Int32((Int32(cRow[5]) - Int32(pRow[5])).magnitude)
+            sad &+= Int32((Int32(cRow[6]) - Int32(pRow[6])).magnitude)
+            sad &+= Int32((Int32(cRow[7]) - Int32(pRow[7])).magnitude)
         }
-        return Int(acc.wrappedSum())
+        return Int(sad)
     }
 
     @inline(__always)
     static func compute64PointSADBlocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
-        var acc = SIMD8<Int32>(repeating: 0)
-        for ry in 0..<8 {
-            let cRow = cBase.advanced(by: ry * 8)
-            let pRow = pBase.advanced(by: ry * 8)
-            
-            let cVec = UnsafeRawPointer(cRow).loadUnaligned(as: SIMD8<Int16>.self)
-            let pVec = UnsafeRawPointer(pRow).loadUnaligned(as: SIMD8<Int16>.self)
-            
-            let d1 = cVec &- pVec
-            let d2 = pVec &- cVec
-            let diff = d1.replacing(with: d2, where: cVec .< pVec)
-            acc &+= SIMD8<Int32>(clamping: diff)
-        }
-        return Int(acc.wrappedSum())
+        var sad: Int32 = 0
+        sad &+= Int32((Int32(cBase[0]) - Int32(pBase[0])).magnitude)
+        sad &+= Int32((Int32(cBase[1]) - Int32(pBase[1])).magnitude)
+        sad &+= Int32((Int32(cBase[2]) - Int32(pBase[2])).magnitude)
+        sad &+= Int32((Int32(cBase[3]) - Int32(pBase[3])).magnitude)
+        sad &+= Int32((Int32(cBase[4]) - Int32(pBase[4])).magnitude)
+        sad &+= Int32((Int32(cBase[5]) - Int32(pBase[5])).magnitude)
+        sad &+= Int32((Int32(cBase[6]) - Int32(pBase[6])).magnitude)
+        sad &+= Int32((Int32(cBase[7]) - Int32(pBase[7])).magnitude)
+        sad &+= Int32((Int32(cBase[8]) - Int32(pBase[8])).magnitude)
+        sad &+= Int32((Int32(cBase[9]) - Int32(pBase[9])).magnitude)
+        sad &+= Int32((Int32(cBase[10]) - Int32(pBase[10])).magnitude)
+        sad &+= Int32((Int32(cBase[11]) - Int32(pBase[11])).magnitude)
+        sad &+= Int32((Int32(cBase[12]) - Int32(pBase[12])).magnitude)
+        sad &+= Int32((Int32(cBase[13]) - Int32(pBase[13])).magnitude)
+        sad &+= Int32((Int32(cBase[14]) - Int32(pBase[14])).magnitude)
+        sad &+= Int32((Int32(cBase[15]) - Int32(pBase[15])).magnitude)
+        sad &+= Int32((Int32(cBase[16]) - Int32(pBase[16])).magnitude)
+        sad &+= Int32((Int32(cBase[17]) - Int32(pBase[17])).magnitude)
+        sad &+= Int32((Int32(cBase[18]) - Int32(pBase[18])).magnitude)
+        sad &+= Int32((Int32(cBase[19]) - Int32(pBase[19])).magnitude)
+        sad &+= Int32((Int32(cBase[20]) - Int32(pBase[20])).magnitude)
+        sad &+= Int32((Int32(cBase[21]) - Int32(pBase[21])).magnitude)
+        sad &+= Int32((Int32(cBase[22]) - Int32(pBase[22])).magnitude)
+        sad &+= Int32((Int32(cBase[23]) - Int32(pBase[23])).magnitude)
+        sad &+= Int32((Int32(cBase[24]) - Int32(pBase[24])).magnitude)
+        sad &+= Int32((Int32(cBase[25]) - Int32(pBase[25])).magnitude)
+        sad &+= Int32((Int32(cBase[26]) - Int32(pBase[26])).magnitude)
+        sad &+= Int32((Int32(cBase[27]) - Int32(pBase[27])).magnitude)
+        sad &+= Int32((Int32(cBase[28]) - Int32(pBase[28])).magnitude)
+        sad &+= Int32((Int32(cBase[29]) - Int32(pBase[29])).magnitude)
+        sad &+= Int32((Int32(cBase[30]) - Int32(pBase[30])).magnitude)
+        sad &+= Int32((Int32(cBase[31]) - Int32(pBase[31])).magnitude)
+        sad &+= Int32((Int32(cBase[32]) - Int32(pBase[32])).magnitude)
+        sad &+= Int32((Int32(cBase[33]) - Int32(pBase[33])).magnitude)
+        sad &+= Int32((Int32(cBase[34]) - Int32(pBase[34])).magnitude)
+        sad &+= Int32((Int32(cBase[35]) - Int32(pBase[35])).magnitude)
+        sad &+= Int32((Int32(cBase[36]) - Int32(pBase[36])).magnitude)
+        sad &+= Int32((Int32(cBase[37]) - Int32(pBase[37])).magnitude)
+        sad &+= Int32((Int32(cBase[38]) - Int32(pBase[38])).magnitude)
+        sad &+= Int32((Int32(cBase[39]) - Int32(pBase[39])).magnitude)
+        sad &+= Int32((Int32(cBase[40]) - Int32(pBase[40])).magnitude)
+        sad &+= Int32((Int32(cBase[41]) - Int32(pBase[41])).magnitude)
+        sad &+= Int32((Int32(cBase[42]) - Int32(pBase[42])).magnitude)
+        sad &+= Int32((Int32(cBase[43]) - Int32(pBase[43])).magnitude)
+        sad &+= Int32((Int32(cBase[44]) - Int32(pBase[44])).magnitude)
+        sad &+= Int32((Int32(cBase[45]) - Int32(pBase[45])).magnitude)
+        sad &+= Int32((Int32(cBase[46]) - Int32(pBase[46])).magnitude)
+        sad &+= Int32((Int32(cBase[47]) - Int32(pBase[47])).magnitude)
+        sad &+= Int32((Int32(cBase[48]) - Int32(pBase[48])).magnitude)
+        sad &+= Int32((Int32(cBase[49]) - Int32(pBase[49])).magnitude)
+        sad &+= Int32((Int32(cBase[50]) - Int32(pBase[50])).magnitude)
+        sad &+= Int32((Int32(cBase[51]) - Int32(pBase[51])).magnitude)
+        sad &+= Int32((Int32(cBase[52]) - Int32(pBase[52])).magnitude)
+        sad &+= Int32((Int32(cBase[53]) - Int32(pBase[53])).magnitude)
+        sad &+= Int32((Int32(cBase[54]) - Int32(pBase[54])).magnitude)
+        sad &+= Int32((Int32(cBase[55]) - Int32(pBase[55])).magnitude)
+        sad &+= Int32((Int32(cBase[56]) - Int32(pBase[56])).magnitude)
+        sad &+= Int32((Int32(cBase[57]) - Int32(pBase[57])).magnitude)
+        sad &+= Int32((Int32(cBase[58]) - Int32(pBase[58])).magnitude)
+        sad &+= Int32((Int32(cBase[59]) - Int32(pBase[59])).magnitude)
+        sad &+= Int32((Int32(cBase[60]) - Int32(pBase[60])).magnitude)
+        sad &+= Int32((Int32(cBase[61]) - Int32(pBase[61])).magnitude)
+        sad &+= Int32((Int32(cBase[62]) - Int32(pBase[62])).magnitude)
+        sad &+= Int32((Int32(cBase[63]) - Int32(pBase[63])).magnitude)
+        return Int(sad)
     }
 
     private static let dsLdspX: [Int] = [0, 1, 2, 1, 0, -1, -2, -1]
@@ -573,26 +626,17 @@ struct MotionEstimation {
         let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 4 <= cbw) && (cry + 4 <= cbh)
         
         if isCurrSafe && isRefSafe {
-            var acc4 = SIMD4<Int32>(repeating: 0)
+            var sad: Int32 = 0
             for y in 0..<4 {
                 let currOffset = (cy + y) * cbw + cx
                 let refOffset = (cry + y) * cbw + crx
                 
-                let cvCb = UnsafeRawPointer(currCb.advanced(by: currOffset)).loadUnaligned(as: SIMD4<Int16>.self)
-                let rvCb = UnsafeRawPointer(refCb.advanced(by: refOffset)).loadUnaligned(as: SIMD4<Int16>.self)
-                let d1Cb = cvCb &- rvCb
-                let d2Cb = rvCb &- cvCb
-                let diffCb = d1Cb.replacing(with: d2Cb, where: cvCb .< rvCb)
-                acc4 &+= SIMD4<Int32>(clamping: diffCb)
-                
-                let cvCr = UnsafeRawPointer(currCr.advanced(by: currOffset)).loadUnaligned(as: SIMD4<Int16>.self)
-                let rvCr = UnsafeRawPointer(refCr.advanced(by: refOffset)).loadUnaligned(as: SIMD4<Int16>.self)
-                let d1Cr = cvCr &- rvCr
-                let d2Cr = rvCr &- cvCr
-                let diffCr = d1Cr.replacing(with: d2Cr, where: cvCr .< rvCr)
-                acc4 &+= SIMD4<Int32>(clamping: diffCr)
+                for x in 0..<4 {
+                    sad &+= Int32((Int32(currCb[currOffset + x]) - Int32(refCb[refOffset + x])).magnitude)
+                    sad &+= Int32((Int32(currCr[currOffset + x]) - Int32(refCr[refOffset + x])).magnitude)
+                }
             }
-            return Int(acc4.wrappedSum()) * 4 // Luma SAD scale matching (since we check 16 pixels here instead of 64 in Luma, *4 keeps penalty scale relative to Luma)
+            return Int(sad) * 4 // Luma SAD scale matching (since we check 16 pixels here instead of 64 in Luma, *4 keeps penalty scale relative to Luma)
         }
         return 1000
     }
