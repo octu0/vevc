@@ -650,172 +650,6 @@ func runHEVC(images: [ImageInput], config: Config, width: Int, height: Int, disa
     return (encTime, decTime, compSize, metrics, frameBox.frames)
 }
 
-// MARK: - MJPEG Encode / Decode (VideoToolbox)
-func runMJPEG(images: [ImageInput], config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?) {
-    var encTime: Double = 0
-    var compSize: Int = 0
-    
-    class FrameBox: @unchecked Sendable {
-        var frames: [CMSampleBuffer] = []
-        var decodedBuffers: [Int: CVPixelBuffer] = [:]
-        let lock = NSLock()
-    }
-    let frameBox = FrameBox()
-    
-
-    var compressionSessionOut: VTCompressionSession?
-    let status = VTCompressionSessionCreate(
-        allocator: kCFAllocatorDefault,
-        width: Int32(width),
-        height: Int32(height),
-        codecType: kCMVideoCodecType_JPEG,
-        encoderSpecification: nil,
-        imageBufferAttributes: nil,
-        compressedDataAllocator: nil,
-        outputCallback: { (outputCallbackRefCon, _, status, infoFlags, sampleBuffer) in
-            guard status == noErr, let sampleBuffer = sampleBuffer else { return }
-            
-            let box = Unmanaged<FrameBox>.fromOpaque(outputCallbackRefCon!).takeUnretainedValue()
-            box.frames.append(sampleBuffer)
-        },
-        refcon: Unmanaged.passUnretained(frameBox).toOpaque(),
-        compressionSessionOut: &compressionSessionOut,
-    )
-    
-    guard status == noErr, let compressionSession = compressionSessionOut else {
-        throw NSError(domain: "VTCompressionSessionCreate (MJPEG)", code: Int(status), userInfo: nil)
-    }
-    
-    let bitRateBps = config.bitrate * 1000
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_AverageBitRate, value: NSNumber(value: bitRateBps))
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_DataRateLimits, value: [bitRateBps / 8 * 2, 1] as CFArray)
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_ExpectedFrameRate, value: NSNumber(value: config.framerate))
-    VTSessionSetProperty(compressionSession, key: kVTCompressionPropertyKey_RealTime, value: kCFBooleanTrue)
-
-    VTCompressionSessionPrepareToEncodeFrames(compressionSession)
-    
-    // Pre-create pixel buffers for fair encoding speed comparison
-    var encodeBuffers: [CVPixelBuffer] = []
-    for imgInput in images {
-        if let pb = createPixelBuffer(from: imgInput.vevcImage) {
-            encodeBuffers.append(pb)
-        }
-    }
-    
-    let encStart = Date()
-    for (idx, pixelBuffer) in encodeBuffers.enumerated() {
-        let presentationTimeStamp = CMTime(value: CMTimeValue(idx), timescale: CMTimeScale(config.framerate))
-        var flags: VTEncodeInfoFlags = []
-        VTCompressionSessionEncodeFrame(
-            compressionSession,
-            imageBuffer: pixelBuffer,
-            presentationTimeStamp: presentationTimeStamp,
-            duration: .invalid,
-            frameProperties: nil,
-            sourceFrameRefcon: nil,
-            infoFlagsOut: &flags,
-        )
-    }
-    
-    VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
-    encTime = Date().timeIntervalSince(encStart)
-    
-
-    for sample in frameBox.frames {
-        if let dataBuffer = CMSampleBufferGetDataBuffer(sample) {
-            compSize += CMBlockBufferGetDataLength(dataBuffer)
-        }
-    }
-    
-    var decTime: Double = 0
-    guard frameBox.frames.isEmpty != true else { return (encTime, decTime, compSize, nil) }
-    
-    guard let formatDesc = CMSampleBufferGetFormatDescription(frameBox.frames[0]) else {
-        throw NSError(domain: "CMSampleBufferGetFormatDescription (MJPEG)", code: -1, userInfo: nil)
-    }
-    
-    let destPixelBufferAttributes: [String: Any] = [
-        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-        kCVPixelBufferMetalCompatibilityKey as String: true
-    ]
-    
-    var decompressionSessionOut: VTDecompressionSession?
-    let decStatus = VTDecompressionSessionCreate(
-        allocator: kCFAllocatorDefault,
-        formatDescription: formatDesc,
-        decoderSpecification: nil,
-        imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
-        outputCallback: nil,
-        decompressionSessionOut: &decompressionSessionOut,
-    )
-                                                
-    guard decStatus == noErr, let decompressionSession = decompressionSessionOut else {
-        throw NSError(domain: "VTDecompressionSessionCreate (MJPEG)", code: Int(decStatus), userInfo: nil)
-    }
-
-
-    let decStart = Date()
-    for sample in frameBox.frames {
-        var flags: VTDecodeInfoFlags = []
-        VTDecompressionSessionDecodeFrame(
-            decompressionSession,
-            sampleBuffer: sample,
-            flags: [],
-            infoFlagsOut: &flags,
-            outputHandler: { (_, _, _, _, _) in }
-        )
-    }
-    VTDecompressionSessionWaitForAsynchronousFrames(decompressionSession)
-    decTime = Date().timeIntervalSince(decStart)
-
-    var metrics: [QualityMetrics]? = nil
-    if config.quality {
-        var qualitySessionOut: VTDecompressionSession?
-        let qualityStatus = VTDecompressionSessionCreate(
-            allocator: kCFAllocatorDefault,
-            formatDescription: formatDesc,
-            decoderSpecification: nil,
-            imageBufferAttributes: destPixelBufferAttributes as CFDictionary,
-            outputCallback: nil,
-            decompressionSessionOut: &qualitySessionOut
-        )
-        guard qualityStatus == noErr, let qualitySession = qualitySessionOut else {
-            throw NSError(domain: "VTDecompressionSessionCreate (MJPEG Quality)", code: Int(qualityStatus), userInfo: nil)
-        }
-        
-        for sample in frameBox.frames {
-            var flags: VTDecodeInfoFlags = []
-            VTDecompressionSessionDecodeFrame(
-                qualitySession,
-                sampleBuffer: sample,
-                flags: [],
-                infoFlagsOut: &flags,
-                outputHandler: { (status, infoFlags, imageBuffer, presentationTimeStamp, presentationDuration) in
-                    if let buf = imageBuffer {
-                        let idx = Int(presentationTimeStamp.value)
-                        frameBox.lock.lock()
-                        frameBox.decodedBuffers[idx] = buf
-                        frameBox.lock.unlock()
-                    }
-                }
-            )
-        }
-        VTDecompressionSessionWaitForAsynchronousFrames(qualitySession)
-        
-        var mets = [QualityMetrics]()
-        for i in 0..<images.count {
-            if let buf = frameBox.decodedBuffers[i] {
-                let psnr = calculatePSNR(img1: images[i].vevcImage, bgraBuffer: buf)
-                let ssim = calculateSSIM(img1: images[i].vevcImage, bgraBuffer: buf)
-                mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
-            }
-        }
-        metrics = mets
-        frameBox.decodedBuffers.removeAll()
-    }
-
-    return (encTime, decTime, compSize, metrics)
-}
 
 @main
 struct CompareApp {
@@ -979,7 +813,6 @@ struct CompareApp {
                 _ = try await runH264(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
                 _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
                 _ = try await runHEVC(images: warmupImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-                _ = try await runMJPEG(images: warmupImages, config: localConfig, width: localWidth, height: localHeight)
             }
             print("Warmup complete.\n")
 
@@ -991,7 +824,6 @@ struct CompareApp {
             var h264SwResult: CodecResult? = nil
             var hevcResult: CodecResult? = nil
             var hevcSwResult: CodecResult? = nil
-            var mjpegResult: (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?)? = nil
             
             if localConfig.vevcOnly != true {
                 print("Running H.264 (VideoToolbox HWA)...")
@@ -1005,9 +837,6 @@ struct CompareApp {
                 
                 print("Running HEVC (VideoToolbox SW)...")
                 hevcSwResult = try await runHEVC(images: localImages, config: localConfig, width: localWidth, height: localHeight, disableHWA: true)
-                
-                print("Running MJPEG (VideoToolbox)...")
-                mjpegResult = try await runMJPEG(images: localImages, config: localConfig, width: localWidth, height: localHeight)
             }
             
             func printStats(name: String, encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, count: Int, rawSizeKB: Double, skips: (prev: Int, ltr: Int, inter: Int, copy: Int, total: Int)? = nil) -> CodecBenchmarkResult {
@@ -1065,50 +894,110 @@ struct CompareApp {
                 if let hevc = hevcResult {
                     chartResults.append(printStats(name: "HEVC (HWA)", encTime: hevc.encTime, decTime: hevc.decTime, compSize: hevc.compSize, metrics: hevc.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
                 }
-                if let mjpeg = mjpegResult {
-                    chartResults.append(printStats(name: "MJPEG", encTime: mjpeg.encTime, decTime: mjpeg.decTime, compSize: mjpeg.compSize, metrics: mjpeg.metrics, count: localImages.count, rawSizeKB: rawTotalSizeKB))
-                }
             }
             print("---------------")
             
             if localConfig.outputGraph {
+                print("\n--- Generating Speed & Size Graphs ---")
+                var p1Config = localConfig
+                p1Config.profile = 1
+                var p2Config = localConfig
+                p2Config.profile = 2
+                
+                print(">> Running VEVC Profile 1...")
+                let p1Res = try await runVEVC(images: localImages, config: p1Config)
+                print(">> Running VEVC Profile 2...")
+                let p2Res = try await runVEVC(images: localImages, config: p2Config)
+                
+                var speedSizeResults: [CodecBenchmarkResult] = []
+                speedSizeResults.append(CodecBenchmarkResult(name: "VEVC (p1)", encTimeMs: p1Res.encTime * 1000 / Double(localImages.count), decTimeMs: p1Res.l2Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p1Res.sizes.l2) / 1024.0, stats: calculateQualityStats(metrics: p1Res.l2Dec.metrics ?? [])))
+                speedSizeResults.append(CodecBenchmarkResult(name: "VEVC (p2)", encTimeMs: p2Res.encTime * 1000 / Double(localImages.count), decTimeMs: p2Res.l2Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p2Res.sizes.l2) / 1024.0, stats: calculateQualityStats(metrics: p2Res.l2Dec.metrics ?? [])))
+                
+                if localConfig.vevcOnly != true {
+                    if let h264 = h264SwResult {
+                        speedSizeResults.append(CodecBenchmarkResult(name: "H.264 (SW)", encTimeMs: h264.encTime * 1000 / Double(localImages.count), decTimeMs: h264.decTime * 1000 / Double(localImages.count), sizeKB: Double(h264.compSize) / 1024.0, stats: calculateQualityStats(metrics: h264.metrics ?? [])))
+                    }
+                    if let hevc = hevcSwResult {
+                        speedSizeResults.append(CodecBenchmarkResult(name: "HEVC (SW)", encTimeMs: hevc.encTime * 1000 / Double(localImages.count), decTimeMs: hevc.decTime * 1000 / Double(localImages.count), sizeKB: Double(hevc.compSize) / 1024.0, stats: calculateQualityStats(metrics: hevc.metrics ?? [])))
+                    }
+                    if let h264Hwa = h264Result {
+                        speedSizeResults.append(CodecBenchmarkResult(name: "H.264 (HWA)", encTimeMs: h264Hwa.encTime * 1000 / Double(localImages.count), decTimeMs: h264Hwa.decTime * 1000 / Double(localImages.count), sizeKB: Double(h264Hwa.compSize) / 1024.0, stats: calculateQualityStats(metrics: h264Hwa.metrics ?? [])))
+                    }
+                    if let hevcHwa = hevcResult {
+                        speedSizeResults.append(CodecBenchmarkResult(name: "HEVC (HWA)", encTimeMs: hevcHwa.encTime * 1000 / Double(localImages.count), decTimeMs: hevcHwa.decTime * 1000 / Double(localImages.count), sizeKB: Double(hevcHwa.compSize) / 1024.0, stats: calculateQualityStats(metrics: hevcHwa.metrics ?? [])))
+                    }
+                }
+                
+                // speed_p1.png
+                var p1Layers: [CodecBenchmarkResult] = []
+                p1Layers.append(CodecBenchmarkResult(name: "Layer 2", encTimeMs: 0, decTimeMs: p1Res.l2Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p1Res.sizes.l2) / 1024.0, stats: nil))
+                p1Layers.append(CodecBenchmarkResult(name: "Layer 1", encTimeMs: 0, decTimeMs: p1Res.l1Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p1Res.sizes.l1) / 1024.0, stats: nil))
+                p1Layers.append(CodecBenchmarkResult(name: "Layer 0", encTimeMs: 0, decTimeMs: p1Res.l0Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p1Res.sizes.l0) / 1024.0, stats: nil))
+                
+                // speed_p2.png
+                var p2Layers: [CodecBenchmarkResult] = []
+                p2Layers.append(CodecBenchmarkResult(name: "Layer 2", encTimeMs: 0, decTimeMs: p2Res.l2Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p2Res.sizes.l2) / 1024.0, stats: nil))
+                p2Layers.append(CodecBenchmarkResult(name: "Layer 1", encTimeMs: 0, decTimeMs: p2Res.l1Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p2Res.sizes.l1) / 1024.0, stats: nil))
+                p2Layers.append(CodecBenchmarkResult(name: "Layer 0", encTimeMs: 0, decTimeMs: p2Res.l0Dec.time * 1000 / Double(localImages.count), sizeKB: Double(p2Res.sizes.l0) / 1024.0, stats: nil))
+
                 await MainActor.run {
-                    generateAndSaveCharts(results: chartResults)
+                    generateAndSaveSpeedSizeChart(results: speedSizeResults, outPath: "docs/speed.png")
+                    generateAndSaveSpeedSizeChart(results: p1Layers, outPath: "docs/speed_p1.png", showEncode: false)
+                    generateAndSaveSpeedSizeChart(results: p2Layers, outPath: "docs/speed_p2.png", showEncode: false)
+                    generateAndSaveQualityCharts(results: speedSizeResults, outDir: "docs", suffix: "")
                 }
             }
             
             if localConfig.outputBitrates {
                 print("\n--- Running Bitrate Sweep (300 - 5000) ---")
-                var chartPoints: [BitrateSsimPoint] = []
+                var chartPointsP1: [BitrateSsimPoint] = []
+                var chartPointsP2: [BitrateSsimPoint] = []
                 let bitrates = [300, 500, 800, 1000, 1200, 1500, 1800, 2500, 3000]
                 
                 for br in bitrates {
-                    var sweepConfig = localConfig
-                    sweepConfig.bitrate = br
+                    var p1Config = localConfig
+                    p1Config.profile = 1
+                    p1Config.bitrate = br
+                    
+                    var p2Config = localConfig
+                    p2Config.profile = 2
+                    p2Config.bitrate = br
+                    
                     print(">> Bitrate: \(br) kbps")
                     
-                    let vevcRes = try await runVEVC(images: localImages, config: sweepConfig)
-                    if let stats = calculateQualityStats(metrics: vevcRes.l2Dec.metrics ?? []) {
-                        chartPoints.append(.init(codec: "VEVC (Layer 2)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(vevcRes.sizes.l2) / 1024.0))
+                    let p1Res = try await runVEVC(images: localImages, config: p1Config)
+                    let p2Res = try await runVEVC(images: localImages, config: p2Config)
+                    
+                    if let stats = calculateQualityStats(metrics: p1Res.l2Dec.metrics ?? []) {
+                        chartPointsP1.append(.init(codec: "VEVC (Layer 2)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(p1Res.sizes.l2) / 1024.0))
                     }
-                    chartPoints.append(.init(codec: "VEVC (Layer 1)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(vevcRes.sizes.l1) / 1024.0))
-                    chartPoints.append(.init(codec: "VEVC (Layer 0)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(vevcRes.sizes.l0) / 1024.0))
+                    if let stats = calculateQualityStats(metrics: p2Res.l2Dec.metrics ?? []) {
+                        chartPointsP2.append(.init(codec: "VEVC (Layer 2)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(p2Res.sizes.l2) / 1024.0))
+                    }
+                    
+                    chartPointsP1.append(.init(codec: "VEVC (Layer 1)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(p1Res.sizes.l1) / 1024.0))
+                    chartPointsP1.append(.init(codec: "VEVC (Layer 0)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(p1Res.sizes.l0) / 1024.0))
+                    chartPointsP2.append(.init(codec: "VEVC (Layer 1)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(p2Res.sizes.l1) / 1024.0))
+                    chartPointsP2.append(.init(codec: "VEVC (Layer 0)", bitrate: br, ssimAvg: 0, ssimMin: 0, ssimMax: 0, sizeKB: Double(p2Res.sizes.l0) / 1024.0))
                     
                     if localConfig.vevcOnly != true {
-                        let h264SwRes = try await runH264(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
+                        let h264SwRes = try await runH264(images: localImages, config: p1Config, width: localWidth, height: localHeight, disableHWA: true)
                         if let stats = calculateQualityStats(metrics: h264SwRes.metrics ?? []) {
-                            chartPoints.append(.init(codec: "H.264 (SW)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(h264SwRes.compSize) / 1024.0))
+                            chartPointsP1.append(.init(codec: "H.264 (SW)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(h264SwRes.compSize) / 1024.0))
+                            chartPointsP2.append(.init(codec: "H.264 (SW)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(h264SwRes.compSize) / 1024.0))
                         }
                         
-                        let hevcSwRes = try await runHEVC(images: localImages, config: sweepConfig, width: localWidth, height: localHeight, disableHWA: true)
+                        let hevcSwRes = try await runHEVC(images: localImages, config: p1Config, width: localWidth, height: localHeight, disableHWA: true)
                         if let stats = calculateQualityStats(metrics: hevcSwRes.metrics ?? []) {
-                            chartPoints.append(.init(codec: "HEVC (SW)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(hevcSwRes.compSize) / 1024.0))
+                            chartPointsP1.append(.init(codec: "HEVC (SW)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(hevcSwRes.compSize) / 1024.0))
+                            chartPointsP2.append(.init(codec: "HEVC (SW)", bitrate: br, ssimAvg: stats.avgSSIM, ssimMin: stats.minSSIM, ssimMax: stats.maxSSIM, sizeKB: Double(hevcSwRes.compSize) / 1024.0))
                         }
                     }
                 }
                 
                 await MainActor.run {
-                    generateAndSaveBitrateCharts(points: chartPoints)
+                    generateAndSaveBitrateCharts(points: chartPointsP1, outPath: "docs/bitrate_ssim_p1.png")
+                    generateAndSaveBitrateCharts(points: chartPointsP2, outPath: "docs/bitrate_ssim_p2.png")
                 }
             }
             

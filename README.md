@@ -55,12 +55,20 @@ Where legacy wavelet codecs (like JPEG 2000's EBCOT) and modern DCT codecs (with
 ## Performance
 
 *(Tested with Tears of Steel 1080p, 1802 frames, target 500 kbps)*
+*(SW: Software, HWA: Hardware Acceleration)*
 
 ### Speed & Size
 
-![speed_size](docs/speed_size.png)
+![speed](docs/speed.png)
 
-SW: Software, HWA: Hardware Acceleration
+#### Profile 1
+
+![speed_p1](docs/speed_p1.png)
+
+#### Profile 2
+
+![speed_p2](docs/speed_p2.png)
+
 
 ### PSNR
 
@@ -72,8 +80,13 @@ SW: Software, HWA: Hardware Acceleration
 
 ### Bitrate vs SSIM
 
-![bitrate_ssim](docs/bitrate_ssim.png)
+#### Profile 1
 
+![bitrate_ssim_p1](docs/bitrate_ssim_p1.png)
+
+#### Profile 2
+
+![bitrate_ssim_p2](docs/bitrate_ssim_p2.png)
 
 ### Visual Quality Comparison
 

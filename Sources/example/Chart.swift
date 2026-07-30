@@ -23,6 +23,7 @@ struct BitrateSsimPoint: Hashable {
 @available(macOS 13.0, *)
 struct SpeedSizeChart: View {
     let results: [CodecBenchmarkResult]
+    var showEncode: Bool = true
     
     var body: some View {
         let maxTime = results.map { max($0.encTimeMs, $0.decTimeMs) }.max() ?? 1.0
@@ -42,12 +43,14 @@ struct SpeedSizeChart: View {
                 let decodeCategory = if isVEVC { "VEVC Decode" } else { "Decode Time" }
                 let sizeCategory = if isVEVC { "VEVC Size" } else { "Size (KB)" }
                 
-                BarMark(
-                    x: .value("Codec", res.name),
-                    y: .value("Time (ms)", res.encTimeMs)
-                )
-                .foregroundStyle(by: .value("Category", encodeCategory))
-                .position(by: .value("Type", "Encode Time"))
+                if showEncode {
+                    BarMark(
+                        x: .value("Codec", res.name),
+                        y: .value("Time (ms)", res.encTimeMs)
+                    )
+                    .foregroundStyle(by: .value("Category", encodeCategory))
+                    .position(by: .value("Type", "Encode Time"))
+                }
                 
                 BarMark(
                     x: .value("Codec", res.name),
@@ -76,7 +79,7 @@ struct SpeedSizeChart: View {
                     AxisTick()
                     AxisValueLabel {
                         if let time = value.as(Double.self) {
-                            Text(String(format: "%.0f ms", time))
+                            Text(String(format: "%.2f ms", time))
                         }
                     }
                 }
@@ -86,7 +89,7 @@ struct SpeedSizeChart: View {
                     AxisValueLabel {
                         if let time = value.as(Double.self) {
                             let size = time / ratio
-                            Text(String(format: "%.0f KB", size))
+                            Text(String(format: "%.1f KB", size))
                         }
                     }
                 }
@@ -204,20 +207,23 @@ struct SsimChart: View {
 
 @available(macOS 13.0, *)
 @MainActor
-func generateAndSaveCharts(results: [CodecBenchmarkResult], outDir: String = "docs") {
-    // Speed & Size Chart
-    let speedSizeView = SpeedSizeChart(results: results)
+func generateAndSaveSpeedSizeChart(results: [CodecBenchmarkResult], outPath: String, showEncode: Bool = true) {
+    let speedSizeView = SpeedSizeChart(results: results, showEncode: showEncode)
     let speedSizeRenderer = ImageRenderer(content: speedSizeView)
     speedSizeRenderer.scale = 2.0
     if let nsImage = speedSizeRenderer.nsImage,
        let tiffData = nsImage.tiffRepresentation,
        let bitmapImage = NSBitmapImageRep(data: tiffData),
        let pngData = bitmapImage.representation(using: .png, properties: [:]) {
-        let path = URL(fileURLWithPath: "\(outDir)/speed_size.png")
+        let path = URL(fileURLWithPath: outPath)
         try? pngData.write(to: path)
         print("Saved \(path.path)")
     }
-    
+}
+
+@available(macOS 13.0, *)
+@MainActor
+func generateAndSaveQualityCharts(results: [CodecBenchmarkResult], outDir: String = "docs", suffix: String = "") {
     // PSNR Chart
     if results.contains(where: { $0.stats != nil }) {
         let psnrView = PsnrChart(results: results)
@@ -227,7 +233,7 @@ func generateAndSaveCharts(results: [CodecBenchmarkResult], outDir: String = "do
            let tiffData = nsImage.tiffRepresentation,
            let bitmapImage = NSBitmapImageRep(data: tiffData),
            let pngData = bitmapImage.representation(using: .png, properties: [:]) {
-            let path = URL(fileURLWithPath: "\(outDir)/psnr.png")
+            let path = URL(fileURLWithPath: "\(outDir)/psnr\(suffix).png")
             try? pngData.write(to: path)
             print("Saved \(path.path)")
         }
@@ -242,7 +248,7 @@ func generateAndSaveCharts(results: [CodecBenchmarkResult], outDir: String = "do
            let tiffData = nsImage.tiffRepresentation,
            let bitmapImage = NSBitmapImageRep(data: tiffData),
            let pngData = bitmapImage.representation(using: .png, properties: [:]) {
-            let path = URL(fileURLWithPath: "\(outDir)/ssim.png")
+            let path = URL(fileURLWithPath: "\(outDir)/ssim\(suffix).png")
             try? pngData.write(to: path)
             print("Saved \(path.path)")
         }
@@ -351,7 +357,7 @@ struct BitrateSsimChart: View {
 
 @available(macOS 13.0, *)
 @MainActor
-func generateAndSaveBitrateCharts(points: [BitrateSsimPoint], outDir: String = "docs") {
+func generateAndSaveBitrateCharts(points: [BitrateSsimPoint], outPath: String) {
     let chartView = BitrateSsimChart(points: points)
     let renderer = ImageRenderer(content: chartView)
     renderer.scale = 2.0
@@ -359,7 +365,7 @@ func generateAndSaveBitrateCharts(points: [BitrateSsimPoint], outDir: String = "
        let tiffData = nsImage.tiffRepresentation,
        let bitmapImage = NSBitmapImageRep(data: tiffData),
        let pngData = bitmapImage.representation(using: .png, properties: [:]) {
-        let path = URL(fileURLWithPath: "\(outDir)/bitrate_ssim.png")
+        let path = URL(fileURLWithPath: outPath)
         try? pngData.write(to: path)
         print("Saved \(path.path)")
     }
