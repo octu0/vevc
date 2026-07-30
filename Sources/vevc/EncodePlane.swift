@@ -698,7 +698,7 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -719,15 +719,27 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 let blk = blocks[idx]
                 idx += 1
                 
+                var isSkip = false
+                if let map = skipMap, map.isEmpty != true {
+                    let mvIndex = min(row * colCount + col, map.count - 1)
+                    if map[mvIndex] != .inter {
+                        isSkip = true
+                    }
+                }
+                
                 let llX = startX / 2
                 let llY = startY / 2
                 prevImg.readY(x: llX, y: llY, size: 16, into: blk)
                                         
                 let view = blk
                 let base = view.base
-                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                
+                if isSkip != true {
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                }
+                
                 inverseDWT2DBlock32(view)
                             
                 switch true {
@@ -779,7 +791,7 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 let llX = startX / 2
                 let llY = startY / 2
                 prevImg.readCb(x: llX, y: llY, size: 16, into: blk)
-                                        
+                
                 let view = blk
                 let base = view.base
                 dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
@@ -836,7 +848,7 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 let llX = startX / 2
                 let llY = startY / 2
                 prevImg.readCr(x: llX, y: llY, size: 16, into: blk)
-                                        
+                
                 let view = blk
                 let base = view.base
                 dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)

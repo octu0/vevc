@@ -475,7 +475,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1ImgConst = l1Img
     
     async let aY = { [mvsConst2, refDirsConst2, skipMapConst, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
-        let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1ImgConst, width: dx, height: dy, qt: qtY2, pool: pool)
+        let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1ImgConst, width: dx, height: dy, qt: qtY2, pool: pool, skipMap: (profile == 0x02 ? skipMapConst : nil))
         var y = reconL2Y
         await applyScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilter32(plane: &y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4, mvs: mvsConst2)
