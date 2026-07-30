@@ -259,23 +259,12 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
-    
-    async let tL1Y = { () -> ([Int16], @Sendable () -> Void) in
-        return reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    }()
-    async let tL1Cb = { () -> ([Int16], @Sendable () -> Void) in
-        return reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    }()
-    async let tL1Cr = { () -> ([Int16], @Sendable () -> Void) in
-        return reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    }()
-    
-    let (mutReconL1Y, r1Y) = await tL1Y
-    let (mutReconL1Cb, r1Cb) = await tL1Cb
-    let (mutReconL1Cr, r1Cr) = await tL1Cr
+    let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool, skipMap: skipMap)
+    let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool, skipMap: skipMap)
+    let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool, skipMap: skipMap)
+    defer { r1Y(); r1Cb(); r1Cr() }
     
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    defer { r1Y(); r1Cb(); r1Cr() }
     
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, sads: sads)
     
@@ -296,16 +285,16 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         return (y, r2Y)
     }()
     
-    async let aCb = { [mvsConst2, refDirsConst2, skipMapConst, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
-        let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1ImgConst, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    async let aCb = { [mvsConst2, refDirsConst2, skipMapConst, sMapForReconY, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
+        let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1ImgConst, width: cbDx, height: cbDy, qt: qtC2, pool: pool, skipMap: sMapForReconY)
         var cb = reconL2Cb
         await applyScaledBidirectionalMotionCompensationChroma(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilterChroma16(plane: &cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvsConst2)
         return (cb, r2Cb)
     }()
     
-    async let aCr = { [mvsConst2, refDirsConst2, skipMapConst, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
-        let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1ImgConst, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    async let aCr = { [mvsConst2, refDirsConst2, skipMapConst, sMapForReconY, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
+        let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1ImgConst, width: cbDx, height: cbDy, qt: qtC2, pool: pool, skipMap: sMapForReconY)
         var cr = reconL2Cr
         await applyScaledBidirectionalMotionCompensationChroma(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilterChroma16(plane: &cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvsConst2)

@@ -644,9 +644,14 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 }
 
 @inline(__always)
-func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil, fullWidth: Int = 0) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 7) / 8
     let rowCount = (height + 7) / 8
+    let fW = (fullWidth != 0) ? fullWidth : width
+    let l2ColCount = (fW + 31) / 32
+    let sCount = skipMap?.count ?? 0
+    let isChroma = (fullWidth != 0)
+    
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -655,15 +660,24 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
             let validEndY = min(height, startY + 8)
             let loopH = validEndY - startY
             let isEdgeY = (loopH < 8)
+            let l2Row = isChroma ? (row / 2) : (row / 4)
             
             for col in 0..<colCount {
                 let startX = col * 8
                 let validEndX = min(width, startX + 8)
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 8)
+                let l2Col = isChroma ? (col / 2) : (col / 4)
                 
                 let blk = blocks[idx]
                 idx += 1
+                
+                if let map = skipMap {
+                    let l2Index = l2Row * l2ColCount + l2Col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
+                    }
+                }
                 
                 let view = blk
                 let base = view.base
@@ -701,6 +715,7 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
 func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
+    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -719,11 +734,10 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 let blk = blocks[idx]
                 idx += 1
                 
-                var isSkip = false
-                if let map = skipMap, map.isEmpty != true {
-                    let mvIndex = min(row * colCount + col, map.count - 1)
-                    if map[mvIndex] != .inter {
-                        isSkip = true
+                if let map = skipMap {
+                    let l2Index = row * colCount + col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
                     }
                 }
                 
@@ -733,13 +747,9 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                                         
                 let view = blk
                 let base = view.base
-                
-                if isSkip != true {
-                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                }
-                
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
                 inverseDWT2DBlock32(view)
                             
                 switch true {
@@ -767,9 +777,10 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
+    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -787,6 +798,13 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let blk = blocks[idx]
                 idx += 1
+                
+                if let map = skipMap {
+                    let l2Index = row * colCount + col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
+                    }
+                }
                 
                 let llX = startX / 2
                 let llY = startY / 2
@@ -824,9 +842,10 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
+    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -844,6 +863,13 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let blk = blocks[idx]
                 idx += 1
+                
+                if let map = skipMap {
+                    let l2Index = row * colCount + col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
+                    }
+                }
                 
                 let llX = startX / 2
                 let llY = startY / 2
@@ -881,9 +907,11 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
+    let l2ColCount = (width + 31) / 32
+    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -892,15 +920,24 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
             let validEndY = min(height, startY + 16)
             let loopH = validEndY - startY
             let isEdgeY = (loopH < 16)
+            let l2Row = row / 2
             
             for col in 0..<colCount {
                 let startX = col * 16
                 let validEndX = min(width, startX + 16)
                 let loopW = validEndX - startX
                 let isEdgeX = (loopW < 16)
+                let l2Col = col / 2
                 
                 let blk = blocks[idx]
                 idx += 1
+                
+                if let map = skipMap {
+                    let l2Index = l2Row * l2ColCount + l2Col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
+                    }
+                }
                 
                 let llX = startX / 2
                 let llY = startY / 2
@@ -938,9 +975,10 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
 }
 
 @inline(__always)
-func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
+    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -958,6 +996,13 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let blk = blocks[idx]
                 idx += 1
+                
+                if let map = skipMap {
+                    let l2Index = row * colCount + col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
+                    }
+                }
                 
                 let llX = startX / 2
                 let llY = startY / 2
@@ -995,9 +1040,10 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 15) / 16
     let rowCount = (height + 15) / 16
+    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -1015,6 +1061,13 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 let blk = blocks[idx]
                 idx += 1
+                
+                if let map = skipMap {
+                    let l2Index = row * colCount + col
+                    if l2Index < sCount && map[l2Index] != .inter {
+                        continue
+                    }
+                }
                 
                 let llX = startX / 2
                 let llY = startY / 2
@@ -1088,7 +1141,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         }
         
         let quantizedBlocks = blocks
-        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool, skipMap: skipMap, fullWidth: dx)
         return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
     }()
     
@@ -1108,7 +1161,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         }
         
         let quantizedBlocks = blocks
-        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool, skipMap: skipMap, fullWidth: dx)
         return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
     }()
     
@@ -1127,7 +1180,7 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         }
         
         let quantizedBlocks = blocks
-        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool, skipMap: skipMap, fullWidth: dx)
         return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
     }()
 
