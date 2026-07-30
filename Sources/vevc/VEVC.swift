@@ -711,3 +711,22 @@ final class BlockViewPool: @unchecked Sendable {
         #endif
     }
 }
+
+@inline(__always)
+func fnv1a64Int16(_ array: [Int16]) -> UInt64 {
+    var hash: UInt64 = 14695981039346656037
+    let prime: UInt64 = 1099511628211
+    array.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { return }
+        let rawPtr = UnsafeRawPointer(base)
+        let byteCount = buf.count * 2
+        for i in 0..<byteCount {
+            let byte = UInt64(rawPtr.load(fromByteOffset: i, as: UInt8.self))
+            hash ^= byte
+            hash = hash &* prime
+        }
+    }
+    return hash
+}
+
+

@@ -301,9 +301,65 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         return (cr, r2Cr)
     }()
     
-    let (mutReconL2Y, r2Y) = await aY
-    let (mutReconL2Cb, r2Cb) = await aCb
-    let (mutReconL2Cr, r2Cr) = await aCr
+    let (reconL2Y, releaseY) = await aY
+    let (reconL2Cb, releaseCb) = await aCb
+    let (reconL2Cr, releaseCr) = await aCr
+    
+    var mutReconL2Y = reconL2Y
+    var mutReconL2Cb = reconL2Cb
+    var mutReconL2Cr = reconL2Cr
+    
+    if profile == 0x02 {
+        let bw = (dx + 31) / 32
+        let targetCbDx = (dx + 1) / 2
+        let targetCbDy = (dy + 1) / 2
+        let targetBSize = 32
+        let tCbSize = 16
+        
+        let pPd = predictedPd ?? PlaneData420(width: dx, height: dy, y: [], cb: [], cr: [])
+        let lPd = nextPd ?? pPd
+        let hasNextPd = (nextPd != nil)
+        
+        withUnsafePointers(
+            lPd.y, lPd.cb, lPd.cr,
+            pPd.y, pPd.cb, pPd.cr,
+            mut: &mutReconL2Y, mut: &mutReconL2Cb, mut: &mutReconL2Cr
+        ) { ltrYPtr, ltrCbPtr, ltrCrPtr, prevYPtr, prevCbPtr, prevCrPtr, currYPtr, currCbPtr, currCrPtr in
+            for i in 0..<skipMap.count {
+                let mode = skipMap[i]
+                if mode != .inter {
+                    let bx = (i % bw) * 32
+                    let by = (i / bw) * 32
+                    
+                    if bx + targetBSize <= dx && by + targetBSize <= dy {
+                        switch mode {
+                        case .skip_ltr where hasNextPd:
+                            copyBlockPointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: dx, blockSize: targetBSize)
+                            copyBlockPointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                            copyBlockPointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        case .skip_prev:
+                            copyBlockPointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: dx, blockSize: targetBSize)
+                            copyBlockPointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                            copyBlockPointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        default: break
+                        }
+                    } else {
+                        switch mode {
+                        case .skip_ltr where hasNextPd:
+                            copyBlockSafe(from: ltrYPtr, to: currYPtr, bx: bx, by: by, width: dx, height: dy, blockSize: targetBSize)
+                            copyBlockSafe(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                            copyBlockSafe(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                        case .skip_prev:
+                            copyBlockSafe(from: prevYPtr, to: currYPtr, bx: bx, by: by, width: dx, height: dy, blockSize: targetBSize)
+                            copyBlockSafe(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                            copyBlockSafe(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
+                        default: break
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
@@ -337,7 +393,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     out.append(contentsOf: layer1)
     out.append(contentsOf: layer2)
     
-    return (out, reconstructed, mvs, sads, { r2Y(); r2Cb(); r2Cr() }, nextSub2Res, nextSub1Res)
+    return (out, reconstructed, mvs, sads, { releaseY(); releaseCb(); releaseCr() }, nextSub2Res, nextSub1Res)
 }
 
 @inline(__always)

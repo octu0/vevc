@@ -20,6 +20,7 @@ struct Config {
     var dumpHash: Bool = false
     var qstep: Int? = nil
     var profile: UInt8 = 0x01
+    var maxFrames: Int? = nil
 }
 
 struct ImageInput {
@@ -884,6 +885,11 @@ struct CompareApp {
                 if let v = UInt8(args[i + 1]) { config.profile = v }
                 i += 1
             }
+        case "-frames", "--frames":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.maxFrames = v }
+                i += 1
+            }
         case "-y4m":
             if (i + 1) < args.count {
                 y4mPath = args[i + 1]
@@ -907,6 +913,10 @@ struct CompareApp {
         } else {
             print("Failed to read y4m: \(y4m)")
         }
+    }
+
+    if let maxF = config.maxFrames, maxF < images.count {
+        images = Array(images[0..<maxF])
     }
 
     if images.isEmpty {

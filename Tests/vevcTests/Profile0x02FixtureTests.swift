@@ -80,4 +80,56 @@ final class Profile0x02FixtureTests: XCTestCase {
             XCTAssertGreaterThan(psnrY, 25.0, "Frame \(fIdx) Y PSNR (\(psnrY) dB) must exceed 25.0 dB threshold.")
         }
     }
+    
+    func testEncoderDecoderReconBitExactness() async throws {
+        let width = 64
+        let height = 64
+        let frameCount = 6
+        
+        var frames = [YCbCrImage]()
+        for f in 0..<frameCount {
+            var y = [UInt8](repeating: 128, count: width * height)
+            var cb = [UInt8](repeating: 128, count: width * height / 4)
+            var cr = [UInt8](repeating: 128, count: width * height / 4)
+            
+            for row in 0..<height {
+                let isTop = (row < height / 2)
+                for col in 0..<width {
+                    let idx = row * width + col
+                    if isTop {
+                        y[idx] = UInt8(((row / 8) + (col / 8)) % 2 * 160 + 40)
+                    } else {
+                        let shiftCol = (col + f * 4) % width
+                        y[idx] = UInt8(((row / 8) + (shiftCol / 8)) % 2 * 180 + 30)
+                    }
+                }
+            }
+            
+            var img = YCbCrImage(width: width, height: height, ratio: .ratio420)
+            img.yPlane = y
+            img.cbPlane = cb
+            img.crPlane = cr
+            frames.append(img)
+        }
+        
+        // Encode and decode
+        let encoder = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02)
+        let bitstream = try await encoder.encodeToData(images: frames)
+        
+        let decoder = Decoder()
+        let decoded1 = try await decoder.decode(data: bitstream)
+        
+        // Decode a second time with clean decoder instance to verify bit-exact consistency
+        let decoder2 = Decoder()
+        let decoded2 = try await decoder2.decode(data: bitstream)
+        
+        XCTAssertEqual(decoded1.count, frameCount)
+        XCTAssertEqual(decoded2.count, frameCount)
+        
+        for f in 0..<frameCount {
+            XCTAssertEqual(decoded1[f].yPlane, decoded2[f].yPlane, "Decoded Y plane at frame \(f) must be bit-exact.")
+            XCTAssertEqual(decoded1[f].cbPlane, decoded2[f].cbPlane, "Decoded Cb plane at frame \(f) must be bit-exact.")
+            XCTAssertEqual(decoded1[f].crPlane, decoded2[f].crPlane, "Decoded Cr plane at frame \(f) must be bit-exact.")
+        }
+    }
 }

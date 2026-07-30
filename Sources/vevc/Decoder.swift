@@ -40,8 +40,8 @@ public actor StreamingDecoderActor {
     
     private var previousReconstructed: PlaneData420?
     private var firstReconstructed: PlaneData420?
-    private var roundOffsetIndex = 0
     private var seenY = Set<UnsafeMutableRawPointer>()
+    private var roundOffsetIndex = 0
     
     public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01) {
         self.maxLayer = maxLayer

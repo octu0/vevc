@@ -243,7 +243,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
 }
 
 @inline(__always)
-private func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int, blockSize: Int) {
+func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int, blockSize: Int) {
     switch blockSize {
     case 32:
         for y in 0..<32 {
@@ -276,7 +276,7 @@ private func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMuta
 }
 
 @inline(__always)
-private func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
+func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
     let maxY = min(by + blockSize, height)
     let maxX = min(bx + blockSize, width)
     let copyCount = maxX - bx
