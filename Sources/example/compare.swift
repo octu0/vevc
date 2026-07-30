@@ -21,6 +21,7 @@ struct Config {
     var qstep: Int? = nil
     var profile: UInt8 = 0x01
     var maxFrames: Int? = nil
+    var skipThreshold: Int = 2
 }
 
 struct ImageInput {
@@ -148,7 +149,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
             sceneChangeThreshold: config.sceneThreshold,
-            profile: config.profile
+            profile: config.profile,
+            skipThreshold: config.skipThreshold
         )
     } else {
         vevcEncoder = VEVCEncoder(
@@ -159,7 +161,8 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
             zeroThreshold: config.zeroThreshold,
             keyint: config.keyint,
             sceneChangeThreshold: config.sceneThreshold,
-            profile: config.profile
+            profile: config.profile,
+            skipThreshold: config.skipThreshold
         )
     }
     let outBytes = try await vevcEncoder.encodeToData(images: vevcImages)
@@ -878,6 +881,11 @@ struct CompareApp {
         case "-qstep", "--qstep":
             if (i + 1) < args.count {
                 if let v = Int(args[i + 1]) { config.qstep = v }
+                i += 1
+            }
+        case "-skip-thresh":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.skipThreshold = v }
                 i += 1
             }
         case "-profile":

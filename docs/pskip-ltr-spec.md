@@ -10,7 +10,7 @@ The skip decision compares the current frame's source image against the previous
 - **Decision Granularity:** The base decision block size is 32x32 pixels. However, the evaluation is performed on 16x16 sub-blocks. 
 - **Sub-block Evaluation:** For a 32x32 block to be marked as skipped, all of its four 16x16 sub-blocks (along with their corresponding chroma regions) must satisfy the skip threshold.
 - **Threshold:** The skip condition requires the Sum of Absolute Differences (SAD) between the current and previous source blocks to be less than or equal to `blockThreshold`.
-- **Environment Override:** The per-pixel threshold is configurable via the `VEVC_SKIP_THRESH` environment variable, defaulting to 2 (`skipThresholdPerPixel = 2`).
+- **Environment Override:** The per-pixel threshold is configurable via the `skipThreshold` parameter in the `VEVCEncoder` initializer, which defaults to 2. The environment variable `VEVC_SKIP_THRESH` serves as a development override and is evaluated only once during initialization.
 - **Edge Blocks:** The calculation uses `computeZeroSAD16x16` for full 16x16 blocks and falls back to `computeZeroSADSubBlock` for partial blocks at the frame edges. There are no additional guard conditions for the skip decision (the only requirement is that all sub-blocks satisfy the threshold).
 
 ### 2.2. Skip Modes and LTR References

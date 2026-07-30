@@ -7,8 +7,8 @@ final class Profile0x02Tests: XCTestCase {
         let width = 1920
         let height = 1080
         var y = [UInt8](repeating: 128, count: width * height)
-        var cb = [UInt8](repeating: 128, count: width * height / 4)
-        var cr = [UInt8](repeating: 128, count: width * height / 4)
+        let cb = [UInt8](repeating: 128, count: width * height / 4)
+        let cr = [UInt8](repeating: 128, count: width * height / 4)
         
         // 複雑すぎない静止画を生成（量子化誤差が 1画素あたり2 以下に収まるようにフラットにする）
         for i in 0..<height {
@@ -175,7 +175,7 @@ final class Profile0x02Tests: XCTestCase {
         defer { rel1() }
         
         // I-frame
-        let (bytesI, encReconI, mvsI, _, relEncI) = try await encodeSpatialLayers(
+        let (bytesI, encReconI, _, _, relEncI) = try await encodeSpatialLayers(
             pd: pd0, pool: pool, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02)
         defer { relEncI() }
         let decImg16I = try await decodeSpatialLayers(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0, profile: 0x02)
@@ -186,9 +186,9 @@ final class Profile0x02Tests: XCTestCase {
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         
-        var counters = [Int](repeating: 0, count: 4)
+        var counters = [Int](repeating: 0, count: bw * bh)
         let (bytesP, encReconP, _, _, relEncP, _, _) = try await encodeSpatialLayers(
-            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02, staticCounters: &counters)
+            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02, skipThreshold: 2, staticCounters: &counters)
         defer { relEncP() }
         
         let decImg16P = try await decodeSpatialLayers(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, profile: 0x02)

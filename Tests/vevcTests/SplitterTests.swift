@@ -101,12 +101,12 @@ struct SplitterTests {
                 } else {
                      Issue.record("Unexpected SplitterError: \(error) at length \(i)")
                 }
-            } catch let error as BinaryError {
+            } catch is BinaryError {
                 // Any binary error is treated as EOF in this context
-            } catch let error as DecodeError {
+            } catch is DecodeError {
                 // Any decode error is treated as EOF/invalid data in this context
             } catch {
-                Issue.record("Unexpected error type: \(error) at length \(i)")
+                Issue.record("Unexpected error: \(error)")
             }
         }
     }
@@ -132,12 +132,12 @@ struct SplitterTests {
             } else {
                  Issue.record("Unexpected SplitterError: \(error)")
             }
-        } catch let error as BinaryError {
+        } catch is BinaryError {
             // Success
-        } catch let error as DecodeError {
+        } catch is DecodeError {
             // Success
         } catch {
-            Issue.record("Unexpected error type: \(error)")
+            Issue.record("Unexpected error: \(error)")
         }
     }
 

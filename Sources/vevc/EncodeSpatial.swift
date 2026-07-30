@@ -2,7 +2,7 @@
 import Foundation
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -71,16 +71,16 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
 
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     var dummyCounters = [Int](repeating: 0, count: 4)
     let (data, recon, mvs, skips, release, _, _) = try await encodeSpatialLayers(
-        pd: pd, pool: pool, predictedPd: predictedPd, nextPd: predictedPd, prevInput: pd, ltrInput: predictedPd, prevMVs: prevMVs, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: roundOffset, profile: profile, staticCounters: &dummyCounters
+        pd: pd, pool: pool, predictedPd: predictedPd, nextPd: predictedPd, prevInput: pd, ltrInput: predictedPd, prevMVs: prevMVs, maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: roundOffset, gopPosition: 0, profile: profile, skipThreshold: skipThreshold, staticCounters: &dummyCounters
     )
     return (data, recon, mvs, skips, release)
 }
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01, staticCounters: inout [Int], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01, skipThreshold: Int = 2, staticCounters: inout [Int], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
     let pPd = predictedPd
     let nPd = nextPd
     
@@ -102,7 +102,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let bh = (dy + 31) / 32
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let skipThresholdPerPixel = ProcessInfo.processInfo.environment["VEVC_SKIP_THRESH"].flatMap { Int($0) } ?? 2
+        let skipThresholdPerPixel = skipThreshold
         
         let matchResults = await withTaskGroup(of: [(Int, Bool)].self) { group in
             let batchSize = 128

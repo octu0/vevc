@@ -105,7 +105,6 @@ final class ChromaDriftInvestigationTests: XCTestCase {
     func testMCFIRBias() async {
         let size = 32
         let chromaBlockSize = 16
-        let numIterations = 500
 
         print("\n=== MC FIR Bias Measurement ===")
         

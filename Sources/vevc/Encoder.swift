@@ -12,12 +12,13 @@ public actor VEVCEncoder {
     public nonisolated let maxConcurrency: Int
     public nonisolated let qstep: Int?
     public nonisolated let profile: UInt8
+    public nonisolated let skipThreshold: Int
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -28,6 +29,7 @@ public actor VEVCEncoder {
         self.maxConcurrency = maxConcurrency
         self.qstep = nil
         self.profile = profile
+        self.skipThreshold = EncoderTuning.envInt(key: "VEVC_SKIP_THRESH", defaultValue: skipThreshold)
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -40,11 +42,12 @@ public actor VEVCEncoder {
             sceneChangeThreshold: sceneChangeThreshold,
             pool: pool,
             qstep: nil,
-            profile: profile
+            profile: profile,
+            skipThreshold: self.skipThreshold
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -55,6 +58,7 @@ public actor VEVCEncoder {
         self.maxConcurrency = maxConcurrency
         self.qstep = qstep
         self.profile = profile
+        self.skipThreshold = EncoderTuning.envInt(key: "VEVC_SKIP_THRESH", defaultValue: skipThreshold)
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -67,7 +71,8 @@ public actor VEVCEncoder {
             sceneChangeThreshold: sceneChangeThreshold,
             pool: pool,
             qstep: qstep,
-            profile: profile
+            profile: profile,
+            skipThreshold: self.skipThreshold
         )
     }
     
@@ -149,6 +154,7 @@ actor LayersEncodeActor {
     let pool: BlockViewPool
     let qstep: Int?
     let profile: UInt8
+    let skipThreshold: Int
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
@@ -171,7 +177,7 @@ actor LayersEncodeActor {
     private var cachedNextSub2: [Int16]?
     private var cachedNextSub1: [Int16]?
     
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -182,6 +188,7 @@ actor LayersEncodeActor {
         self.pool = pool
         self.qstep = qstep
         self.profile = profile
+        self.skipThreshold = skipThreshold
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
         let bw = (width + 31) / 32
@@ -189,7 +196,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -200,6 +207,7 @@ actor LayersEncodeActor {
         self.pool = BlockViewPool()
         self.qstep = nil
         self.profile = profile
+        self.skipThreshold = skipThreshold
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
         let bw = (width + 31) / 32
@@ -251,7 +259,7 @@ actor LayersEncodeActor {
             
             let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, maxbitrate: maxbitrate,
-                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile
+                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile, skipThreshold: self.skipThreshold
             )
             
             if self.qstep == nil {
@@ -322,7 +330,7 @@ actor LayersEncodeActor {
         let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = try await encodeSpatialLayers(
             pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
             maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, staticCounters: &localCounters,
+            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, skipThreshold: self.skipThreshold, staticCounters: &localCounters,
             cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
         )
         self.staticCounters = localCounters
@@ -727,7 +735,7 @@ public struct EncoderTuning: @unchecked Sendable {
     }
     
     @inline(__always)
-    private static func envInt(key: String, defaultValue: Int) -> Int {
+    internal static func envInt(key: String, defaultValue: Int) -> Int {
         if let valStr = ProcessInfo.processInfo.environment[key], let val = Int(valStr) {
             return val
         }

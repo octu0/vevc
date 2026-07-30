@@ -89,8 +89,8 @@ final class Profile0x02FixtureTests: XCTestCase {
         var frames = [YCbCrImage]()
         for f in 0..<frameCount {
             var y = [UInt8](repeating: 128, count: width * height)
-            var cb = [UInt8](repeating: 128, count: width * height / 4)
-            var cr = [UInt8](repeating: 128, count: width * height / 4)
+            let cb = [UInt8](repeating: 128, count: width * height / 4)
+            let cr = [UInt8](repeating: 128, count: width * height / 4)
             
             for row in 0..<height {
                 let isTop = (row < height / 2)
