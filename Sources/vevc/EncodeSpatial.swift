@@ -316,9 +316,8 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let targetBSize = 32
         let tCbSize = 16
         
-        let pPd = predictedPd ?? PlaneData420(width: dx, height: dy, y: [], cb: [], cr: [])
-        let lPd = nextPd ?? pPd
-        let hasNextPd = (nextPd != nil)
+        let pPd = predictedPd
+        let lPd = nextPd
         
         withUnsafePointers(
             lPd.y, lPd.cb, lPd.cr,
@@ -333,7 +332,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                     
                     if bx + targetBSize <= dx && by + targetBSize <= dy {
                         switch mode {
-                        case .skip_ltr where hasNextPd:
+                        case .skip_ltr:
                             copyBlockPointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: dx, blockSize: targetBSize)
                             copyBlockPointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
                             copyBlockPointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
@@ -345,7 +344,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                         }
                     } else {
                         switch mode {
-                        case .skip_ltr where hasNextPd:
+                        case .skip_ltr:
                             copyBlockSafe(from: ltrYPtr, to: currYPtr, bx: bx, by: by, width: dx, height: dy, blockSize: targetBSize)
                             copyBlockSafe(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
                             copyBlockSafe(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: tCbSize)
