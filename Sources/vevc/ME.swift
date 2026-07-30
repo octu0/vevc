@@ -1157,7 +1157,7 @@ struct UnsafePointerWrapper<T>: @unchecked Sendable {
 }
 
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode]) async -> (MotionVectors, [Int], [Bool], [Int]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1171,24 +1171,39 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     // Forward reference DWT LL band
     async let (prevSub2, rPrevSub2) = extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
     
-    // Backward reference DWT LL band
-    async let (nextSub2, rNextSub2) = extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
-    
     let cS2 = await currSub2
     let pS2 = await prevSub2
-    let nS2 = await nextSub2
+    
+    let nS2: [Int16]
+    let nR2: @Sendable () -> Void
+    if let cached = cachedNextSub2 {
+        nS2 = cached
+        nR2 = {}
+    } else {
+        let (sub2, releaseFn) = await extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
+        nS2 = sub2
+        nR2 = releaseFn
+    }
     
     async let (currSub1, rCurrSub1) = extractSingleTransformSubband16(r: Int16Reader(data: cS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
     async let (prevSub1, rPrevSub1) = extractSingleTransformSubband16(r: Int16Reader(data: pS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
-    async let (nextSub1, rNextSub1) = extractSingleTransformSubband16(r: Int16Reader(data: nS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
     
     let (cS1, cR1) = await (currSub1, rCurrSub1)
     let (pS1, pR1) = await (prevSub1, rPrevSub1)
-    let (nS1, nR1) = await (nextSub1, rNextSub1)
+    
+    let nS1: [Int16]
+    let nR1: @Sendable () -> Void
+    if let cached = cachedNextSub1 {
+        nS1 = cached
+        nR1 = {}
+    } else {
+        let (sub1, releaseFn) = await extractSingleTransformSubband16(r: Int16Reader(data: nS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+        nS1 = sub1
+        nR1 = releaseFn
+    }
     
     let cR2 = await rCurrSub2
     let pR2 = await rPrevSub2
-    let nR2 = await rNextSub2
     
     defer {
         cR2()
@@ -1426,5 +1441,5 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     }
     
     let occlusionScores = MotionEstimation.computeOcclusionScores(currPlane: cS1, prevPlane: pS1, width: targetWidth, height: targetHeight, globalPrior: MotionVector(dx: 0, dy: 0))
-    return (mvs, sads, refDirs, occlusionScores)
+    return (mvs, sads, refDirs, occlusionScores, nS2, nS1)
 }

@@ -168,6 +168,8 @@ actor LayersEncodeActor {
     private var firstInputPlane: PlaneData420?
     private var releaseFirstInput: (@Sendable () -> Void)?
     private var staticCounters: [Int] = []
+    private var cachedNextSub2: [Int16]?
+    private var cachedNextSub1: [Int16]?
     
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01) {
         self.width = width
@@ -268,6 +270,9 @@ actor LayersEncodeActor {
             firstReconstructed = reconstructed
             releaseFirstRecon = releaseRecon
             
+            cachedNextSub2 = nil
+            cachedNextSub1 = nil
+            
             previousReconstructed = reconstructed
             releasePreviousRecon = nil
             
@@ -314,12 +319,15 @@ actor LayersEncodeActor {
         let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
         
         var localCounters = self.staticCounters
-        let (bytes, reconstructed, mvs, sads, releaseRecon) = try await encodeSpatialLayers(
+        let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = try await encodeSpatialLayers(
             pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
             maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, staticCounters: &localCounters
+            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, staticCounters: &localCounters,
+            cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
         )
         self.staticCounters = localCounters
+        self.cachedNextSub2 = nSub2
+        self.cachedNextSub1 = nSub1
         
         // Using masked recon distortion for quality metric
         let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
