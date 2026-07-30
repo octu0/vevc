@@ -6,6 +6,7 @@ import CryptoKit
 import vevc
 
 struct Config {
+    var inFps: Int? = nil
     var bitrate: Int = 500
     var framerate: Int = 60
     var zeroThreshold: Int = 5
@@ -845,6 +846,11 @@ struct CompareApp {
                 if let v = Int(args[i + 1]) { config.framerate = v }
                 i += 1
             }
+        case "-in-fps":
+            if (i + 1) < args.count {
+                if let v = Int(args[i + 1]) { config.inFps = v }
+                i += 1
+            }
         case "-zeroThreshold":
             if (i + 1) < args.count {
                 if let v = Int(args[i + 1]) { config.zeroThreshold = v }
@@ -910,7 +916,7 @@ struct CompareApp {
     }
 
     if positionalArgs.isEmpty && y4mPath == nil {
-        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-quality] [-output-graph] [-vevc-only]")
+        print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-quality] [-output-graph] [-vevc-only]")
         exit(1)
     }
 
@@ -925,6 +931,18 @@ struct CompareApp {
 
     if let maxF = config.maxFrames, maxF < images.count {
         images = Array(images[0..<maxF])
+    }
+
+    if let inFps = config.inFps, inFps != config.framerate {
+        var converter = FrameRateConverter(inFps: inFps, outFps: config.framerate)
+        var converted: [ImageInput] = []
+        for img in images {
+            let count = converter.repeatCount()
+            for _ in 0..<count {
+                converted.append(img)
+            }
+        }
+        images = converted
     }
 
     if images.isEmpty {

@@ -10,6 +10,8 @@ var sceneThreshold = 32
 var qstep: Int? = nil
 var profile: UInt8 = 0x01
 var skipThreshold: Int = 2
+var inFpsOpt: Int? = nil
+var outFpsOpt: Int? = nil
 
 let args = CommandLine.arguments
 var i = 1
@@ -61,6 +63,16 @@ while i < args.count {
             if let v = Int(args[i + 1]) { skipThreshold = v }
             i += 1
         }
+    case "-framerate":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { outFpsOpt = v }
+            i += 1
+        }
+    case "-in-fps":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { inFpsOpt = v }
+            i += 1
+        }
     default:
         ()
     }
@@ -68,7 +80,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>]\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>]\n", stderr)
     exit(1)
 }
 
@@ -107,13 +119,21 @@ do {
         }
     }
     
+    let sourceFps = inFpsOpt ?? fps
+    let targetFps = outFpsOpt ?? sourceFps
+    
+    var converter: vevc.FrameRateConverter? = nil
+    if sourceFps != targetFps {
+        converter = vevc.FrameRateConverter(inFps: sourceFps, outFps: targetFps)
+    }
+    
     let encoder: vevc.VEVCEncoder
     if let qstep = qstep {
         encoder = vevc.VEVCEncoder(
             width: y4mReader.width,
             height: y4mReader.height,
             qstep: qstep,
-            framerate: Int(fps),
+            framerate: targetFps,
             zeroThreshold: zeroThreshold,
             keyint: keyint,
             sceneChangeThreshold: sceneThreshold,
@@ -125,7 +145,7 @@ do {
             width: y4mReader.width,
             height: y4mReader.height,
             maxbitrate: bitrate * 1000,
-            framerate: Int(fps),
+            framerate: targetFps,
             zeroThreshold: zeroThreshold,
             keyint: keyint,
             sceneChangeThreshold: sceneThreshold,
@@ -138,12 +158,21 @@ do {
     var totalEncodeTime: TimeInterval = 0
 
     while let image = try y4mReader.readFrame() {
-        let encStart = Date()
-        let chunk = try await encoder.encode(image: image)
-        totalEncodeTime += Date().timeIntervalSince(encStart)
+        var converterCount: Int
+        if converter != nil {
+            converterCount = converter!.repeatCount()
+        } else {
+            converterCount = 1
+        }
         
-        outFileHandle.write(Data(chunk))
-        frameCount += 1
+        for _ in 0..<converterCount {
+            let encStart = Date()
+            let chunk = try await encoder.encode(image: image)
+            totalEncodeTime += Date().timeIntervalSince(encStart)
+            
+            outFileHandle.write(Data(chunk))
+            frameCount += 1
+        }
     }
 
     if outPath != "-" {
