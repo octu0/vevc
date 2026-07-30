@@ -11,7 +11,7 @@ The skip decision compares the current frame's source image against the previous
 - **Sub-block Evaluation:** For a 32x32 block to be marked as skipped, all of its four 16x16 sub-blocks (along with their corresponding chroma regions) must satisfy the skip threshold.
 - **Threshold:** The skip condition requires the Sum of Absolute Differences (SAD) between the current and previous source blocks to be less than or equal to `blockThreshold`.
 - **Environment Override:** The per-pixel threshold is configurable via the `VEVC_SKIP_THRESH` environment variable, defaulting to 2 (`skipThresholdPerPixel = 2`).
-- **Guard Conditions:** The calculation uses `computeZeroSAD16x16` for full 16x16 blocks and falls back to `computeZeroSADSubBlock` for partial blocks at the frame edges.
+- **Edge Blocks:** The calculation uses `computeZeroSAD16x16` for full 16x16 blocks and falls back to `computeZeroSADSubBlock` for partial blocks at the frame edges. There are no additional guard conditions for the skip decision (the only requirement is that all sub-blocks satisfy the threshold).
 
 ### 2.2. Skip Modes and LTR References
 - **Skip Modes:** A block can be assigned one of three modes, defined in `BlockMode`:
@@ -24,7 +24,7 @@ The skip decision compares the current frame's source image against the previous
 ### 2.3. Bitstream Elements
 - **Frame Header:** For `pFrame` in Profile 0x02, the frame header (`VEVCFrameHeader`) includes `skipMapSize` (4 bytes, UInt32BE) and a `hasRefDir` flag (0x10 bit in the frame type byte).
 - **Skip Map Serialization:** The `skipMap` is encoded directly into the bitstream, taking `skipMapSize` bytes.
-- **Motion Vectors (MV):** MVs are encoded alongside the `skipMap`. For skipped blocks, MV encoding is bypassed or implicitly zeroed out.
+- **Motion Vectors (MV):** MVs are encoded alongside the `skipMap`. For skipped blocks, MV encoding is completely omitted from the bitstream. The decoder symmetrically restores the zero motion vectors by checking the `skipMap`.
 - **Reference Direction:** If `hasRefDir` is true, an additional array of bits (`refDirBuf`) is serialized to indicate the reference direction (LTR or previous). The size is specified by `refDirSize`.
 
 ### 2.4. Decoder Restoration Rules
@@ -62,7 +62,7 @@ To maintain a closed-loop design, the following invariants are strictly enforced
 
 ## 5. Relationship with Deblocking Filter
 
-1. **Edge Guarding:** Both the encoder and decoder pass the `skipMap` (and MVs) into the deblocking functions (`applyDeblockingFilter32`, `applyDeblockingFilterChroma16`). Neither side filters edges between skipped blocks.
+1. **Edge Guarding:** Both the encoder and decoder pass the `skipMap` (and MVs) into the deblocking functions (`applyDeblockingFilter32`, `applyDeblockingFilterChroma16`). Neither side filters edges where both sides share the same non-inter mode.
 2. **Computational Savings:** This skip-guard in the deblocking filter **does not affect the final output**, because the skipped block pixels are subsequently overwritten by the final skip copy anyway. Its sole purpose is to reduce computational cost (saving CPU cycles).
 3. **Boundary Guards:** The deblocking edge loop includes boundary guards to exclude out-of-bounds reads when plane dimensions are multiples of 16 plus 1. Historically, out-of-bounds reading caused non-deterministic encoding outputs.
 
