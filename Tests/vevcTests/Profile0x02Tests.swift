@@ -186,8 +186,9 @@ final class Profile0x02Tests: XCTestCase {
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         
-        let (bytesP, encReconP, _, _, relEncP) = try await encodeSpatialLayers(
-            pd: pd1, pool: pool, predictedPd: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02)
+        var counters = [Int](repeating: 0, count: 4)
+        let (bytesP, encReconP, _, _, relEncP, _, _) = try await encodeSpatialLayers(
+            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02, staticCounters: &counters)
         defer { relEncP() }
         
         let decImg16P = try await decodeSpatialLayers(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, profile: 0x02)

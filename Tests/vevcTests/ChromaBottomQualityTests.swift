@@ -276,8 +276,9 @@ final class ChromaBottomQualityTests: XCTestCase {
         )
 
         // P-Frame: encode (without motion compensation since it's removed)
-        let (pBytes, pRecon, _, _, releaseP) = try await encodeSpatialLayers(
-            pd: pd1, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        var counters = [Int](repeating: 0, count: 4)
+        let (pBytes, pRecon, _, _, releaseP, _, _) = try await encodeSpatialLayers(
+            pd: pd1, pool: pool, predictedPd: iRecon, nextPd: iRecon, prevInput: pd1, ltrInput: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, staticCounters: &counters)
         defer { releaseP() }
 
         // P-Frame: decode

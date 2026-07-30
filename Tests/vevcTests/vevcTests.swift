@@ -306,8 +306,9 @@ final class VevcTests: XCTestCase {
         let iPsnr = calculatePSNR(original: img0.yPlane, decoded: iImg.yPlane)
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
 
-        let (pBytes, _, _, _, releaseP) = try await encodeSpatialLayers(
-            pd: pd3, pool: pool, predictedPd: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        var counters = [Int](repeating: 0, count: 4)
+        let (pBytes, _, _, _, releaseP, _, _) = try await encodeSpatialLayers(
+            pd: pd3, pool: pool, predictedPd: iRecon, nextPd: iRecon, prevInput: pd3, ltrInput: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, staticCounters: &counters)
         defer { releaseP() }
 
         // P-Frameのresidualの検証（省略して正常終了とする）

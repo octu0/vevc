@@ -588,3 +588,29 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
         return blocks
     }
 }
+
+// MARK: - Convenience overloads for [UInt8]
+@inline(__always)
+func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
+    try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blockCount)
+}
+
+@inline(__always)
+func decodePlaneSubbands32WithParentBlocks(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
+    try decodePlaneSubbands32WithParentBlocks(data: data[...], pool: pool, blockCount: blockCount, parentBlocks: parentBlocks)
+}
+
+@inline(__always)
+func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
+    try decodePlaneSubbands16(data: data[...], pool: pool, blockCount: blockCount)
+}
+
+@inline(__always)
+func decodePlaneSubbands16WithParentBlocks(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
+    try decodePlaneSubbands16WithParentBlocks(data: data[...], pool: pool, blockCount: blockCount, parentBlocks: parentBlocks)
+}
+
+@inline(__always)
+func decodePlaneBaseSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, isIFrame: Bool) throws -> [BlockView] {
+    try decodePlaneBaseSubbands8(data: data[...], pool: pool, blockCount: blockCount, isIFrame: isIFrame)
+}
