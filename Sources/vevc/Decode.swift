@@ -1,3 +1,5 @@
+import Foundation
+
 // MARK: - Decode Error
 
 public enum DecodeError: Error, CustomStringConvertible {
@@ -769,9 +771,8 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
 
 @Sendable @inline(__always)
 func decodeLayer32ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     let sCount = skipMap.count
     let pWidth = prev.width
@@ -781,35 +782,45 @@ func decodeLayer32ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSi
     
     prev.withUnsafeYReadOnly { prevBase in
         sub.withUnsafeY { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 32
-                let rowOffset = i * colCount
-                let py = h / 2
-                for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let isSkip = blockIndex < sCount && skipMap[blockIndex] != .inter
-                    if isSkip {
-                        continue
-                    }
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    let px = w / 2
-                    
-                    if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
-                        copy16x16ContiguousDirect(srcBase: prevBase, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destBase, destWidth: sWidth, x: w, y: h)
-                    } else {
-                        prev.readYDirect(srcBase: prevBase, x: px, y: py, size: 16, into: block)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        var blk = block
-                        subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 32
+                    let rowOffset = i * colCount
+                    let py = h / 2
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let isSkip = blockIndex < sCount && skipMap[blockIndex] != .inter
+                        if isSkip {
+                            continue
+                        }
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        let px = w / 2
+                        
+                        if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
+                            copy16x16ContiguousDirect(srcBase: prevPtr, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
+                            dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                            inverseDWT2DBlock32(ptr: base, stride: 32)
+                            copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destPtr, destWidth: sWidth, x: w, y: h)
+                        } else {
+                            prev.readYDirect(srcBase: prevPtr, x: px, y: py, size: 16, into: block)
+                            dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                            inverseDWT2DBlock32(ptr: base, stride: 32)
+                            var blk = block
+                            subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+                        }
                     }
                 }
             }
@@ -843,9 +854,8 @@ private func copy32x32ContiguousDirect(srcBase: UnsafePointer<Int16>, srcStride:
 
 @Sendable @inline(__always)
 func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     let pWidth = prev.width
     let pHeight = prev.height
@@ -854,31 +864,41 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
     
     prev.withUnsafeYReadOnly { prevBase in
         sub.withUnsafeY { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 32
-                let rowOffset = i * colCount
-                let py = h / 2
-                for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    let px = w / 2
-                    
-                    if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
-                        copy16x16ContiguousDirect(srcBase: prevBase, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destBase, destWidth: sWidth, x: w, y: h)
-                    } else {
-                        prev.readYDirect(srcBase: prevBase, x: px, y: py, size: 16, into: block)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        var blk = block
-                        subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 32
+                    let rowOffset = i * colCount
+                    let py = h / 2
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        let px = w / 2
+                        
+                        if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
+                            copy16x16ContiguousDirect(srcBase: prevPtr, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
+                            dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                            inverseDWT2DBlock32(ptr: base, stride: 32)
+                            copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destPtr, destWidth: sWidth, x: w, y: h)
+                        } else {
+                            prev.readYDirect(srcBase: prevPtr, x: px, y: py, size: 16, into: block)
+                            dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                            dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                            inverseDWT2DBlock32(ptr: base, stride: 32)
+                            var blk = block
+                            subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+                        }
                     }
                 }
             }
@@ -888,26 +908,35 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
 
 @Sendable @inline(__always)
 func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     prev.withUnsafeCbReadOnly { prevBase in
         sub.withUnsafeCb { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 32
-                let rowOffset = i * colCount
-                for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    prev.readCbDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
-                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                    inverseDWT2DBlock32(ptr: base, stride: 32)
-                    var blk = block
-                    subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 32
+                    let rowOffset = i * colCount
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        var blk = block
+                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+                    }
                 }
             }
         }
@@ -916,26 +945,35 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 
 @Sendable @inline(__always)
 func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     prev.withUnsafeCrReadOnly { prevBase in
         sub.withUnsafeCr { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 32
-                let rowOffset = i * colCount
-                for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    prev.readCrDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 16, into: block)
-                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                    inverseDWT2DBlock32(ptr: base, stride: 32)
-                    var blk = block
-                    subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 32)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 32
+                    let rowOffset = i * colCount
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        var blk = block
+                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+                    }
                 }
             }
         }
@@ -944,27 +982,36 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 
 @Sendable @inline(__always)
 func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     prev.withUnsafeYReadOnly { prevBase in
         sub.withUnsafeY { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 16
-                let rowOffset = i * colCount
-                for xIdx in 0..<colCount {
-                    let w = xIdx * 16
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    prev.readYDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 8, into: block)
-                    dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
-                    dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
-                    dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                    inverseDWT2DBlock16(ptr: base, stride: 16)
-                    var blk = block
-                    subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 16
+                    let rowOffset = i * colCount
+                    for xIdx in 0..<colCount {
+                        let w = xIdx * 16
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readYDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
+                        dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                        dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                        dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                        inverseDWT2DBlock16(ptr: base, stride: 16)
+                        var blk = block
+                        subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
+                    }
                 }
             }
         }
@@ -973,27 +1020,36 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
 
 @Sendable @inline(__always)
 func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     prev.withUnsafeCbReadOnly { prevBase in
         sub.withUnsafeCb { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 16
-                let rowOffset = i * colCount
-                for xIdx in 0..<colCount {
-                    let w = xIdx * 16
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    prev.readCbDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 8, into: block)
-                    dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
-                    dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
-                    dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                    inverseDWT2DBlock16(ptr: base, stride: 16)
-                    var blk = block
-                    subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 16
+                    let rowOffset = i * colCount
+                    for xIdx in 0..<colCount {
+                        let w = xIdx * 16
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
+                        dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                        dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                        dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                        inverseDWT2DBlock16(ptr: base, stride: 16)
+                        var blk = block
+                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
+                    }
                 }
             }
         }
@@ -1002,27 +1058,36 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 
 @Sendable @inline(__always)
 func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     prev.withUnsafeCrReadOnly { prevBase in
         sub.withUnsafeCr { destBase in
-            for i in startRow..<endRow {
-                let h: Int = i * 16
-                let rowOffset = i * colCount
-                for xIdx in 0..<colCount {
-                    let w = xIdx * 16
-                    let blockIndex: Int = rowOffset &+ xIdx
-                    let block: BlockView = blocks[blockIndex]
-                    let base = block.base
-                    prev.readCrDirect(srcBase: prevBase, x: w / 2, y: h / 2, size: 8, into: block)
-                    dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
-                    dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
-                    dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                    inverseDWT2DBlock16(ptr: base, stride: 16)
-                    var blk = block
-                    subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 16)
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 16
+                    let rowOffset = i * colCount
+                    for xIdx in 0..<colCount {
+                        let w = xIdx * 16
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
+                        dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                        dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                        dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                        inverseDWT2DBlock16(ptr: base, stride: 16)
+                        var blk = block
+                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
+                    }
                 }
             }
         }
@@ -1031,26 +1096,32 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 
 @Sendable @inline(__always)
 func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     sub.withUnsafeY { destBase in
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                let block: BlockView = blocks[blockIndex]
-                let base = block.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                var blk = block
-                subConst.updateY(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
+        let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+        DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+            let startRow: Int = tIdx * chunkSizeSlice
+            let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+            guard startRow < endRow else { return }
+            let destPtr = sDest.ptr
+            for i in startRow..<endRow {
+                let h: Int = i * 8
+                let rowOffset = i * colCount
+                for xIdx in 0..<colCount {
+                    let w = xIdx * 8
+                    let blockIndex: Int = rowOffset &+ xIdx
+                    let block: BlockView = blocks[blockIndex]
+                    let base = block.base
+                    dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                    dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                    dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                    dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                    inverseDWT2DBlock8(ptr: base, stride: 8)
+                    var blk = block
+                    subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+                }
             }
         }
     }
@@ -1058,26 +1129,32 @@ func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowC
 
 @Sendable @inline(__always)
 func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     sub.withUnsafeCb { destBase in
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                let block: BlockView = blocks[blockIndex]
-                let base = block.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                var blk = block
-                subConst.updateCb(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
+        let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+        DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+            let startRow: Int = tIdx * chunkSizeSlice
+            let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+            guard startRow < endRow else { return }
+            let destPtr = sDest.ptr
+            for i in startRow..<endRow {
+                let h: Int = i * 8
+                let rowOffset = i * colCount
+                for xIdx in 0..<colCount {
+                    let w = xIdx * 8
+                    let blockIndex: Int = rowOffset &+ xIdx
+                    let block: BlockView = blocks[blockIndex]
+                    let base = block.base
+                    dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                    dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                    dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                    dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                    inverseDWT2DBlock8(ptr: base, stride: 8)
+                    var blk = block
+                    subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+                }
             }
         }
     }
@@ -1085,26 +1162,32 @@ func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
 
 @Sendable @inline(__always)
 func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) {
-    let startRow: Int = taskIdx * chunkSize
-    let endRow: Int = min(startRow + chunkSize, rowCount)
-    guard startRow < endRow else { return }
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
     sub.withUnsafeCr { destBase in
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                let block: BlockView = blocks[blockIndex]
-                let base = block.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                var blk = block
-                subConst.updateCr(destBase: destBase, data: &blk, startX: w, startY: h, size: 8)
+        let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+        DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+            let startRow: Int = tIdx * chunkSizeSlice
+            let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+            guard startRow < endRow else { return }
+            let destPtr = sDest.ptr
+            for i in startRow..<endRow {
+                let h: Int = i * 8
+                let rowOffset = i * colCount
+                for xIdx in 0..<colCount {
+                    let w = xIdx * 8
+                    let blockIndex: Int = rowOffset &+ xIdx
+                    let block: BlockView = blocks[blockIndex]
+                    let base = block.base
+                    dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                    dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                    dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                    dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                    inverseDWT2DBlock8(ptr: base, stride: 8)
+                    var blk = block
+                    subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+                }
             }
         }
     }
