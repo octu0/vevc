@@ -666,13 +666,13 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     
     if let sMap = skipMap {
         decodeLayer32ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, skipMap: sMap, sub: &sub)
+        decodeLayer32ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, skipMap: sMap, sub: &sub)
+        decodeLayer32ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, skipMap: sMap, sub: &sub)
     } else {
         decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, sub: &sub)
+        decodeLayer32ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, sub: &sub)
+        decodeLayer32ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, sub: &sub)
     }
-    
-    decodeLayer32ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, sub: &sub)
-        
-    decodeLayer32ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, sub: &sub)
     
     // MC: MV is layer0 precision -> layer2 (full resolution) mvScale=4
     if let tPrev = predictedPd, let mvs = mvs {
@@ -907,6 +907,47 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
 }
 
 @Sendable @inline(__always)
+func decodeLayer32ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) {
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+    let subConst = sub
+    let sCount = skipMap.count
+    prev.withUnsafeCbReadOnly { prevBase in
+        sub.withUnsafeCb { destBase in
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 32
+                    let rowOffset = i * colCount
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        if blockIndex < sCount && skipMap[blockIndex] != .inter {
+                            continue
+                        }
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        var blk = block
+                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Sendable @inline(__always)
 func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, sub: inout Image16) {
     let concurrency = min(rowCount, 4)
     let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
@@ -936,6 +977,47 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
                         inverseDWT2DBlock32(ptr: base, stride: 32)
                         var blk = block
                         subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Sendable @inline(__always)
+func decodeLayer32ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) {
+    let concurrency = min(rowCount, 4)
+    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+    let subConst = sub
+    let sCount = skipMap.count
+    prev.withUnsafeCrReadOnly { prevBase in
+        sub.withUnsafeCr { destBase in
+            let sPrev = UnsafeSendablePointer(ptr: prevBase)
+            let sDest = UnsafeSendableMutablePointer(ptr: destBase)
+            
+            DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+                let startRow: Int = tIdx * chunkSizeSlice
+                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+                guard startRow < endRow else { return }
+                let prevPtr = sPrev.ptr
+                let destPtr = sDest.ptr
+                for i in startRow..<endRow {
+                    let h: Int = i * 32
+                    let rowOffset = i * colCount
+                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                        let blockIndex: Int = rowOffset &+ xIdx
+                        if blockIndex < sCount && skipMap[blockIndex] != .inter {
+                            continue
+                        }
+                        let block: BlockView = blocks[blockIndex]
+                        let base = block.base
+                        prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                        inverseDWT2DBlock32(ptr: base, stride: 32)
+                        var blk = block
+                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
                     }
                 }
             }
