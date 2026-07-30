@@ -68,210 +68,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     return (out, reconstructed, MotionVectors.empty, [], { r2Y(); r2Cb(); r2Cr() })
 }
 
-@inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
-    let dx = pd.width
-    let dy = pd.height
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-    
-    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
-    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2)
-    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1)
-    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1)
-    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
-    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
-    
-    var skipMap = [BlockMode]()
-    if profile == 0x02 {
-        let bw = (dx + 31) / 32
-        let bh = (dy + 31) / 32
-        let blockCount = bw * bh
-        skipMap = [BlockMode](repeating: .inter, count: blockCount)
-        let skipThresholdPerPixel = ProcessInfo.processInfo.environment["VEVC_SKIP_THRESH"].flatMap { Int($0) } ?? 2
-        
-        withUnsafePointers(pd.y, pd.cb, pd.cr, predictedPd.y, predictedPd.cb, predictedPd.cr) { (currYPtr: UnsafePointer<Int16>, currCbPtr: UnsafePointer<Int16>, currCrPtr: UnsafePointer<Int16>, prevYPtr: UnsafePointer<Int16>, prevCbPtr: UnsafePointer<Int16>, prevCrPtr: UnsafePointer<Int16>) -> Void in
-            for i in 0..<blockCount {
-                let bx = (i % bw) * 32
-                let by = (i / bw) * 32
-                
-                var allSubBlocksMatchPrev = true
-                
-                for sy in 0..<2 {
-                    for sx in 0..<2 {
-                        let subX = bx + sx * 16
-                        let subY = by + sy * 16
-                        let mw = min(16, dx - subX)
-                        let mh = min(16, dy - subY)
-                        if mw <= 0 || mh <= 0 { continue }
-                        let mwc = min(8, cbDx - subX / 2)
-                        let mhc = min(8, cbDy - subY / 2)
-                        let area = mw * mh + mwc * mhc * 2
-                        let blockThreshold = skipThresholdPerPixel * area
-                        
-                        let sadPrev = if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                            computeZeroSAD16x16(cY: currYPtr, rY: prevYPtr, cCb: currCbPtr, rCb: prevCbPtr, cCr: currCrPtr, rCr: prevCrPtr, bx: subX, by: subY, width: dx)
-                        } else {
-                            computeZeroSADSubBlock(cY: currYPtr, rY: prevYPtr, cCb: currCbPtr, rCb: prevCbPtr, cCr: currCrPtr, rCr: prevCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
-                        }
-                        
-                        if sadPrev > blockThreshold { allSubBlocksMatchPrev = false }
-                    }
-                }
-                
-                if allSubBlocksMatchPrev {
-                    skipMap[i] = .skip_prev
-                }
-            }
-        }
-    }
-    
-    let (mvs_original, sads, occlusionScores) = await computeMotionVectors(curr: pd, prev: predictedPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, skipMap: profile == 0x02 ? skipMap : [])
-    var mvs = mvs_original
-    if profile == 0x02 {
-        for i in 0..<skipMap.count {
-            if skipMap[i] != .inter {
-                mvs.dx[i] = 0
-                mvs.dy[i] = 0
-            }
-        }
-    }
-    
-    var mutPdY = pool.getInt16(count: pd.y.count)
-    var mutPdCb = pool.getInt16(count: pd.cb.count)
-    var mutPdCr = pool.getInt16(count: pd.cr.count)
-    
-    if profile == 0x02 {
-        mutPdY.withUnsafeMutableBufferPointer { dst in _ = memset(dst.baseAddress!, 0, dst.count * 2) }
-        mutPdCb.withUnsafeMutableBufferPointer { dst in _ = memset(dst.baseAddress!, 0, dst.count * 2) }
-        mutPdCr.withUnsafeMutableBufferPointer { dst in _ = memset(dst.baseAddress!, 0, dst.count * 2) }
-        
-        let bw = (dx + 31) / 32
-        let cbBw = (cbDx + 15) / 16
-        let yDstCount = mutPdY.count
-        let cbDstCount = mutPdCb.count
-        withUnsafePointers(pd.y, pd.cb, pd.cr, mut: &mutPdY, mut: &mutPdCb, mut: &mutPdCr) { (ySrc: UnsafePointer<Int16>, cbSrc: UnsafePointer<Int16>, crSrc: UnsafePointer<Int16>, yDst: UnsafeMutablePointer<Int16>, cbDst: UnsafeMutablePointer<Int16>, crDst: UnsafeMutablePointer<Int16>) -> Void in
-            for i in 0..<skipMap.count {
-                if skipMap[i] == .inter {
-                    let bx = (i % bw) * 32
-                    let by = (i / bw) * 32
-                    for r in 0..<32 {
-                        let offset = (by + r) * dx + bx
-                        if offset < yDstCount && offset + 32 <= yDstCount {
-                            let count = min(32, dx - bx)
-                            if count == 32 {
-                                let dPtr = UnsafeMutableRawPointer(yDst.advanced(by: offset))
-                                let sPtr = UnsafeRawPointer(ySrc.advanced(by: offset))
-                                dPtr.storeBytes(of: sPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                                dPtr.advanced(by: 32).storeBytes(of: sPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            } else {
-                                yDst.advanced(by: offset).update(from: ySrc.advanced(by: offset), count: count)
-                            }
-                        }
-                    }
-                    
-                    let cBx = (i % cbBw) * 16
-                    let cBy = (i / cbBw) * 16
-                    for r in 0..<16 {
-                        let offset = (cBy + r) * cbDx + cBx
-                        if offset < cbDstCount && offset + 16 <= cbDstCount {
-                            let count = min(16, cbDx - cBx)
-                            if count == 16 {
-                                let cbDPtr = UnsafeMutableRawPointer(cbDst.advanced(by: offset))
-                                let cbSPtr = UnsafeRawPointer(cbSrc.advanced(by: offset))
-                                cbDPtr.storeBytes(of: cbSPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                                
-                                let crDPtr = UnsafeMutableRawPointer(crDst.advanced(by: offset))
-                                let crSPtr = UnsafeRawPointer(crSrc.advanced(by: offset))
-                                crDPtr.storeBytes(of: crSPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            } else {
-                                cbDst.advanced(by: offset).update(from: cbSrc.advanced(by: offset), count: count)
-                                crDst.advanced(by: offset).update(from: crSrc.advanced(by: offset), count: count)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    } else {
-        mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-        mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-        mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-    }
 
-    // MV is layer0 precision -> mvScale=4 for applying to layer2 (full resolution)
-    let sMap: [BlockMode]? = (profile == 0x02) ? skipMap : nil
-    subtractScaledMotionCompensationLuma(plane: &mutPdY, prevPlane: predictedPd.y, mvs: mvs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-    subtractScaledMotionCompensationChroma(plane: &mutPdCb, prevPlane: predictedPd.cb, mvs: mvs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-    subtractScaledMotionCompensationChroma(plane: &mutPdCr, prevPlane: predictedPd.cr, mvs: mvs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-    
-    let resPd = PlaneData420(width: dx, height: dy, y: mutPdY, cb: mutPdCb, cr: mutPdCr)
-    let isPFrame = true
-    
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, skipMap: sMap)
-    defer { releaseL2() }
-    
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, skipMap: sMap)
-    defer { releaseL1() }
-    
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, skipMap: sMap)
-    defer { releaseBase() }
-    
-    let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
-    
-    let l1dx = sub2.width
-    let l1dy = sub2.height
-    let l1cbDx = ((l1dx + 1) / 2)
-    let l1cbDy = ((l1dy + 1) / 2)
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
-    
-    let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
-    let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
-    defer { r1Y(); r1Cb(); r1Cr() }
-
-    let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, sads: sads)
-    
-    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
-    var mutReconL2Y = reconL2Y
-    let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    var mutReconL2Cb = reconL2Cb
-    let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    var mutReconL2Cr = reconL2Cr
-        
-    // Reconstruction adds back the reference prediction (mvScale=4 for layer2)
-    await applyScaledMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: predictedPd.y, mvs: mvs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-    await applyScaledMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: predictedPd.cb, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-    await applyScaledMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: predictedPd.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-    
-    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4, mvs: mvs)
-    applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs)
-    applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs)
-    
-    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
-    
-    debugLog({
-        return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
-    }())
-    
-    var out: [UInt8] = []
-    var skipMapData: [UInt8] = []
-    if profile == 0x02 {
-        skipMapData = encodeSkipMap(map: skipMap)
-    }
-    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, profile: profile)
-    
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
-    out.append(contentsOf: frameHeader.serialize(profile: profile))
-    out.append(contentsOf: skipMapData)
-    out.append(contentsOf: mvData)
-    out.append(contentsOf: layer0)
-    out.append(contentsOf: layer1)
-    out.append(contentsOf: layer2)
-    
-    return (out, reconstructed, mvs, sads, { r2Y(); r2Cb(); r2Cr() })
-}
 
 @inline(__always)
 func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01, staticCounters: inout [Int], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
@@ -479,17 +276,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         var y = reconL2Y
         await applyScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilter32(plane: &y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4, mvs: mvsConst2)
-        
-        if profile == 0x02 {
-            let bw = (dx + 31) / 32
-            for i in 0..<skipMapConst.count {
-                if skipMapConst[i] == .skip_ltr {
-                    let bx = (i % bw) * 32
-                    let by = (i / bw) * 32
-                    copyBlock(from: nPd.y, to: &y, bx: bx, by: by, width: dx, height: dy, blockSize: 32)
-                }
-            }
-        }
         return (y, r2Y)
     }()
     
@@ -498,16 +284,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         var cb = reconL2Cb
         await applyScaledBidirectionalMotionCompensationChroma(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilterChroma16(plane: &cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvsConst2)
-        if profile == 0x02 {
-            let bw = (dx + 31) / 32
-            for i in 0..<skipMapConst.count {
-                if skipMapConst[i] == .skip_ltr {
-                    let bx = (i % bw) * 32
-                    let by = (i / bw) * 32
-                    copyBlock(from: nPd.cb, to: &cb, bx: bx/2, by: by/2, width: cbDx, height: cbDy, blockSize: 16)
-                }
-            }
-        }
         return (cb, r2Cb)
     }()
     
@@ -516,16 +292,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         var cr = reconL2Cr
         await applyScaledBidirectionalMotionCompensationChroma(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilterChroma16(plane: &cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvsConst2)
-        if profile == 0x02 {
-            let bw = (dx + 31) / 32
-            for i in 0..<skipMapConst.count {
-                if skipMapConst[i] == .skip_ltr {
-                    let bx = (i % bw) * 32
-                    let by = (i / bw) * 32
-                    copyBlock(from: nPd.cr, to: &cr, bx: bx/2, by: by/2, width: cbDx, height: cbDy, blockSize: 16)
-                }
-            }
-        }
         return (cr, r2Cr)
     }()
     

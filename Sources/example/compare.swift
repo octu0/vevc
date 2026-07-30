@@ -2,6 +2,7 @@ import Foundation
 import VideoToolbox
 import CoreMedia
 import AppKit
+import CryptoKit
 import vevc
 
 struct Config {
@@ -16,6 +17,7 @@ struct Config {
     var outputVersus: Bool = false
     var outputBitrates: Bool = false
     var vevcOnly: Bool = false
+    var dumpHash: Bool = false
     var qstep: Int? = nil
     var profile: UInt8 = 0x01
 }
@@ -174,6 +176,19 @@ func runVEVC(images: [ImageInput], config: Config) async throws -> (
         let outFrames = try await vevcDecoder.decode(data: outBytes)
         let decTime = Date().timeIntervalSince(decStart)
         print("  -> runVEVC Decoded Layer \(maxLayer) \(outFrames.count) frames")
+        
+        if config.dumpHash && maxLayer == 2 {
+            let encHash = SHA256.hash(data: outBytes).map { String(format: "%02x", $0) }.joined()
+            var hasher = SHA256()
+            for frame in outFrames {
+                frame.yPlane.withUnsafeBufferPointer { hasher.update(bufferPointer: UnsafeRawBufferPointer($0)) }
+                frame.cbPlane.withUnsafeBufferPointer { hasher.update(bufferPointer: UnsafeRawBufferPointer($0)) }
+                frame.crPlane.withUnsafeBufferPointer { hasher.update(bufferPointer: UnsafeRawBufferPointer($0)) }
+            }
+            let decHash = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+            print("[FIXTURE_HASH] Encoded SHA-256: \(encHash)")
+            print("[FIXTURE_HASH] Decoded SHA-256: \(decHash)")
+        }
         
         var metrics: [QualityMetrics]? = nil
         if config.quality && maxLayer == 2 {
@@ -857,6 +872,8 @@ struct CompareApp {
             config.quality = true
         case "-vevc-only", "--vevc-only":
             config.vevcOnly = true
+        case "-dump-hash", "--dump-hash":
+            config.dumpHash = true
         case "-qstep", "--qstep":
             if (i + 1) < args.count {
                 if let v = Int(args[i + 1]) { config.qstep = v }
