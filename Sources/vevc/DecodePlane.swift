@@ -5,7 +5,7 @@ enum DecodeTask32 {
 }
 
 @inline(__always)
-func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
+func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -101,7 +101,7 @@ func decodePlaneSubbands32(data: [UInt8], pool: BlockViewPool, blockCount: Int) 
 }
 
 @inline(__always)
-func decodePlaneSubbands32WithParentBlocks(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
+func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -294,7 +294,7 @@ enum DecodeTask16 {
 }
 
 @inline(__always)
-func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
+func decodePlaneSubbands16(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -385,7 +385,7 @@ func decodePlaneSubbands16(data: [UInt8], pool: BlockViewPool, blockCount: Int) 
 }
 
 @inline(__always)
-func decodePlaneSubbands16WithParentBlocks(data: [UInt8], pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
+func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView]) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -536,7 +536,7 @@ func decodePlaneSubbands16WithParentBlocks(data: [UInt8], pool: BlockViewPool, b
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8(data: [UInt8], pool: BlockViewPool, blockCount: Int, isIFrame: Bool) throws -> [BlockView] {
+func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isIFrame: Bool) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count

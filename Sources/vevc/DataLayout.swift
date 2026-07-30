@@ -232,7 +232,7 @@ public struct VEVCLayerData {
         from r: [UInt8],
         layer: UInt8,
         layerLabel: String
-    ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: [UInt8], bufCb: [UInt8], bufCr: [UInt8]) {
+    ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: ArraySlice<UInt8>, bufCb: ArraySlice<UInt8>, bufCr: ArraySlice<UInt8>) {
         var offset = 0
         let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
         let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
@@ -241,21 +241,21 @@ public struct VEVCLayerData {
         guard (offset + bufYLen) <= r.count else {
             throw DecodeError.invalidBlockDataContext("\(layerLabel) Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)")
         }
-        let bufY = Array(r[offset..<(offset + bufYLen)])
+        let bufY = r[offset..<(offset + bufYLen)]
         offset += bufYLen
         
         let bufCbLen = try readVLQSizeFromBytes(r, offset: &offset)
         guard (offset + bufCbLen) <= r.count else {
             throw DecodeError.invalidBlockDataContext("\(layerLabel) Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)")
         }
-        let bufCb = Array(r[offset..<(offset + bufCbLen)])
+        let bufCb = r[offset..<(offset + bufCbLen)]
         offset += bufCbLen
         
         let bufCrLen = try readVLQSizeFromBytes(r, offset: &offset)
         guard (offset + bufCrLen) <= r.count else {
             throw DecodeError.invalidBlockDataContext("\(layerLabel) Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)")
         }
-        let bufCr = Array(r[offset..<(offset + bufCrLen)])
+        let bufCr = r[offset..<(offset + bufCrLen)]
         offset += bufCrLen
         
         return (qtY, qtC, bufY, bufCb, bufCr)
