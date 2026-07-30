@@ -184,8 +184,12 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         }
     }
     
+    var searchSkipMap: [BlockMode] = []
+    if profile == 0x02 {
+        searchSkipMap = skipMap
+    }
     // bidirectional MV calculation: search MVs for both forward and backward and select the one with the smaller SAD for each block
-    let (mvs_original, sads, refDirs_original, occlusionScores, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: profile == 0x02 ? skipMap : [], cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
+    let (mvs_original, sads, refDirs_original, occlusionScores, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: searchSkipMap, cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
     var mvs = mvs_original
     var refDirs = refDirs_original
     if profile == 0x02 {
@@ -279,9 +283,13 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let refDirsConst2 = refDirs
     let skipMapConst = skipMap
     let l1ImgConst = l1Img
+    var sMapForReconY: [BlockMode]? = nil
+    if profile == 0x02 {
+        sMapForReconY = skipMapConst
+    }
     
-    async let aY = { [mvsConst2, refDirsConst2, skipMapConst, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
-        let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1ImgConst, width: dx, height: dy, qt: qtY2, pool: pool, skipMap: (profile == 0x02 ? skipMapConst : nil))
+    async let aY = { [mvsConst2, refDirsConst2, skipMapConst, sMapForReconY, l1ImgConst] () -> ([Int16], @Sendable () -> Void) in
+        let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1ImgConst, width: dx, height: dy, qt: qtY2, pool: pool, skipMap: sMapForReconY)
         var y = reconL2Y
         await applyScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst2, refDirs: refDirsConst2, skipMap: skipMapConst, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         applyDeblockingFilter32(plane: &y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4, mvs: mvsConst2)

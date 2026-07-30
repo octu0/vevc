@@ -51,7 +51,7 @@ final class BlockDataCompareTests: XCTestCase {
 
         let rowCountY = (height + 32 - 1) / 32
         let colCountY = (width + 32 - 1) / 32
-        let decYBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
+        let decYBlocks = try decodePlaneSubbands32(data: bufY[...], pool: pool, blockCount: rowCountY * colCountY)
 
         // encYBlocks vs decYBlocks のHL/LH/HHサブバンドを比較
         XCTAssertEqual(encYBlocks.count, decYBlocks.count, "blocks count mismatch: enc=\(encYBlocks.count) dec=\(decYBlocks.count)")
