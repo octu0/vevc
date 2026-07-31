@@ -100,9 +100,9 @@ class PlayerViewModel: ObservableObject {
             profile: profile
         )
         
-        let decoder0 = StreamingDecoderActor(maxLayer: 0, width: y4mReader.width, height: y4mReader.height)
-        let decoder1 = StreamingDecoderActor(maxLayer: 1, width: y4mReader.width, height: y4mReader.height)
-        let decoder2 = StreamingDecoderActor(maxLayer: 2, width: y4mReader.width, height: y4mReader.height)
+        let decoder0 = StreamingDecoderActor(maxLayer: 0, width: y4mReader.width, height: y4mReader.height, profile: profile)
+        let decoder1 = StreamingDecoderActor(maxLayer: 1, width: y4mReader.width, height: y4mReader.height, profile: profile)
+        let decoder2 = StreamingDecoderActor(maxLayer: 2, width: y4mReader.width, height: y4mReader.height, profile: profile)
         
         let frameInterval = 1.0 / fps
         var frameIndex: Double = 0.0
@@ -127,9 +127,9 @@ class PlayerViewModel: ObservableObject {
                     try Task.checkCancellation()
                     let chunk = try await encoder.encode(image: image)
                     
-                    let l0Chunk = try splitFrameChunk(chunk, maxLayer: 0)
-                    let l1Chunk = try splitFrameChunk(chunk, maxLayer: 1)
-                    let l2Chunk = try splitFrameChunk(chunk, maxLayer: 2)
+                    let l0Chunk = try splitFrameChunk(chunk, maxLayer: 0, profile: profile)
+                    let l1Chunk = try splitFrameChunk(chunk, maxLayer: 1, profile: profile)
+                    let l2Chunk = try splitFrameChunk(chunk, maxLayer: 2, profile: profile)
                     
                     async let dec0 = decoder0.decodeNextFrame(chunk: l0Chunk)
                     async let dec1 = decoder1.decodeNextFrame(chunk: l1Chunk)
@@ -223,7 +223,7 @@ class PlayerViewModel: ObservableObject {
         return val
     }
     
-    private func splitFrameChunk(_ chunk: [UInt8], maxLayer: Int) throws -> [UInt8] {
+    private func splitFrameChunk(_ chunk: [UInt8], maxLayer: Int, profile: UInt8) throws -> [UInt8] {
         var offset = 0
         if offset + 4 <= chunk.count && chunk[offset] == 0x56 && chunk[offset+1] == 0x45 && chunk[offset+2] == 0x56 && chunk[offset+3] == 0x43 {
             offset += 4
@@ -233,72 +233,58 @@ class PlayerViewModel: ObservableObject {
         
         if chunk.count <= offset { return [] }
         
-        let flagByte = chunk[offset]
-        let frameTypeBits = flagByte & 0x0F
-        let hasRefDir = (flagByte & 0x10) != 0
-        guard let fType = VEVCFrameHeader.FrameType(rawValue: frameTypeBits) else {
-            throw NSError(domain: "Player", code: 3, userInfo: [NSLocalizedDescriptionKey: "Invalid frame type"])
+        var headerOffset = offset
+        let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &headerOffset, profile: profile)
+        
+        if frameHeader.frameType == .copyFrame {
+            return [chunk[offset]]
         }
         
-        if fType == .copyFrame {
-            return [flagByte]
-        }
-        
-        guard offset + 21 <= chunk.count else {
-            throw NSError(domain: "Player", code: 4, userInfo: [NSLocalizedDescriptionKey: "Chunk too small"])
-        }
-        
-        @inline(__always)
-        func readU32(_ base: Int) -> Int {
-            return Int(UInt32(chunk[base]) << 24 | UInt32(chunk[base+1]) << 16 | UInt32(chunk[base+2]) << 8 | UInt32(chunk[base+3]))
-        }
-        
-        let mvsSize    = readU32(offset + 1)
-        let refDirSize = readU32(offset + 5)
-        let layer0Size = readU32(offset + 9)
-        let layer1Size = readU32(offset + 13)
-        let layer2Size = readU32(offset + 17)
-        
-        let newLayer1Size = if 1 <= maxLayer { layer1Size } else { 0 }
-        let newLayer2Size = if 2 <= maxLayer { layer2Size } else { 0 }
+        let newLayer1Size = if 1 <= maxLayer { frameHeader.layer1Size } else { 0 }
+        let newLayer2Size = if 2 <= maxLayer { frameHeader.layer2Size } else { 0 }
         
         let newHeader = VEVCFrameHeader(
-            frameType: fType,
-            hasRefDir: hasRefDir,
-            mvsSize: mvsSize,
-            refDirSize: refDirSize,
-            layer0Size: layer0Size,
+            frameType: frameHeader.frameType,
+            hasRefDir: frameHeader.hasRefDir,
+            skipMapSize: frameHeader.skipMapSize,
+            mvsSize: frameHeader.mvsSize,
+            refDirSize: frameHeader.refDirSize,
+            layer0Size: frameHeader.layer0Size,
             layer1Size: newLayer1Size,
             layer2Size: newLayer2Size
         )
         
         var output = [UInt8]()
-        output.append(contentsOf: newHeader.serialize())
+        output.append(contentsOf: newHeader.serialize(profile: profile))
         
-        var payloadOffset = offset + 21
-        if 0 < mvsSize {
-            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + mvsSize])
-            payloadOffset += mvsSize
+        var payloadOffset = headerOffset
+        if 0 < frameHeader.skipMapSize {
+            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + frameHeader.skipMapSize])
+            payloadOffset += frameHeader.skipMapSize
         }
-        if 0 < refDirSize {
-            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + refDirSize])
-            payloadOffset += refDirSize
+        if 0 < frameHeader.mvsSize {
+            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + frameHeader.mvsSize])
+            payloadOffset += frameHeader.mvsSize
         }
-        if 0 < layer0Size {
-            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + layer0Size])
-            payloadOffset += layer0Size
+        if 0 < frameHeader.refDirSize {
+            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + frameHeader.refDirSize])
+            payloadOffset += frameHeader.refDirSize
         }
-        if 0 < layer1Size {
+        if 0 < frameHeader.layer0Size {
+            output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + frameHeader.layer0Size])
+            payloadOffset += frameHeader.layer0Size
+        }
+        if 0 < frameHeader.layer1Size {
             if 1 <= maxLayer {
-                output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + layer1Size])
+                output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + frameHeader.layer1Size])
             }
-            payloadOffset += layer1Size
+            payloadOffset += frameHeader.layer1Size
         }
-        if 0 < layer2Size {
+        if 0 < frameHeader.layer2Size {
             if 2 <= maxLayer {
-                output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + layer2Size])
+                output.append(contentsOf: chunk[payloadOffset ..< payloadOffset + frameHeader.layer2Size])
             }
-            payloadOffset += layer2Size
+            payloadOffset += frameHeader.layer2Size
         }
         
         return output
@@ -324,17 +310,19 @@ class PlayerViewModel: ObservableObject {
         var width = 0
         var height = 0
         var fps: Double = 30.0
+        var currentProfile: UInt8 = 0x01
         if let h = headerChunk {
             var hOffset = 0
             let fh = try VEVCFileHeader.deserialize(from: h, offset: &hOffset)
             width = fh.width
             height = fh.height
             fps = Double(fh.framerate)
+            currentProfile = fh.profile
         }
         
-        let decoder0 = StreamingDecoderActor(maxLayer: 0, width: width, height: height)
-        let decoder1 = StreamingDecoderActor(maxLayer: 1, width: width, height: height)
-        let decoder2 = StreamingDecoderActor(maxLayer: 2, width: width, height: height)
+        let decoder0 = StreamingDecoderActor(maxLayer: 0, width: width, height: height, profile: currentProfile)
+        let decoder1 = StreamingDecoderActor(maxLayer: 1, width: width, height: height, profile: currentProfile)
+        let decoder2 = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: currentProfile)
         
         let frameInterval = 1.0 / fps
         var frameIndex: Double = 0.0
@@ -359,15 +347,15 @@ class PlayerViewModel: ObservableObject {
                     try Task.checkCancellation()
                     
                     let chunkStart = offset
-                    let frameHeader = try VEVCFrameHeader.deserialize(from: vevcData, offset: &offset)
-                    offset += frameHeader.payloadSize
+                    let frameHeader = try VEVCFrameHeader.deserialize(from: vevcData, offset: &offset, profile: currentProfile)
+                    offset = chunkStart + frameHeader.serialize(profile: currentProfile).count + frameHeader.payloadSize
                     
                     if vevcData.count < offset { break }
                     let chunk = Array(vevcData[chunkStart..<offset])
                     
-                    let l0Chunk = try splitFrameChunk(chunk, maxLayer: 0)
-                    let l1Chunk = try splitFrameChunk(chunk, maxLayer: 1)
-                    let l2Chunk = try splitFrameChunk(chunk, maxLayer: 2)
+                    let l0Chunk = try splitFrameChunk(chunk, maxLayer: 0, profile: currentProfile)
+                    let l1Chunk = try splitFrameChunk(chunk, maxLayer: 1, profile: currentProfile)
+                    let l2Chunk = try splitFrameChunk(chunk, maxLayer: 2, profile: currentProfile)
                     
                     async let dec0 = decoder0.decodeNextFrame(chunk: l0Chunk)
                     async let dec1 = decoder1.decodeNextFrame(chunk: l1Chunk)
