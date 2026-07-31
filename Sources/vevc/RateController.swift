@@ -14,6 +14,9 @@ struct RateController {
     private(set) var lastPFrameQStep: Int = 0
     private(set) var lastPFrameSAD: Int = 0
     
+    private(set) var avgPFrameBits: Int = 0
+    private(set) var staticStreak: Int = 0
+    
     // Reconstruction distortion tracking for quality-consistent QP adjustment.
     // avgDistortionQ8: EMA of per-pixel reconstruction SAD in Q8 (target quality level)
     // lastDistortionQ8: previous frame's per-pixel reconstruction SAD in Q8
@@ -137,6 +140,8 @@ struct RateController {
         
         self.pPlanBits = self.gopRemainingBits
         self.pPlanFrames = self.gopRemainingFrames
+        
+        self.staticStreak = 0
     }
     
     @inline(__always)
@@ -268,6 +273,15 @@ struct RateController {
         
         // Track reconstruction distortion with EMA.
         // Slow adaptation (7/8 weight on history) to establish a stable target.
+        let isCheap = self.avgPFrameBits > 0 && (bits * 2) < self.avgPFrameBits
+        let isDistorted = (self.targetDistortionQ8 * 4) < distortion
+        
+        if isCheap && isDistorted {
+            self.staticStreak += 1
+        } else {
+            self.staticStreak = 0
+        }
+        
         self.lastDistortionQ8 = distortion
         if self.avgDistortionQ8 == 0 {
             self.avgDistortionQ8 = distortion
@@ -275,6 +289,26 @@ struct RateController {
             self.avgDistortionQ8 = ((self.avgDistortionQ8 * 7) + distortion) / 8
         }
         
+        if self.avgPFrameBits == 0 {
+            self.avgPFrameBits = bits
+        } else {
+            self.avgPFrameBits = ((self.avgPFrameBits * 4) + bits) / 5
+        }
+        
         updateSaturationState()
+    }
+    
+    @inline(__always)
+    func shouldRefreshStaticScene(framesSinceKeyframe: Int) -> Bool {
+        let limit = min(8, self.keyint / 2)
+        if 3 <= self.staticStreak && limit <= framesSinceKeyframe {
+            return true
+        }
+        return false
+    }
+    
+    @inline(__always)
+    mutating func resetStaticStreak() {
+        self.staticStreak = 0
     }
 }

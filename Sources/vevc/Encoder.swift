@@ -237,6 +237,15 @@ actor LayersEncodeActor {
             forceIFrame = true
         }
         
+        var isStaticRefresh = false
+        if self.qstep == nil {
+            isStaticRefresh = rateController.shouldRefreshStaticScene(framesSinceKeyframe: framesSinceKeyframe)
+        }
+        
+        if forceIFrame != true && isStaticRefresh {
+            forceIFrame = true
+        }
+        
         let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceIFrame)
         
         if isIFrame {
@@ -305,6 +314,8 @@ actor LayersEncodeActor {
             let isDuplicate = isPlaneIdentical(a: plane, b: prevIn)
             if isDuplicate {
                 releasePlane()
+                
+                rateController.resetStaticStreak()
                 framesSinceKeyframe += 1
                 frameIndex += 1
                 return VEVCFrameHeader(frameType: .copyFrame).serialize()
