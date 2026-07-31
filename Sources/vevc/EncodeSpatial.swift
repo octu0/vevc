@@ -104,12 +104,12 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
         let skipThresholdPerPixel = skipThreshold
         
-        let matchResults = await withTaskGroup(of: [(Int, Bool, Bool)].self) { group in
+        let matchResults = await withTaskGroup(of: [(Int, Bool)].self) { group in
             let batchSize = 128
             for batchStart in stride(from: 0, to: blockCount, by: batchSize) {
                 let batchEnd = min(batchStart + batchSize, blockCount)
                 group.addTask {
-                    var results = [(Int, Bool, Bool)]()
+                    var results = [(Int, Bool)]()
                     results.reserveCapacity(batchEnd - batchStart)
                     // ポインタ取得はタスク内・クロージャスコープ内で行う（外へ持ち出すと未定義動作）
                     pd.y.withUnsafeBufferPointer { cYBuf in
@@ -118,25 +118,18 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                     prevInput.y.withUnsafeBufferPointer { pYBuf in
                     prevInput.cb.withUnsafeBufferPointer { pCbBuf in
                     prevInput.cr.withUnsafeBufferPointer { pCrBuf in
-                    ltrInput.y.withUnsafeBufferPointer { lYBuf in
-                    ltrInput.cb.withUnsafeBufferPointer { lCbBuf in
-                    ltrInput.cr.withUnsafeBufferPointer { lCrBuf in
                     let cYPtr = cYBuf.baseAddress!
                     let cCbPtr = cCbBuf.baseAddress!
                     let cCrPtr = cCrBuf.baseAddress!
                     let pYPtr = pYBuf.baseAddress!
                     let pCbPtr = pCbBuf.baseAddress!
                     let pCrPtr = pCrBuf.baseAddress!
-                    let lYPtr = lYBuf.baseAddress!
-                    let lCbPtr = lCbBuf.baseAddress!
-                    let lCrPtr = lCrBuf.baseAddress!
                     
                     for i in batchStart..<batchEnd {
                         let bx = (i % bw) * 32
                         let by = (i / bw) * 32
                         
                         var allSubBlocksMatchPrev = true
-                        var allSubBlocksMatchLtr = true
                         
                         for sy in 0..<2 {
                             for sx in 0..<2 {
@@ -151,44 +144,42 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                                 let blockThreshold = skipThresholdPerPixel * area
                                 
                                 let sadPrevIn: Int
-                                let sadLtrIn: Int
                                 if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
                                     sadPrevIn = computeZeroSAD16x16(cY: cYPtr, rY: pYPtr, cCb: cCbPtr, rCb: pCbPtr, cCr: cCrPtr, rCr: pCrPtr, bx: subX, by: subY, width: dx)
-                                    sadLtrIn = computeZeroSAD16x16(cY: cYPtr, rY: lYPtr, cCb: cCbPtr, rCb: lCbPtr, cCr: cCrPtr, rCr: lCrPtr, bx: subX, by: subY, width: dx)
                                 } else {
                                     sadPrevIn = computeZeroSADSubBlock(cY: cYPtr, rY: pYPtr, cCb: cCbPtr, rCb: pCbPtr, cCr: cCrPtr, rCr: pCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
-                                    sadLtrIn = computeZeroSADSubBlock(cY: cYPtr, rY: lYPtr, cCb: cCbPtr, rCb: lCbPtr, cCr: cCrPtr, rCr: lCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
                                 }
                                 
                                 if sadPrevIn > blockThreshold { allSubBlocksMatchPrev = false }
-                                if sadLtrIn > blockThreshold { allSubBlocksMatchLtr = false }
                             }
                         }
-                        results.append((i, allSubBlocksMatchPrev, allSubBlocksMatchLtr))
+                        results.append((i, allSubBlocksMatchPrev))
                     }
-                    }}}}}}}}}
+                    }}}}}}
                     return results
                 }
             }
             
-            var allResults = [(Int, Bool, Bool)]()
+            var allResults = [(Int, Bool)]()
             for await batch in group {
                 allResults.append(contentsOf: batch)
             }
             return allResults
         }
         
-        for (i, allSubBlocksMatchPrev, allSubBlocksMatchLtr) in matchResults {
+        for (i, allSubBlocksMatchPrev) in matchResults {
             if allSubBlocksMatchPrev {
                 staticCounters[i] += 1
             } else {
                 staticCounters[i] = 0
             }
             
-            if allSubBlocksMatchLtr {
-                skipMap[i] = .skip_ltr
-            } else if allSubBlocksMatchPrev && staticCounters[i] > 3 {
-                skipMap[i] = .skip_prev
+            if staticCounters[i] > 0 {
+                if staticCounters[i] == gopPosition {
+                    skipMap[i] = .skip_ltr
+                } else {
+                    skipMap[i] = .skip_prev
+                }
             }
         }
     }

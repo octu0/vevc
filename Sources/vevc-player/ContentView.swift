@@ -15,7 +15,7 @@ struct ContentView: View {
             } else {
                 ScrollView([.horizontal, .vertical]) {
                     if viewModel.videoWidth > viewModel.videoHeight {
-                        VStack(alignment: .center, spacing: 16) {
+                        HStack(alignment: .bottom, spacing: 16) {
                             // Layer 0: quarter resolution
                             videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
                             // Layer 0+1: half resolution
@@ -25,7 +25,7 @@ struct ContentView: View {
                         }
                         .padding()
                     } else {
-                        HStack(alignment: .bottom, spacing: 16) {
+                        VStack(alignment: .center, spacing: 16) {
                             // Layer 0: quarter resolution
                             videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
                             // Layer 0+1: half resolution
@@ -58,20 +58,11 @@ struct ContentView: View {
                         .frame(width: 150)
                     }
                     
-                    HStack(spacing: 8) {
-                        Text("Profile")
-                        Toggle("1", isOn: Binding(
-                            get: { viewModel.profile == 1 },
-                            set: { if $0 { viewModel.profile = 1 } }
-                        ))
-                        .toggleStyle(.checkbox)
-                        
-                        Toggle("2", isOn: Binding(
-                            get: { viewModel.profile == 2 },
-                            set: { if $0 { viewModel.profile = 2 } }
-                        ))
-                        .toggleStyle(.checkbox)
+                    Picker("Profile", selection: $viewModel.profile) {
+                        Text("Profile 1").tag(UInt8(1))
+                        Text("Profile 2").tag(UInt8(2))
                     }
+                    .pickerStyle(SegmentedPickerStyle())
                     .frame(width: 150)
                     .disabled(viewModel.isLoading)
                     
