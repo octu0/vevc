@@ -96,7 +96,7 @@ class PlayerViewModel: ObservableObject {
             framerate: Int(round(fps)),
             zeroThreshold: 3,
             keyint: 30,
-            sceneChangeThreshold: 32,
+            sceneChangeThreshold: 10,
             profile: profile
         )
         

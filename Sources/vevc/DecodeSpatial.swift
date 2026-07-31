@@ -140,6 +140,10 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                     await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 }
                 
+                clampPlane(plane: &current.y)
+                clampPlane(plane: &current.cb)
+                clampPlane(plane: &current.cr)
+                
                 applyDeblockingFilterN(plane: &current.y, width: l1dx, height: l1dy, qStep: qtYStep, blockSize: 16)
                 let cStep = min(qtCStep * 2, 255)
                 applyDeblockingFilterN(plane: &current.cb, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
@@ -159,6 +163,10 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
                     await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                     await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 2, roundOffset: roundOffset)
                 }
+                
+                clampPlane(plane: &current.y)
+                clampPlane(plane: &current.cb)
+                clampPlane(plane: &current.cr)
                 
                 applyDeblockingFilterN(plane: &current.y, width: l0dx, height: l0dy, qStep: qtYStep, blockSize: 8)
                 let cStep = min(qtCStep * 2, 255)
@@ -241,6 +249,32 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     
     return current
 }
+
+@inline(__always)
+fileprivate func clampPlane(plane: inout [Int16]) {
+    plane.withUnsafeMutableBufferPointer { ptr in
+        guard let base = ptr.baseAddress else { return }
+        var x = 0
+        let c = ptr.count
+        let vMin = SIMD16<Int16>(repeating: -128)
+        let vMax = SIMD16<Int16>(repeating: 127)
+        while x < c - 15 {
+            let p = base.advanced(by: x)
+            let v = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
+            let clampedMin = v.replacing(with: vMin, where: v .< vMin)
+            let clamped = clampedMin.replacing(with: vMax, where: clampedMin .> vMax)
+            UnsafeMutableRawPointer(p).storeBytes(of: clamped, as: SIMD16<Int16>.self)
+            x &+= 16
+        }
+        while x < c {
+            let v = ptr[x]
+            if v < -128 { ptr[x] = -128 }
+            else if v > 127 { ptr[x] = 127 }
+            x &+= 1
+        }
+    }
+}
+
 
 @inline(__always)
 func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int, blockSize: Int) {

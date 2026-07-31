@@ -6,8 +6,8 @@ import CryptoKit
 import vevc
 
 struct Config {
-    var bitrate: Int = 3000
-    var framerate: Int = 30
+    var bitrate: Int = 500
+    var framerate: Int = 60
     var inFps: Int? = nil
     var zeroThreshold: Int = 0
     var keyint: Int = 30
