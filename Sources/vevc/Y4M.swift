@@ -53,29 +53,31 @@ public class Y4MReader: @unchecked Sendable {
     
     @inline(__always)
     public func readFrame() throws -> YCbCrImage? {
-        let header = fileHandle.readData(ofLength: 6)
-        if header.isEmpty { return nil } // EOF
-        guard header == frameHeader else { throw Y4MError.invalidFormat }
-        
-        let ySize = width * height
-        let cSize = ((width + 1) / 2) * ((height + 1) / 2)
-        let totalSize = ySize + cSize * 2
-        
-        let frameData = fileHandle.readData(ofLength: totalSize)
-        guard frameData.count == totalSize else { throw Y4MError.unexpectedEOF }
-        
-        var img = YCbCrImage(width: width, height: height, ratio: .ratio420)
-        
-        frameData.withUnsafeBytes { ptr in
-            let base = ptr.bindMemory(to: UInt8.self).baseAddress!
-            withUnsafePointers(mut: &img.yPlane, mut: &img.cbPlane, mut: &img.crPlane) { yBase, cbBase, crBase in
-                yBase.update(from: base, count: ySize)
-                cbBase.update(from: base.advanced(by: ySize), count: cSize)
-                crBase.update(from: base.advanced(by: ySize + cSize), count: cSize)
+        return try autoreleasepool {
+            let header = fileHandle.readData(ofLength: 6)
+            if header.isEmpty { return nil } // EOF
+            guard header == frameHeader else { throw Y4MError.invalidFormat }
+            
+            let ySize = width * height
+            let cSize = ((width + 1) / 2) * ((height + 1) / 2)
+            let totalSize = ySize + cSize * 2
+            
+            let frameData = fileHandle.readData(ofLength: totalSize)
+            guard frameData.count == totalSize else { throw Y4MError.unexpectedEOF }
+            
+            var img = YCbCrImage(width: width, height: height, ratio: .ratio420)
+            
+            frameData.withUnsafeBytes { ptr in
+                let base = ptr.bindMemory(to: UInt8.self).baseAddress!
+                withUnsafePointers(mut: &img.yPlane, mut: &img.cbPlane, mut: &img.crPlane) { yBase, cbBase, crBase in
+                    yBase.update(from: base, count: ySize)
+                    cbBase.update(from: base.advanced(by: ySize), count: cSize)
+                    crBase.update(from: base.advanced(by: ySize + cSize), count: cSize)
+                }
             }
+            
+            return img
         }
-        
-        return img
     }
 }
 
