@@ -174,12 +174,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                 staticCounters[i] = 0
             }
             
-            if staticCounters[i] > 0 {
-                if staticCounters[i] == gopPosition {
-                    skipMap[i] = .skip_ltr
-                } else {
-                    skipMap[i] = .skip_prev
-                }
+            if allSubBlocksMatchLtr {
+                skipMap[i] = .skip_ltr
+            } else if allSubBlocksMatchPrev && staticCounters[i] > 3 {
+                skipMap[i] = .skip_prev
             }
         }
     }
