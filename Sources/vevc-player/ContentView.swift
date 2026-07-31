@@ -13,15 +13,29 @@ struct ContentView: View {
                     .padding()
                 Spacer()
             } else {
-                HStack(alignment: .bottom, spacing: 16) {
-                    // Layer 0: quarter resolution
-                    videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
-                    // Layer 0+1: half resolution
-                    videoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
-                    // Layer 0+1+2: full resolution
-                    videoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
+                ScrollView([.horizontal, .vertical]) {
+                    if viewModel.videoWidth > viewModel.videoHeight {
+                        HStack(alignment: .bottom, spacing: 16) {
+                            // Layer 0: quarter resolution
+                            videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
+                            // Layer 0+1: half resolution
+                            videoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
+                            // Layer 0+1+2: full resolution
+                            videoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
+                        }
+                        .padding()
+                    } else {
+                        VStack(alignment: .center, spacing: 16) {
+                            // Layer 0: quarter resolution
+                            videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
+                            // Layer 0+1: half resolution
+                            videoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
+                            // Layer 0+1+2: full resolution
+                            videoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
+                        }
+                        .padding()
+                    }
                 }
-                .padding()
             }
             
             Divider()
@@ -43,6 +57,14 @@ struct ContentView: View {
                         ), in: 100...8000)
                         .frame(width: 150)
                     }
+                    
+                    Picker("Profile", selection: $viewModel.profile) {
+                        Text("Profile 1").tag(UInt8(1))
+                        Text("Profile 2").tag(UInt8(2))
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .frame(width: 150)
+                    .disabled(viewModel.isLoading)
                     
                     Button("Open File") {
                         isFilePickerPresented = true
@@ -80,7 +102,10 @@ struct ContentView: View {
         // 1.5x width to accommodate Layer 2 (1.0) + Layer 1 (0.5) + Layer 0 (0.25) horizontally.
         // We set ideal size so the window can grow with the video content.
         .frame(minWidth: 800, minHeight: 400)
-        .frame(idealWidth: viewModel.videoWidth * 1.75, idealHeight: viewModel.videoHeight + 200)
+        .frame(
+            idealWidth: viewModel.videoWidth > viewModel.videoHeight ? viewModel.videoWidth * 1.75 : viewModel.videoWidth + 100,
+            idealHeight: viewModel.videoWidth > viewModel.videoHeight ? viewModel.videoHeight + 200 : viewModel.videoHeight * 1.75 + 100
+        )
     }
     
     @ViewBuilder

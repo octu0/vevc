@@ -22,6 +22,8 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
+    @Published var profile: UInt8 = 0x01
+    
     @Published var currentLayer0Image: CGImage?
     @Published var currentLayer1Image: CGImage?
     @Published var currentLayer2Image: CGImage?
@@ -43,6 +45,7 @@ class PlayerViewModel: ObservableObject {
         isLoading = true
         statusMessage = "Loading..."
         let currentBitrate = bitrate
+        let currentProfile = profile
         
         streamingTask?.cancel()
         
@@ -51,7 +54,7 @@ class PlayerViewModel: ObservableObject {
             do {
                 if url.pathExtension.lowercased() == "y4m" {
                     await MainActor.run { self.statusMessage = "Starting Y4M Streaming..." }
-                    try await self.streamY4M(url: url, bitrate: currentBitrate)
+                    try await self.streamY4M(url: url, bitrate: currentBitrate, profile: currentProfile)
                 } else {
                     await MainActor.run { self.statusMessage = "Starting VEVC Streaming..." }
                     try await self.streamVEVC(url: url)
@@ -68,7 +71,7 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
-    private func streamY4M(url: URL, bitrate: Int) async throws {
+    private func streamY4M(url: URL, bitrate: Int, profile: UInt8) async throws {
         guard let fileHandle = try? FileHandle(forReadingFrom: url) else {
             throw NSError(domain: "Player", code: 1, userInfo: [NSLocalizedDescriptionKey: "Cannot open file"])
         }
@@ -93,7 +96,8 @@ class PlayerViewModel: ObservableObject {
             framerate: Int(round(fps)),
             zeroThreshold: 3,
             keyint: 30,
-            sceneChangeThreshold: 32
+            sceneChangeThreshold: 32,
+            profile: profile
         )
         
         let decoder0 = StreamingDecoderActor(maxLayer: 0, width: y4mReader.width, height: y4mReader.height)

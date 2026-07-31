@@ -197,9 +197,15 @@ func runH264(y4mPath: String, config: Config, width: Int, height: Int, disableHW
         let qY4M = try Y4MIterator(path: y4mPath, config: config)
         let qBox = QualityBox(qY4M: qY4M)
         
+        struct SendableSession: @unchecked Sendable {
+            let session: VTDecompressionSession
+        }
+        let safeQualitySession = SendableSession(session: qualitySession)
+        
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async {
                 let sem = DispatchSemaphore(value: 300)
+                let qualitySession = safeQualitySession.session
                 for sample in frameBox.frames {
                     guard let sb = recreateCMSampleBuffer(from: sample) else { continue }
                     sem.wait()
@@ -394,9 +400,15 @@ func runHEVC(y4mPath: String, config: Config, width: Int, height: Int, disableHW
         let qY4M = try Y4MIterator(path: y4mPath, config: config)
         let qBox = QualityBox(qY4M: qY4M)
         
+        struct SendableSession: @unchecked Sendable {
+            let session: VTDecompressionSession
+        }
+        let safeQualitySession = SendableSession(session: qualitySession)
+        
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async {
                 let sem = DispatchSemaphore(value: 300)
+                let qualitySession = safeQualitySession.session
                 for sample in frameBox.frames {
                     guard let sb = recreateCMSampleBuffer(from: sample) else { continue }
                     sem.wait()
