@@ -182,3 +182,25 @@ Measured results vs. the unfixed baseline (`miko1.y4m`, Profile 0x02): skip rati
 **Verified result:** the severe rainbow corruption at Frame 174 Layer0 is eliminated; Luma stays intact; Layer1/2 unaffected. Stream size / PSNR / SSIM are bit-identical to before the fix (decoder-only change, encoder output unchanged); all 32 tests PASS; `Profile0x02FixtureTests` unaffected (they exercise `maxLayer=2`).
 
 **Remaining (separate, minor):** a faint pitcher-region ghost still visible at Layer0/1. This is **not** the chroma MC bug — it comes from `skip_ltr`/`skip_prev` reference copying combined with the structural fact that `maxLayer=0/1` decode reads no high-frequency residual to correct the copied reference. It is a distinct issue from the corruption fixed here.
+
+---
+
+## 9. Performance Knowledge (Accumulated from 2026-08-02 Investigations)
+
+This section records hard-won performance facts: where the compute cost actually is, and where a careless change silently makes things *slower* (or breaks them). Read this before attempting any optimization work on Profile 0x02.
+
+### 9.1. Compute-Heavy Hot Spots
+
+- **Skip-decision SAD computation** (`EncodeSpatial.swift`, full-resolution 32×32 block / 16×16 sub-block evaluation): ≈ **9.40 M Ops/frame** baseline. Adding a reconstruction-divergence SAD check (`sadPrevRecon`) roughly **doubles** this — which is why the adopted design applies the check to `skip_prev` *only* (not `skip_ltr`).
+- **DWT LL extraction** (`extractSingleTransformSubband32` / `extractSingleTransformSubband16`): expensive. Re-running it per frame *just* for a side computation (e.g. a Layer0 skip decision) duplicates the main pipeline's DWT work and **reduces** encode speed. Any such use must share / cache with ME (`cachedNextSub1`, `cachedNextSub2`) — this is exactly why the Layer0 4×4 skip-decision attempt failed on speed (§8.6).
+- **Decoder per-layer pipeline**: Layer0/1/2 MC (`applyScaled*MotionCompensation*`), deblocking (`applyDeblockingFilter*`), final skip copy (`copyBlockPointer` / `copyBlockSafe`).
+- **MC sub-pixel FIR interpolation** (`addMCBlockLuma32`, `subMCBlockChroma16`): heavy fractional-pixel filtering on inter blocks.
+
+### 9.2. Pitfalls — Changes That Silently Make It Slower (or Break It)
+
+- **Reconstruction check on *both* `skip_ltr` and `skip_prev`:** −40% encode / −53% decode fps, +9% size. **Rejected.** Apply to `skip_prev` only.
+- **Layer0 4×4 fine-grained skip decision:** per-frame duplicate DWT LL extraction → *slower* despite lower per-op count; skip ratio collapsed to ~3% → larger size. **Rejected.**
+- **`skipMap` granularity must stay at 32×32** (1:1 grid across layers). Changing it forces bitstream + decoder changes; judge any such change as high-cost.
+- **MV scale conversion is Luma/Chroma-asymmetric:** `scaledMV(mvShift)` + `addMCBlockLuma32(>>2/&3)` vs `subMCBlockChroma16(>>3/&7)`. **`mvShift` must be validated separately for Luma and Chroma** — the Layer0 chroma corruption (§8.8) was a double-shift from assuming one value fit both. Never change `mvShift` without measuring both planes at every layer.
+- **Decoder-only changes** (e.g. the §8.8 chroma MC fix) do **not** change encoder output: stream size / PSNR / SSIM stay bit-identical, and `Profile0x02FixtureTests` (which exercise `maxLayer=2`) are unaffected. Verify which side a change touches before predicting its metric impact.
+- **Benchmark variance:** encode/decode fps fluctuate with machine load (observed Enc 72.9–99.7 fps for the *same* code). Always compare against a same-session baseline (`compare -y4m … -vevc-only -profile 2`), never across days/machines.

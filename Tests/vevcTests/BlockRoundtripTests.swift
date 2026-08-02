@@ -36,7 +36,7 @@ final class BlockRoundtripTests: XCTestCase {
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             print("DEBUG: Calling blockDecode16V")
             fflush(stdout)
-            try! blockDecode16V(decoder: &decoder, block: decBlock)
+            try! blockDecode16V(decoder: &decoder, ptr: decBlock.base, stride: decBlock.stride)
             print("DEBUG: blockDecode16V Done")
         }
         // エンコード後のデータとデコード後のデータを比較
@@ -71,7 +71,7 @@ final class BlockRoundtripTests: XCTestCase {
         defer { decBlock.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
-            try! blockDecode8V(decoder: &decoder, block: decBlock)
+            try! blockDecode8V(decoder: &decoder, ptr: decBlock.base, stride: decBlock.stride)
         }
         for i in 0..<64 {
             XCTAssertEqual(
@@ -154,7 +154,7 @@ final class BlockRoundtripTests: XCTestCase {
         try encoded.withUnsafeBufferPointer { ptr in
             var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
             hlView = BlockView(base: decBlock32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
-            try! blockDecode16V(decoder: &decoder, block: hlView)
+            try! blockDecode16V(decoder: &decoder, ptr: hlView.base, stride: hlView.stride)
         }
 
         // デコード後のHLデータ

@@ -11,8 +11,8 @@ func blockEncode(encoder: inout EntropyEncoder, block: BlockView, size: Int) {
 
 func blockDecode(decoder: inout EntropyDecoder, block: BlockView, size: Int) throws {
     switch size {
-    case 16: try blockDecode16V(decoder: &decoder, block: block)
-    case 8: try blockDecode8V(decoder: &decoder, block: block)
+    case 16: try blockDecode16V(decoder: &decoder, ptr: block.base, stride: block.stride)
+    case 8: try blockDecode8V(decoder: &decoder, ptr: block.base, stride: block.stride)
     default: fatalError()
     }
 }

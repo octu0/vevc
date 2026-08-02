@@ -51,13 +51,13 @@ final class DWTTests: XCTestCase {
             switch size {
             case 8:
                 dwt2DBlock8(block)
-                inverseDWT2DBlock8(block)
+                inverseDWT2DBlock8(ptr: block.base, stride: block.stride)
             case 16:
                 dwt2DBlock16(block)
-                inverseDWT2DBlock16(block)
+                inverseDWT2DBlock16(ptr: block.base, stride: block.stride)
             case 32:
                 dwt2DBlock32(block)
-                inverseDWT2DBlock32(block)
+                inverseDWT2DBlock32(ptr: block.base, stride: block.stride)
             default:
                 XCTFail("Unsupported size: \(size)")
             }

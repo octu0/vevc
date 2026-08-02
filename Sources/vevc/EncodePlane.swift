@@ -671,7 +671,7 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
                 dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
                 dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(view)
+                inverseDWT2DBlock8(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:
@@ -736,7 +736,7 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
                 dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
                 dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                inverseDWT2DBlock32(view)
+                inverseDWT2DBlock32(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:
@@ -801,7 +801,7 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
                 dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
                 dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                inverseDWT2DBlock32(view)
+                inverseDWT2DBlock32(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:
@@ -866,7 +866,7 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
                 dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
                 dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                inverseDWT2DBlock32(view)
+                inverseDWT2DBlock32(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:
@@ -923,7 +923,7 @@ func reconstructPlaneLayer16Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
                 dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
                 dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                inverseDWT2DBlock16(view)
+                inverseDWT2DBlock16(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:
@@ -980,7 +980,7 @@ func reconstructPlaneLayer16Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
                 dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
                 dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                inverseDWT2DBlock16(view)
+                inverseDWT2DBlock16(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:
@@ -1037,7 +1037,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
                 dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
                 dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                inverseDWT2DBlock16(view)
+                inverseDWT2DBlock16(ptr: view.base, stride: view.stride)
                             
                 switch true {
                 case isEdgeY != true && isEdgeX != true:

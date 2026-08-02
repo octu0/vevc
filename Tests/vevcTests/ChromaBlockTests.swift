@@ -262,7 +262,7 @@ final class ChromaBlockTests: XCTestCase {
             dequantize4(ptr: base.advanced(by: half), stride: blockSize, q: qt.qMid)
             dequantize4(ptr: base.advanced(by: half * blockSize), stride: blockSize, q: qt.qMid)
             dequantize4(ptr: base.advanced(by: half * blockSize + half), stride: blockSize, q: qt.qHigh)
-            inverseDWT2DBlock8(view)
+            inverseDWT2DBlock8(ptr: view.base, stride: view.stride)
 
             // MSE計算
             var mse: Double = 0
