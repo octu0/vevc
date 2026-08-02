@@ -163,9 +163,22 @@ The working tree contains the **adopted** design, verified as the best balance:
 
 Measured results vs. the unfixed baseline (`miko1.y4m`, Profile 0x02): skip ratio LTR 58.85% / Prev ~2% / Inter ~39%, SSIM avg/min ≈ 0.9033–0.9050 / 0.7564–0.7594 (min improved from 0.7480), encode/decode fps within run-load variance of baseline. Frame 1157 Layer2 ghosting resolved; Frame 174 Layer2 ghosting reduced (pitcher region still slightly residual).
 
-### 8.8. Outstanding Issue: Frame 174 Layer0 Chroma Corruption (Separate Root Cause)
+### 8.8. Frame 174 Layer0 Chroma Corruption — Root Cause Identified and FIXED (2026-08-02)
 
-**Status: UNRESOLVED, tracked as a separate issue.** The Frame 174 Layer0 rainbow chroma corruption persists across *all* skip-decision variants tested (unfixed, spec-compliant `skip_ltr`, reconstruction checks on both/neither, and the near-elimination of skip in the Layer0 4x4 attempt). Because eliminating skip did not remove it, the corruption is **not solely a skip-decision problem**. Current leading hypothesis, consistent with the user's "the two phenomena are separate" intuition:
-- It is a **decoder-side Layer0 (low-resolution) decode-path issue**, not an encoder skip-judgment issue. At `maxLayer=0`, no Layer1/2 high-frequency residual is decoded, so a skip block's chroma is force-copied at low resolution without contour correction; the chroma gap then saturates R/G/B to 0/255 in YUV→RGB.
-- A possible contributing factor is **chroma phase (chroma-siting) misalignment** during Layer0 down-sampling / motion-compensation copy, which would shift colors independently of skip decisions.
-- **Next step (not yet done):** identify whether the corrupting Layer0 blocks are `skip` or `inter` blocks, and verify the Layer0 decode-path chroma handling (down-sampling reference, final skip copy coordinates, MC chroma phase) with targeted instrumentation.
+**Status: ROOT CAUSE IDENTIFIED, FIX APPLIED (decoder `DecodeSpatial.swift`).**
+
+**Investigation findings (dynamic instrumentation):**
+- The corrupting Layer0 blocks were **99.7% `inter` blocks** (not `skip`), proving this is a **decoder Layer0 decode-path bug**, completely independent of skip decisions. This confirmed the user's "the two phenomena are separate" intuition.
+- Chroma first corrupts **immediately after Layer0 motion compensation**: after `decodeBase8` the residual chroma is normal, but after Layer0 MC the Cr value exceeds the signed 8-bit range (reaching +181), then `clampPlane` saturates it to −128/+127, which shows up as rainbow noise in YUV→RGB.
+
+**Root cause — double right-shift in Layer0 Chroma MC:**
+- MVs are searched and stored at **Layer0 (480×270) quarter-pixel precision**.
+- At `maxLayer=0` decode, `DecodeSpatial.swift` passed `mvShift: 2` to the Chroma MC path. `scaledMV(>>2)` therefore pre-shifted the MV, and then `subMCBlockChroma16` (which is hard-coded to additionally apply `>>3` / `&7` assuming 1/8-pixel input) applied a *second* shift — a total of `>>5` (divide by 32). The Chroma reference coordinates collapsed to ~1/4 of their true location, so completely unrelated chroma pixels were added to the Base8 residual, overflowing the signed range and saturating on clamp.
+- **Why Luma was unaffected:** `addMCBlockLuma32` applies `>>2` / `&3` (quarter-pixel assumption), which composes correctly with `scaledMV(>>2)`. Only Chroma (hard-coded `>>3`) suffered the double shift.
+- **Layer1 is NOT affected:** at Layer1, `mvShift: 1` gives `scaledMV(>>1)` + `subMCBlockChroma16(>>3)` = `>>4`, which is exactly correct for the Layer1 chroma plane resolution.
+
+**Fix (decoder only, minimal):** in `DecodeSpatial.swift`'s Layer0 MC path, **Chroma `mvShift` changed from `2` to `0`** (both `applyScaledBidirectionalMotionCompensationChroma` and `applyScaledMotionCompensationChroma`); **Luma stays at `mvShift: 2`**. Luma/Layer1/Layer2 are untouched.
+
+**Verified result:** the severe rainbow corruption at Frame 174 Layer0 is eliminated; Luma stays intact; Layer1/2 unaffected. Stream size / PSNR / SSIM are bit-identical to before the fix (decoder-only change, encoder output unchanged); all 32 tests PASS; `Profile0x02FixtureTests` unaffected (they exercise `maxLayer=2`).
+
+**Remaining (separate, minor):** a faint pitcher-region ghost still visible at Layer0/1. This is **not** the chroma MC bug — it comes from `skip_ltr`/`skip_prev` reference copying combined with the structural fact that `maxLayer=0/1` decode reads no high-frequency residual to correct the copied reference. It is a distinct issue from the corruption fixed here.
