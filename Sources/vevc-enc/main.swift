@@ -10,6 +10,7 @@ var sceneThreshold = 10
 var qstep: Int? = nil
 var profile: UInt8 = 0x01
 var skipThreshold: Int = 2
+var reconThresholdScale: Int = 1
 var inFpsOpt: Int? = nil
 var outFpsOpt: Int? = nil
 
@@ -63,6 +64,11 @@ while i < args.count {
             if let v = Int(args[i + 1]) { skipThreshold = v }
             i += 1
         }
+    case "-reconThresholdScale", "--recon-threshold-scale":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { reconThresholdScale = v }
+            i += 1
+        }
     case "-framerate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { outFpsOpt = v }
@@ -80,7 +86,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>]\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-reconThresholdScale <scale>]\n", stderr)
     exit(1)
 }
 
@@ -138,7 +144,8 @@ do {
             keyint: keyint,
             sceneChangeThreshold: sceneThreshold,
             profile: profile,
-            skipThreshold: skipThreshold
+            skipThreshold: skipThreshold,
+            reconThresholdScale: reconThresholdScale
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -150,7 +157,8 @@ do {
             keyint: keyint,
             sceneChangeThreshold: sceneThreshold,
             profile: profile,
-            skipThreshold: skipThreshold
+            skipThreshold: skipThreshold,
+            reconThresholdScale: reconThresholdScale
         )
     }
 
