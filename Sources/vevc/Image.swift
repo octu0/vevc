@@ -80,7 +80,13 @@ extension PlaneData420 {
     @inline(__always)
     func toYCbCr() -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
-        if width < 1 || height < 1 { return img }
+        toYCbCr(into: &img)
+        return img
+    }
+
+    @inline(__always)
+    func toYCbCr(into img: inout YCbCrImage) {
+        if width < 1 || height < 1 { return }
 
         // optimize SIMD Int16 -> UInt8 (+128 clamp)
         @inline(__always)
@@ -123,8 +129,6 @@ extension PlaneData420 {
         convertPlane(src: self.y, dst: &img.yPlane)
         convertPlane(src: self.cb, dst: &img.cbPlane)
         convertPlane(src: self.cr, dst: &img.crPlane)
-
-        return img
     }
 }
 
@@ -411,14 +415,14 @@ struct Image16: Sendable {
     let width: Int
     let height: Int
     
-    init(width: Int, height: Int, pool: BlockViewPool) {
+    init(width: Int, height: Int, pool: BlockViewPool, zeroed: Bool = true) {
         self.width = width
         self.height = height
-        self.y = pool.getInt16(count: width * height)
+        self.y = pool.getInt16(count: width * height, zeroed: zeroed)
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        self.cb = pool.getInt16(count: cWidth * cHeight)
-        self.cr = pool.getInt16(count: cWidth * cHeight)
+        self.cb = pool.getInt16(count: cWidth * cHeight, zeroed: zeroed)
+        self.cr = pool.getInt16(count: cWidth * cHeight, zeroed: zeroed)
     }
     
     init(width: Int, height: Int, y: [Int16], cb: [Int16], cr: [Int16]) {

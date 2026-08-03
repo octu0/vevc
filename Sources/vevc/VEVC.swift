@@ -425,15 +425,14 @@ final class BaseBlockViewPool: @unchecked Sendable {
     }
 
     @inline(__always)
-    func getInt16(count: Int) -> [Int16] {
-        // プールは常にゼロ初期化済みメモリを返す。
-        // 未初期化のまま返すと「書き込まれなかった領域を読む消費者」の出力が
-        // ヒープ状態・スケジューリング依存になり、エンコード結果が非決定になる。
+    func getInt16(count: Int, zeroed: Bool = true) -> [Int16] {
         #if arch(wasm32)
         if var bucket = int16Pools[count], bucket.isEmpty != true {
             var arr = bucket.removeLast()
             int16Pools[count] = bucket
-            arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
+            if zeroed {
+                arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
+            }
             return arr
         }
         #else
@@ -441,12 +440,18 @@ final class BaseBlockViewPool: @unchecked Sendable {
         if let pool = int16Pools[count], pool.isEmpty != true {
             var arr = int16Pools[count]!.removeLast()
             _lock.unlock()
-            arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
+            if zeroed {
+                arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
+            }
             return arr
         }
         _lock.unlock()
         #endif
-        return [Int16](repeating: 0, count: count)
+        if zeroed {
+            return [Int16](repeating: 0, count: count)
+        } else {
+            return [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+        }
     }
     
     @inline(__always)
@@ -672,12 +677,12 @@ final class BlockViewPool: @unchecked Sendable {
     }
 
     @inline(__always)
-    func getInt16(count: Int) -> [Int16] {
+    func getInt16(count: Int, zeroed: Bool = true) -> [Int16] {
         #if arch(wasm32)
-        return pool.getInt16(count: count)
+        return pool.getInt16(count: count, zeroed: zeroed)
         #else
         let idx = currentThreadShardIndex(shardCount: shardCount)
-        return shards[idx].getInt16(count: count)
+        return shards[idx].getInt16(count: count, zeroed: zeroed)
         #endif
     }
     

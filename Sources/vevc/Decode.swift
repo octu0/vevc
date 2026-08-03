@@ -612,7 +612,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16")
     
-    var sub = Image16(width: dx, height: dy, pool: pool)
+    var sub = Image16(width: dx, height: dy, pool: pool, zeroed: false)
     
     let rowCountY = (dy + 16 - 1) / 16
     let colCountY = (dx + 16 - 1) / 16
@@ -654,7 +654,7 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool) async throws -> (Image16, [BlockView], [BlockView], [BlockView], qtYStep: Int, qtCStep: Int) {
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8")
     
-    var sub = Image16(width: dx, height: dy, pool: pool)
+    var sub = Image16(width: dx, height: dy, pool: pool, zeroed: false)
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
