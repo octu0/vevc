@@ -39,7 +39,7 @@ struct QuantizationTable: Sendable {
     public let qHigh: Quantizer
 
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
-        let s = max(16, min(baseStep, 4096))
+        let s = max(1, min(baseStep, 4096))
         self.step = Int16(s)
         self.isChroma = isChroma
 

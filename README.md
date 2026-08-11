@@ -34,16 +34,12 @@ At decode or delivery time, specific spatial resolutions can be instantly extrac
 | **Medium (Preview)**      | `1` (Layer 0,1)       | 540p          | **O(1) Drop Layer 2 packets**            |
 | **Ultra Low (Thumbnail)** | `0` (Layer 0 only)    | 270p          | **O(1) Drop Layer 1 & 2 packets**        |
 
-### 2. Multi-Resolution Motion Compensation
-Building on the spatial scalability of DWT, `vevc` performs **motion estimation once at the base (Layer 0) resolution** and scales the resulting Motion Vectors for each spatial tier:
-- **Layer 0 (Base8, ×1)**: MVs used as-is, with 8×8 Luma / 4×4 Chroma blocks.
-- **Layer 1 (Level16, ×2)**: MVs scaled 2×, with 16×16 Luma / 8×8 Chroma blocks.
-- **Layer 2 (Level32, ×4)**: MVs scaled 4×, with 32×32 Luma / 16×16 Chroma blocks.
-
-This **"Compute Once, Scale Everywhere"** strategy eliminates redundant motion estimation at higher resolutions. Each resolution tier independently performs motion compensation, meaning a server dropping Layer 2 and Layer 1 does not break P-frame prediction—Layer 0 alone is fully self-contained.
-- **Subband Motion Estimation**: Motion estimation operates directly on reduced-resolution spatial frequency domains (Layer 0), combining Diamond Search with half-pixel refinement for sub-millisecond coarse-to-fine searches.
-- **Zero-Data Skip Blocks**: P-frame residuals undergo strict structural threshold tests. Unchanged macroblock coefficients are aggressively nulled out at the encoder, pushing entropy compression to its limits on static backgrounds.
-- **Spatial DWT**: Clean LeGall 5/3 2D-DWT decomposes I-frames and P-frame residuals, completely eliminating the blocking artifacts inherent in traditional DCT-based codecs (like AVC/HEVC).
+### 2. Feature Map-Based Implicit Conditioning & Affine Modulation
+`vevc` replaces traditional explicit Motion Estimation (ME) and Motion Compensation (MC) with feature map-based implicit conditioning:
+- **Implicit Conditioning**: Local statistics (mean $\mu$ and standard deviation $\sigma$) are dynamically computed from reference subband feature maps.
+- **Affine Modulation & Surprisal Masking**: Input DWT latents undergo Z-score affine modulation ($Z = (X - \mu) / \sigma$). Latents with low surprisal ($|Z| \le \text{threshold}$) are adaptively masked to zero, pushing entropy compression efficiency to its limits while preserving salient information.
+- **Invertible Reconstruction**: At decode time, exact inverse affine modulation ($X = Z \cdot \sigma + \mu$) restores the feature domain prior to inverse DWT transformation, eliminating heavy motion vector searches and block prediction artifacts.
+- **Spatial DWT**: Clean LeGall 5/3 2D-DWT decomposes raw frame latents, completely eliminating the blocking artifacts inherent in traditional DCT-based codecs.
 
 ### 3. Built for Massive Concurrency & SIMD
 Where legacy wavelet codecs (like JPEG 2000's EBCOT) and modern DCT codecs (with CABAC) suffer from strictly serial bottlenecks, `vevc` is fundamentally architected for modern multi-core, SIMD-rich processors:
@@ -167,14 +163,11 @@ DWT Coefficients
     A delivery server can perform O(1) resolution scaling by simply dropping
     the trailing layer payloads without recalculating sizes.
     +--------------------------------------------------------------------------------------------------+
-    | Frame Status (1B) (lower 4 bits: 0x00=P, 0x01=Copy, 0x02=I; bit4: hasRefDir)                    |
+    | Frame Status (1B) (lower 4 bits: 0x00=P, 0x01=Copy, 0x02=I)                                     |
     +---- IF NOT CopyFrame ----------------------------------------------------------------------------+
-    | MVs Size (4B)    | RefDir Size (4B) | Layer0 Size (4B) | Layer1 Size (4B)  | Layer2 Size (4B)                        |
-    +------------------+------------------+------------------+-------------------+-----------------------------------------+
-    | MVs Data Payload (MVs Size bytes)                                                                |
-    +--------------------------------------------------------------------------------------------------+
-    | RefDir Data Payload (RefDir Size bytes)  (Only when hasRefDir bit is set)                        |
-    +--------------------------------------------------------------------------------------------------+
+    | Layer0 Size (4B) | Layer1 Size (4B)  | Layer2 Size (4B)                                          |
+    +------------------+-------------------+-----------------------------------------------------------+
+
     | Layer 0 Payload (Layer0 Size bytes)       (Base8: Thumbnail)                                     |
     +--------------------------------------------------------------------------------------------------+
     | Layer 1 Payload (Layer1 Size bytes)       (Level16: Preview)                                     |

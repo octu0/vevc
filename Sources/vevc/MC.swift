@@ -1017,3 +1017,27 @@ func subtractScaledBidirectionalMotionCompensationChroma(plane: inout [Int16], p
         }
     }
 }
+
+enum MotionCompensation {
+    static func compensate(ref: PlaneData420, mvs: MotionVectors, pool: BlockViewPool) -> PlaneData420 {
+        let width = ref.width
+        let height = ref.height
+        let cbWidth = (width + 1) / 2
+        let cbHeight = (height + 1) / 2
+        
+        var mcY = [Int16](repeating: 0, count: width * height)
+        var mcCb = [Int16](repeating: 0, count: cbWidth * cbHeight)
+        var mcCr = [Int16](repeating: 0, count: cbWidth * cbHeight)
+        
+        let lumaBlockSize = 16
+        let chromaBlockSize = 8
+        
+        applyScaledMotionCompensationLuma(plane: &mcY, prevPlane: ref.y, mvs: mvs, width: width, height: height, lumaBlockSize: lumaBlockSize, mvShift: 0, roundOffset: 0)
+        applyScaledMotionCompensationChroma(plane: &mcCb, prevPlane: ref.cb, mvs: mvs, width: cbWidth, height: cbHeight, chromaBlockSize: chromaBlockSize, mvShift: 1, roundOffset: 0)
+        applyScaledMotionCompensationChroma(plane: &mcCr, prevPlane: ref.cr, mvs: mvs, width: cbWidth, height: cbHeight, chromaBlockSize: chromaBlockSize, mvShift: 1, roundOffset: 0)
+        
+        return PlaneData420(width: width, height: height, y: mcY, cb: mcCb, cr: mcCr)
+    }
+}
+
+

@@ -497,20 +497,23 @@ private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD
 
 @inline(__always)
 func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: MotionVectors, width: Int, height: Int) {
+    guard mvs.isEmpty != true else { return }
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
+    let mvCount = mvs.dx.count
     
     withUnsafePointers(mut: &plane) { base in
         for row in 0..<rowCount {
             for col in 0..<colCount {
                 let idx = row * colCount + col
+                guard idx < mvCount else { continue }
                 let isIntra = mvs.dx[idx] == 32767 && mvs.dy[idx] == 32767
                 if isIntra {
                     let bx = col * 32
                     let by = row * 32
                     
                     // Left neighbor
-                    let leftNotIntra = if 0 < col { mvs.dx[idx - 1] != 32767 || mvs.dy[idx - 1] != 32767 } else { false }
+                    let leftNotIntra = if 0 < col && (idx - 1) < mvCount { mvs.dx[idx - 1] != 32767 || mvs.dy[idx - 1] != 32767 } else { false }
                     if leftNotIntra {
                         let safeH = min(32, height - by)
                         if 4 <= bx && bx + 3 < width {
@@ -518,7 +521,7 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: MotionVectors, wid
                         }
                     }
                     // Right neighbor
-                    let rightNotIntra = if col < colCount - 1 { mvs.dx[idx + 1] != 32767 || mvs.dy[idx + 1] != 32767 } else { false }
+                    let rightNotIntra = if col < colCount - 1 && (idx + 1) < mvCount { mvs.dx[idx + 1] != 32767 || mvs.dy[idx + 1] != 32767 } else { false }
                     if rightNotIntra {
                         let bxRight = bx + 32
                         if 4 <= bxRight && bxRight + 3 < width {
@@ -527,7 +530,7 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: MotionVectors, wid
                         }
                     }
                     // Top neighbor
-                    let topNotIntra = if 0 < row { mvs.dx[idx - colCount] != 32767 || mvs.dy[idx - colCount] != 32767 } else { false }
+                    let topNotIntra = if 0 < row && 0 <= (idx - colCount) && (idx - colCount) < mvCount { mvs.dx[idx - colCount] != 32767 || mvs.dy[idx - colCount] != 32767 } else { false }
                     if topNotIntra {
                         let safeW = min(32, width - bx)
                         if 4 <= by && by + 3 < height {
@@ -535,11 +538,11 @@ func blendIntraInterBoundaryLuma32(plane: inout [Int16], mvs: MotionVectors, wid
                         }
                     }
                     // Bottom neighbor
-                    let bottomNotIntra = if row < rowCount - 1 { mvs.dx[idx + colCount] != 32767 || mvs.dy[idx + colCount] != 32767 } else { false }
+                    let bottomNotIntra = if row < rowCount - 1 && (idx + colCount) < mvCount { mvs.dx[idx + colCount] != 32767 || mvs.dy[idx + colCount] != 32767 } else { false }
                     if bottomNotIntra {
                         let byBottom = by + 32
-                        let safeW = min(32, width - bx)
                         if 4 <= byBottom && byBottom + 3 < height {
+                            let safeW = min(32, width - bx)
                             blendHorizontalEdgeLuma32(base: base, width: width, x: bx, y: byBottom, widthBlock: safeW)
                         }
                     }

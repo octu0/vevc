@@ -446,10 +446,13 @@ func computeMaskedReconDistortion(
                     totalPixels += pixels
                     totalFallbackSAD += blockSAD
                     
-                    if let sads = sads {
-                        if 256 < sads[rowOffset + c] {
-                            totalSAD += blockSAD
-                            activePixels += pixels
+                    if let sads = sads, sads.isEmpty != true {
+                        let idx = rowOffset + c
+                        if idx < sads.count {
+                            if 256 < sads[idx] {
+                                totalSAD += blockSAD
+                                activePixels += pixels
+                            }
                         }
                     }
                 }

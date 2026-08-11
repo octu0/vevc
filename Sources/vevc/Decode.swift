@@ -574,6 +574,29 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
     }
     
+
+    if let pPd = predictedPd {
+        pPd.y.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: pPd.width, refHeight: pPd.height)
+        }
+        pPd.cb.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+        }
+        pPd.cr.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+        }
+    } else {
+        prev.y.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: prev.width, refHeight: prev.height)
+        }
+        prev.cb.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (prev.width+1)/2, refHeight: (prev.height+1)/2)
+        }
+        prev.cr.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (prev.width+1)/2, refHeight: (prev.height+1)/2)
+        }
+    }
+    
     let resY32 = decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY)
     for j in resY32.indices {
         var blk = resY32[j].0
@@ -625,7 +648,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 }
 
 @inline(__always)
-func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
+func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16")
     
     var sub = Image16(width: dx, height: dy, pool: pool)
@@ -657,6 +680,29 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         crBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: p)
     } else {
         crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
+    }
+    
+
+    if let pPd = predictedPd {
+        pPd.y.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: yBlocks, blockSize: 16, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: pPd.width, refHeight: pPd.height)
+        }
+        pPd.cb.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: cbBlocks, blockSize: 16, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+        }
+        pPd.cr.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: crBlocks, blockSize: 16, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+        }
+    } else {
+        prev.y.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: yBlocks, blockSize: 16, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: prev.width, refHeight: prev.height)
+        }
+        prev.cb.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: cbBlocks, blockSize: 16, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (prev.width+1)/2, refHeight: (prev.height+1)/2)
+        }
+        prev.cr.withUnsafeBufferPointer { pBuf in
+            ImplicitConditioning.applyLatentDemodulation(blocks: crBlocks, blockSize: 16, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (prev.width+1)/2, refHeight: (prev.height+1)/2)
+        }
     }
     
     let resY16 = decodeLayer16ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY)

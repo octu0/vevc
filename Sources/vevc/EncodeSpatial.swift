@@ -30,7 +30,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
+    baseImg.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1yBlocks, blockSize: 16, planeWidth: l1dx, planeHeight: l1dy, refImagePlane: Array(pBuf), refWidth: baseImg.width, refHeight: baseImg.height)
+    }
+    baseImg.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1cbBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (baseImg.width+1)/2, refHeight: (baseImg.height+1)/2)
+    }
+    baseImg.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1crBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (baseImg.width+1)/2, refHeight: (baseImg.height+1)/2)
+    }
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    baseImg.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1yBlocks, blockSize: 16, planeWidth: l1dx, planeHeight: l1dy, refImagePlane: Array(pBuf), refWidth: baseImg.width, refHeight: baseImg.height)
+    }
+    baseImg.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1cbBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (baseImg.width+1)/2, refHeight: (baseImg.height+1)/2)
+    }
+    baseImg.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1crBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (baseImg.width+1)/2, refHeight: (baseImg.height+1)/2)
+    }
     
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -38,7 +56,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    l1Img.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: l1dx, refHeight: l1dy)
+    }
+    l1Img.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: l1cbDx, refHeight: l1cbDy)
+    }
+    l1Img.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: l1cbDx, refHeight: l1cbDy)
+    }
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
+    l1Img.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: l1dx, refHeight: l1dy)
+    }
+    l1Img.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: l1cbDx, refHeight: l1cbDy)
+    }
+    l1Img.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: l1cbDx, refHeight: l1cbDy)
+    }
     
     let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
@@ -113,7 +149,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
+    predictedPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1yBlocks, blockSize: 16, planeWidth: l1dx, planeHeight: l1dy, refImagePlane: Array(pBuf), refWidth: predictedPd.width, refHeight: predictedPd.height)
+    }
+    predictedPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1cbBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
+    predictedPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1crBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    predictedPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1yBlocks, blockSize: 16, planeWidth: l1dx, planeHeight: l1dy, refImagePlane: Array(pBuf), refWidth: predictedPd.width, refHeight: predictedPd.height)
+    }
+    predictedPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1cbBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
+    predictedPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1crBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
     
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -121,7 +175,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    predictedPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: predictedPd.width, refHeight: predictedPd.height)
+    }
+    predictedPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
+    predictedPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, sads: sads)
+    predictedPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: predictedPd.width, refHeight: predictedPd.height)
+    }
+    predictedPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
+    predictedPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (predictedPd.width+1)/2, refHeight: (predictedPd.height+1)/2)
+    }
     
     let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
@@ -207,7 +279,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
+    pPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1yBlocks, blockSize: 16, planeWidth: l1dx, planeHeight: l1dy, refImagePlane: Array(pBuf), refWidth: pPd.width, refHeight: pPd.height)
+    }
+    pPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1cbBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
+    pPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l1crBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    pPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1yBlocks, blockSize: 16, planeWidth: l1dx, planeHeight: l1dy, refImagePlane: Array(pBuf), refWidth: pPd.width, refHeight: pPd.height)
+    }
+    pPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1cbBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
+    pPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l1crBlocks, blockSize: 16, planeWidth: l1cbDx, planeHeight: l1cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
     
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -216,7 +306,25 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     defer { r1Y(); r1Cb(); r1Cr() }
     
+    pPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: pPd.width, refHeight: pPd.height)
+    }
+    pPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
+    pPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentModulation(blocks: &l2crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
     let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, sads: sads)
+    pPd.y.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2yBlocks, blockSize: 32, planeWidth: dx, planeHeight: dy, refImagePlane: Array(pBuf), refWidth: pPd.width, refHeight: pPd.height)
+    }
+    pPd.cb.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2cbBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
+    pPd.cr.withUnsafeBufferPointer { pBuf in
+        ImplicitConditioning.applyLatentDemodulation(blocks: l2crBlocks, blockSize: 32, planeWidth: cbDx, planeHeight: cbDy, refImagePlane: Array(pBuf), refWidth: (pPd.width+1)/2, refHeight: (pPd.height+1)/2)
+    }
     
     let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
