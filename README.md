@@ -49,7 +49,7 @@ This **"Compute Once, Scale Everywhere"** strategy eliminates redundant motion e
 Where legacy wavelet codecs (like JPEG 2000's EBCOT) and modern DCT codecs (with CABAC) suffer from strictly serial bottlenecks, `vevc` is fundamentally architected for modern multi-core, SIMD-rich processors:
 - **Multi-Threaded Pipeline**: Temporal subband frames and spatial code-blocks are completely decoupled. This data-agnostic structure allows the encoder and decoder to aggressively distribute workloads across multiple CPU threads without complex synchronization locks.
 - **Vectorized Core Loops**: Spatial DWT lifting, plane matching, sub-pixel shifting, and residual calculations are strictly unrolled and fully vectorized using `SIMD8` and `SIMD16` for maximum ALU utilization.
-- **Parallel Entropy Coding**: Bypassing the serial nature of traditional arithmetic coding, `vevc` employs a 4-way **Interleaved rANS (Asymmetric Numeral Systems)** coder with a unified 5-context model per plane. This guarantees high compression ratios while enabling simultaneous, multi-lane decoding.
+- **Parallel Entropy Coding**: Bypassing the serial nature of traditional arithmetic coding, `vevc` employs a 4-way **Interleaved rANS (Asymmetric Numeral Systems)** coder with a unified 6-context model per plane. This guarantees high compression ratios while enabling simultaneous, multi-lane decoding.
 ---
 
 ## Performance
@@ -139,7 +139,7 @@ DWT Coefficients
        ▼                      │
    ValueTokenizer              ├── runModel (zero-run tokens)
    token + bypass bits         ├── valModel (value tokens)
-        │                      ├── 5 contexts (AC×4 + DPCM)
+        │                      ├── 6 contexts (AC×4 + DPCM + LSCP)
         ▼                      └── 4-way Interleaved stream
   Interleaved 4-way rANS Encoder
   (4 independent states, shared stream)
@@ -200,9 +200,7 @@ DWT Coefficients
         Layer Payload
         +-------------+-----------+
         | qtY (2B)    | qtC (2B)  |
-        +-------------------+-------------+
-        | AQ Map len (VLQ)  | AQ Map data |   (Layer2 ONLY)
-        +-------------------+-------------+
+        +-------------+-----------+
         | Y len (VLQ) | Y data    |
         +-------------+-----------+
         | Cb len (VLQ)| Cb data   |
@@ -229,16 +227,19 @@ While `vevc` currently achieves extreme speeds in software via SIMD, its foundat
 
 | Mode | Header Cost | When Selected |
 |------|-------------|---------------|
-| **Static 4-context** | 0 bytes | Pre-trained tables already fit the data well |
-| **Dynamic 4-context** | ~48B × 8 tables | Data-specific tables provide enough compression gain to offset header cost |
+| **Static 6-context** | 0 bytes | Pre-trained tables already fit the data well |
+| **Dynamic 6-context** | ~48B × 12 tables | Data-specific tables provide enough compression gain to offset header cost |
 | **Dynamic merged** | ~48B × 2 tables | All contexts share similar distributions; merged model reduces header by 75% |
+| **Backward-adapted history** | 0 bytes | Profile 2 P-frames: tables rebuilt from previously decoded frames beat all header-bearing options |
 
-The encoder automatically selects the mode that minimizes total encoded size for each subband block. This replaces the previous fixed-threshold approach with a Shannon entropy-based cost estimation.
+The encoder automatically selects the mode that minimizes total encoded size for each plane stream. This replaces the previous fixed-threshold approach with a Shannon entropy-based cost estimation.
+
+**Backward-Adaptive History Tables (Profile 2)**: Encoder and decoder both maintain per-stream (layer × plane) decayed token counts across P-frames (`acc = acc/2 + current`). Once primed, the encoder can signal "reuse history" (flags bit `0x20`) and transmit no frequency tables at all — the decoder rebuilds identical models from the tokens it already decoded. State resets at every I-frame, keeping random access intact. On live-streaming content this removes most per-frame table overhead (measured 4.5–6% total bitrate reduction at equal quality, and up to ~23% at deeply saturated low-bitrate settings combined with the saturation-gated quantizer below).
 
 ### Optimizations
 
 - **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
-- **Unified 5-Context Stream**: LL (DPCM) and HL/LH/HH (AC) subbands share a single per-plane entropy stream with 5 contexts, eliminating 12 bytes of per-subband size prefixes
+- **Unified 6-Context Stream**: LL (DPCM), HL/LH/HH (AC), and LSCP coordinates share a single per-plane entropy stream with 6 contexts, eliminating 12 bytes of per-subband size prefixes
 - **Headerless 4-way Parallel Boundaries**: Lane bounds (chunk starts) are dynamically reconstructed from the total pair entries, eliminating 16-byte fixed header overhead per subband.
 - **VLQ Internal Fields**: Bypass sizes, coefficient counts, and pair entries are stored using Variable Length Quantities (VLQ) instead of fixed 4-byte integers
 - **Built-in Static Tables**: File header uses a 1-byte Table Flag instead of embedding 2560 bytes of raw frequency tables
@@ -247,7 +248,8 @@ The encoder automatically selects the mode that minimizes total encoded size for
 - **Raw Fallback**: Blocks with ≤32 non-zero coefficients skip rANS overhead entirely
 - **Compressed Frequency Tables**: Bitmap-based encoding reduces table size from 32B to ~10B
 - **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 1-byte markers
-- **Adaptive Quantization Map**: Dynamic per-block quantization scaling in Layer2 based on energy and SAD to preserve fine detail while reducing overall bitrate
+- **Backward-Adaptive Entropy Tables**: Profile 2 P-frames can reuse rANS models rebuilt from decoded history (zero table headers, decoder stays in lockstep without signaling)
+- **Saturation-Gated Quantization Range**: qMid/qHigh caps ramp up to 2× only when the rate controller saturates (base step beyond 2048), lowering the achievable rate floor by ~20%+ without touching normal-rate quality
 
 ---
 

@@ -42,13 +42,15 @@ public actor StreamingDecoderActor {
     private var firstReconstructed: PlaneData420?
     private var seenY = Set<UnsafeMutableRawPointer>()
     private var roundOffsetIndex = 0
-    
+    private let entropyHistories: FrameEntropyHistories?
+
     public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
         self.profile = profile
+        self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
     }
     
     @inline(__always)
@@ -89,14 +91,16 @@ public actor StreamingDecoderActor {
             previousReconstructed = nil
 
             roundOffsetIndex = 0
+            entropyHistories?.reset()
         }
-        
+
         let isPFrame = (previousReconstructed != nil)
         let useBidirectional = isPFrame && firstReconstructed != nil
         let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
         let img16 = try await decodeSpatialLayers(
             r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile
+            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile,
+            entropyHistories: entropyHistories
         )
         
         let pd = PlaneData420(img16: img16)

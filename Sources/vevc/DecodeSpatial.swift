@@ -1,7 +1,7 @@
 // MARK: - Decode Spatial
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, profile: UInt8 = 0x01) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, profile: UInt8 = 0x01, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
     var offset = 0
 
     // Compute per-layer dimensions matching encoder DWT subband sizes:
@@ -63,9 +63,13 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     guard (offset + frameHeader.layer0Size) <= r.count else { throw DecodeError.insufficientData }
     let layer0Data = Array(r[offset..<(offset + frameHeader.layer0Size)])
     offset += frameHeader.layer0Size
-    
+
+    // Backward-adaptive tables apply to P-frames only; the encoder resets the
+    // state at every I-frame and never uses it there.
+    let histories: FrameEntropyHistories? = frameHeader.isIFrame ? nil : entropyHistories
+
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame)
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame, histories: histories?.streams[0])
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
@@ -83,7 +87,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let layer1Data = Array(r[offset..<(offset + frameHeader.layer1Size)])
         offset += frameHeader.layer1Size
         
-        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks)
+        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, histories: histories?.streams[1])
         
         if let y = parentYBlocks { pool.putBlockViewArray64(y) }
         if let cb = parentCbBlocks { pool.putBlockViewArray64(cb) }
@@ -103,7 +107,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let layer2Data = Array(r[offset..<(offset + frameHeader.layer2Size)])
         offset += frameHeader.layer2Size
         
-        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap)
+        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap, histories: histories?.streams[2])
         
         if let y = parentYBlocks {
             if hasLayer1 { pool.putBlockViewArray256(y) }

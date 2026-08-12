@@ -23,7 +23,7 @@ The metadata payload occupies exactly the number of bytes specified by `Metadata
 
 | Field Name | Size | Description |
 |---|---|---|
-| Profile Version | 1 Byte | Currently always `0x01`. |
+| Profile Version | 1 Byte | `0x01` (baseline) or `0x02` (P-Skip/LTR + backward-adaptive entropy tables; see `docs/pskip-ltr-spec.md`). |
 | Width | 2 Bytes (UInt16BE) | The pixel width of the video. |
 | Height | 2 Bytes (UInt16BE) | The pixel height of the video. |
 | Color Gamut | 1 Byte | Color gamut flag. Currently fixed to `0x01` (BT.709). |
@@ -108,8 +108,6 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 |---|---|---|
 | Quantization Step Y | 2 Bytes (UInt16BE) | Base quantization step for the Y plane, stored in Q4 fixed-point format (value × 16). |
 | Quantization Step CbCr | 2 Bytes (UInt16BE) | Base quantization step for the Cb/Cr planes, stored in Q4 fixed-point format (value × 16). |
-| AQ Map Size | VLQ | Byte size of the AQ Map data (Present ONLY in Layer2). |
-| **AQ Map Data** | (AQ Map Size bytes) | Encoded Adaptive Quantization map defining per-block quantization levels for Layer2. (Present ONLY in Layer2). |
 | Y Payload Size | VLQ | Byte size of the Y Payload Data. |
 | **Y Payload Data** | (Y Payload Size bytes) | See section 4.1 below. |
 | Cb Payload Size | VLQ | Byte size of the Cb Payload Data. |
@@ -117,12 +115,22 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 | Cr Payload Size | VLQ | Byte size of the Cr Payload Data. |
 | **Cr Payload Data** | (Cr Payload Size bytes) | |
 
+The per-subband steps (qLow/qMid/qHigh) are derived deterministically from the
+signaled base step and the layer index on both encoder and decoder (see
+`QuantizationTable.init`). The qMid/qHigh caps use a saturation-gated extended
+range: for base steps up to 2048 (Q4) the caps are the base tuning
+(luma 768/1024, chroma 384/768); from 2048 to 4096 the effective cap ramps
+linearly up to 2x (luma 1536/2048, chroma 768/1536), lowering the achievable
+rate floor when the rate controller is saturated. qLow (DC) is never extended.
+Decoders older than this rule mis-derive steps for streams whose base step
+exceeds 2048.
+
 ### 4.1. Plane Payload (Y / Cb / Cr)
-The data for each plane consists of a single **unified entropy stream** that encodes all four DWT subbands (LL, HL, LH, HH) together using 5 rANS contexts.
+The data for each plane consists of a single **unified entropy stream** that encodes all four DWT subbands (LL, HL, LH, HH) together using 6 rANS contexts.
 
 The payload consists of:
 1. **Block Flags** (variable, bypass bitstream): Per-block zero/split decision flags.
-2. **Unified Entropy Data**: A single `EntropyEncoder` output containing interleaved LL (DPCM, context 4) and HL/LH/HH (AC, contexts 0-3) coefficients.
+2. **Unified Entropy Data**: A single `EntropyEncoder` output containing interleaved LL (DPCM, context 4), HL/LH/HH (AC, contexts 0-3) coefficients, and LSCP coordinates (context 5).
 
 > [!NOTE]
 > In previous versions, each subband had its own `[Size (4B)][Data]` pair, totaling 16 bytes of size prefixes per plane. The unified stream eliminates this overhead entirely.
@@ -156,15 +164,15 @@ This format is used when the number of coefficients is very small (<= 32 pairs).
 This is the standard mode used for the vast majority of blocks.
 - `Flags` (1 Byte):
   - Bit 6 (`0x40`): Indicates the use of Static Tables (decoder uses the built-in models instead of reading dynamic tables).
-  - Bit 5 (`0x20`): Reserved (must be 0).
-  - Bit 4 (`0x10`): Indicates Merged Context mode. When set, a single rANS model (1 Run + 1 Val table) is used for all 5 contexts instead of separate context-specific models. Only 2 frequency tables follow in the stream instead of 10.
+  - Bit 5 (`0x20`): Backward-adapted History Tables (Profile `0x02` P-frames only). No frequency tables follow; the decoder rebuilds the models from its own decoded token history (see note below).
+  - Bit 4 (`0x10`): Indicates Merged Context mode. When set, a single rANS model (1 Run + 1 Val table) is used for all 6 contexts instead of separate context-specific models. Only 2 frequency tables follow in the stream instead of 12.
   - Bit 0 (`0x01`): Indicates the presence of Trailing Zeros (zero-runs that extend to the end of the block).
 - `Total Pair Entries` (VLQ): Total number of Run/Value pairs.
   - *Note: The 4-lane elements boundaries (chunk starts) are dynamically reconstructed from this value by the decoder using integer division and modulo (`Total Pair Entries / 4`), eliminating fixed header overhead.*
 - **Dynamic Frequency Tables (Conditional)**:
   - Present **only if** Bit 6 of `Flags` is `0` (dynamic tables).
   - If Bit 4 (`0x10`, Merged Context) is set: 2 compressed frequency tables (1 Run + 1 Val) follow.
-  - If Bit 4 is `0` (5-context mode): 10 compressed frequency tables (Run + Val for each of the 5 contexts) follow.
+  - If Bit 4 is `0` (6-context mode): 12 compressed frequency tables (Run + Val for each of the 6 contexts) follow.
 - `Lane Bypass Data` (4 Chunks):
   - Repeated 4 times for each lane: `Bypass Size` (VLQ) followed by the `Bypass Data`.
 - `rANS Bitstream` (All remaining bytes):
@@ -172,12 +180,31 @@ This is the standard mode used for the vast majority of blocks.
 
 > [!NOTE]
 > **Cost-Based Model Selection**
-> The encoder uses a cost-based model selection algorithm to choose the optimal model for each plane's unified stream. The encoder estimates the total bit cost (data bits + header overhead) for three options:
-> 1. **Static 5-context**: Uses the built-in models (no header overhead). Contexts 0-3 use AC models, context 4 uses the DPCM model.
-> 2. **Dynamic 5-context**: Builds models from the actual data, writes 10 frequency tables to the stream.
+> The encoder uses a cost-based model selection algorithm to choose the optimal model for each plane's unified stream. The encoder estimates the total bit cost (data bits + header overhead) for up to four options:
+> 1. **Static 6-context**: Uses the built-in models (no header overhead). Contexts 0-3 use AC models, context 4 uses the DPCM model, context 5 the LSCP model.
+> 2. **Dynamic 6-context**: Builds models from the actual data, writes 12 frequency tables to the stream.
 > 3. **Dynamic merged**: Merges all context statistics into a single model, writes only 2 frequency tables.
+> 4. **Backward-adapted history** (Profile `0x02` P-frames, once primed): reuses models built from previously decoded frames, writes no tables (see note below).
 >
 > The option with the lowest estimated total cost is selected. This ensures that dynamic tables are only used when the compression benefit outweighs the header overhead cost.
+
+> [!NOTE]
+> **Backward-Adapted History Tables (Profile `0x02`, flags bit `0x20`)**
+> For profile `0x02`, both encoder and decoder maintain per-stream (layer × plane)
+> decayed token counts across P-frames: after every rANS-coded stream,
+> `acc[ctx][token] = acc[ctx][token] / 2 + min(65535, currentFrameCount)`.
+> The counts on the decoder side come from the tokens it decodes, so both sides
+> hold identical state without any signaling. When the models normalized from
+> this history beat the static/dynamic/merged options (headers included), the
+> encoder sets flags bit `0x20` and transmits no tables — a fourth, zero-header
+> option in the cost-based selection.
+> Lockstep rules: state resets at every I-frame (random access boundary);
+> raw-mode (`0x80`) and empty streams neither use nor update history; the
+> trailing-zeros run token is accumulated under context 0. Contexts with no
+> accumulated counts normalize to the uniform distribution. A decoder that
+> switches `maxLayer` upward mid-GOP cannot decode history-coded streams of the
+> newly enabled layer (this was already unsupported for reconstruction reasons;
+> layer switches must happen at GOP boundaries).
 
 > [!NOTE]
 > **Tokenization and Exponential-Golomb Encoding**
@@ -191,9 +218,10 @@ This is the standard mode used for the vast majority of blocks.
 
 > [!NOTE]
 > **Context Modeling (5 Contexts)**
-> VEVC uses 5 probability model contexts within each unified stream:
+> VEVC uses 6 probability model contexts within each unified stream:
 > - **Context 0-3 (AC)**: Used for HL, LH, HH subband coefficients. The context index is selected based on surrounding block statistics (parent zero, previous value magnitude).
 > - **Context 4 (DPCM)**: Used exclusively for LL subband coefficients, which are DPCM-encoded (differential pulse-code modulation). This context captures the prediction residual distribution.
+> - **Context 5 (LSCP)**: Used for the Last Significant Coefficient Position coordinates emitted at the start of every non-zero block.
 >
 > The encoder may also select a merged single-context mode when the context-specific distributions are similar enough that the header savings outweigh the compression loss.
 

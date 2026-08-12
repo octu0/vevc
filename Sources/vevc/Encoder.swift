@@ -182,6 +182,7 @@ actor LayersEncodeActor {
     private var staticCounters: [Int] = []
     private var cachedNextSub2: [Int16]?
     private var cachedNextSub1: [Int16]?
+    private var entropyHistories: FrameEntropyHistories?
     
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
         self.width = width
@@ -270,7 +271,13 @@ actor LayersEncodeActor {
             }
             
             framesSinceKeyframe = 0
-            
+
+            // Backward-adaptive entropy tables: random-access boundary reset.
+            if profile == 0x02 {
+                if entropyHistories == nil { entropyHistories = FrameEntropyHistories() }
+                entropyHistories?.reset()
+            }
+
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0)
             
@@ -350,7 +357,8 @@ actor LayersEncodeActor {
             pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
             maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
             roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
-            cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
+            cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
+            entropyHistories: self.entropyHistories
         )
         self.staticCounters = localCounters
         self.cachedNextSub2 = nSub2

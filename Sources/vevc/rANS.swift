@@ -1,3 +1,5 @@
+import Foundation
+
 // 14-bit scale balances precision vs compression efficiency
 let rANSScaleBits: UInt32 = 14
 let rANSScale: UInt32 = 1 << rANSScaleBits
@@ -176,13 +178,16 @@ struct rANSModel {
     @inline(__always)
     private mutating func buildLUT() {
         guard tokenLUT.isEmpty != true else { return }
+        // memset per symbol run: this runs per frame for dynamic/history
+        // models, so the fill must be vectorized, not a byte loop
         tokenLUT.withUnsafeMutableBufferPointer { ptr in
+            let base = ptr.baseAddress!
             for sym in 0..<64 {
                 let start = Int(tokenCumFreqs[sym])
-                let end = start + Int(tokenFreqs[sym])
-                let s = UInt8(sym)
-                for j in start..<min(end, Int(rANSScale)) {
-                    ptr[j] = s
+                guard start < Int(rANSScale) else { continue }
+                let len = min(Int(tokenFreqs[sym]), Int(rANSScale) - start)
+                if 0 < len {
+                    memset(base.advanced(by: start), Int32(sym), len)
                 }
             }
         }

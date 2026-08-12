@@ -3,7 +3,7 @@
 /// Number of rANS contexts in the unified entropy stream.
 /// Contexts 0-3: AC coefficients (HL/LH/HH subbands, context selected by getContext())
 /// Context 4:    DPCM coefficients (LL subband)
-private let entropyContextCount = 6
+internal let entropyContextCount = 6
 let dpcmContext: UInt8 = 4
 
 // MARK: - EntropyModelSelection
@@ -14,6 +14,17 @@ struct EntropyModelSelection {
     let valModels: [rANSModel]  // always entropyContextCount elements
     let isStatic: Bool
     let isMerged: Bool
+    /// Estimated total cost (bits in Q8, header included) of the chosen
+    /// option, used to compare against backward-adapted history tables.
+    let costQ8: Int
+
+    init(runModels: [rANSModel], valModels: [rANSModel], isStatic: Bool, isMerged: Bool, costQ8: Int = 0) {
+        self.runModels = runModels
+        self.valModels = valModels
+        self.isStatic = isStatic
+        self.isMerged = isMerged
+        self.costQ8 = costQ8
+    }
 }
 
 // MARK: - EntropyModelProvider
@@ -304,7 +315,7 @@ func unifiedSelectModel(
         return EntropyModelSelection(
             runModels: staticACRunModels + [staticDPCMRun, staticLSCPRun],
             valModels: staticACValModels + [staticDPCMVal, staticDPCMVal],
-            isStatic: true, isMerged: false
+            isStatic: true, isMerged: false, costQ8: minCost
         )
     }
     if minCost == mergedCostQ8 {
@@ -312,13 +323,13 @@ func unifiedSelectModel(
         let merged5Val = [rANSModel](repeating: mergedValModel, count: entropyContextCount)
         return EntropyModelSelection(
             runModels: merged5Run, valModels: merged5Val,
-            isStatic: false, isMerged: true
+            isStatic: false, isMerged: true, costQ8: minCost
         )
     }
     // dynamic 5-context
     return EntropyModelSelection(
         runModels: dynRunModels, valModels: dynValModels,
-        isStatic: false, isMerged: false
+        isStatic: false, isMerged: false, costQ8: minCost
     )
 }
 
@@ -380,7 +391,7 @@ struct EntropyEncoder {
     }
 
     @inline(__always)
-    mutating func getData(selectModel: ModelSelectorFn) -> [UInt8] {
+    mutating func getData(selectModel: ModelSelectorFn, history: EntropyHistoryState? = nil) -> [UInt8] {
         var out = [UInt8]()
         let pairCount = pairRuns.count
         out.reserveCapacity(pairCount * 4 + 128)
@@ -483,23 +494,42 @@ struct EntropyEncoder {
         let selection = selectModel(
             &runTokenCounts, &valTokenCounts
         )
-        let runModels = selection.runModels
-        let valModels = selection.valModels
-        
-        // Flags byte: bit6=isStatic, bit4=isMerged, bit0=hasTrailingZeros
+
+        // Backward-adapted history option: zero header cost; usable once the
+        // stream has coded at least one rANS frame since the last I-frame.
+        var useHistory = false
+        var runModels = selection.runModels
+        var valModels = selection.valModels
+        if let h = history, h.primed {
+            let (histRun, histVal) = h.models(buildLUT: false)
+            var histCostQ8 = 0
+            for c in 0..<entropyContextCount {
+                histCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: histRun[c])
+                histCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[c], model: histVal[c])
+            }
+            if histCostQ8 < selection.costQ8 {
+                useHistory = true
+                runModels = histRun
+                valModels = histVal
+            }
+        }
+
+        // Flags byte: bit6=isStatic, bit5=isHistory, bit4=isMerged, bit0=hasTrailingZeros
         let flagTrailingZeros: UInt8 = 0x01
         let flagMerged: UInt8        = 0x10
+        let flagHistory: UInt8       = 0x20
         let flagStatic: UInt8        = 0x40
-        
+
         let trailBit: UInt8  = if hasTrailingZeros { flagTrailingZeros } else { 0 }
-        let staticBit: UInt8 = if selection.isStatic { flagStatic } else { 0 }
-        let mergedBit: UInt8 = if selection.isMerged { flagMerged } else { 0 }
-        
-        out.append(staticBit | mergedBit | trailBit)
+        let staticBit: UInt8 = if useHistory != true && selection.isStatic { flagStatic } else { 0 }
+        let mergedBit: UInt8 = if useHistory != true && selection.isMerged { flagMerged } else { 0 }
+        let historyBit: UInt8 = if useHistory { flagHistory } else { 0 }
+
+        out.append(staticBit | mergedBit | historyBit | trailBit)
         writeVLQSize(&out, totalPairEntries)
-        
-        // Write dynamic frequency table headers when not static
-        if selection.isStatic != true {
+
+        // Write dynamic frequency table headers when not static/history
+        if useHistory != true && selection.isStatic != true {
             if selection.isMerged {
                 // Merged: 2 tables (run + val for single merged context)
                 writeCompressedFreqTable(&out, freqs: runModels[0].tokenFreqs)
@@ -512,6 +542,10 @@ struct EntropyEncoder {
                 }
             }
         }
+
+        // The decoder mirrors this update with its decoded token counts after
+        // every rANS-coded stream (raw/empty streams return before this point).
+        history?.update(runTokenCounts: runTokenCounts, valTokenCounts: valTokenCounts)
         
         // 4-way bypass data
         for lane in 0..<4 {
@@ -667,7 +701,15 @@ struct EntropyDecoder {
     private var ransDecoder: Interleaved4rANSDecoder!
     private var currentLane: Int = 0
 
-    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0) throws {
+    // Backward-adaptive history: token counts of this stream's decoded pairs,
+    // fed back into `history` when the stream completes (finalizeHistory).
+    private var history: EntropyHistoryState? = nil
+    private var countTokens = false
+    private var decRunCounts: [[Int]] = []
+    private var decValCounts: [[Int]] = []
+
+    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil) throws {
+        self.history = history
         var offset = startOffset
         
         let bypassLen = try readVLQSize(base, at: &offset, count: count)
@@ -721,8 +763,16 @@ struct EntropyDecoder {
         
         // rANS mode
         let isStaticTable = (flags & 0x40) != 0
+        let isHistoryTable = (flags & 0x20) != 0
         let hasTrailingZeros = (flags & 1) != 0
         self.hasTrailingZeros = hasTrailingZeros
+
+        // rANS-coded stream: mirror the encoder's history accumulation.
+        if history != nil {
+            self.countTokens = true
+            self.decRunCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+            self.decValCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+        }
         
         let totalPairEntries = try readVLQSize(base, at: &offset, count: count)
         self.totalPairEntries = totalPairEntries
@@ -742,8 +792,14 @@ struct EntropyDecoder {
         self.chunkStarts = starts
         
         let isMergedContext = (flags & 0x10) != 0
-        
+
         switch true {
+        case isHistoryTable:
+            // Backward-adapted: rebuild models from the decoded history.
+            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
+            let (r, v) = h.models(buildLUT: true)
+            self.runModels = r
+            self.valModels = v
         case isStaticTable:
             // Static 6-context: AC models for ctx 0-3, DPCM model for ctx 4, LSCP for ctx 5
             self.runModels = [
@@ -847,34 +903,55 @@ struct EntropyDecoder {
             let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
             let rtInfo = runModels[0].findToken(cf: cfRun)
             ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
-            
+
             let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
             let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
             let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
-            
+
+            // Trailing-zeros run token is counted under context 0, matching the encoder.
+            if countTokens {
+                decRunCounts[0][Int(rtInfo.token)] += 1
+            }
+
             pairIndex += 1
             return (Int(zeroRun), 0)
         }
-        
+
         let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
         let ctx = Int(context)
         let rtInfo = runModels[ctx].findToken(cf: cfRun)
         ransDecoder.advanceSymbol(lane: lane, cumFreq: rtInfo.cumFreq, freq: rtInfo.freq)
-        
+
         let runBypassLen = valueBypassLengthUnsigned(for: rtInfo.token)
         let runBypassBits = chunkBypassReaders[lane].readBits(count: runBypassLen)
         let zeroRun = UInt32(valueDetokenizeUnsigned(token: rtInfo.token, bypassBits: runBypassBits))
-        
+
         let cfVal = ransDecoder.getCumulativeFreq(lane: lane)
         let vtInfo = valModels[ctx].findToken(cf: cfVal)
         ransDecoder.advanceSymbol(lane: lane, cumFreq: vtInfo.cumFreq, freq: vtInfo.freq)
-        
+
         let valBypassLen = valueBypassLength(for: vtInfo.token)
         let valBypassBits = chunkBypassReaders[lane].readBits(count: valBypassLen)
         let val = valueDetokenize(token: vtInfo.token, bypassBits: valBypassBits)
-        
+
+        if countTokens {
+            decRunCounts[ctx][Int(rtInfo.token)] += 1
+            decValCounts[ctx][Int(vtInfo.token)] += 1
+        }
+
         pairIndex += 1
         return (Int(zeroRun), val)
+    }
+
+    /// Feed this stream's decoded token counts back into the history state.
+    /// Call exactly once after all blocks of the plane have been decoded.
+    /// Raw-bypass and empty streams never reach the counting setup, so this
+    /// is a no-op for them — matching the encoder, which only updates history
+    /// for rANS-coded streams.
+    mutating func finalizeHistory() {
+        guard countTokens, let h = history else { return }
+        countTokens = false
+        h.update(runTokenCounts: decRunCounts, valTokenCounts: decValCounts)
     }
 }
 

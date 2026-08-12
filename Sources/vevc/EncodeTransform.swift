@@ -302,7 +302,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0, history: EntropyHistoryState? = nil) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -386,7 +386,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         }
         encoder.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+        out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel, history: history))
         return out
     }
     
@@ -397,7 +397,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
     }
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel, history: history))
     return out
 }
 
@@ -407,7 +407,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0, history: EntropyHistoryState? = nil) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -500,7 +500,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         }
         encoder.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+        out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel, history: history))
         return out
     }
     
@@ -511,7 +511,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
     }
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel, history: history))
     return out
 }
 
@@ -568,7 +568,7 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int) -> 
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int) -> [UInt8] {
+func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int, history: EntropyHistoryState? = nil) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -612,7 +612,7 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
     
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel))
+    out.append(contentsOf: encoder.getData(selectModel: unifiedSelectModel, history: history))
     return out
 }
 
