@@ -93,6 +93,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         let blockCount = bw * bh
         skipMap = [BlockMode](repeating: .inter, count: blockCount)
         let skipThresholdPerPixel = skipThreshold
+        let prevStaticCounters = staticCounters
         
         let matchResults = await withTaskGroup(of: [(Int, Bool, Bool, Bool)].self) { group in
             let batchSize = 128
@@ -130,10 +131,11 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                     for i in batchStart..<batchEnd {
                         let bx = (i % bw) * 32
                         let by = (i / bw) * 32
+                        let prevCount = prevStaticCounters[i]
                         
                         var allSubBlocksMatchPrev = true
-                        var allSubBlocksMatchLtr = true
-                        var allSubBlocksMatchPrevRecon = true
+                        var allSubBlocksMatchLtr = false
+                        var allSubBlocksMatchPrevRecon = false
                         
                         for sy in 0..<2 {
                             for sx in 0..<2 {
@@ -147,26 +149,88 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                                 
                                 let area = mw * mh + mwc * mhc * 2
                                 let blockThreshold = skipThresholdPerPixel * area
-                                let reconBlockThreshold = blockThreshold * reconThresholdScale
                                 
                                 let sadPrevIn: Int
-                                let sadLtrIn: Int
-                                let sadPrevRecon: Int
                                 if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                    sadPrevIn = computeZeroSAD16x16(cY: cYPtr, rY: pYPtr, cCb: cCbPtr, rCb: pCbPtr, cCr: cCrPtr, rCr: pCrPtr, bx: subX, by: subY, width: dx)
-                                    sadLtrIn = computeZeroSAD16x16(cY: cYPtr, rY: lYPtr, cCb: cCbPtr, rCb: lCbPtr, cCr: cCrPtr, rCr: lCrPtr, bx: subX, by: subY, width: dx)
-                                    sadPrevRecon = computeZeroSAD16x16(cY: cYPtr, rY: pReconYPtr, cCb: cCbPtr, rCb: pReconCbPtr, cCr: cCrPtr, rCr: pReconCrPtr, bx: subX, by: subY, width: dx)
+                                    sadPrevIn = computeZeroSAD16x16(cY: cYPtr, rY: pYPtr, cCb: cCbPtr, rCb: pCbPtr, cCr: cCrPtr, rCr: pCrPtr, bx: subX, by: subY, width: dx, limit: blockThreshold)
                                 } else {
-                                    sadPrevIn = computeZeroSADSubBlock(cY: cYPtr, rY: pYPtr, cCb: cCbPtr, rCb: pCbPtr, cCr: cCrPtr, rCr: pCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
-                                    sadLtrIn = computeZeroSADSubBlock(cY: cYPtr, rY: lYPtr, cCb: cCbPtr, rCb: lCbPtr, cCr: cCrPtr, rCr: lCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
-                                    sadPrevRecon = computeZeroSADSubBlock(cY: cYPtr, rY: pReconYPtr, cCb: cCbPtr, rCb: pReconCbPtr, cCr: cCrPtr, rCr: pReconCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc)
+                                    sadPrevIn = computeZeroSADSubBlock(cY: cYPtr, rY: pYPtr, cCb: cCbPtr, rCb: pCbPtr, cCr: cCrPtr, rCr: pCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
                                 }
                                 
-                                if blockThreshold < sadPrevIn { allSubBlocksMatchPrev = false }
-                                if blockThreshold < sadLtrIn { allSubBlocksMatchLtr = false }
-                                if reconBlockThreshold < sadPrevRecon { allSubBlocksMatchPrevRecon = false }
+                                if blockThreshold < sadPrevIn {
+                                    allSubBlocksMatchPrev = false
+                                    break
+                                }
+                            }
+                            if allSubBlocksMatchPrev != true { break }
+                        }
+                        
+                        let nextStaticCount = allSubBlocksMatchPrev ? (prevCount + 1) : 0
+                        
+                        if nextStaticCount == gopPosition {
+                            allSubBlocksMatchLtr = true
+                            for sy in 0..<2 {
+                                for sx in 0..<2 {
+                                    let subX = bx + sx * 16
+                                    let subY = by + sy * 16
+                                    let mw = min(16, dx - subX)
+                                    let mh = min(16, dy - subY)
+                                    if mw <= 0 || mh <= 0 { continue }
+                                    let mwc = ((mw + 1) / 2)
+                                    let mhc = ((mh + 1) / 2)
+                                    
+                                    let area = mw * mh + mwc * mhc * 2
+                                    let blockThreshold = skipThresholdPerPixel * area
+                                    
+                                    let sadLtrIn: Int
+                                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                        sadLtrIn = computeZeroSAD16x16(cY: cYPtr, rY: lYPtr, cCb: cCbPtr, rCb: lCbPtr, cCr: cCrPtr, rCr: lCrPtr, bx: subX, by: subY, width: dx, limit: blockThreshold)
+                                    } else {
+                                        sadLtrIn = computeZeroSADSubBlock(cY: cYPtr, rY: lYPtr, cCb: cCbPtr, rCb: lCbPtr, cCr: cCrPtr, rCr: lCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
+                                    }
+                                    
+                                    if blockThreshold < sadLtrIn {
+                                        allSubBlocksMatchLtr = false
+                                        break
+                                    }
+                                }
+                                if allSubBlocksMatchLtr != true { break }
                             }
                         }
+                        
+                        let isLtrMatch = allSubBlocksMatchLtr && (nextStaticCount == gopPosition)
+                        if isLtrMatch != true && allSubBlocksMatchPrev && (3 < nextStaticCount) {
+                            allSubBlocksMatchPrevRecon = true
+                            for sy in 0..<2 {
+                                for sx in 0..<2 {
+                                    let subX = bx + sx * 16
+                                    let subY = by + sy * 16
+                                    let mw = min(16, dx - subX)
+                                    let mh = min(16, dy - subY)
+                                    if mw <= 0 || mh <= 0 { continue }
+                                    let mwc = ((mw + 1) / 2)
+                                    let mhc = ((mh + 1) / 2)
+                                    
+                                    let area = mw * mh + mwc * mhc * 2
+                                    let blockThreshold = skipThresholdPerPixel * area
+                                    let reconBlockThreshold = blockThreshold * reconThresholdScale
+                                    
+                                    let sadPrevRecon: Int
+                                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                        sadPrevRecon = computeZeroSAD16x16(cY: cYPtr, rY: pReconYPtr, cCb: cCbPtr, rCb: pReconCbPtr, cCr: cCrPtr, rCr: pReconCrPtr, bx: subX, by: subY, width: dx, limit: reconBlockThreshold)
+                                    } else {
+                                        sadPrevRecon = computeZeroSADSubBlock(cY: cYPtr, rY: pReconYPtr, cCb: cCbPtr, rCb: pReconCbPtr, cCr: cCrPtr, rCr: pReconCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: reconBlockThreshold)
+                                    }
+                                    
+                                    if reconBlockThreshold < sadPrevRecon {
+                                        allSubBlocksMatchPrevRecon = false
+                                        break
+                                    }
+                                }
+                                if allSubBlocksMatchPrevRecon != true { break }
+                            }
+                        }
+                        
                         results.append((i, allSubBlocksMatchPrev, allSubBlocksMatchLtr, allSubBlocksMatchPrevRecon))
                     }
                     }}}}}}}}}}}}
@@ -402,7 +466,7 @@ func computeZeroSAD16x16(
     cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
     cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
     cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
-    bx: Int, by: Int, width: Int
+    bx: Int, by: Int, width: Int, limit: Int = Int.max
 ) -> Int {
     var sad: Int = 0
     let strideY = width
@@ -415,6 +479,7 @@ func computeZeroSAD16x16(
         for x in 0..<16 {
             sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
         }
+        if limit < sad { return sad }
     }
     
     for y in 0..<8 {
@@ -423,6 +488,7 @@ func computeZeroSAD16x16(
             sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
             sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
         }
+        if limit < sad { return sad }
     }
     return sad
 }
@@ -433,7 +499,8 @@ func computeZeroSADSubBlock(
     cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
     cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
     bx: Int, by: Int, width: Int, height: Int,
-    subWidth: Int, subHeight: Int, subWc: Int, subHc: Int
+    subWidth: Int, subHeight: Int, subWc: Int, subHc: Int,
+    limit: Int = Int.max
 ) -> Int {
     var sad: Int = 0
     let strideY = width
@@ -443,6 +510,7 @@ func computeZeroSADSubBlock(
         for x in 0..<subWidth {
             sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
         }
+        if limit < sad { return sad }
     }
     
     let bxC = bx / 2
@@ -455,6 +523,7 @@ func computeZeroSADSubBlock(
             sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
             sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
         }
+        if limit < sad { return sad }
     }
     return sad
 }

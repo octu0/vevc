@@ -43,6 +43,7 @@ public actor StreamingDecoderActor {
     private var seenY = Set<UnsafeMutableRawPointer>()
     private var roundOffsetIndex = 0
     private let entropyHistories: FrameEntropyHistories?
+    private var cachedYCbCrImage: YCbCrImage?
 
     public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01) {
         self.maxLayer = maxLayer
@@ -51,6 +52,21 @@ public actor StreamingDecoderActor {
         self.pool = BlockViewPool()
         self.profile = profile
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
+    }
+
+    private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
+        let w = pd.width
+        let h = pd.height
+        if var cached = cachedYCbCrImage, cached.width == w && cached.height == h {
+            pd.toYCbCr(into: &cached)
+            cachedYCbCrImage = cached
+            return cached
+        } else {
+            var newImg = YCbCrImage(width: w, height: h)
+            pd.toYCbCr(into: &newImg)
+            cachedYCbCrImage = newImg
+            return newImg
+        }
     }
     
     @inline(__always)
@@ -64,7 +80,7 @@ public actor StreamingDecoderActor {
                 throw DecodeError.insufficientDataContext("Copy frame without previous frame")
             }
             roundOffsetIndex += 1
-            return prev.toYCbCr()
+            return renderToYCbCr(pd: prev)
         }
         
         if frameHeader.isIFrame {
@@ -126,7 +142,7 @@ public actor StreamingDecoderActor {
         }
         
         roundOffsetIndex += 1
-        return pd.toYCbCr()
+        return renderToYCbCr(pd: pd)
     }
 }
 
