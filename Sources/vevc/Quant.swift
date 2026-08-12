@@ -107,11 +107,21 @@ struct QuantizationTable: Sendable {
         }
 
 
+        // Saturation-gated extended range: below the knee (baseStep 2048) the
+        // caps match the original tuning exactly, so normal-rate quality is
+        // untouched. When the rate controller pushes baseStep past the knee
+        // (i.e. the original caps have long been saturated and rate can no
+        // longer drop), the effective cap ramps linearly up to 2x at
+        // baseStep 4096, lowering the achievable rate floor instead of the
+        // step silently clamping. Derived deterministically from the signaled
+        // baseStep, so the decoder reproduces it without extra signaling.
+        let ext = max(0, Int(s) - 2048)
+
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(256, max(16, baseStep / 8))
-            let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen))
-            let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen))
+            let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen)) + (ext * 384) / 2048
+            let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 768) / 2048
 
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC)
@@ -122,10 +132,10 @@ struct QuantizationTable: Sendable {
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
 
             // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
-            let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen))
+            let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen)) + (ext * 768) / 2048
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY)
 
-            let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen))
+            let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 1024) / 2048
             self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY)
         }
     }
