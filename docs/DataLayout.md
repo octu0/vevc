@@ -117,13 +117,15 @@ The internal structure for `Layer0`, `Layer1`, and `Layer2` is identical. Each l
 
 The per-subband steps (qLow/qMid/qHigh) are derived deterministically from the
 signaled base step and the layer index on both encoder and decoder (see
-`QuantizationTable.init`). The qMid/qHigh caps use a saturation-gated extended
+`QuantizationTable.init`). The qHigh (HH) cap uses a saturation-gated extended
 range: for base steps up to 2048 (Q4) the caps are the base tuning
-(luma 768/1024, chroma 384/768); from 2048 to 4096 the effective cap ramps
-linearly up to 2x (luma 1536/2048, chroma 768/1536), lowering the achievable
-rate floor when the rate controller is saturated. qLow (DC) is never extended.
-Decoders older than this rule mis-derive steps for streams whose base step
-exceeds 2048.
+(luma 768/1024, chroma 384/768); from 2048 to 4096 the effective qHigh cap
+ramps linearly up to 2x (luma 2048, chroma 1536), lowering the achievable rate
+floor when the rate controller is saturated. qLow (DC) and qMid (HL/LH) are
+never extended — extending qMid was measured to collapse structure in
+high-motion frames (worst-frame SSIM 0.756 → 0.708) and is deliberately
+excluded. Decoders older than this rule mis-derive steps for streams whose
+base step exceeds 2048.
 
 ### 4.1. Plane Payload (Y / Cb / Cr)
 The data for each plane consists of a single **unified entropy stream** that encodes all four DWT subbands (LL, HL, LH, HH) together using 6 rANS contexts.

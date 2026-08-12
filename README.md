@@ -234,7 +234,7 @@ While `vevc` currently achieves extreme speeds in software via SIMD, its foundat
 
 The encoder automatically selects the mode that minimizes total encoded size for each plane stream. This replaces the previous fixed-threshold approach with a Shannon entropy-based cost estimation.
 
-**Backward-Adaptive History Tables (Profile 2)**: Encoder and decoder both maintain per-stream (layer × plane) decayed token counts across P-frames (`acc = acc/2 + current`). Once primed, the encoder can signal "reuse history" (flags bit `0x20`) and transmit no frequency tables at all — the decoder rebuilds identical models from the tokens it already decoded. State resets at every I-frame, keeping random access intact. On live-streaming content this removes most per-frame table overhead (measured 4.5–6% total bitrate reduction at equal quality, and up to ~23% at deeply saturated low-bitrate settings combined with the saturation-gated quantizer below).
+**Backward-Adaptive History Tables (Profile 2)**: Encoder and decoder both maintain per-stream (layer × plane) decayed token counts across P-frames (`acc = acc/2 + current`). Once primed, the encoder can signal "reuse history" (flags bit `0x20`) and transmit no frequency tables at all — the decoder rebuilds identical models from the tokens it already decoded. State resets at every I-frame, keeping random access intact. On live-streaming content this removes most per-frame table overhead (measured 4.5–6% total bitrate reduction at equal quality, and ~8% at deeply saturated low-bitrate settings combined with the saturation-gated quantizer below).
 
 ### Optimizations
 
@@ -249,7 +249,7 @@ The encoder automatically selects the mode that minimizes total encoded size for
 - **Compressed Frequency Tables**: Bitmap-based encoding reduces table size from 32B to ~10B
 - **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 1-byte markers
 - **Backward-Adaptive Entropy Tables**: Profile 2 P-frames can reuse rANS models rebuilt from decoded history (zero table headers, decoder stays in lockstep without signaling)
-- **Saturation-Gated Quantization Range**: qMid/qHigh caps ramp up to 2× only when the rate controller saturates (base step beyond 2048), lowering the achievable rate floor by ~20%+ without touching normal-rate quality
+- **Saturation-Gated Quantization Range**: the qHigh (HH) cap ramps up to 2× only when the rate controller saturates (base step beyond 2048), lowering the achievable rate floor by ~7% without touching normal-rate quality or worst-frame structure (qMid/qLow are never extended)
 
 ---
 

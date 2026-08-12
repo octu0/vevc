@@ -120,7 +120,7 @@ struct QuantizationTable: Sendable {
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(256, max(16, baseStep / 8))
-            let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen)) + (ext * 384) / 2048
+            let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen))
             let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 768) / 2048
 
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
@@ -132,7 +132,7 @@ struct QuantizationTable: Sendable {
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
 
             // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
-            let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen)) + (ext * 768) / 2048
+            let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen))
             self.qMid = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY)
 
             let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 1024) / 2048
