@@ -547,10 +547,12 @@ private func mergedCostQ8(run: [[Int]], val: [[Int]]) -> Int {
 }
 
 /// Baseline adaptive cost, replicating unifiedSelectModel's 3-way choice.
-private func costBase6Q8(run: [[Int]], val: [[Int]]) -> (adaptive: Int, modelOnly: Int) {
+/// `statRun`/`statVal` default to the shipped static tables; table training
+/// passes retrained candidates to evaluate them under the real selection.
+private func costBase6Q8(run: [[Int]], val: [[Int]], statRun statRunIn: [rANSModel]? = nil, statVal statValIn: [rANSModel]? = nil) -> (adaptive: Int, modelOnly: Int) {
     let s = StaticRANSModels.shared
-    let statRun = [s.runModel0, s.runModel1, s.runModel2, s.runModel3, s.dpcmRunModel, s.lscpRunModel]
-    let statVal = [s.valModel0, s.valModel1, s.valModel2, s.valModel3, s.dpcmValModel, s.dpcmValModel]
+    let statRun = statRunIn ?? [s.runModel0, s.runModel1, s.runModel2, s.runModel3, s.dpcmRunModel, s.lscpRunModel]
+    let statVal = statValIn ?? [s.valModel0, s.valModel1, s.valModel2, s.valModel3, s.dpcmValModel, s.dpcmValModel]
     var staticQ8 = 0
     var dynQ8 = 0
     var dynHdrBits = 0
@@ -896,6 +898,167 @@ public func runSigmaMeasurement(dumpPath: String) throws -> String {
     for li in 0..<3 {
         let rate = muBlocks[li] == 0 ? 0.0 : Double(muWins[li]) / Double(muBlocks[li]) * 100.0
         out += String(format: "  %@ %6.2f%% (%d / %d blocks)\n", pad(layerNames[li], 20), rate, muWins[li], muBlocks[li])
+    }
+    return out
+}
+
+// MARK: - Static table training (Table retuning from corpus)
+
+/// Zero σ planes: lets the pair walker run when only base6 counts are needed.
+private func zeroSigma(for entry: MEntry) -> SigmaPlanes {
+    SigmaPlanes(a3: entry.subs.map { [Int](repeating: 0, count: $0.data.count) }, b3: nil, b7: nil, b11: nil)
+}
+
+/// Walk one frame's nine streams with the base6 variant only, invoking
+/// `sink` with each stream's token counts.
+private func walkBase6(frame: MFrame, sink: (_ e: Int, _ run: [[Int]], _ val: [[Int]], _ shared: Int) -> Void) {
+    let base6 = [makeVariants()[0]]
+    for e in 0..<9 {
+        let entry = frame.coded[e]
+        let counter = StreamCounter(variants: base6)
+        let sigma = zeroSigma(for: entry)
+        switch e / 3 {
+        case 0:
+            walkStreamUpper(entry: entry, parent: frame.parents[e], tile: 16, sigma: sigma, counter: counter)
+        case 1:
+            walkStreamUpper(entry: entry, parent: frame.parents[e], tile: 8, sigma: sigma, counter: counter)
+        default:
+            walkStreamBase(entry: entry, sigma: sigma, counter: counter)
+        }
+        sink(e, counter.run[0], counter.val[0], counter.sharedBits)
+    }
+}
+
+private func staticCostQ8(run: [[Int]], val: [[Int]], statRun: [rANSModel], statVal: [rANSModel]) -> Int {
+    var q8 = 0
+    for c in 0..<entropyContextCount {
+        q8 += estimateBitCostQ8(tokenCounts: run[c], model: statRun[c])
+        q8 += estimateBitCostQ8(tokenCounts: val[c], model: statVal[c])
+    }
+    return q8
+}
+
+private func dynAndMergedCostQ8(run: [[Int]], val: [[Int]]) -> (dyn: Int, merged: Int) {
+    var dynQ8 = 0
+    var dynHdrBits = 0
+    for c in 0..<entropyContextCount {
+        var rm = rANSModel(buildLUT: false)
+        var vm = rANSModel(buildLUT: false)
+        rm.normalize(tokenCounts: run[c])
+        vm.normalize(tokenCounts: val[c])
+        dynQ8 += estimateBitCostQ8(tokenCounts: run[c], model: rm)
+        dynQ8 += estimateBitCostQ8(tokenCounts: val[c], model: vm)
+        dynHdrBits += headerCostBits(model: rm) + headerCostBits(model: vm)
+    }
+    return (dynQ8 + (dynHdrBits << 8), mergedCostQ8(run: run, val: val))
+}
+
+private func emitTable(_ name: String, _ freqs: [UInt32]) -> String {
+    var out = "    var \(name) = buildStaticModel(rawFreqs: [\n"
+    for row in 0..<4 {
+        out += "        " + (0..<16).map { String(freqs[row * 16 + $0]) }.joined(separator: ", ") + ",\n"
+    }
+    out += "    ])\n\n"
+    return out
+}
+
+/// Train static tables on one dump and evaluate them against the shipped
+/// tables on another, under the real 4-way selection (static / dynamic /
+/// merged / backward-history). Emits drop-in Swift for StaticRANSModels.
+public func runTableTraining(trainPath: String, testPath: String) throws -> String {
+    // --- 1) accumulate global per-context counts on the training dumps
+    // (comma-separated paths train a combined corpus)
+    var gRun = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+    var gVal = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+    var trainFrames = 0
+    for path in trainPath.split(separator: ",").map(String.init) {
+        let trainReader = try DumpReader(path: path)
+        while let frame = try trainReader.nextFrame() {
+            walkBase6(frame: frame) { _, run, val, _ in
+                for c in 0..<entropyContextCount {
+                    for t in 0..<64 {
+                        gRun[c][t] += run[c][t]
+                        gVal[c][t] += val[c][t]
+                    }
+                }
+            }
+            trainFrames += 1
+        }
+    }
+    guard 0 < trainFrames else { throw SigmaMeasureError.badFormat("empty train dump") }
+
+    func trained(_ counts: [Int]) -> rANSModel {
+        var m = rANSModel(buildLUT: false)
+        m.normalize(tokenCounts: counts)
+        return m
+    }
+    // ctx4 (DPCM) only occurs in I-frames, which the dump does not contain —
+    // retraining it from P-frame data would produce degenerate tables and
+    // wreck I-frame static coding. Keep the shipped DPCM run/val models
+    // (ctx5 vals keep sharing dpcmValModel as in the shipped layout) and
+    // retrain only the AC contexts 0-3 and the LSCP run model.
+    let shipped = StaticRANSModels.shared
+    var newRun = (0..<entropyContextCount).map { trained(gRun[$0]) }
+    var newVal = (0..<entropyContextCount).map { trained(gVal[$0]) }
+    newRun[4] = shipped.dpcmRunModel
+    newVal[4] = shipped.dpcmValModel
+    newVal[5] = shipped.dpcmValModel
+
+    // --- 2) evaluate on the test dump under real selection
+    let s = StaticRANSModels.shared
+    let oldRun = [s.runModel0, s.runModel1, s.runModel2, s.runModel3, s.dpcmRunModel, s.lscpRunModel]
+    let oldVal = [s.valModel0, s.valModel1, s.valModel2, s.valModel3, s.dpcmValModel, s.dpcmValModel]
+
+    let testReader = try DumpReader(path: testPath)
+    let backward = BackwardState(streams: 9, variants: [makeVariants()[0]])
+    var bitsOld = 0.0
+    var bitsNew = 0.0
+    var staticPickedOld = 0
+    var staticPickedNew = 0
+    var streams = 0
+    var testFrames = 0
+    while let frame = try testReader.nextFrame() {
+        walkBase6(frame: frame) { e, run, val, _ in
+            let stOld = staticCostQ8(run: run, val: val, statRun: oldRun, statVal: oldVal)
+            let stNew = staticCostQ8(run: run, val: val, statRun: newRun, statVal: newVal)
+            let (dyn, merged) = dynAndMergedCostQ8(run: run, val: val)
+            let hist: Int
+            if backward.primed[e][0] {
+                hist = costBackwardQ8(curRun: run, curVal: val, accRun: backward.run[e][0], accVal: backward.val[e][0])
+            } else {
+                hist = Int.max
+            }
+            let bestOld = min(stOld, dyn, merged, hist)
+            let bestNew = min(stNew, dyn, merged, hist)
+            bitsOld += Double(bestOld) / 256.0
+            bitsNew += Double(bestNew) / 256.0
+            if bestOld == stOld { staticPickedOld += 1 }
+            if bestNew == stNew { staticPickedNew += 1 }
+            streams += 1
+            for cc in 0..<entropyContextCount {
+                for t in 0..<64 {
+                    backward.run[e][0][cc][t] = backward.run[e][0][cc][t] / 2 + run[cc][t]
+                    backward.val[e][0][cc][t] = backward.val[e][0][cc][t] / 2 + val[cc][t]
+                }
+            }
+            backward.primed[e][0] = true
+        }
+        testFrames += 1
+    }
+    guard 0 < testFrames else { throw SigmaMeasureError.badFormat("empty test dump") }
+
+    var out = "=== static table retraining ===\n"
+    out += "train: \(trainPath) (\(trainFrames) frames)\ntest:  \(testPath) (\(testFrames) frames)\n\n"
+    out += String(format: "coded bits under real selection (static/dyn/merged/history):\n")
+    out += String(format: "  shipped tables:   %10.1f KB (static picked %d/%d streams)\n", bitsOld / 8.0 / 1024.0, staticPickedOld, streams)
+    out += String(format: "  retrained tables: %10.1f KB (static picked %d/%d streams)\n", bitsNew / 8.0 / 1024.0, staticPickedNew, streams)
+    out += String(format: "  delta: %+.2f%%\n\n", (bitsOld - bitsNew) / bitsOld * 100.0)
+
+    out += "drop-in Swift (StaticRANSModels; dpcm models intentionally kept as shipped):\n\n"
+    let names = [("runModel0", 0), ("runModel1", 1), ("runModel2", 2), ("runModel3", 3), ("lscpRunModel", 5)]
+    for (n, c) in names { out += emitTable(n, newRun[c].tokenFreqs) }
+    for (n, c) in [("valModel0", 0), ("valModel1", 1), ("valModel2", 2), ("valModel3", 3)] {
+        out += emitTable(n, newVal[c].tokenFreqs)
     }
     return out
 }

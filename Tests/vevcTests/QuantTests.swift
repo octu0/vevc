@@ -70,8 +70,13 @@ final class QuantTests: XCTestCase {
 
                 // The error should be at most real_step.
                 // Due to fixed-point precision with 16-bit shift, it might be real_step + 1 in some cases.
+                // The AC (signed-mapping) dequantizers additionally apply the
+                // +3/16-step centroid offset away from zero (DataLayout §4),
+                // which raises the worst-case error bound by 3·Δ/16 while
+                // lowering the mean error.
                 let realStep = Int32(step) / 16
-                let limit = roundToNearest ? (realStep / 2 + 1) : (realStep + 1)
+                let centroidMargin: Int32 = signedMapping ? (realStep * 3) / 16 + 1 : 0
+                let limit = (roundToNearest ? (realStep / 2 + 1) : (realStep + 1)) + centroidMargin
                 XCTAssertLessThanOrEqual(
                     diff, limit,
                     "Error too large at (\(x), \(y)) for step \(step), roundToNearest: \(roundToNearest), signedMapping: \(signedMapping), original: \(original), recon: \(reconstructed), size: \(width)x\(height)"
