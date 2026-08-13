@@ -306,6 +306,79 @@ private func absMagnitudes(_ p: MPlane) -> [Int] {
     return out
 }
 
+// MARK: μ-prediction (shift/integer lifting) simulation
+
+@inline(__always)
+private func unzigzag(_ v: Int16) -> Int {
+    let u = Int(UInt16(bitPattern: v))
+    return (u >> 1) ^ -(u & 1)
+}
+
+@inline(__always)
+private func zigzag(_ s: Int) -> Int16 {
+    let v = Int16(clamping: s)
+    return Int16(bitPattern: UInt16(bitPattern: (v << 1) ^ (v >> 15)))
+}
+
+/// Residual planes for μ-prediction: predict each quantized coefficient from
+/// the co-located coefficient of the previous P-frame (dequantized and
+/// re-quantized to the current step, integer rounding — exactly reproducible
+/// on the decoder). r = c − pred, stored back in the plane's native mapping
+/// so the unmodified pair walker measures the NET bit cost including the
+/// zero-run / LSCP / block-flag structure of the residual.
+private func muResidualEntry(cur: MEntry, prev: MEntry, entryIndex e: Int, qstepsCur: [[Int]], qstepsPrev: [[Int]]) -> MEntry {
+    let layerRow = e / 3
+    var subs: [MPlane] = []
+    subs.reserveCapacity(cur.subs.count)
+    for s in 0..<cur.subs.count {
+        let isSignedLL = (layerRow == 2 && s == 0)
+        let stepCur = stepFor(entry: e, sub: s, qsteps: qstepsCur)
+        let stepPrev = stepFor(entry: e, sub: s, qsteps: qstepsPrev)
+        let cp = cur.subs[s]
+        let pp = prev.subs[s]
+        var data = [Int16](repeating: 0, count: cp.data.count)
+        for i in cp.data.indices {
+            let curS = isSignedLL ? Int(cp.data[i]) : unzigzag(cp.data[i])
+            let prevS = isSignedLL ? Int(pp.data[i]) : unzigzag(pp.data[i])
+            let num = prevS * stepPrev
+            let half = stepCur / 2
+            let pred = (num + (0 <= num ? half : -half)) / stepCur
+            let r = curS - pred
+            data[i] = isSignedLL ? Int16(clamping: r) : zigzag(r)
+        }
+        subs.append(MPlane(w: cp.w, h: cp.h, data: data))
+    }
+    return MEntry(subs: subs)
+}
+
+/// Per-block oracle diagnostic: fraction of coding blocks where the μ
+/// residual has strictly fewer nonzero coefficients than the original
+/// (upper bound on what per-block predict-on/off signaling could exploit).
+private func muBlockWinRate(orig: MEntry, mu: MEntry, tile: Int) -> (wins: Int, total: Int) {
+    let cols = orig.subs[0].w / tile
+    let rows = orig.subs[0].h / tile
+    var wins = 0
+    for r in 0..<rows {
+        for c in 0..<cols {
+            var nzO = 0
+            var nzM = 0
+            for s in orig.subs.indices {
+                let po = orig.subs[s]
+                let pm = mu.subs[s]
+                for y in 0..<tile {
+                    let ro = (r * tile + y) * po.w + c * tile
+                    for x in 0..<tile {
+                        if po.data[ro + x] != 0 { nzO += 1 }
+                        if pm.data[ro + x] != 0 { nzM += 1 }
+                    }
+                }
+            }
+            if nzM < nzO { wins += 1 }
+        }
+    }
+    return (wins, rows * cols)
+}
+
 // MARK: Pair stream regeneration (mirrors blockEncode*)
 
 @inline(__always)
@@ -587,6 +660,11 @@ public func runSigmaMeasurement(dumpPath: String) throws -> String {
     let variants = makeVariants()
     var agg = [LayerAgg(variantCount: variants.count), LayerAgg(variantCount: variants.count), LayerAgg(variantCount: variants.count)]
     let backward = BackwardState(streams: 9, variants: variants)
+    // μ-prediction lane: same variants/costing over residual planes
+    var aggMu = [LayerAgg(variantCount: variants.count), LayerAgg(variantCount: variants.count), LayerAgg(variantCount: variants.count)]
+    let backwardMu = BackwardState(streams: 9, variants: variants)
+    var muWins = [0, 0, 0]
+    var muBlocks = [0, 0, 0]
     var frameCount = 0
     var coldCount = 0
     var width = 0
@@ -665,6 +743,58 @@ public func runSigmaMeasurement(dumpPath: String) throws -> String {
                 backward.primed[e][vi] = true
             }
             agg[layerRow].sharedBits += counter.sharedBits
+
+            // μ-prediction lane: identical costing over the residual planes
+            // (cold frames fall back to the original planes, pred = 0).
+            let muEntry: MEntry
+            if prevOK, let p = prev {
+                muEntry = muResidualEntry(cur: entry, prev: p.coded[e], entryIndex: e, qstepsCur: frame.qsteps, qstepsPrev: p.qsteps)
+            } else {
+                muEntry = entry
+            }
+            let counterMu = StreamCounter(variants: variants)
+            switch layerRow {
+            case 0:
+                walkStreamUpper(entry: muEntry, parent: frame.parents[e], tile: 16, sigma: sigma, counter: counterMu)
+                let w = muBlockWinRate(orig: entry, mu: muEntry, tile: 16)
+                muWins[layerRow] += w.wins
+                muBlocks[layerRow] += w.total
+            case 1:
+                walkStreamUpper(entry: muEntry, parent: frame.parents[e], tile: 8, sigma: sigma, counter: counterMu)
+                let w = muBlockWinRate(orig: entry, mu: muEntry, tile: 8)
+                muWins[layerRow] += w.wins
+                muBlocks[layerRow] += w.total
+            default:
+                walkStreamBase(entry: muEntry, sigma: sigma, counter: counterMu)
+                let w = muBlockWinRate(orig: entry, mu: muEntry, tile: 4)
+                muWins[layerRow] += w.wins
+                muBlocks[layerRow] += w.total
+            }
+            for vi in variants.indices {
+                let cost: (adaptive: Int, modelOnly: Int)
+                if vi == 0 {
+                    cost = costBase6Q8(run: counterMu.run[vi], val: counterMu.val[vi])
+                } else {
+                    cost = costVariantQ8(run: counterMu.run[vi], val: counterMu.val[vi])
+                }
+                aggMu[layerRow].adaptiveQ8[vi] += cost.adaptive
+                aggMu[layerRow].modelOnlyQ8[vi] += cost.modelOnly
+                let bw: Int
+                if backwardMu.primed[e][vi] {
+                    bw = costBackwardQ8(curRun: counterMu.run[vi], curVal: counterMu.val[vi], accRun: backwardMu.run[e][vi], accVal: backwardMu.val[e][vi])
+                } else {
+                    bw = cost.adaptive
+                }
+                aggMu[layerRow].backwardQ8[vi] += bw
+                for c in 0..<variants[vi].contextCount {
+                    for t in 0..<64 {
+                        backwardMu.run[e][vi][c][t] = backwardMu.run[e][vi][c][t] / 2 + counterMu.run[vi][c][t]
+                        backwardMu.val[e][vi][c][t] = backwardMu.val[e][vi][c][t] / 2 + counterMu.val[vi][c][t]
+                    }
+                }
+                backwardMu.primed[e][vi] = true
+            }
+            aggMu[layerRow].sharedBits += counterMu.sharedBits
         }
 
         // layerBytes dump order is (L0, L1, L2); agg rows are (L2, L1, L0)
@@ -734,5 +864,38 @@ public func runSigmaMeasurement(dumpPath: String) throws -> String {
     }
     out += "\nsanity: simulated base6 adaptive total vs actual coeff bytes = "
     out += String(format: "%.1f KB vs %.1f KB (%.1f%%)\n", totalAdaptive[0] / 8.0 / 1024.0, Double(totalActual) / 1024.0, (totalAdaptive[0] / 8.0) / Double(max(1, totalActual)) * 100.0)
+
+    // μ-prediction report: original vs residual planes, same costing.
+    // Deltas are relative to the SAME variant/column on the original planes,
+    // i.e. the pure gain of the integer prediction lifting step.
+    out += "\n=== mu-prediction (r = c - pred(prev coeff)) vs original planes ===\n"
+    for vi in [0, 2] {
+        out += "[variant: \(variants[vi].name)]\n"
+        out += row("layer", ["adaptive KB", "delta", "prevTbl KB", "delta", "modelOnly", "delta"])
+        var tO = [0.0, 0.0, 0.0]
+        var tM = [0.0, 0.0, 0.0]
+        for li in 0..<3 {
+            let o = agg[li]
+            let m = aggMu[li]
+            let oCols = [Double(o.adaptiveQ8[vi]) / 256.0 + Double(o.sharedBits),
+                         Double(o.backwardQ8[vi]) / 256.0 + Double(o.sharedBits),
+                         Double(o.modelOnlyQ8[vi]) / 256.0 + Double(o.sharedBits)]
+            let mCols = [Double(m.adaptiveQ8[vi]) / 256.0 + Double(m.sharedBits),
+                         Double(m.backwardQ8[vi]) / 256.0 + Double(m.sharedBits),
+                         Double(m.modelOnlyQ8[vi]) / 256.0 + Double(m.sharedBits)]
+            for k in 0..<3 {
+                tO[k] += oCols[k]
+                tM[k] += mCols[k]
+            }
+            out += row(layerNames[li], [kb(mCols[0]), pct(oCols[0], mCols[0]), kb(mCols[1]), pct(oCols[1], mCols[1]), kb(mCols[2]), pct(oCols[2], mCols[2])])
+        }
+        out += row("TOTAL", [kb(tM[0]), pct(tO[0], tM[0]), kb(tM[1]), pct(tO[1], tM[1]), kb(tM[2]), pct(tO[2], tM[2])])
+        out += "\n"
+    }
+    out += "mu per-block win rate (residual strictly sparser than original; oracle upper bound for per-block signaling):\n"
+    for li in 0..<3 {
+        let rate = muBlocks[li] == 0 ? 0.0 : Double(muWins[li]) / Double(muBlocks[li]) * 100.0
+        out += String(format: "  %@ %6.2f%% (%d / %d blocks)\n", pad(layerNames[li], 20), rate, muWins[li], muBlocks[li])
+    }
     return out
 }
