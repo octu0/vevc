@@ -127,6 +127,12 @@ high-motion frames (worst-frame SSIM 0.756 → 0.708) and is deliberately
 excluded. Decoders older than this rule mis-derive steps for streams whose
 base step exceeds 2048.
 
+The qLow (DC) cap is 192 (Q4, real step 12), lowered from 256: at saturated
+rates a DC step of 16 turns slow global luminance ramps (fades) into visible
+32×32px plateaus at full resolution that the dead-zoned enhancement layers
+cannot repair. Step 12 sits below the banding visibility threshold and is
+net-free under rate control.
+
 AC dequantization applies a centroid offset of 3/16 of the effective step,
 away from zero (`rec = k·Δ ± 3Δ/16`): dead-zone bins reconstruct at their
 lower edge, while the coefficient distribution's centroid lies well inside

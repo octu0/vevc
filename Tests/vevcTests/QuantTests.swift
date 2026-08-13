@@ -15,7 +15,7 @@ final class QuantTests: XCTestCase {
     func testQuantizationTableInit() {
         let qt = QuantizationTable(baseStep: 1600) // Q4 rep of 100
         XCTAssertEqual(qt.step, 1600)
-        XCTAssertEqual(qt.qLow.step, 200) // 1600 / 8
+        XCTAssertEqual(qt.qLow.step, 192) // 1600 / 8 = 200, capped at qLowCapQ4 (real step 12, DC banding threshold)
         XCTAssertEqual(qt.qMid.step, 768) // 1600 clipped at 768
         XCTAssertEqual(qt.qHigh.step, 1024) // 1600 * 4 / 5 -> 1280 but clipped at 1024
     }

@@ -119,7 +119,7 @@ struct QuantizationTable: Sendable {
 
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
-            let cLow = min(256, max(16, baseStep / 8))
+            let cLow = min(qLowCapQ4, max(16, baseStep / 8))
             let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen))
             let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 768) / 2048
 
@@ -128,7 +128,7 @@ struct QuantizationTable: Sendable {
             self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC)
         } else {
             // qLow is the DC component: NEVER scale it!
-            let lLow = min(256, max(16, baseStep / qLowDivisor))
+            let lLow = min(qLowCapQ4, max(16, baseStep / qLowDivisor))
             self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
 
             // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
@@ -156,6 +156,16 @@ struct QuantizationTable: Sendable {
 /// qLow is NOT scaled — base frequency quality must remain constant.
 
 // MARK: - Quantization SIMD
+
+/// Cap for the DC (qLow) quantizer step, in Q4 units (192 = real step 12).
+/// Was 256 (real step 16): at deeply saturated rates that step turns slow
+/// global luminance ramps (fades) into visible 32×32px DC plateaus at full
+/// resolution — the enhancement layers cannot repair them because the
+/// correction falls inside the qMid dead zones. Step 12 is below the banding
+/// visibility threshold on measured content and, with rate-control feedback,
+/// is net-free (miko1 500k: size −0.2%, worst-frame SSIM +0.010). Inactive
+/// at normal rates (qLow = baseStep/8 stays below the cap).
+let qLowCapQ4: Int = 192
 
 @inline(__always)
 internal func quantizeDPCM(_ block: BlockView, q: Quantizer) {
