@@ -127,6 +127,13 @@ high-motion frames (worst-frame SSIM 0.756 → 0.708) and is deliberately
 excluded. Decoders older than this rule mis-derive steps for streams whose
 base step exceeds 2048.
 
+AC dequantization applies a centroid offset of 3/16 of the effective step,
+away from zero (`rec = k·Δ ± 3Δ/16`): dead-zone bins reconstruct at their
+lower edge, while the coefficient distribution's centroid lies well inside
+the bin. The offset is part of the normative reconstruction (encoder
+reconstruction loop and decoder share the same dequantize functions);
+qLow/DPCM (DC) values are reconstructed without offset.
+
 ### 4.1. Plane Payload (Y / Cb / Cr)
 The data for each plane consists of a single **unified entropy stream** that encodes all four DWT subbands (LL, HL, LH, HH) together using 6 rANS contexts.
 

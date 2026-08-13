@@ -28,19 +28,19 @@ public enum SigmaMeasureError: Error {
     case badFormat(String)
 }
 
-// MARK: Dump reading
+// MARK: Dump reading (internal: shared with DequantOffsetMeasure)
 
-private struct MPlane {
+internal struct MPlane {
     let w: Int
     let h: Int
     let data: [Int16]
 }
 
-private struct MEntry {
+internal struct MEntry {
     let subs: [MPlane]
 }
 
-private struct MFrame {
+internal struct MFrame {
     let gop: Int
     let width: Int
     let height: Int
@@ -51,7 +51,7 @@ private struct MFrame {
     let pyr: [MEntry]      // 9, same order/shape as coded
 }
 
-private final class DumpReader {
+internal final class DumpReader {
     private let data: Data
     private var off: Int
 
@@ -265,7 +265,7 @@ private func energyPlane(mag: [Int], w: Int, h: Int, radius: Int, num: Int, den:
 }
 
 /// Quantizer step (Q4) applying to a given entry/subband of the dump.
-private func stepFor(entry e: Int, sub: Int, qsteps: [[Int]]) -> Int {
+internal func stepFor(entry e: Int, sub: Int, qsteps: [[Int]]) -> Int {
     let layerRow = e / 3  // 0 → L2, 1 → L1, 2 → L0
     let chroma = (e % 3) != 0
     let t = qsteps[layerRow * 2 + (chroma ? 1 : 0)]
@@ -309,7 +309,7 @@ private func absMagnitudes(_ p: MPlane) -> [Int] {
 // MARK: μ-prediction (shift/integer lifting) simulation
 
 @inline(__always)
-private func unzigzag(_ v: Int16) -> Int {
+internal func unzigzag(_ v: Int16) -> Int {
     let u = Int(UInt16(bitPattern: v))
     return (u >> 1) ^ -(u & 1)
 }
