@@ -129,7 +129,10 @@ struct QuantizationTable: Sendable {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(qLowCapQ4, max(16, baseStep / 8))
             let cMid = min(384, max(16, (baseStep * qMidNum) / qMidDen))
-            let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 768) / 2048
+            // No saturation extension for chroma: at extended steps (real 96)
+            // surviving chroma HH coefficients of motion residuals appear as
+            // red/green block splats on fast pans (measured on the Cr plane).
+            let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen))
 
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC, centroidOffset: offsetOn)

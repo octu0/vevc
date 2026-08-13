@@ -386,10 +386,16 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         }
     }
     
-    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4)
-    applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs)
-    applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs)
-    
+    // Must match the decoder's deblock invocation exactly (mvs + skipMap
+    // variants): the encoder previously filtered its reconstruction with the
+    // plain/partial variants while the decoder used the intra-boundary
+    // enhanced + skip-gated ones, so the two reconstructions diverged and the
+    // P-chain accumulated the difference into chroma-heavy smears in
+    // intra-dense motion regions (grew with GOP position, immune to bitrate).
+    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4, mvs: mvs, skipMap: sMap)
+    applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs, skipMap: sMap)
+    applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs, skipMap: sMap)
+
     if profile == 0x02 {
         let bw = (dx + 31) / 32
         let targetCbDx = (dx + 1) / 2
