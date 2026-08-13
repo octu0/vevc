@@ -7,6 +7,11 @@ struct Quantizer: Sendable {
     let mul: Int32
     let bias: Int32
     let shift: Int16 = 16
+    /// Whether AC dequantization applies the centroid offset. Disabled in the
+    /// saturated regime (baseStep > 2048): at those step sizes the ±3Δ/16
+    /// boost on every surviving coefficient reads as visible mottling on
+    /// flat regions, outweighing the MSE gain.
+    let centroidOffset: Bool
 
     /// - Parameters:
     ///   - step: Quantization step size.
@@ -15,7 +20,7 @@ struct Quantizer: Sendable {
     ///     Positive values narrow the dead zone (towards round-to-nearest).
     ///     Negative values widen the dead zone (more values become 0).
     ///     Common values: -6554 (-0.10), -3277 (-0.05), 0 (none).
-    init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0) {
+    init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0, centroidOffset: Bool = true) {
         self.step = Int16(step)
         // reciprocal in Q16 fixed-point converts division to multiply+shift
         // Optimize by approximating division: val / step ≈ (val * mul) >> 16
@@ -28,6 +33,7 @@ struct Quantizer: Sendable {
             b = deadZoneBias
         }
         self.bias = b
+        self.centroidOffset = centroidOffset
     }
 }
 
@@ -117,6 +123,8 @@ struct QuantizationTable: Sendable {
         // baseStep, so the decoder reproduces it without extra signaling.
         let ext = max(0, Int(s) - 2048)
 
+        let offsetOn = Int(s) <= 2048
+
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(qLowCapQ4, max(16, baseStep / 8))
@@ -124,8 +132,8 @@ struct QuantizationTable: Sendable {
             let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 768) / 2048
 
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
-            self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC)
-            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC)
+            self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC, centroidOffset: offsetOn)
+            self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC, centroidOffset: offsetOn)
         } else {
             // qLow is the DC component: NEVER scale it!
             let lLow = min(qLowCapQ4, max(16, baseStep / qLowDivisor))
@@ -133,10 +141,10 @@ struct QuantizationTable: Sendable {
 
             // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
             let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen))
-            self.qMid = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY)
+            self.qMid = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY, centroidOffset: offsetOn)
 
             let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 1024) / 2048
-            self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY)
+            self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY, centroidOffset: offsetOn)
         }
     }
 }
@@ -289,7 +297,7 @@ let dequantOffsetNumQ4: Int32 = 3
 @inline(__always)
 internal func dequantize4(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quantizer) {
     let step = Int32(q.step)
-    let offQ = (dequantOffsetNumQ4 &* step) >> 4
+    let offQ = q.centroidOffset ? (dequantOffsetNumQ4 &* step) >> 4 : 0
     var rowPtr = ptr
     for _ in 0..<4 {
         let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
@@ -308,7 +316,7 @@ internal func dequantize4(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quan
 @inline(__always)
 internal func dequantize8(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quantizer) {
     let step = Int32(q.step)
-    let offQ = (dequantOffsetNumQ4 &* step) >> 4
+    let offQ = q.centroidOffset ? (dequantOffsetNumQ4 &* step) >> 4 : 0
     var rowPtr = ptr
     for _ in 0..<8 {
         let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
@@ -329,7 +337,7 @@ internal func dequantize16(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Qua
     let step = Int32(q.step)
     let vStep = SIMD8<Int32>(repeating: step)
     let v8 = SIMD8<Int32>(repeating: 8)
-    let offQ = (dequantOffsetNumQ4 &* step) >> 4
+    let offQ = q.centroidOffset ? (dequantOffsetNumQ4 &* step) >> 4 : 0
     let vOffPos = SIMD8<Int32>(repeating: offQ)
     let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
     let vZero32 = SIMD8<Int32>(repeating: 0)
