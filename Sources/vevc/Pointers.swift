@@ -6,6 +6,14 @@ internal struct UnsafeSendableMutablePointer<T>: @unchecked Sendable {
     internal let ptr: UnsafeMutablePointer<T>
 }
 
+/// Escaped array view for @Sendable hot-loop closures: element access through
+/// a captured Array would emit retain/release traffic per subscript; through
+/// this buffer it is a plain load. The array must outlive all uses (function
+/// parameters are kept alive for the whole call).
+internal struct UnsafeSendableBufferPointer<T>: @unchecked Sendable {
+    internal let ptr: UnsafeBufferPointer<T>
+}
+
 @inline(__always)
 internal func withUnsafePointers<T, R>(
     _ a: [T],
