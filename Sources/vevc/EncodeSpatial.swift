@@ -26,7 +26,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     defer { releaseBase() }
     
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
-    
+
     let l1dx = sub2.width
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
@@ -48,10 +48,16 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     var mutReconL2Cr = reconL2Cr
         
+    // Must be the decoder's exact I-frame deblock sequence (its mvs==nil
+    // branch): plain luma + applyDeblockingFilter16 chroma. The encoder
+    // previously used applyDeblockingFilterChroma16 with empty mvs, which
+    // differs by ±1 at some block edges; with the L0 closed loop that drift
+    // reaches the entropy contexts (LL2 slot couples P into the parent
+    // blocks) and desyncs backward-adaptive tables.
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4)
-    applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: MotionVectors.empty)
-    applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: MotionVectors.empty)
-    
+    applyDeblockingFilter16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
+    applyDeblockingFilter16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
+
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     
     debugLog({
@@ -325,9 +331,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     defer { releaseL1() }
     let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, histories: entropyHistories?.streams[0])
     defer { releaseBase() }
-    
+
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
-    
+
     let l1dx = sub2.width
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
@@ -361,11 +367,19 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
             layer0Bytes: layer0.count, layer1Bytes: layer1.count, layer2Bytes: layer2.count)
     }
 
-    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
+    // skipMap must be passed here: the decoder's layer2 reconstruction skips
+    // skip blocks entirely (they stay zero until the final skip copy), and
+    // the deblocking filter runs BEFORE that copy, reading pixels from skip
+    // regions at mixed inter|skip block edges. Reconstructing those regions
+    // on the encoder only (as before) diverges the reconstructions by ±1 at
+    // such edges — harmless historically, but the L0 closed loop couples the
+    // reconstruction into the entropy contexts where any divergence desyncs
+    // the backward-adaptive tables.
+    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool, skipMap: sMap)
     var mutReconL2Y = reconL2Y
-    let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool, skipMap: sMap)
     var mutReconL2Cb = reconL2Cb
-    let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool, skipMap: sMap)
     var mutReconL2Cr = reconL2Cr
 
     await applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
