@@ -233,9 +233,9 @@ This is the standard mode used for the vast majority of blocks.
 > This hybrid approach ensures that the highly-probable small values are densely packed into the rANS models, while large outliers do not inflate the frequency tables.
 
 > [!NOTE]
-> **Context Modeling (5 Contexts)**
+> **Context Modeling (6 Contexts)**
 > VEVC uses 6 probability model contexts within each unified stream:
-> - **Context 0-3 (AC)**: Used for HL, LH, HH subband coefficients. The context index is selected based on surrounding block statistics (parent zero, previous value magnitude).
+> - **Context 0-3 (AC)**: Used for HL, LH, HH subband coefficients. Profile 0x01 selects the index from the co-located parent-layer coefficient (zero / nonzero) and the previous coefficient value; profile 0x02 codes **parent-free** — only the previous-coefficient feature is used, so all AC traffic lands in contexts 0-1 (contexts 2-3 stay unused). Measured against the backward-adaptive tables, the parent term is redundant with the previous-coefficient feature, and removing it lifts the inter-layer dependency: the three layers of a profile 0x02 frame can entropy-decode without reading each other's blocks.
 > - **Context 4 (DPCM)**: Used exclusively for LL subband coefficients, which are DPCM-encoded (differential pulse-code modulation). This context captures the prediction residual distribution.
 > - **Context 5 (LSCP)**: Used for the Last Significant Coefficient Position coordinates emitted at the start of every non-zero block.
 >

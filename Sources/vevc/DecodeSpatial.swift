@@ -74,7 +74,12 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
     var parentCrBlocks: [BlockView]? = base8CrBlocks
-    
+
+    // Profile 0x02 codes AC contexts parent-free (ParentFreeContext.swift);
+    // the real blocks are kept only for pool release. Profile 0x01 keeps the
+    // parent-conditioned contexts.
+    let useParentCtx = (profile != 0x02)
+
     // Determine the effective layer based on maxLayer AND available data.
     // When the splitter strips upper layers, their size becomes 0.
     // MC must be applied at the highest available layer's resolution.
@@ -130,7 +135,13 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let layer1Data = Array(r[offset..<(offset + frameHeader.layer1Size)])
         offset += frameHeader.layer1Size
         
-        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, histories: histories?.streams[1])
+        let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(
+            r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: current,
+            parentYBlocks: useParentCtx ? parentYBlocks : parentFreeParents8(count: parentYBlocks?.count ?? 0),
+            parentCbBlocks: useParentCtx ? parentCbBlocks : parentFreeParents8(count: parentCbBlocks?.count ?? 0),
+            parentCrBlocks: useParentCtx ? parentCrBlocks : parentFreeParents8(count: parentCrBlocks?.count ?? 0),
+            histories: histories?.streams[1]
+        )
         
         if let y = parentYBlocks { pool.putBlockViewArray64(y) }
         if let cb = parentCbBlocks { pool.putBlockViewArray64(cb) }
@@ -150,7 +161,13 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         let layer2Data = Array(r[offset..<(offset + frameHeader.layer2Size)])
         offset += frameHeader.layer2Size
         
-        current = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current, parentYBlocks: parentYBlocks, parentCbBlocks: parentCbBlocks, parentCrBlocks: parentCrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap, histories: histories?.streams[2])
+        current = try await decodeLayer32(
+            r: layer2Data, pool: pool, layer: 2, dx: l2dx, dy: l2dy, prev: current,
+            parentYBlocks: useParentCtx ? parentYBlocks : parentFreeParents16(count: parentYBlocks?.count ?? 0),
+            parentCbBlocks: useParentCtx ? parentCbBlocks : parentFreeParents16(count: parentCbBlocks?.count ?? 0),
+            parentCrBlocks: useParentCtx ? parentCrBlocks : parentFreeParents16(count: parentCrBlocks?.count ?? 0),
+            predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap, histories: histories?.streams[2]
+        )
         
         if let y = parentYBlocks {
             if hasLayer1 { pool.putBlockViewArray256(y) }

@@ -196,6 +196,23 @@ private func makeVariants() -> [VariantDef] {
             if f.isLscp { return 20 }
             return f.eB3 < 0 ? 16 + b4(f.eA3) : b4(f.eA3) * 4 + b4(f.eB3)
         },
+        // Parent-replacement decision lanes (One-Pyramid §6): the candidate
+        // contexts must not read the parent layer, so that entropy decode of
+        // the 3 layers can run in parallel and skip blocks can bypass all
+        // layers. Compared against base6 under the prev-tables signaling.
+        VariantDef(name: "prevNZ only (no parent)", contextCount: 3) { f in
+            f.isLscp ? 2 : (f.prevNZ ? 1 : 0)
+        },
+        VariantDef(name: "sigA4 w3 x prevNZ (no parent)", contextCount: 9) { f in
+            f.isLscp ? 8 : b4(f.eA3) * 2 + (f.prevNZ ? 1 : 0)
+        },
+        VariantDef(name: "sigA6 w3 x prevNZ (no parent)", contextCount: 13) { f in
+            f.isLscp ? 12 : b6(f.eA3) * 2 + (f.prevNZ ? 1 : 0)
+        },
+        VariantDef(name: "sigB4 w7 x prevNZ (no parent)", contextCount: 10) { f in
+            if f.isLscp { return 9 }
+            return f.eB7 < 0 ? 8 : b4(f.eB7) * 2 + (f.prevNZ ? 1 : 0)
+        },
     ]
 }
 

@@ -222,9 +222,12 @@ final class Profile0x02Tests: XCTestCase {
         let encoder02 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
         let bitstream02 = try await encoder02.encodeToData(images: frames)
         
-        // わずかなヘッダサイズ（skipMapSizeなど）の微増のみを許容する
+        // skip機構のヘッダ増に加え、profile 0x02 は親なしACコンテキスト
+        // (ParentFreeContext.swift) で符号化するため、エントロピー段の
+        // バイト列は profile 0x01 と一致しない。粗大なオーバーヘッドの
+        // 検出が目的なので、全体の 2% までの差を許容する。
         let diff = abs(bitstream01.count - bitstream02.count)
-        XCTAssertLessThan(diff, 1000)
+        XCTAssertLessThan(diff, bitstream01.count / 50)
     }
 
     // 6. 決定論（同じ素材なら完全に同じバイトストリームが出力されること）。
