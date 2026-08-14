@@ -67,6 +67,12 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     applyDeblockingFilter16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
 
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
+
+    if profile == 0x02, let oracle = MultiRefOracle.shared {
+        // Random-access boundary: the candidate pool never crosses an I-frame.
+        oracle.reset()
+        oracle.push(recon: reconstructed)
+    }
     
     debugLog({
         return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
@@ -251,21 +257,21 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
                     return results
                 }
             }
-            
+
             var allResults = [(Int, Bool, Bool, Bool)]()
             for await batch in group {
                 allResults.append(contentsOf: batch)
             }
             return allResults
         }
-        
+
         for (i, allSubBlocksMatchPrev, allSubBlocksMatchLtr, allSubBlocksMatchPrevRecon) in matchResults {
             if allSubBlocksMatchPrev {
                 staticCounters[i] += 1
             } else {
                 staticCounters[i] = 0
             }
-            
+
             if allSubBlocksMatchLtr && staticCounters[i] == gopPosition {
                 skipMap[i] = .skip_ltr
             } else if allSubBlocksMatchPrev && allSubBlocksMatchPrevRecon && (3 < staticCounters[i]) {
@@ -276,6 +282,10 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
         }
     }
     
+    if profile == 0x02, let oracle = MultiRefOracle.shared {
+        oracle.evaluate(pd: pd, skipMap: skipMap, skipThreshold: skipThreshold)
+    }
+
     var searchSkipMap: [BlockMode] = []
     if profile == 0x02 {
         searchSkipMap = skipMap
@@ -516,8 +526,12 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let releaseY: @Sendable () -> Void = { r2Y() }
     let releaseCb: @Sendable () -> Void = { r2Cb() }
     let releaseCr: @Sendable () -> Void = { r2Cr() }
-    
+
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
+
+    if profile == 0x02 {
+        MultiRefOracle.shared?.push(recon: reconstructed)
+    }
     
     debugLog({
         return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
