@@ -23,18 +23,10 @@ private struct ParentFreeDummies: @unchecked Sendable {
 }
 
 private let parentFreeDummies: ParentFreeDummies = {
-    var b16 = BlockView.allocate(width: 16, height: 16)
-    var b8 = BlockView.allocate(width: 8, height: 8)
-    for y in 0..<16 {
-        for x in 0..<16 {
-            b16[y, x] = 1
-        }
-    }
-    for y in 0..<8 {
-        for x in 0..<8 {
-            b8[y, x] = 1
-        }
-    }
+    let b16 = BlockView.allocate(width: 16, height: 16)
+    let b8 = BlockView.allocate(width: 8, height: 8)
+    b16.base.update(repeating: 1, count: 16 * b16.stride)
+    b8.base.update(repeating: 1, count: 8 * b8.stride)
     return ParentFreeDummies(block16: b16, block8: b8)
 }()
 

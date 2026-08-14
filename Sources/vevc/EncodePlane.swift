@@ -585,7 +585,7 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, oc
 }
 
 @inline(__always)
-func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, histories: [EntropyHistoryState]? = nil) -> [UInt8] {
+func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, histories: [EntropyHistoryState]? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
     // Layer2 (32x32) contains the highest-frequency DWT subbands with the
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=3) than Layer1 (threshold=2) without
@@ -600,9 +600,9 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     let colCountC = (cbDx + 31) / 32
     let rowCountC = (cbDy + 31) / 32
     
-    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, history: histories?[0])
-    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[1])
-    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2])
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, history: histories?[0], selectModel: selectModel)
+    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[1], selectModel: selectModel)
+    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2], selectModel: selectModel)
     
     debugLog({
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
@@ -615,7 +615,7 @@ func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
 }
 
 @inline(__always)
-func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, histories: [EntropyHistoryState]? = nil) -> [UInt8] {
+func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, histories: [EntropyHistoryState]? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
     let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
     
@@ -629,9 +629,9 @@ func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable
     // Note: SADs are evaluated at 32x32 granularity, so map Layer16 to Layer32 granularity
     // In layered structure, we just pass sads arrays if aligned, or map if necessary.
     // For now, only 32x32 blocks use it cleanly, but if Layer16 needs it:
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, occlusionScores: occlusionScores, colCount: colCountY, rowCount: rowCountY, history: histories?[0])
-    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[1])
-    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2])
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, occlusionScores: occlusionScores, colCount: colCountY, rowCount: rowCountY, history: histories?[0], selectModel: selectModel)
+    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[1], selectModel: selectModel)
+    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2], selectModel: selectModel)
     
     debugLog({
         return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
@@ -1064,7 +1064,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0, histories: [EntropyHistoryState]? = nil) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlusionScores: [Int]?, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode]? = nil, skipMapWidth: Int = 0, histories: [EntropyHistoryState]? = nil, selectModel: @escaping ModelSelectorFn = unifiedSelectModel) async throws -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1094,9 +1094,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[0])
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[0], selectModel: selectModel)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
         }
 
         CoeffDumper.shared?.stash("L0Y", blocks: blocks, planeW: dx, planeH: dy, blockSize: 8, includeLL: true)
@@ -1116,9 +1116,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[1])
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[1], selectModel: selectModel)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
         }
 
         CoeffDumper.shared?.stash("L0Cb", blocks: blocks, planeW: cbDx, planeH: cbDy, blockSize: 8, includeLL: true)
@@ -1137,9 +1137,9 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
         let buf = if isIFrame != true {
-            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[2])
+            encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[2], selectModel: selectModel)
         } else {
-            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold)
+            encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
         }
 
         CoeffDumper.shared?.stash("L0Cr", blocks: blocks, planeW: cbDx, planeH: cbDy, blockSize: 8, includeLL: true)

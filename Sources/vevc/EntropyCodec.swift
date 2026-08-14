@@ -232,15 +232,43 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
 func unifiedSelectModel(
     runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
 ) -> EntropyModelSelection {
-    // --- AC contexts (0-3) ---
-    let staticACRunModels = [
-        StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
-        StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
-    ]
-    let staticACValModels = [
-        StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
-        StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
-    ]
+    unifiedSelectModelCore(
+        runTokenCounts: &runTokenCounts, valTokenCounts: &valTokenCounts,
+        staticACRunModels: [
+            StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
+            StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
+        ],
+        staticACValModels: [
+            StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
+            StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
+        ]
+    )
+}
+
+/// Profile 0x02 selector: AC contexts are parent-free (all AC traffic lands
+/// in contexts 0-1, see ParentFreeContext.swift), so their static tables are
+/// trained on the parent-free assignment. Contexts 2-3 carry no data.
+func unifiedSelectModelParentFree(
+    runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
+) -> EntropyModelSelection {
+    unifiedSelectModelCore(
+        runTokenCounts: &runTokenCounts, valTokenCounts: &valTokenCounts,
+        staticACRunModels: [
+            StaticRANSModels.shared.pfRunModel0, StaticRANSModels.shared.pfRunModel1,
+            StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
+        ],
+        staticACValModels: [
+            StaticRANSModels.shared.pfValModel0, StaticRANSModels.shared.pfValModel1,
+            StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
+        ]
+    )
+}
+
+@inline(__always)
+private func unifiedSelectModelCore(
+    runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]],
+    staticACRunModels: [rANSModel], staticACValModels: [rANSModel]
+) -> EntropyModelSelection {
     let staticDPCMRun = StaticRANSModels.shared.dpcmRunModel
     let staticDPCMVal = StaticRANSModels.shared.dpcmValModel
     let staticLSCPRun = StaticRANSModels.shared.lscpRunModel
@@ -336,7 +364,7 @@ func unifiedSelectModel(
 // MARK: - EntropyEncoder
 
 /// Model selection function type: given mutable token count arrays, returns the best model selection.
-typealias ModelSelectorFn = (inout [[Int]], inout [[Int]]) -> EntropyModelSelection
+typealias ModelSelectorFn = @Sendable (inout [[Int]], inout [[Int]]) -> EntropyModelSelection
 
 struct EntropyEncoder {
     var bypassWriter: BypassWriter
@@ -708,7 +736,7 @@ struct EntropyDecoder {
     private var decRunCounts: [[Int]] = []
     private var decValCounts: [[Int]] = []
 
-    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil) throws {
+    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws {
         self.history = history
         var offset = startOffset
         
@@ -801,17 +829,32 @@ struct EntropyDecoder {
             self.runModels = r
             self.valModels = v
         case isStaticTable:
-            // Static 6-context: AC models for ctx 0-3, DPCM model for ctx 4, LSCP for ctx 5
-            self.runModels = [
-                StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
-                StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
-                StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel,
-            ]
-            self.valModels = [
-                StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
-                StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
-                StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
-            ]
+            // Static 6-context: AC models for ctx 0-3, DPCM model for ctx 4,
+            // LSCP for ctx 5. Parent-free streams (profile 0x02) use the AC
+            // tables trained on the parent-free context assignment.
+            if parentFreeStatics {
+                self.runModels = [
+                    StaticRANSModels.shared.pfRunModel0, StaticRANSModels.shared.pfRunModel1,
+                    StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
+                    StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel,
+                ]
+                self.valModels = [
+                    StaticRANSModels.shared.pfValModel0, StaticRANSModels.shared.pfValModel1,
+                    StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
+                    StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
+                ]
+            } else {
+                self.runModels = [
+                    StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
+                    StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
+                    StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel,
+                ]
+                self.valModels = [
+                    StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1,
+                    StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
+                    StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
+                ]
+            }
         case isMergedContext:
             // Dynamic merged: read 2 tables (run + val), replicate to all 5 contexts
             let runFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)

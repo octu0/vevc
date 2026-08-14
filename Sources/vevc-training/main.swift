@@ -7,6 +7,7 @@ func main() {
     usage: vevc-training sigma <dumpfile>
            vevc-training offsets <dumpfile>
            vevc-training train-tables <train.vsd> <test.vsd>
+           vevc-training train-tables-pf <train.vsd> <test.vsd>
 
     sigma:        evaluate sigma-conditioned rANS contexts against the current
                   6-context scheme, using a coefficient dump produced by running
@@ -24,6 +25,8 @@ func main() {
             print(try runDequantOffsetEstimation(dumpPath: args[2]))
         case "train-tables" where args.count >= 4:
             print(try runTableTraining(trainPath: args[2], testPath: args[3]))
+        case "train-tables-pf" where args.count >= 4:
+            print(try runTableTraining(trainPath: args[2], testPath: args[3], parentFree: true))
         default:
             print(usage)
             exit(1)

@@ -18,11 +18,20 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
     let isPFrame = false
 
+    // Profile 0x02 selects models against the parent-free static AC tables
+    // (ParentFreeContext.swift); profile 0x01 keeps the shipped tables.
+    let selectModel: ModelSelectorFn
+    if profile == 0x02 {
+        selectModel = unifiedSelectModelParentFree
+    } else {
+        selectModel = unifiedSelectModel
+    }
+
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
     defer { releaseL2() }
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: nil, occlusionScores: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
     defer { releaseL1() }
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: selectModel)
     defer { releaseBase() }
 
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
@@ -46,7 +55,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: l1ParentY, parentCbBlocks: l1ParentCb, parentCrBlocks: l1ParentCr)
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: l1ParentY, parentCbBlocks: l1ParentCb, parentCrBlocks: l1ParentCr, selectModel: selectModel)
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -58,7 +67,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let l2ParentCr = useParentCtx ? l1crBlocks : parentFreeParents16(count: l1crBlocks.count)
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l2ParentY, parentCbBlocks: l2ParentCb, parentCrBlocks: l2ParentCr)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l2ParentY, parentCbBlocks: l2ParentCb, parentCrBlocks: l2ParentCr, selectModel: selectModel)
 
     let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
@@ -508,7 +517,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         base8Input = PlaneData420(img16: r0)
     }
 
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: base8Input, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, histories: entropyHistories?.streams[0])
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: base8Input, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, histories: entropyHistories?.streams[0], selectModel: unifiedSelectModelParentFree)
     defer { releaseBase() }
 
     var baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
@@ -540,7 +549,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let l1cbDy = ((l1dy + 1) / 2)
     // Parent-free AC contexts (ParentFreeContext.swift): profile 0x02 never
     // conditions entropy coding on the parent layer.
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), histories: entropyHistories?.streams[1])
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), histories: entropyHistories?.streams[1], selectModel: unifiedSelectModelParentFree)
 
     if let dumper = CoeffDumper.shared {
         dumper.stash("L1Y", blocks: l1yBlocks, planeW: sub2.width, planeH: sub2.height, blockSize: 16, includeLL: false)
@@ -554,7 +563,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), histories: entropyHistories?.streams[2])
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), histories: entropyHistories?.streams[2], selectModel: unifiedSelectModelParentFree)
 
     if let dumper = CoeffDumper.shared {
         dumper.stash("L2Y", blocks: l2yBlocks, planeW: dx, planeH: dy, blockSize: 32, includeLL: false)

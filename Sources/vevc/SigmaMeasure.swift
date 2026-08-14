@@ -982,7 +982,13 @@ private func emitTable(_ name: String, _ freqs: [UInt32]) -> String {
 /// Train static tables on one dump and evaluate them against the shipped
 /// tables on another, under the real 4-way selection (static / dynamic /
 /// merged / backward-history). Emits drop-in Swift for StaticRANSModels.
-public func runTableTraining(trainPath: String, testPath: String) throws -> String {
+///
+/// parentFree trains for the profile-0x02 context assignment
+/// (ParentFreeContext.swift): all AC traffic lands in contexts 0-1, which is
+/// exactly the base6 counts with the parent-zero half merged in (0+2 → 0,
+/// 1+3 → 1). Both evaluation lanes then cost the remapped counts, so
+/// "shipped" reproduces today's profile-0x02 production behavior.
+public func runTableTraining(trainPath: String, testPath: String, parentFree: Bool = false) throws -> String {
     // --- 1) accumulate global per-context counts on the training dumps
     // (comma-separated paths train a combined corpus)
     var gRun = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
@@ -1004,6 +1010,19 @@ public func runTableTraining(trainPath: String, testPath: String) throws -> Stri
     }
     guard 0 < trainFrames else { throw SigmaMeasureError.badFormat("empty train dump") }
 
+    func remapParentFree(_ counts: inout [[Int]]) {
+        for t in 0..<64 {
+            counts[0][t] += counts[2][t]
+            counts[1][t] += counts[3][t]
+            counts[2][t] = 0
+            counts[3][t] = 0
+        }
+    }
+    if parentFree {
+        remapParentFree(&gRun)
+        remapParentFree(&gVal)
+    }
+
     func trained(_ counts: [Int]) -> rANSModel {
         var m = rANSModel(buildLUT: false)
         m.normalize(tokenCounts: counts)
@@ -1020,11 +1039,21 @@ public func runTableTraining(trainPath: String, testPath: String) throws -> Stri
     newRun[4] = shipped.dpcmRunModel
     newVal[4] = shipped.dpcmValModel
     newVal[5] = shipped.dpcmValModel
+    if parentFree {
+        newRun[2] = shipped.runModel2
+        newRun[3] = shipped.runModel3
+        newVal[2] = shipped.valModel2
+        newVal[3] = shipped.valModel3
+    }
 
     // --- 2) evaluate on the test dump under real selection
     let s = StaticRANSModels.shared
-    let oldRun = [s.runModel0, s.runModel1, s.runModel2, s.runModel3, s.dpcmRunModel, s.lscpRunModel]
-    let oldVal = [s.valModel0, s.valModel1, s.valModel2, s.valModel3, s.dpcmValModel, s.dpcmValModel]
+    let oldRun = parentFree
+        ? [s.pfRunModel0, s.pfRunModel1, s.runModel2, s.runModel3, s.dpcmRunModel, s.lscpRunModel]
+        : [s.runModel0, s.runModel1, s.runModel2, s.runModel3, s.dpcmRunModel, s.lscpRunModel]
+    let oldVal = parentFree
+        ? [s.pfValModel0, s.pfValModel1, s.valModel2, s.valModel3, s.dpcmValModel, s.dpcmValModel]
+        : [s.valModel0, s.valModel1, s.valModel2, s.valModel3, s.dpcmValModel, s.dpcmValModel]
 
     let testReader = try DumpReader(path: testPath)
     let backward = BackwardState(streams: 9, variants: [makeVariants()[0]])
@@ -1035,7 +1064,13 @@ public func runTableTraining(trainPath: String, testPath: String) throws -> Stri
     var streams = 0
     var testFrames = 0
     while let frame = try testReader.nextFrame() {
-        walkBase6(frame: frame) { e, run, val, _ in
+        walkBase6(frame: frame) { e, rawRun, rawVal, _ in
+            var run = rawRun
+            var val = rawVal
+            if parentFree {
+                remapParentFree(&run)
+                remapParentFree(&val)
+            }
             let stOld = staticCostQ8(run: run, val: val, statRun: oldRun, statVal: oldVal)
             let stNew = staticCostQ8(run: run, val: val, statRun: newRun, statVal: newVal)
             let (dyn, merged) = dynAndMergedCostQ8(run: run, val: val)
@@ -1072,10 +1107,15 @@ public func runTableTraining(trainPath: String, testPath: String) throws -> Stri
     out += String(format: "  delta: %+.2f%%\n\n", (bitsOld - bitsNew) / bitsOld * 100.0)
 
     out += "drop-in Swift (StaticRANSModels; dpcm models intentionally kept as shipped):\n\n"
-    let names = [("runModel0", 0), ("runModel1", 1), ("runModel2", 2), ("runModel3", 3), ("lscpRunModel", 5)]
-    for (n, c) in names { out += emitTable(n, newRun[c].tokenFreqs) }
-    for (n, c) in [("valModel0", 0), ("valModel1", 1), ("valModel2", 2), ("valModel3", 3)] {
-        out += emitTable(n, newVal[c].tokenFreqs)
+    if parentFree {
+        for (n, c) in [("pfRunModel0", 0), ("pfRunModel1", 1)] { out += emitTable(n, newRun[c].tokenFreqs) }
+        for (n, c) in [("pfValModel0", 0), ("pfValModel1", 1)] { out += emitTable(n, newVal[c].tokenFreqs) }
+    } else {
+        let names = [("runModel0", 0), ("runModel1", 1), ("runModel2", 2), ("runModel3", 3), ("lscpRunModel", 5)]
+        for (n, c) in names { out += emitTable(n, newRun[c].tokenFreqs) }
+        for (n, c) in [("valModel0", 0), ("valModel1", 1), ("valModel2", 2), ("valModel3", 3)] {
+            out += emitTable(n, newVal[c].tokenFreqs)
+        }
     }
     return out
 }

@@ -69,7 +69,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     let histories: FrameEntropyHistories? = frameHeader.isIFrame ? nil : entropyHistories
 
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame, histories: histories?.streams[0])
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame, histories: histories?.streams[0], parentFreeStatics: profile == 0x02)
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
@@ -140,7 +140,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
             parentYBlocks: useParentCtx ? parentYBlocks : parentFreeParents8(count: parentYBlocks?.count ?? 0),
             parentCbBlocks: useParentCtx ? parentCbBlocks : parentFreeParents8(count: parentCbBlocks?.count ?? 0),
             parentCrBlocks: useParentCtx ? parentCrBlocks : parentFreeParents8(count: parentCrBlocks?.count ?? 0),
-            histories: histories?.streams[1]
+            histories: histories?.streams[1], parentFreeStatics: useParentCtx != true
         )
         
         if let y = parentYBlocks { pool.putBlockViewArray64(y) }
@@ -166,7 +166,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
             parentYBlocks: useParentCtx ? parentYBlocks : parentFreeParents16(count: parentYBlocks?.count ?? 0),
             parentCbBlocks: useParentCtx ? parentCbBlocks : parentFreeParents16(count: parentCbBlocks?.count ?? 0),
             parentCrBlocks: useParentCtx ? parentCrBlocks : parentFreeParents16(count: parentCrBlocks?.count ?? 0),
-            predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap, histories: histories?.streams[2]
+            predictedPd: predictedPd, nextPd: nextPd, mvs: mvs, refDirs: refDirs, roundOffset: roundOffset, skipMap: skipMap, histories: histories?.streams[2], parentFreeStatics: useParentCtx != true
         )
         
         if let y = parentYBlocks {

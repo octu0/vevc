@@ -197,7 +197,7 @@ This is the standard mode used for the vast majority of blocks.
 > [!NOTE]
 > **Cost-Based Model Selection**
 > The encoder uses a cost-based model selection algorithm to choose the optimal model for each plane's unified stream. The encoder estimates the total bit cost (data bits + header overhead) for up to four options:
-> 1. **Static 6-context**: Uses the built-in models (no header overhead). Contexts 0-3 use AC models, context 4 uses the DPCM model, context 5 the LSCP model.
+> 1. **Static 6-context**: Uses the built-in models (no header overhead). Contexts 0-3 use AC models, context 4 uses the DPCM model, context 5 the LSCP model. Profile 0x02 streams use AC models for contexts 0-1 that are trained on the parent-free context assignment (`vevc-training train-tables-pf`); profile 0x01 uses the parent-conditioned set.
 > 2. **Dynamic 6-context**: Builds models from the actual data, writes 12 frequency tables to the stream.
 > 3. **Dynamic merged**: Merges all context statistics into a single model, writes only 2 frequency tables.
 > 4. **Backward-adapted history** (Profile `0x02` P-frames, once primed): reuses models built from previously decoded frames, writes no tables (see note below).

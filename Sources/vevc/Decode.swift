@@ -532,7 +532,7 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoi
 // MARK: - Internal Decode Functions
 
 @inline(__always)
-func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: MotionVectors? = nil, refDirs: [Bool]? = nil, roundOffset: Int, skipMap: [BlockMode]? = nil, histories: [EntropyHistoryState]? = nil) async throws -> Image16 {
+func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, mvs: MotionVectors? = nil, refDirs: [Bool]? = nil, roundOffset: Int, skipMap: [BlockMode]? = nil, histories: [EntropyHistoryState]? = nil, parentFreeStatics: Bool = false) async throws -> Image16 {
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer32")
     
     var sub = Image16(width: dx, height: dy, pool: pool)
@@ -542,9 +542,9 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     
     let yBlocks: [BlockView]
     if let p = parentYBlocks {
-        yBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: p, history: histories?[0])
+        yBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: p, history: histories?[0], parentFreeStatics: parentFreeStatics)
     } else {
-        yBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: histories?[0])
+        yBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: histories?[0], parentFreeStatics: parentFreeStatics)
     }
     
     let cbDx = (dx + 1) / 2
@@ -553,18 +553,18 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let colCountCb = (cbDx + 32 - 1) / 32
     let cbBlocks: [BlockView]
     if let p = parentCbBlocks {
-        cbBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, parentBlocks: p, history: histories?[1])
+        cbBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, parentBlocks: p, history: histories?[1], parentFreeStatics: parentFreeStatics)
     } else {
-        cbBlocks = try decodePlaneSubbands32(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: histories?[1])
+        cbBlocks = try decodePlaneSubbands32(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: histories?[1], parentFreeStatics: parentFreeStatics)
     }
     
     let rowCountCr = (cbDy + 32 - 1) / 32
     let colCountCr = (cbDx + 32 - 1) / 32
     let crBlocks: [BlockView]
     if let p = parentCrBlocks {
-        crBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: p, history: histories?[2])
+        crBlocks = try decodePlaneSubbands32WithParentBlocks(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: p, history: histories?[2], parentFreeStatics: parentFreeStatics)
     } else {
-        crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: histories?[2])
+        crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: histories?[2], parentFreeStatics: parentFreeStatics)
     }
     defer {
         pool.putBlockViewArray1024(yBlocks)
@@ -609,7 +609,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 }
 
 @inline(__always)
-func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, histories: [EntropyHistoryState]? = nil) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
+func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, prev: Image16, parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, histories: [EntropyHistoryState]? = nil, parentFreeStatics: Bool = false) async throws -> (Image16, [BlockView], [BlockView], [BlockView]) {
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Layer16")
     
     var sub = Image16(width: dx, height: dy, pool: pool, zeroed: false)
@@ -618,9 +618,9 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let colCountY = (dx + 16 - 1) / 16
     let yBlocks: [BlockView]
     if let p = parentYBlocks {
-        yBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: p, history: histories?[0])
+        yBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufY, pool: pool, blockCount: rowCountY * colCountY, parentBlocks: p, history: histories?[0], parentFreeStatics: parentFreeStatics)
     } else {
-        yBlocks = try decodePlaneSubbands16(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: histories?[0])
+        yBlocks = try decodePlaneSubbands16(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: histories?[0], parentFreeStatics: parentFreeStatics)
     }
     
     let cbDx = (dx + 1) / 2
@@ -629,18 +629,18 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     let colCountCb = (cbDx + 16 - 1) / 16
     let cbBlocks: [BlockView]
     if let p = parentCbBlocks {
-        cbBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, parentBlocks: p, history: histories?[1])
+        cbBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, parentBlocks: p, history: histories?[1], parentFreeStatics: parentFreeStatics)
     } else {
-        cbBlocks = try decodePlaneSubbands16(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: histories?[1])
+        cbBlocks = try decodePlaneSubbands16(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: histories?[1], parentFreeStatics: parentFreeStatics)
     }
     
     let rowCountCr = (cbDy + 16 - 1) / 16
     let colCountCr = (cbDx + 16 - 1) / 16
     let crBlocks: [BlockView]
     if let p = parentCrBlocks {
-        crBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: p, history: histories?[2])
+        crBlocks = try decodePlaneSubbands16WithParentBlocks(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, parentBlocks: p, history: histories?[2], parentFreeStatics: parentFreeStatics)
     } else {
-        crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: histories?[2])
+        crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: histories?[2], parentFreeStatics: parentFreeStatics)
     }
     
     await decodeLayer16ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, sub: &sub)
@@ -651,24 +651,24 @@ func decodeLayer16(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
 }
 
 @inline(__always)
-func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool, histories: [EntropyHistoryState]? = nil) async throws -> (Image16, [BlockView], [BlockView], [BlockView], qtYStep: Int, qtCStep: Int) {
+func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int, isIFrame: Bool, histories: [EntropyHistoryState]? = nil, parentFreeStatics: Bool = false) async throws -> (Image16, [BlockView], [BlockView], [BlockView], qtYStep: Int, qtCStep: Int) {
     let (qtY, qtC, bufY, bufCb, bufCr) = try VEVCLayerData.deserialize(from: r, layer: layer, layerLabel: "Base8")
     
     var sub = Image16(width: dx, height: dy, pool: pool, zeroed: false)
     
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, pool: pool, blockCount: rowCountY * colCountY, isIFrame: isIFrame, history: histories?[0])
+    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, pool: pool, blockCount: rowCountY * colCountY, isIFrame: isIFrame, history: histories?[0], parentFreeStatics: parentFreeStatics)
     
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, isIFrame: isIFrame, history: histories?[1])
+    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, isIFrame: isIFrame, history: histories?[1], parentFreeStatics: parentFreeStatics)
     
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, isIFrame: isIFrame, history: histories?[2])
+    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, isIFrame: isIFrame, history: histories?[2], parentFreeStatics: parentFreeStatics)
     
     await decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY, sub: &sub)
     await decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC, sub: &sub)

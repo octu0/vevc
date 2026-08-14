@@ -150,6 +150,39 @@ final class StaticRANSModels: @unchecked Sendable {
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     ])
+
+    // Parent-free AC tables (profile 0x02, ParentFreeContext.swift): all AC
+    // traffic lands in contexts 0-1, so these are trained on the merged
+    // parent-free assignment (`vevc-training train-tables-pf`, corpus:
+    // miko1+ToS 121f dumps at 500k+2500k, 2026-08-14). Contexts 2-3 reuse
+    // the shipped models above but carry no data in profile 0x02.
+    var pfRunModel0 = buildStaticModel(rawFreqs: [
+        3804, 1660, 1260, 1042, 945, 619, 581, 610, 700, 452, 417, 423, 550, 365, 345, 400,
+        98, 56, 50, 54, 47, 49, 48, 78, 76, 48, 44, 45, 40, 37, 39, 69,
+        58, 34, 62, 142, 257, 618, 53, 57, 29, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
+
+    var pfRunModel1 = buildStaticModel(rawFreqs: [
+        8097, 2351, 1338, 1039, 562, 438, 418, 450, 216, 153, 129, 119, 110, 111, 121, 126,
+        67, 42, 31, 27, 23, 22, 23, 26, 20, 16, 14, 14, 14, 16, 19, 21,
+        15, 10, 15, 25, 39, 38, 27, 16, 3, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
+
+    var pfValModel0 = buildStaticModel(rawFreqs: [
+        1, 6757, 1270, 6249, 210, 504, 70, 526, 36, 150, 21, 162, 14, 68, 9, 70,
+        6, 35, 4, 38, 4, 20, 3, 21, 2, 13, 2, 14, 1, 7, 2, 1,
+        9, 6, 12, 17, 14, 9, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
+
+    var pfValModel1 = buildStaticModel(rawFreqs: [
+        1, 5556, 1324, 4681, 293, 1081, 112, 1090, 61, 410, 36, 414, 23, 218, 17, 220,
+        11, 125, 9, 129, 6, 74, 5, 76, 4, 49, 3, 51, 3, 33, 2, 1,
+        36, 23, 43, 52, 50, 28, 9, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+    ])
 }
 
 // MARK: - rANS Probability Model
