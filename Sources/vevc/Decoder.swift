@@ -38,19 +38,27 @@ public actor StreamingDecoderActor {
     let pool: BlockViewPool
     let profile: UInt8
     
-    private var previousReconstructed: PlaneData420?
+    var previousReconstructed: PlaneData420? // internal for drift diagnostics
     private var firstReconstructed: PlaneData420?
     private var seenY = Set<UnsafeMutableRawPointer>()
     private var roundOffsetIndex = 0
-    private let entropyHistories: FrameEntropyHistories?
+    let entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
     private var cachedYCbCrImage: YCbCrImage?
+    // Quarter-resolution L0 reference chain (One-Pyramid §4). Only needed
+    // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
+    // Internal so the L0 bit-exactness gate tests can compare chains.
+    let l0State = L0RefState()
+    // Dormant One-Pyramid Wave-1 switch — must match the encoder's setting
+    // (the layer0 payload semantics differ). See LayersEncodeActor.
+    let enableL0Loop: Bool
 
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, enableL0Loop: Bool = false) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
         self.profile = profile
+        self.enableL0Loop = enableL0Loop
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
     }
 
@@ -116,7 +124,8 @@ public actor StreamingDecoderActor {
         let img16 = try await decodeSpatialLayers(
             r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
             predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile,
-            entropyHistories: entropyHistories
+            entropyHistories: entropyHistories,
+            l0State: (profile == 0x02 && enableL0Loop && 1 <= maxLayer) ? l0State : nil
         )
         
         let pd = PlaneData420(img16: img16)

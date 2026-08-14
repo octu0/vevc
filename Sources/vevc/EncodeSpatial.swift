@@ -2,7 +2,7 @@
 import Foundation
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, dwtGainScale: Int = 1) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, dwtGainScale: Int = 1, l0State: L0RefState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -27,12 +27,20 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
 
+    // L0 closed loop (One-Pyramid §4): the I-frame L0 reference is the
+    // dequantized Base8 output — identical on both sides by construction.
+    if profile == 0x02, let l0s = l0State {
+        let ref = freshCopy(baseImg)
+        l0s.prev = ref
+        l0s.ltr = ref
+    }
+
     let l1dx = sub2.width
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
     let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
-    
+
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -76,7 +84,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
 
 
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, staticCounters: inout [Int], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil, entropyHistories: FrameEntropyHistories? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, staticCounters: inout [Int], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil, entropyHistories: FrameEntropyHistories? = nil, l0State: L0RefState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
     let pPd = predictedPd
     let nPd = nextPd
     
@@ -329,10 +337,57 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     defer { releaseL2() }
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
     defer { releaseL1() }
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, histories: entropyHistories?.streams[0])
+
+    // L0 closed loop (One-Pyramid §4): Base8 codes r0 = LL2(source) −
+    // MC_L0(L0_ref) instead of LL2(residual), so the quarter-resolution
+    // reconstruction closes over the bitstream alone (bit-exact with the
+    // decoder's layer0 chain). Requires an L0 reference from a preceding
+    // I-frame; without l0State the legacy LL2(residual) semantics apply.
+    let isL0Loop = (profile == 0x02) && (l0State?.prev != nil)
+    var base8Input = sub1
+    if isL0Loop, let l0s = l0State, let l0Prev = l0s.prev {
+        let tSrc = analyzeLL2(pd: pd)
+        var r0 = Image16(width: tSrc.width, height: tSrc.height, y: tSrc.y, cb: tSrc.cb, cr: tSrc.cr)
+        var pred0 = Image16(
+            width: tSrc.width, height: tSrc.height,
+            y: [Int16](repeating: 0, count: tSrc.y.count),
+            cb: [Int16](repeating: 0, count: tSrc.cb.count),
+            cr: [Int16](repeating: 0, count: tSrc.cr.count))
+        await applyL0MotionCompensation(img: &pred0, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        subtractPlanes(&r0, PlaneData420(img16: pred0))
+        if let map = sMap {
+            clearL0SkipResidual(img: &r0, skipMap: map, fullDx: dx)
+        }
+        base8Input = PlaneData420(img16: r0)
+    }
+
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: base8Input, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, histories: entropyHistories?.streams[0])
     defer { releaseBase() }
 
-    let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+    var baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+
+    if isL0Loop, let l0s = l0State, let l0Prev = l0s.prev {
+        // L0 reconstruction — the decoder's exact layer0 pipeline:
+        // deq(r0) + MC_L0, clamp, deblock, skip copy.
+        let baseCopy = freshCopy(baseImg)
+        var l0Cur = Image16(width: baseRecon.width, height: baseRecon.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
+        await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        finishL0Reconstruction(img: &l0Cur, qtYStepQ4: Int(qtY0.step), qtCStepQ4: Int(qtC0.step))
+        if let map = sMap {
+            applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, skipMap: map, fullDx: dx)
+        }
+        let newRef = PlaneData420(img16: l0Cur)
+
+        // The full loop's LL2 coefficient slot is L0_recon − LL2(P), with P
+        // built by the identical MC call sequence the decoder uses.
+        let fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: pPd, ltrPd: nPd, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        let tP = analyzeLL2(pd: fullP)
+        var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
+        subtractPlanes(&slot, tP)
+        baseImg = slot
+
+        l0s.prev = newRef
+    }
 
     let l1dx = sub2.width
     let l1dy = sub2.height

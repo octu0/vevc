@@ -1,7 +1,7 @@
 // MARK: - Decode Spatial
 
 @inline(__always)
-func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, profile: UInt8 = 0x01, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, profile: UInt8 = 0x01, entropyHistories: FrameEntropyHistories? = nil, l0State: L0RefState? = nil) async throws -> Image16 {
     var offset = 0
 
     // Compute per-layer dimensions matching encoder DWT subband sizes:
@@ -80,7 +80,46 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     // MC must be applied at the highest available layer's resolution.
     let hasLayer1 = (1 <= maxLayer && 0 < frameHeader.layer1Size)
     let hasLayer2 = (2 <= maxLayer && 0 < frameHeader.layer2Size)
-    
+
+    // L0 closed loop (One-Pyramid §4, profile 0x02 with an l0State chain).
+    // Base8 carries r0 = LL2(source) − MC_L0(L0_ref); maintain the
+    // quarter-resolution reference chain and substitute the LL2 coefficient
+    // slot (L0_recon − LL2(P)) before the detail layers reconstruct.
+    // The maxLayer==0 path needs none of this: its existing pipeline is
+    // exactly deq(r0) + MC_L0 on its own layer-matched chain.
+    if profile == 0x02, let l0s = l0State {
+        if frameHeader.isIFrame {
+            let ref = freshCopy(baseImg)
+            l0s.prev = ref
+            l0s.ltr = ref
+        } else if (hasLayer1 || hasLayer2), let tMVs = mvs, let l0Prev = l0s.prev {
+            let baseCopy = freshCopy(baseImg)
+            var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
+            await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            finishL0Reconstruction(img: &l0Cur, qtYStepQ4: qtYStep, qtCStepQ4: qtCStep)
+            if let map = skipMap {
+                applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, skipMap: map, fullDx: dx)
+            }
+            let newRef = PlaneData420(img16: l0Cur)
+
+            if let tPrev = predictedPd {
+                let tP: PlaneData420
+                if hasLayer2 {
+                    let fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    tP = analyzeLL2(pd: fullP)
+                } else {
+                    let l1P = await buildL1Prediction(l1dx: l1dx, l1dy: l1dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    tP = analyzeLL1(pd: l1P)
+                }
+                var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
+                subtractPlanes(&slot, tP)
+                current = slot
+            }
+
+            l0s.prev = newRef
+        }
+    }
+
     // Decode Layer1 if data is present
     if hasLayer1 {
         guard (offset + frameHeader.layer1Size) <= r.count else { throw DecodeError.insufficientData }

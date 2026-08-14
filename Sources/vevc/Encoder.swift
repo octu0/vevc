@@ -174,7 +174,7 @@ actor LayersEncodeActor {
     private var firstReconstructed: PlaneData420?
     private var releaseFirstRecon: (@Sendable () -> Void)?
     
-    private var previousReconstructed: PlaneData420?
+    var previousReconstructed: PlaneData420? // internal for drift diagnostics
     private var releasePreviousRecon: (@Sendable () -> Void)?
     
     private var firstInputPlane: PlaneData420?
@@ -182,9 +182,18 @@ actor LayersEncodeActor {
     private var staticCounters: [Int] = []
     private var cachedNextSub2: [Int16]?
     private var cachedNextSub1: [Int16]?
-    private var entropyHistories: FrameEntropyHistories?
-    
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
+    // Quarter-resolution L0 reference chain (One-Pyramid §4, profile 0x02).
+    // Internal so the L0 bit-exactness gate tests can compare chains.
+    let l0State = L0RefState()
+    // One-Pyramid Wave 1 (L0 closed loop) is implemented and gate-tested but
+    // DORMANT: it failed the Wave-1 size budget (miko 500k +6.7%, 2500k +10%
+    // vs LL2(residual) coding). Off by default pending the B'-vs-Option-C
+    // decision; the gate tests enable it explicitly.
+    let enableL0Loop: Bool
+
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, enableL0Loop: Bool = false) {
+        self.enableL0Loop = enableL0Loop
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -205,6 +214,7 @@ actor LayersEncodeActor {
     }
     
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+        self.enableL0Loop = false
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -283,7 +293,8 @@ actor LayersEncodeActor {
             
             let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
                 pd: plane, pool: pool, maxbitrate: maxbitrate,
-                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale
+                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale,
+                l0State: (profile == 0x02 && enableL0Loop) ? l0State : nil
             )
             
             if self.qstep == nil {
@@ -358,7 +369,8 @@ actor LayersEncodeActor {
             maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
             roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
             cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
-            entropyHistories: self.entropyHistories
+            entropyHistories: self.entropyHistories,
+            l0State: (profile == 0x02 && enableL0Loop) ? l0State : nil
         )
         self.staticCounters = localCounters
         self.cachedNextSub2 = nSub2
