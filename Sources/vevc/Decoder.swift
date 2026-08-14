@@ -121,12 +121,22 @@ public actor StreamingDecoderActor {
         let isPFrame = (previousReconstructed != nil)
         let useBidirectional = isPFrame && firstReconstructed != nil
         let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
-        let img16 = try await decodeSpatialLayers(
-            r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-            predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, profile: profile,
-            entropyHistories: entropyHistories,
-            l0State: (profile == 0x02 && enableL0Loop && 1 <= maxLayer) ? l0State : nil
-        )
+        // The two pipelines are separate functions so each stays branch-free;
+        // the profile decides here, once.
+        let img16: Image16
+        if profile == 0x02 {
+            img16 = try await decodeSpatialLayersForProfile2(
+                r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
+                predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
+                entropyHistories: entropyHistories,
+                l0State: (enableL0Loop && 1 <= maxLayer) ? l0State : nil
+            )
+        } else {
+            img16 = try await decodeSpatialLayers(
+                r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
+                predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+            )
+        }
         
         let pd = PlaneData420(img16: img16)
         let yBase = pd.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
