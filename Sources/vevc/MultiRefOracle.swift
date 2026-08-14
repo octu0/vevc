@@ -120,20 +120,8 @@ final class MultiRefOracle: @unchecked Sendable {
     /// block within skipThreshold-per-pixel SAD (luma + chroma) against a
     /// single reference's reconstruction.
     private func blockMatches(cur: PlaneData420, ref: PlaneData420, bx: Int, by: Int, dx: Int, dy: Int, skipThreshold: Int) -> Bool {
-        var ok = true
-        cur.y.withUnsafeBufferPointer { cY in
-        cur.cb.withUnsafeBufferPointer { cCb in
-        cur.cr.withUnsafeBufferPointer { cCr in
-        ref.y.withUnsafeBufferPointer { rY in
-        ref.cb.withUnsafeBufferPointer { rCb in
-        ref.cr.withUnsafeBufferPointer { rCr in
-            let cYPtr = cY.baseAddress!
-            let cCbPtr = cCb.baseAddress!
-            let cCrPtr = cCr.baseAddress!
-            let rYPtr = rY.baseAddress!
-            let rCbPtr = rCb.baseAddress!
-            let rCrPtr = rCr.baseAddress!
-            outer: for sy in 0..<2 {
+        withUnsafePlanePointers(cur, ref) { c, r in
+            for sy in 0..<2 {
                 for sx in 0..<2 {
                     let subX = bx + sx * 16
                     let subY = by + sy * 16
@@ -146,17 +134,16 @@ final class MultiRefOracle: @unchecked Sendable {
                     let blockThreshold = skipThreshold * area
                     let sad: Int
                     if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                        sad = computeZeroSAD16x16(cY: cYPtr, rY: rYPtr, cCb: cCbPtr, rCb: rCbPtr, cCr: cCrPtr, rCr: rCrPtr, bx: subX, by: subY, width: dx, limit: blockThreshold)
+                        sad = computeZeroSAD16x16(cY: c.y, rY: r.y, cCb: c.cb, rCb: r.cb, cCr: c.cr, rCr: r.cr, bx: subX, by: subY, width: dx, limit: blockThreshold)
                     } else {
-                        sad = computeZeroSADSubBlock(cY: cYPtr, rY: rYPtr, cCb: cCbPtr, rCb: rCbPtr, cCr: cCrPtr, rCr: rCrPtr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
+                        sad = computeZeroSADSubBlock(cY: c.y, rY: r.y, cCb: c.cb, rCb: r.cb, cCr: c.cr, rCr: r.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
                     }
                     if blockThreshold < sad {
-                        ok = false
-                        break outer
+                        return false
                     }
                 }
             }
-        }}}}}}
-        return ok
+            return true
+        }
     }
 }

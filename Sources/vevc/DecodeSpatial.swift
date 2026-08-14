@@ -88,11 +88,13 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     // The maxLayer==0 path needs none of this: its existing pipeline is
     // exactly deq(r0) + MC_L0 on its own layer-matched chain.
     if profile == 0x02, let l0s = l0State {
-        if frameHeader.isIFrame {
+        switch true {
+        case frameHeader.isIFrame:
             let ref = freshCopy(baseImg)
             l0s.prev = ref
             l0s.ltr = ref
-        } else if (hasLayer1 || hasLayer2), let tMVs = mvs, let l0Prev = l0s.prev {
+        case (hasLayer1 || hasLayer2):
+            guard let tMVs = mvs, let l0Prev = l0s.prev else { break }
             let baseCopy = freshCopy(baseImg)
             var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
             await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
@@ -117,6 +119,8 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
             }
 
             l0s.prev = newRef
+        default:
+            break
         }
     }
 

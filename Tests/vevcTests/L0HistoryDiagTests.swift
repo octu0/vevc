@@ -19,7 +19,8 @@ final class L0HistoryDiagTests: XCTestCase {
         let enc = LayersEncodeActor(
             width: reader.width, height: reader.height, maxbitrate: 2_500_000, framerate: 60,
             zeroThreshold: 0, keyint: 30, sceneChangeThreshold: 2000,
-            pool: pool, qstep: nil, profile: 0x02, enableL0Loop: true)
+            pool: pool, qstep: nil, profile: 0x02, enableL0Loop: true
+        )
         let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02, enableL0Loop: true)
 
         var frame = 0

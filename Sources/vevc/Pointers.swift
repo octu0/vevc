@@ -1,3 +1,53 @@
+/// Borrowed Y/Cb/Cr base pointers of one PlaneData420. Only valid inside the
+/// withUnsafePlanePointers call that produced it.
+internal struct PlanePointers {
+    internal let y: UnsafePointer<Int16>
+    internal let cb: UnsafePointer<Int16>
+    internal let cr: UnsafePointer<Int16>
+}
+
+@inline(__always)
+internal func withUnsafePlanePointers<R>(
+    _ a: PlaneData420,
+    _ body: (PlanePointers) throws -> R
+) rethrows -> R {
+    try a.y.withUnsafeBufferPointer { aY in
+        try a.cb.withUnsafeBufferPointer { aCb in
+            try a.cr.withUnsafeBufferPointer { aCr in
+                try body(PlanePointers(y: aY.baseAddress!, cb: aCb.baseAddress!, cr: aCr.baseAddress!))
+            }
+        }
+    }
+}
+
+@inline(__always)
+internal func withUnsafePlanePointers<R>(
+    _ a: PlaneData420, _ b: PlaneData420,
+    _ body: (PlanePointers, PlanePointers) throws -> R
+) rethrows -> R {
+    try withUnsafePlanePointers(a) { pA in
+        try withUnsafePlanePointers(b) { pB in
+            try body(pA, pB)
+        }
+    }
+}
+
+@inline(__always)
+internal func withUnsafePlanePointers<R>(
+    _ a: PlaneData420, _ b: PlaneData420, _ c: PlaneData420, _ d: PlaneData420,
+    _ body: (PlanePointers, PlanePointers, PlanePointers, PlanePointers) throws -> R
+) rethrows -> R {
+    try withUnsafePlanePointers(a) { pA in
+        try withUnsafePlanePointers(b) { pB in
+            try withUnsafePlanePointers(c) { pC in
+                try withUnsafePlanePointers(d) { pD in
+                    try body(pA, pB, pC, pD)
+                }
+            }
+        }
+    }
+}
+
 internal struct UnsafeSendablePointer<T>: @unchecked Sendable {
     internal let ptr: UnsafePointer<T>
 }

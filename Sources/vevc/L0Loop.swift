@@ -192,8 +192,11 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
         }
         while x < c {
             let v = ptr[x]
-            if v < -128 { ptr[x] = -128 }
-            else if v > 127 { ptr[x] = 127 }
+            switch true {
+            case v < -128: ptr[x] = -128
+            case 127 < v: ptr[x] = 127
+            default: break
+            }
             x &+= 1
         }
     }

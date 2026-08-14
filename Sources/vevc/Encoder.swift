@@ -363,16 +363,29 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
         
-        var localCounters = self.staticCounters
-        let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = try await encodeSpatialLayers(
-            pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
-            maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-            roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, profile: profile, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
-            cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
-            entropyHistories: self.entropyHistories,
-            l0State: (profile == 0x02 && enableL0Loop) ? l0State : nil
-        )
-        self.staticCounters = localCounters
+        // The two P-frame pipelines are separate functions so each stays
+        // branch-free; the profile decides here, once.
+        let encoded: ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16])
+        if profile == 0x02 {
+            var localCounters = self.staticCounters
+            encoded = try await encodeSpatialLayersForProfile2(
+                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
+                maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
+                roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
+                cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
+                entropyHistories: self.entropyHistories,
+                l0State: enableL0Loop ? l0State : nil
+            )
+            self.staticCounters = localCounters
+        } else {
+            encoded = try await encodeSpatialLayers(
+                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
+                maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
+                roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
+                cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
+            )
+        }
+        let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = encoded
         self.cachedNextSub2 = nSub2
         self.cachedNextSub1 = nSub1
         
