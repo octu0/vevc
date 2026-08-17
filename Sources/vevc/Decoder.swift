@@ -126,13 +126,26 @@ public actor StreamingDecoderActor {
         // the profile and maxLayer decide here, once.
         let img16: Image16
         if profile == 0x02 {
-            img16 = try await decodeSpatialLayersForProfile2(
-                r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-                predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
-                entropyHistories: entropyHistories,
-                l0State: (1 <= maxLayer) ? l0State : nil,
-                parallelEntropy: parallelEntropy
-            )
+            switch maxLayer {
+            case 0:
+                img16 = try await decodeSpatialLayersForProfile2Base8Only(
+                    r: chunk, pool: pool, dx: width, dy: height,
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
+                    entropyHistories: entropyHistories, parallelEntropy: parallelEntropy
+                )
+            case 1:
+                img16 = try await decodeSpatialLayersForProfile2WithLayer1(
+                    r: chunk, pool: pool, dx: width, dy: height,
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
+                    entropyHistories: entropyHistories, l0State: l0State, parallelEntropy: parallelEntropy
+                )
+            default:
+                img16 = try await decodeSpatialLayersForProfile2Full(
+                    r: chunk, pool: pool, dx: width, dy: height,
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
+                    entropyHistories: entropyHistories, l0State: l0State, parallelEntropy: parallelEntropy
+                )
+            }
         } else {
             switch maxLayer {
             case 0:

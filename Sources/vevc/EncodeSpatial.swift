@@ -634,13 +634,13 @@ private func applyProfile2SkipCopy(skipMap: [BlockMode], ltrPd: PlaneData420, pr
                 if bx + targetBSize <= dx && by + targetBSize <= dy {
                     switch mode {
                     case .skip_ltr:
-                        copyBlockPointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: dx, blockSize: targetBSize)
-                        copyBlockPointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
-                        copyBlockPointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        copyBlock32Pointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: dx)
+                        copyBlock16Pointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx)
+                        copyBlock16Pointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx)
                     case .skip_prev:
-                        copyBlockPointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: dx, blockSize: targetBSize)
-                        copyBlockPointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
-                        copyBlockPointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: tCbSize)
+                        copyBlock32Pointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: dx)
+                        copyBlock16Pointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx)
+                        copyBlock16Pointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx)
                     default: break
                     }
                 } else {

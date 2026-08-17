@@ -146,13 +146,13 @@ func applyL0SkipCopy(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData4
                 if bx + 8 <= targetDx && by + 8 <= targetDy {
                     switch mode {
                     case .skip_ltr where ltrPd != nil:
-                        copyBlockPointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx, blockSize: 8)
-                        copyBlockPointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: 4)
-                        copyBlockPointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: 4)
+                        copyBlock8Pointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx)
+                        copyBlock4Pointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx)
+                        copyBlock4Pointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx)
                     case .skip_prev:
-                        copyBlockPointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx, blockSize: 8)
-                        copyBlockPointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: 4)
-                        copyBlockPointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx, blockSize: 4)
+                        copyBlock8Pointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: targetDx)
+                        copyBlock4Pointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx)
+                        copyBlock4Pointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx)
                     default: break
                     }
                 } else {

@@ -178,7 +178,7 @@ final class Profile0x02Tests: XCTestCase {
         let (bytesI, encReconI, _, _, relEncI) = try await encodeSpatialLayers(
             pd: pd0, pool: pool, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02)
         defer { relEncI() }
-        let decImg16I = try await decodeSpatialLayersForProfile2(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
+        let decImg16I = try await decodeSpatialLayersForProfile2(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: nil, parallelEntropy: true)
         let decReconI = PlaneData420(img16: decImg16I)
         
         // P-frame
@@ -191,7 +191,7 @@ final class Profile0x02Tests: XCTestCase {
             pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, skipThreshold: 2, staticCounters: &counters)
         defer { relEncP() }
         
-        let decImg16P = try await decodeSpatialLayersForProfile2(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0)
+        let decImg16P = try await decodeSpatialLayersForProfile2(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: nil, parallelEntropy: true)
         let decReconP = PlaneData420(img16: decImg16P)
         
         XCTAssertEqual(encReconP.y, decReconP.y)
