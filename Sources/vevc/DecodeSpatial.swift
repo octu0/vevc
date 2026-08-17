@@ -1,24 +1,19 @@
 // MARK: - Decode Spatial
 
-/// Frame decode, profile 0x01: layered reconstruction with parent-conditioned
-/// entropy contexts (each layer's entropy decode reads the previous layer's
-/// blocks, so the layers decode sequentially). Profile 0x02 lives in
-/// decodeSpatialLayersForProfile2 — the caller selects the pipeline.
-@inline(__always)
-func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+/// Shared profile-0x01 frame prelude: header, motion vectors, reference
+/// directions, and the layer0 payload slice — everything before the layer
+/// pipelines diverge by maxLayer.
+private struct Profile1Prelude {
+    let frameHeader: VEVCFrameHeader
+    let mvs: MotionVectors?
+    let refDirs: [Bool]?
+    let layer0Data: [UInt8]
+    /// Byte offset of the layer1 payload within the frame chunk.
+    let layer1Offset: Int
+}
+
+private func parseProfile1Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?) throws -> Profile1Prelude {
     var offset = 0
-
-    // Compute per-layer dimensions matching encoder DWT subband sizes:
-    // Layer2 (32x32): original size
-    // Layer1 (16x16): DWT LL subband of Layer2 = (dx+1)/2 × (dy+1)/2
-    // Layer0 (Base8): DWT LL subband of Layer1 = ((dx+1)/2+1)/2 × ((dy+1)/2+1)/2
-    let l2dx = dx
-    let l2dy = dy
-    let l1dx = (dx + 1) / 2
-    let l1dy = (dy + 1) / 2
-    let l0dx = (l1dx + 1) / 2
-    let l0dy = (l1dy + 1) / 2
-
     let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset, profile: 0x01)
     if frameHeader.isCopyFrame {
         throw DecodeError.insufficientDataContext("decodeSpatialLayers passed copy frame")
@@ -60,11 +55,200 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
     let layer0Data = Array(r[offset..<(offset + frameHeader.layer0Size)])
     offset += frameHeader.layer0Size
 
+    return Profile1Prelude(frameHeader: frameHeader, mvs: mvs, refDirs: refDirs, layer0Data: layer0Data, layer1Offset: offset)
+}
+
+/// Layer2 data absent: MC + clamp + deblock at layer1 resolution
+/// (16x16 blocks, mvShift=1). No-op on I-frames (no MVs / no prediction).
+private func finishProfile1AtLayer1(current: inout Image16, l1dx: Int, l1dy: Int, mvs: MotionVectors?, refDirs: [Bool]?, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, qtYStep: Int, qtCStep: Int) async {
+    guard let tMVs = mvs, let tPrev = predictedPd else { return }
+    let cbDx1 = (l1dx + 1) / 2
+    let cbDy1 = (l1dy + 1) / 2
+    if let tNext = nextPd, let dirs = refDirs {
+        await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: nil, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+    } else {
+        await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: nil, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+        await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+    }
+
+    clampPlane(plane: &current.y)
+    clampPlane(plane: &current.cb)
+    clampPlane(plane: &current.cr)
+
+    applyDeblockingFilterN(plane: &current.y, width: l1dx, height: l1dy, qStep: qtYStep, blockSize: 16)
+    let cStep = min(qtCStep * 2, 255)
+    applyDeblockingFilterN(plane: &current.cb, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
+    applyDeblockingFilterN(plane: &current.cr, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
+}
+
+/// Upper layers absent: MC + clamp + deblock at layer0 resolution
+/// (8x8 blocks, mvShift=2 for luma, mvShift=1 for chroma). No-op on
+/// I-frames (no MVs / no prediction).
+private func finishProfile1AtLayer0(current: inout Image16, l0dx: Int, l0dy: Int, mvs: MotionVectors?, refDirs: [Bool]?, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, qtYStep: Int, qtCStep: Int) async {
+    guard let tMVs = mvs, let tPrev = predictedPd else { return }
+    let cbDx0 = (l0dx + 1) / 2
+    let cbDy0 = (l0dy + 1) / 2
+    if let tNext = nextPd, let dirs = refDirs {
+        await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: nil, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+    } else {
+        await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: nil, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+        await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+    }
+
+    clampPlane(plane: &current.y)
+    clampPlane(plane: &current.cb)
+    clampPlane(plane: &current.cr)
+
+    applyDeblockingFilterN(plane: &current.y, width: l0dx, height: l0dy, qStep: qtYStep, blockSize: 8)
+    let cStep = min(qtCStep * 2, 255)
+    applyDeblockingFilterN(plane: &current.cb, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
+    applyDeblockingFilterN(plane: &current.cr, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
+}
+
+/// Frame decode, profile 0x01, maxLayer == 2 with full payloads — the
+/// straight-line production pipeline (parent-conditioned entropy contexts,
+/// so the three layers decode sequentially). Streams whose upper layers
+/// were stripped by the splitter (layer sizes 0) delegate to the generic
+/// decodeSpatialLayers.
+func decodeSpatialLayersFull(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+    let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+    guard 0 < p.frameHeader.layer1Size, 0 < p.frameHeader.layer2Size else {
+        return try await decodeSpatialLayers(
+            r: r, pool: pool, maxLayer: 2, dx: dx, dy: dy,
+            predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset, entropyHistories: entropyHistories
+        )
+    }
+
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+    // Backward-adaptive tables apply to profile 0x02 only.
+    let histories: FrameEntropyHistories? = p.frameHeader.isIFrame ? nil : entropyHistories
+
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, _, _) = try await decodeBase8(r: p.layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: p.frameHeader.isIFrame, histories: histories?.streams[0])
+
+    var offset = p.layer1Offset
+    guard (offset + p.frameHeader.layer1Size) <= r.count else { throw DecodeError.insufficientData }
+    let layer1Data = Array(r[offset..<(offset + p.frameHeader.layer1Size)])
+    offset += p.frameHeader.layer1Size
+
+    let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: baseImg, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks, histories: histories?.streams[1])
+
+    pool.putBlockViewArray64(base8YBlocks)
+    pool.putBlockViewArray64(base8CbBlocks)
+    pool.putBlockViewArray64(base8CrBlocks)
+
+    guard (offset + p.frameHeader.layer2Size) <= r.count else { throw DecodeError.insufficientData }
+    let layer2Data = Array(r[offset..<(offset + p.frameHeader.layer2Size)])
+
+    let result = try await decodeLayer32(r: layer2Data, pool: pool, layer: 2, dx: dx, dy: dy, prev: l16Img, parentYBlocks: l16YBlocks, parentCbBlocks: l16CbBlocks, parentCrBlocks: l16CrBlocks, predictedPd: predictedPd, nextPd: nextPd, mvs: p.mvs, refDirs: p.refDirs, roundOffset: roundOffset, skipMap: nil, histories: histories?.streams[2])
+
+    pool.putBlockViewArray256(l16YBlocks)
+    pool.putBlockViewArray256(l16CbBlocks)
+    pool.putBlockViewArray256(l16CrBlocks)
+
+    return result
+}
+
+/// Frame decode, profile 0x01, maxLayer == 1: Base8 + Layer1, MC at half
+/// resolution. A stripped layer1 (size 0) delegates to the generic
+/// decodeSpatialLayers.
+func decodeSpatialLayersWithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+    let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+    guard 0 < p.frameHeader.layer1Size else {
+        return try await decodeSpatialLayers(
+            r: r, pool: pool, maxLayer: 1, dx: dx, dy: dy,
+            predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset, entropyHistories: entropyHistories
+        )
+    }
+
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+    let histories: FrameEntropyHistories? = p.frameHeader.isIFrame ? nil : entropyHistories
+
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: p.layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: p.frameHeader.isIFrame, histories: histories?.streams[0])
+
+    let offset = p.layer1Offset
+    guard (offset + p.frameHeader.layer1Size) <= r.count else { throw DecodeError.insufficientData }
+    let layer1Data = Array(r[offset..<(offset + p.frameHeader.layer1Size)])
+
+    let (l16Img, l16YBlocks, l16CbBlocks, l16CrBlocks) = try await decodeLayer16(r: layer1Data, pool: pool, layer: 1, dx: l1dx, dy: l1dy, prev: baseImg, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks, histories: histories?.streams[1])
+
+    pool.putBlockViewArray64(base8YBlocks)
+    pool.putBlockViewArray64(base8CbBlocks)
+    pool.putBlockViewArray64(base8CrBlocks)
+
+    var current = l16Img
+    await finishProfile1AtLayer1(current: &current, l1dx: l1dx, l1dy: l1dy, mvs: p.mvs, refDirs: p.refDirs, predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset, qtYStep: qtYStep, qtCStep: qtCStep)
+
+    pool.putBlockViewArray256(l16YBlocks)
+    pool.putBlockViewArray256(l16CbBlocks)
+    pool.putBlockViewArray256(l16CrBlocks)
+
+    return current
+}
+
+/// Frame decode, profile 0x01, maxLayer == 0: Base8 + MC at quarter
+/// resolution. Upper-layer payloads are never read, so no stripped-stream
+/// delegation is needed.
+func decodeSpatialLayersBase8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+    let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+    let histories: FrameEntropyHistories? = p.frameHeader.isIFrame ? nil : entropyHistories
+
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: p.layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: p.frameHeader.isIFrame, histories: histories?.streams[0])
+
+    pool.putBlockViewArray64(base8YBlocks)
+    pool.putBlockViewArray64(base8CbBlocks)
+    pool.putBlockViewArray64(base8CrBlocks)
+
+    var current = baseImg
+    await finishProfile1AtLayer0(current: &current, l0dx: l0dx, l0dy: l0dy, mvs: p.mvs, refDirs: p.refDirs, predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset, qtYStep: qtYStep, qtCStep: qtCStep)
+
+    return current
+}
+
+/// Frame decode, profile 0x01, generic pipeline: handles streams whose
+/// upper layers were stripped by the splitter (layer sizes 0), where the
+/// effective top layer is only known from the frame header. Production
+/// decoding uses the straight-line variants above, which delegate here
+/// only in those stripped cases.
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+    // Compute per-layer dimensions matching encoder DWT subband sizes:
+    // Layer2 (32x32): original size
+    // Layer1 (16x16): DWT LL subband of Layer2 = (dx+1)/2 × (dy+1)/2
+    // Layer0 (Base8): DWT LL subband of Layer1 = ((dx+1)/2+1)/2 × ((dy+1)/2+1)/2
+    let l2dx = dx
+    let l2dy = dy
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+
+    let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+    let frameHeader = p.frameHeader
+    let mvs = p.mvs
+    let refDirs = p.refDirs
+    var offset = p.layer1Offset
+
     // Backward-adaptive tables apply to profile 0x02 only.
     let histories: FrameEntropyHistories? = frameHeader.isIFrame ? nil : entropyHistories
 
     // Base layer (layer 0) is always Base8
-    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame, histories: histories?.streams[0])
+    let (baseImg, base8YBlocks, base8CbBlocks, base8CrBlocks, qtYStep, qtCStep) = try await decodeBase8(r: p.layer0Data, pool: pool, layer: 0, dx: l0dx, dy: l0dy, isIFrame: frameHeader.isIFrame, histories: histories?.streams[0])
     var current = baseImg
     var parentYBlocks: [BlockView]? = base8YBlocks
     var parentCbBlocks: [BlockView]? = base8CbBlocks
@@ -125,53 +309,9 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
         // Layer2 data is absent: apply MC at the highest available layer's resolution.
         // This handles the case where the splitter stripped upper layers.
         if hasLayer1 {
-            // Apply MC at layer1 resolution (16x16 blocks, mvShift=1)
-            if let tMVs = mvs, let tPrev = predictedPd {
-                let cbDx1 = (l1dx + 1) / 2
-                let cbDy1 = (l1dy + 1) / 2
-                if let tNext = nextPd, let dirs = refDirs {
-                    await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: nil, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                } else {
-                    await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: nil, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-                    await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                    await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: nil, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-                }
-
-                clampPlane(plane: &current.y)
-                clampPlane(plane: &current.cb)
-                clampPlane(plane: &current.cr)
-
-                applyDeblockingFilterN(plane: &current.y, width: l1dx, height: l1dy, qStep: qtYStep, blockSize: 16)
-                let cStep = min(qtCStep * 2, 255)
-                applyDeblockingFilterN(plane: &current.cb, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
-                applyDeblockingFilterN(plane: &current.cr, width: cbDx1, height: cbDy1, qStep: cStep, blockSize: 8)
-            }
+            await finishProfile1AtLayer1(current: &current, l1dx: l1dx, l1dy: l1dy, mvs: mvs, refDirs: refDirs, predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset, qtYStep: qtYStep, qtCStep: qtCStep)
         } else {
-            // Apply MC at layer0 resolution (8x8 blocks, mvShift=2 for luma, mvShift=1 for chroma)
-            if let tMVs = mvs, let tPrev = predictedPd {
-                let cbDx0 = (l0dx + 1) / 2
-                let cbDy0 = (l0dy + 1) / 2
-                if let tNext = nextPd, let dirs = refDirs {
-                    await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: nil, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-                    await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-                } else {
-                    await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: nil, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-                    await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-                    await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: nil, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-                }
-
-                clampPlane(plane: &current.y)
-                clampPlane(plane: &current.cb)
-                clampPlane(plane: &current.cr)
-
-                applyDeblockingFilterN(plane: &current.y, width: l0dx, height: l0dy, qStep: qtYStep, blockSize: 8)
-                let cStep = min(qtCStep * 2, 255)
-                applyDeblockingFilterN(plane: &current.cb, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
-                applyDeblockingFilterN(plane: &current.cr, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
-            }
+            await finishProfile1AtLayer0(current: &current, l0dx: l0dx, l0dy: l0dy, mvs: mvs, refDirs: refDirs, predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset, qtYStep: qtYStep, qtCStep: qtCStep)
         }
     }
 

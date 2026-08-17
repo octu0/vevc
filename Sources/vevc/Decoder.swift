@@ -122,8 +122,8 @@ public actor StreamingDecoderActor {
         let isPFrame = (previousReconstructed != nil)
         let useBidirectional = isPFrame && firstReconstructed != nil
         let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
-        // The two pipelines are separate functions so each stays branch-free;
-        // the profile decides here, once.
+        // The pipelines are separate functions so each stays branch-free;
+        // the profile and maxLayer decide here, once.
         let img16: Image16
         if profile == 0x02 {
             img16 = try await decodeSpatialLayersForProfile2(
@@ -134,10 +134,23 @@ public actor StreamingDecoderActor {
                 parallelEntropy: parallelEntropy
             )
         } else {
-            img16 = try await decodeSpatialLayers(
-                r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
-                predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
-            )
+            switch maxLayer {
+            case 0:
+                img16 = try await decodeSpatialLayersBase8Only(
+                    r: chunk, pool: pool, dx: width, dy: height,
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+                )
+            case 1:
+                img16 = try await decodeSpatialLayersWithLayer1(
+                    r: chunk, pool: pool, dx: width, dy: height,
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+                )
+            default:
+                img16 = try await decodeSpatialLayersFull(
+                    r: chunk, pool: pool, dx: width, dy: height,
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+                )
+            }
         }
         
         let pd = PlaneData420(img16: img16)
