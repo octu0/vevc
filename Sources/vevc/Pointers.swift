@@ -85,6 +85,18 @@ internal func withUnsafePointers<T, R>(
 }
 
 @inline(__always)
+internal func withUnsafePointers<T1, T2, R>(
+    mut a: inout [T1], mut b: inout [T2],
+    _ body: (UnsafeMutablePointer<T1>, UnsafeMutablePointer<T2>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeMutableBufferPointer { pA in
+        try b.withUnsafeMutableBufferPointer { pB in
+            try body(pA.baseAddress!, pB.baseAddress!)
+        }
+    }
+}
+
+@inline(__always)
 internal func withUnsafePointers<T, R>(
     mut a: inout [T], mut b: inout [T], mut c: inout [T],
     _ body: (UnsafeMutablePointer<T>, UnsafeMutablePointer<T>, UnsafeMutablePointer<T>) throws -> R

@@ -57,3 +57,148 @@ func spatialSADThreshold(baseSAD: Int, blockCol: Int, blockRow: Int, colCount: I
 func scaledSADThreshold(_ defaultSAD: Int, step: Int) -> Int {
     return (defaultSAD * min(step, 256)) / 48
 }
+
+/// Fast whole-frame SAD estimate (every 4th pixel) for scene-change
+/// detection: per-pixel average over Y plus a chroma term that catches
+/// scene changes where luminance is similar but the color palette differs
+/// (e.g. dark scene to dark scene).
+@inline(__always)
+func estimateFastSAD(a: PlaneData420, b: PlaneData420) -> Int {
+    guard a.y.count == b.y.count, 0 < a.y.count else { return 0 }
+    let yCount = a.y.count
+    var sumY: UInt64 = 0
+    withUnsafePointers(a.y, b.y) { aPtr, bPtr in
+        for i in stride(from: 0, to: yCount, by: 4) {
+            sumY += UInt64(abs(Int(aPtr[i]) - Int(bPtr[i])))
+        }
+    }
+    let ySAD = Int((sumY * 4) / UInt64(yCount))
+
+    let cbCount = a.cb.count
+    guard a.cb.count == b.cb.count, 0 < cbCount else { return ySAD }
+
+    var sumCb: UInt64 = 0
+    var sumCr: UInt64 = 0
+    withUnsafePointers(a.cb, b.cb, a.cr, b.cr) { aCb, bCb, aCr, bCr in
+        for i in stride(from: 0, to: cbCount, by: 4) {
+            sumCb += UInt64(abs(Int(aCb[i]) - Int(bCb[i])))
+            sumCr += UInt64(abs(Int(aCr[i]) - Int(bCr[i])))
+        }
+    }
+    let chromaSAD = Int(((sumCb + sumCr) * 4) / UInt64(cbCount * 2))
+
+    // Weight: Y dominates but chroma provides critical color-change detection
+    return ySAD + chromaSAD
+}
+
+/// Estimate frame-level SAD (Sum of Absolute Differences) between current
+/// and previous PlaneData420 Y planes by sampling representative blocks.
+/// Returns average per-pixel SAD as an Int for RateController input.
+@inline(__always)
+func estimateFrameSAD(current: PlaneData420, previous: PlaneData420) -> Int {
+    let width = current.width
+    let height = current.height
+
+    let blockSize = 32
+    let bw = min(blockSize, width)
+    let bh = min(blockSize, height)
+
+    // Sample 8 blocks at strategic positions (same as estimateQuantization)
+    let points: [(Int, Int)] = [
+        (0, 0),
+        (max(0, width - bw), 0),
+        (0, max(0, height - bh)),
+        (max(0, width - bw), max(0, height - bh)),
+        (max(0, (width - bw) / 2), 0),
+        (max(0, width - bw), max(0, (height - bh) / 2)),
+        (max(0, (width - bw) / 2), max(0, height - bh)),
+        (0, max(0, (height - bh) / 2)),
+    ]
+
+    var totalSAD: Int = 0
+    var totalPixels: Int = 0
+
+    for (sx, sy) in points {
+        for y in sy..<min(sy + bh, height) {
+            let rowOffset = y * width
+            for x in sx..<min(sx + bw, width) {
+                let idx = rowOffset + x
+                totalSAD += abs(Int(current.y[idx]) - Int(previous.y[idx]))
+            }
+        }
+        totalPixels += bw * bh
+    }
+
+    if 0 < totalPixels {
+        return totalSAD / totalPixels
+    }
+    return 0
+}
+
+/// Full block scan with activity mask-based reconstruction distortion measurement.
+/// Returns per-pixel average SAD (same unit as traditional estimateFrameSAD).
+@inline(__always)
+func computeMaskedReconDistortion(
+    original: PlaneData420,
+    reconstructed: PlaneData420,
+    sads: [Int]?
+) -> Int {
+    let width = original.width
+    let height = original.height
+
+    let blockSize = 32
+    let colCount = (width + 31) / 32
+    let rowCount = (height + 31) / 32
+
+    var totalSAD: Int = 0
+    var activePixels: Int = 0
+    var totalFallbackSAD: Int = 0
+    var totalPixels: Int = 0
+
+    withUnsafePointers(original.y, reconstructed.y) { oBase, rBase in
+        for r in 0..<rowCount {
+            let sy = r * blockSize
+            let bh = min(blockSize, height - sy)
+            let rowOffset = r * colCount
+
+            for c in 0..<colCount {
+                let sx = c * blockSize
+                let bw = min(blockSize, width - sx)
+
+                var blockSAD = 0
+                for y in sy..<sy+bh {
+                    let oRow = oBase + y * width + sx
+                    let rRow = rBase + y * width + sx
+
+                    for x in 0..<bw {
+                        blockSAD += abs(Int(oRow[x]) - Int(rRow[x]))
+                    }
+                }
+
+                let pixels = bw * bh
+                totalPixels += pixels
+                totalFallbackSAD += blockSAD
+
+                if let sads = sads {
+                    if 256 < sads[rowOffset + c] {
+                        totalSAD += blockSAD
+                        activePixels += pixels
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: use full block average if active blocks are less than 5% of total
+    if sads == nil || activePixels < (totalPixels / 20) {
+        if 0 < totalPixels {
+            return (totalFallbackSAD << 8) / totalPixels
+        }
+        return 0
+    }
+
+    if 0 < activePixels {
+        return (totalSAD << 8) / activePixels
+    }
+    return 0
+}

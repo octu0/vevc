@@ -19,6 +19,13 @@
 //     (same cap the encoder applies before model selection).
 //   - Enabled for profile 0x02 only.
 
+/// Reference type by design (same rationale as L0RefState): each of the nine
+/// per-stream states is a long-lived box mutated in place across frames and
+/// from the parallel entropy-decode tasks (each task owns one distinct
+/// state), and it caches 12 renormalized 16KB LUT model buffers refilled in
+/// place per frame — value semantics would copy those buffers at every
+/// mutation boundary. ARC traffic is a few retain/release per frame on
+/// long-lived objects, not per token.
 final class EntropyHistoryState: @unchecked Sendable {
     private(set) var runCounts: [[Int]]
     private(set) var valCounts: [[Int]]

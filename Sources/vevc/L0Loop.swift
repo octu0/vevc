@@ -36,30 +36,25 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
     var ll = [Int16](repeating: 0, count: llW * llH)
     var scratch = [Int16](repeating: 0, count: blockSize * blockSize)
     let reader = Int16Reader(data: plane, width: w, height: h)
-    for r in 0..<rowCount {
-        for c in 0..<colCount {
-            scratch.withUnsafeMutableBufferPointer { sb in
-                let sBase = sb.baseAddress!
-                let view = BlockView(base: sBase, width: blockSize, height: blockSize, stride: blockSize)
+    withUnsafePointers(mut: &scratch, mut: &ll) { sBase, dBase in
+        let view = BlockView(base: sBase, width: blockSize, height: blockSize, stride: blockSize)
+        for r in 0..<rowCount {
+            for c in 0..<colCount {
                 reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view)
                 switch blockSize {
                 case 32: dwt2DBlock32(view)
                 case 16: dwt2DBlock16(view)
                 default: dwt2DBlock8(view)
                 }
-                ll.withUnsafeMutableBufferPointer { dst in
-                    let dBase = dst.baseAddress!
-                    let dx0 = c * q
-                    let dy0 = r * q
-                    let copyW = min(q, llW - dx0)
-                    if 0 < copyW {
-                        for y in 0..<q {
-                            let dy = dy0 + y
-                            if dy < llH {
-                                let src = sBase.advanced(by: y * blockSize)
-                                dBase.advanced(by: dy * llW + dx0).update(from: src, count: copyW)
-                            }
-                        }
+                let dx0 = c * q
+                let dy0 = r * q
+                let copyW = min(q, llW - dx0)
+                if copyW <= 0 { continue }
+                for y in 0..<q {
+                    let dy = dy0 + y
+                    if dy < llH {
+                        let src = sBase.advanced(by: y * blockSize)
+                        dBase.advanced(by: dy * llW + dx0).update(from: src, count: copyW)
                     }
                 }
             }
@@ -267,13 +262,10 @@ func subtractPlanes(_ a: inout Image16, _ b: PlaneData420) {
 
 @inline(__always)
 private func subtractInt16(_ a: inout [Int16], _ b: [Int16]) {
-    a.withUnsafeMutableBufferPointer { aBuf in
-        b.withUnsafeBufferPointer { bBuf in
-            let aBase = aBuf.baseAddress!
-            let bBase = bBuf.baseAddress!
-            for i in 0..<min(aBuf.count, bBuf.count) {
-                aBase[i] &-= bBase[i]
-            }
+    let count = min(a.count, b.count)
+    withUnsafePointers(mut: &a, b) { aBase, bBase in
+        for i in 0..<count {
+            aBase[i] &-= bBase[i]
         }
     }
 }
@@ -285,9 +277,9 @@ func freshCopy(_ img: Image16) -> PlaneData420 {
     var y = [Int16](repeating: 0, count: img.y.count)
     var cb = [Int16](repeating: 0, count: img.cb.count)
     var cr = [Int16](repeating: 0, count: img.cr.count)
-    y.withUnsafeMutableBufferPointer { dst in img.y.withUnsafeBufferPointer { dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) } }
-    cb.withUnsafeMutableBufferPointer { dst in img.cb.withUnsafeBufferPointer { dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) } }
-    cr.withUnsafeMutableBufferPointer { dst in img.cr.withUnsafeBufferPointer { dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) } }
+    withUnsafePointers(img.y, mut: &y) { src, dst in dst.update(from: src, count: img.y.count) }
+    withUnsafePointers(img.cb, mut: &cb) { src, dst in dst.update(from: src, count: img.cb.count) }
+    withUnsafePointers(img.cr, mut: &cr) { src, dst in dst.update(from: src, count: img.cr.count) }
     return PlaneData420(width: img.width, height: img.height, y: y, cb: cb, cr: cr)
 }
 
@@ -300,26 +292,22 @@ func clearL0SkipResidual(img: inout Image16, skipMap: [BlockMode], fullDx: Int) 
     let dy = img.height
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
-    img.y.withUnsafeMutableBufferPointer { yBuf in
-        img.cb.withUnsafeMutableBufferPointer { cbBuf in
-            img.cr.withUnsafeMutableBufferPointer { crBuf in
-                for i in 0..<skipMap.count {
-                    if skipMap[i] != .inter {
-                        let bx = ((i % bw) * 32) / 4
-                        let by = ((i / bw) * 32) / 4
-                        for yy in by..<min(by + 8, dy) {
-                            let off = yy * dx + bx
-                            for xx in 0..<min(8, dx - bx) { yBuf[off + xx] = 0 }
-                        }
-                        let cx = bx / 2
-                        let cy = by / 2
-                        for yy in cy..<min(cy + 4, cbDy) {
-                            let off = yy * cbDx + cx
-                            for xx in 0..<min(4, cbDx - cx) {
-                                cbBuf[off + xx] = 0
-                                crBuf[off + xx] = 0
-                            }
-                        }
+    withUnsafePointers(mut: &img.y, mut: &img.cb, mut: &img.cr) { yBuf, cbBuf, crBuf in
+        for i in 0..<skipMap.count {
+            if skipMap[i] != .inter {
+                let bx = ((i % bw) * 32) / 4
+                let by = ((i / bw) * 32) / 4
+                for yy in by..<min(by + 8, dy) {
+                    let off = yy * dx + bx
+                    for xx in 0..<min(8, dx - bx) { yBuf[off + xx] = 0 }
+                }
+                let cx = bx / 2
+                let cy = by / 2
+                for yy in cy..<min(cy + 4, cbDy) {
+                    let off = yy * cbDx + cx
+                    for xx in 0..<min(4, cbDx - cx) {
+                        cbBuf[off + xx] = 0
+                        crBuf[off + xx] = 0
                     }
                 }
             }

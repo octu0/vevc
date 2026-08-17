@@ -717,6 +717,30 @@ final class BlockViewPool: @unchecked Sendable {
     }
 }
 
+// MARK: - FrameRateConverter
+
+/// Frame-rate conversion by frame repetition/dropping: feed input frames in
+/// order and emit each one repeatCount() times.
+public struct FrameRateConverter {
+    public let inFps: Int
+    public let outFps: Int
+    private var acc: Int = 0
+
+    public init(inFps: Int, outFps: Int) {
+        precondition(inFps > 0 && outFps > 0, "inFps and outFps must be positive integers")
+        self.inFps = inFps
+        self.outFps = outFps
+    }
+
+    /// Output count for the next input frame (call order = input frame order).
+    public mutating func repeatCount() -> Int {
+        acc += outFps
+        let count = acc / inFps
+        acc %= inFps
+        return count
+    }
+}
+
 
 
 
