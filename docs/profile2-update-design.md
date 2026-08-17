@@ -1,6 +1,7 @@
 # Profile 0x02 Update: Design Specification (B' — "One Pyramid, Two Loops")
 
-Status: DRAFT for review (2026-08-04). Applies to Profile 0x02 only; no backward compatibility retained (profile is in development).
+Status: IMPLEMENTED through Wave 4 (2026-08-17). Applies to Profile 0x02 only; no backward compatibility retained (profile is in development).
+Implementation status per wave (§9): Wave 1 implemented and gate-tested, **dormant** behind `enableL0Loop` (failed the +2% size budget: miko 500k +6.7%; pending decision between accepting the cost, Option C, or MC_L0 precision work). Wave 2 done — the context replacement adopted the measured winner (previous-coefficient only, parent-free; σ conditioning rejected: unstable across content) instead of the drafted 8-context scheme, and the §7 header restructure proved unnecessary (the existing per-layer/per-plane sizes already make the 9 streams independently addressable). Wave 3 done as a latency-mode option (`parallelEntropy`; under GOP-parallel throughput decoding the fan-out is counterproductive). Wave 4 done (all-layer skip bypass, bit-exact). Wave 5 (docs) done. Measured 2026-08-17 remote: encode 9.41 ms/frame (≤10 target met), decode 1.39 ms/frame (≤1.10 open).
 
 ## 1. Goals
 

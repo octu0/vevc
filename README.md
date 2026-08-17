@@ -250,6 +250,9 @@ The encoder automatically selects the mode that minimizes total encoded size for
 - **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 1-byte markers
 - **Backward-Adaptive Entropy Tables**: Profile 2 P-frames can reuse rANS models rebuilt from decoded history (zero table headers, decoder stays in lockstep without signaling)
 - **Saturation-Gated Quantization Range**: the qHigh (HH) cap ramps up to 2× only when the rate controller saturates (base step beyond 2048), lowering the achievable rate floor by ~7% without touching normal-rate quality or worst-frame structure (qMid/qLow are never extended)
+- **Parent-Free Entropy Contexts (Profile 2)**: AC coefficient contexts condition only on the previous coefficient, never on the parent layer — measured smaller streams under the backward-adaptive tables, and it decouples the 9 coefficient streams (3 layers × 3 planes) from each other
+- **All-Layer Skip Bypass (Profile 2)**: skip blocks bypass the block read, DWT and quantization on the encoder and dequant/inverse-DWT on the decoder at every layer (bit-exact — their coefficients are zero by construction). On skip-heavy live content this is the difference between 11.4 and 9.4 ms/frame encode at 1080p60
+- **Latency-Mode Parallel Entropy Decode (Profile 2)**: the 9 independent streams can entropy-decode concurrently for single-stream low-latency playback (−13% per-frame latency); GOP-parallel throughput decoding keeps the sequential order, which is faster when all cores are already busy
 
 ---
 

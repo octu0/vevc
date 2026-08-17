@@ -46,22 +46,24 @@ To maintain a closed-loop design, the following invariants are strictly enforced
    - Deblocking Filter.
    - **Final Skip Copy:** (Crucial Step) Skipped blocks are overwritten with the raw reference pixels (`skip_prev` from the previous frame, `skip_ltr` from the LTR frame).
 3. **Post-Deblocking Skip Copy:** The final skip copy occurs **after** the deblocking filter. This ensures that skipped block pixels are identical to the raw reference pixels. The encoder applies this copy in `encodeSpatialLayers` immediately after `applyDeblockingFilter32` / `applyDeblockingFilterChroma16`. The decoder applies it at the end of `decodeSpatialLayers`. (Historically, the encoder kept deblocked pixels in the reference for skipped blocks, causing drift at the skip/inter boundaries).
-4. **Validation:** This bit-exactness is permanently verified by the `Profile0x02FixtureTests.swift` reconstruction tests. **WARNING: Modifying reconstruction, deblocking, or MC in only one side (encoder or decoder) will inevitably break this test.**
+4. **Function-variant identity:** every reconstruction-path call (deblock, MC, layer reconstruction) must invoke the **identical function variant with identical parameters** on both sides. Three real asymmetries of this class were found and fixed in 2026-08: the encoder's P-frame deblock used the plain variants while the decoder used the intra-boundary-enhanced + skip-gated ones (95d7994); the encoder reconstructed skip-block regions that the decoder leaves zero until the final skip copy, diverging deblock edge reads at mixed inter|skip edges (9d491b4); the encoder's I-frame chroma deblock used a different function than the decoder's mvs==nil branch (9d491b4). Each diverged the reconstructions by ±1 and, once the entropy contexts started depending on reconstruction state, desynchronized the backward-adaptive tables.
+5. **Validation:** This bit-exactness is permanently verified by the `Profile0x02FixtureTests.swift` reconstruction tests, and by `L0HistoryDiagTests` which locksteps the full reconstruction, the L0 reference chain, and every backward-adaptive history state between encoder and decoder on real 1080p content. **WARNING: Modifying reconstruction, deblocking, or MC in only one side (encoder or decoder) will inevitably break these tests.**
+6. **L0 closed loop (optional mode, dormant):** with `enableL0Loop` (One-Pyramid Wave 1, off by default pending the rate decision), Base8 codes `r0 = LL2(source) − MC_L0(L0_ref)` and both sides maintain a quarter-resolution L0 reference chain that closes over the bitstream alone — the `maxLayer=0` output becomes bit-exact with the encoder's L0 reconstruction. The flag changes the layer0 payload semantics and is NOT signaled in the bitstream: encoder and decoder must agree on it out of band.
 
-## 4. Skip Block Computation Bypass and Structural Constraints
+## 4. Skip Block Computation Bypass (All Layers)
 
-**Constraint:** Computational bypass for skipped blocks is ONLY permitted in Layer 32. It is structurally prohibited in Layer 16 and Base 8.
+**Current rule (since 2026-08-17, One-Pyramid Waves 2+4):** skipped blocks bypass computation at **every** layer, on both sides. This is legal because profile 0x02 codes its AC entropy contexts **parent-free** (`ParentFreeContext.swift`): no layer's entropy decode reads another layer's block buffers, so reconstruction state can no longer desynchronize the rANS streams.
 
-- **Entropy Context Dependency:** The parent layer entropy context (e.g., `blockDecode4HParent`, `blockDecode16HParent`) reads the parent block's buffer **after** the reconstruction is executed. Because `dequantize` and inverse DWT modify the block buffers in-place, skipping the reconstruction alters the buffer contents.
-- **rANS Synchronization:** If Layer 16 or Base 8 reconstruction is bypassed on only one side (e.g., encoder but not decoder), their entropy contexts will diverge, causing the rANS codec to lose synchronization and emit `lscp out of range` errors. **This is a structural constraint that cannot be fixed by adjusting indices or patching code.**
-- **Layer 32 Bypass:** Because Layer 32 blocks do not serve as parents to any other layer, their reconstruction state does not affect any entropy context. Thus, skipped Layer 32 blocks can safely bypass LL subband reading, dequantization, inverse DWT, and write-back entirely.
-  - Encoder: `reconstructPlaneLayer32Y`, `reconstructPlaneLayer32Cb`, `reconstructPlaneLayer32Cr`.
-  - Decoder: `decodeLayer32ProcessYWithSkipMap`, `decodeLayer32ProcessCbWithSkipMap`, `decodeLayer32ProcessCrWithSkipMap`.
-- **Skip Map Indexing:** The `skipMap` indices have a 1:1 grid correspondence across all layers (L2 = 32x32, L1 = 16x16, Base = 8x8), as the number of matrix elements is identical. The self-layer grid index (`row * colCount + col`) must be used directly. **Applying `/2` or `/4` transformations to the index is incorrect.**
+- **Normative basis:** skip blocks carry all-zero coefficients by construction (the encoder zeroes their residual before the DWT). Dequantization and the integer LeGall lifting both map zero to zero, so "reconstruct" and "bypass" produce identical pixels for these blocks.
+- **Encoder bypass:** `extractSingleTransformBlocks32/16/Base8` skip the block read, zero-scan, DWT and quantization for skip blocks; `reconstructPlaneLayer32*` skip their reconstruction. Coded streams are unchanged (verified SHA1-identical).
+- **Decoder bypass:** `decodeLayer32Process*WithSkipMap` and `decodeLayer16Process*WithSkipMap` skip reconstruction entirely (layer1 only when layer2 is present — otherwise layer1 is the display output and every block reconstructs); `decodeBase8Process*WithSkipMap` copy the cleared block views without dequant/IDWT (bit-exact at every `maxLayer`). Decoded outputs are unchanged (verified SHA1-identical).
+- **Skip Map Indexing:** luma grids of all layers are `ceil(dx/32) × ceil(dy/32)` and map 1:1 to the skip map — use the self-layer grid index (`row * colCount + col`) directly; `/2` or `/4` transformations are incorrect. Layer1/Layer2 **chroma** blocks are 1:1 with *each other* and use the same direct index; only Base8 chroma blocks span 2×2 skip-map entries geometrically and bypass only when all four are non-inter.
 - **Additional Optimizations:**
   - For skipped blocks, motion search and forward transform input scanning are bypassed.
   - The LTR reference subband pyramid (downscaled images for ME) remains invariant within a GOP and is cached, only recomputed at keyframes.
-  - The decoder parallelizes the reconstruction process within a frame (entropy decoding remains sequential due to intra-plane dependencies).
+  - The 9 coefficient streams (3 layers × 3 planes) are independent and can entropy-decode in parallel (`parallelEntropy`, latency mode). Under GOP-parallel throughput decoding the fan-out only adds overhead, so the GOP-parallel `Decoder` uses the sequential order.
+
+**Historical constraint (superseded):** until 2026-08-14, profile 0x02 shared the parent-conditioned entropy contexts with profile 0x01 — the layer1/Base8 block buffers were read (post in-place dequant/IDWT) as the next layer's rANS context, so bypassing their reconstruction on one side desynchronized the codec (`lscp out of range`). The parent-free context change (measured smaller streams on every configuration under the backward-adaptive tables) removed that dependency; profile 0x01 still has it, and keeps the layer-32-only bypass rule.
 
 ## 5. Relationship with Deblocking Filter
 
@@ -84,6 +86,8 @@ Based on user benchmarks conducted on 2026-07-30 (Comparing Profile 0x02 to Prof
 1. For the target use case (game streaming with large static regions at low bitrates, e.g., `miko1 300k`), Profile 0x02 significantly outperforms 0x01 in all metrics: reduced bitrate (size), improved quality (SSIM), and increased encoding/decoding speed.
 2. **Known Limitations:** At high bitrates, SSIM may be lower than 0x01 (a trade-off for bitrate reduction). For content with high motion and almost no skipped blocks (e.g., `ToS`), Profile 0x02 incurs a slight penalty due to the signaling overhead of the skip map.
 3. Profile 0x02 is opt-in and should be selected when the content characteristics match its design goals.
+
+**Update (2026-08-17, remote 3-run, miko1 1801f 1080p60 @500k):** encode 9.41 ms/frame (target ≤10 met; was 11.4 before the reconstruction-symmetry fixes and the all-layer skip bypass), full decode 1.39 ms/frame (target ≤1.10 still open), layer-1-only decode 0.44 ms, layer-0-only 0.15 ms. PSNR 31.11 / SSIM min 0.7617.
 
 ## 7. Future Improvements
 - **QStep-Conditional Skip:** Implement a more conservative skip decision at high bitrates (currently unimplemented).
@@ -181,7 +185,7 @@ Measured results vs. the unfixed baseline (`miko1.y4m`, Profile 0x02): skip rati
 
 **Verified result:** the severe rainbow corruption at Frame 174 Layer0 is eliminated; Luma stays intact; Layer1/2 unaffected. Stream size / PSNR / SSIM are bit-identical to before the fix (decoder-only change, encoder output unchanged); all 32 tests PASS; `Profile0x02FixtureTests` unaffected (they exercise `maxLayer=2`).
 
-**Remaining (separate, minor):** a faint pitcher-region ghost still visible at Layer0/1. This is **not** the chroma MC bug — it comes from `skip_ltr`/`skip_prev` reference copying combined with the structural fact that `maxLayer=0/1` decode reads no high-frequency residual to correct the copied reference. It is a distinct issue from the corruption fixed here.
+**Remaining (separate, minor):** a faint pitcher-region ghost still visible at Layer0/1. This is **not** the chroma MC bug — it comes from `skip_ltr`/`skip_prev` reference copying combined with the structural fact that `maxLayer=0/1` decode reads no high-frequency residual to correct the copied reference, plus the operator mismatch between the encoder's full-resolution loop and the decoder's layer0 MC approximation. **Update 2026-08-14: the layer0 half of this is structurally solved by the L0 closed loop (One-Pyramid Wave 1, §3 invariant 6) — the `maxLayer=0` output becomes bit-exact with the encoder. The mode is implemented and gate-tested but dormant (`enableL0Loop`, off by default) because it costs +6.7% total size at 500k; enabling it is a pending rate-vs-quality decision.**
 
 ---
 
