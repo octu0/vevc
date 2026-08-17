@@ -617,26 +617,37 @@ struct MotionEstimation {
         cbw: Int, cbh: Int,
         bx: Int, by: Int, refDx: Int, refDy: Int
     ) -> Int {
+        // bx/by are quarter-resolution block coordinates; the chroma planes
+        // are half resolution, so the block's chroma region is 16×16 at
+        // (2bx, 2by). refDx/refDy are the full-resolution-pixel motion vector
+        // (ChromaSADCoordinateTests pins this contract), so the chroma
+        // displacement is refDx>>1. Callers must NOT pre-scale the MV — the
+        // previous call sites passed mv*2, sampling the reference at DOUBLE
+        // the true motion displacement (correct only for zero MVs, wrong for
+        // exactly the moving blocks the penalty exists for).
         let cx = bx << 1
         let cy = by << 1
         let crx = cx + (refDx >> 1)
         let cry = cy + (refDy >> 1)
-        
-        let isCurrSafe = (0 <= cx) && (0 <= cy) && (cx + 4 <= cbw) && (cy + 4 <= cbh)
-        let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 4 <= cbw) && (cry + 4 <= cbh)
-        
+
+        // 4×4 samples strided by 4 across the whole 16×16 chroma region (the
+        // corner-only version read the top-left 4×4 — 1/16 coverage, which
+        // let chroma mismatches in the remaining area go unseen).
+        let isCurrSafe = (0 <= cx) && (0 <= cy) && (cx + 13 <= cbw) && (cy + 13 <= cbh)
+        let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 13 <= cbw) && (cry + 13 <= cbh)
+
         if isCurrSafe && isRefSafe {
             var sad: Int32 = 0
             for y in 0..<4 {
-                let currOffset = (cy + y) * cbw + cx
-                let refOffset = (cry + y) * cbw + crx
-                
+                let currOffset = (cy + y * 4) * cbw + cx
+                let refOffset = (cry + y * 4) * cbw + crx
+
                 for x in 0..<4 {
-                    sad &+= Int32((Int32(currCb[currOffset + x]) - Int32(refCb[refOffset + x])).magnitude)
-                    sad &+= Int32((Int32(currCr[currOffset + x]) - Int32(refCr[refOffset + x])).magnitude)
+                    sad &+= Int32((Int32(currCb[currOffset + x * 4]) - Int32(refCb[refOffset + x * 4])).magnitude)
+                    sad &+= Int32((Int32(currCr[currOffset + x * 4]) - Int32(refCr[refOffset + x * 4])).magnitude)
                 }
             }
-            return Int(sad) * 4 // Luma SAD scale matching (since we check 16 pixels here instead of 64 in Luma, *4 keeps penalty scale relative to Luma)
+            return Int(sad) * 4 // Luma SAD scale matching (16 sample positions × 2 planes vs 64 luma points)
         }
         return 1000
     }
@@ -1217,12 +1228,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
                     )
                     
-                    let intPrevDx = Int(mvPrev.dx) * 2
-                    let intPrevDy = Int(mvPrev.dy) * 2
-                    let intNextDx = Int(mvNext.dx) * 2
-                    let intNextDy = Int(mvNext.dy) * 2
-                    
-                    let prevChromaSad = MotionEstimation.computeChromaSAD(curr: currConst, ref: prevConst, bx: bx, by: by, refDx: intPrevDx, refDy: intPrevDy)
+                    let prevChromaSad = MotionEstimation.computeChromaSAD(curr: currConst, ref: prevConst, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
                     mutSADPrev += prevChromaSad / 4
                     let prevSAD = mutSADPrev
                     
@@ -1238,11 +1244,15 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
                         
                         if mutSADNext + baselinePenalty < prevSAD {
-                            let nextContrast = MotionEstimation.extractContrast8x8(base: nBase, width: targetWidth, height: targetHeight, bx: bx + (intNextDx >> 2), by: by + (intNextDy >> 2))
+                            // Quarter-resolution displacement is mv/4 (the mv
+                            // is in full-resolution pixels; the previous
+                            // intNextDx>>2 = mv/2 probed double the true
+                            // displacement).
+                            let nextContrast = MotionEstimation.extractContrast8x8(base: nBase, width: targetWidth, height: targetHeight, bx: bx + (Int(mvNext.dx) >> 2), by: by + (Int(mvNext.dy) >> 2))
                             
                             let contrastDiff = Int((currContrast - nextContrast).magnitude)
                             let structurePenalty = (contrastDiff * contrastDiff) / 4
-                            let chromaSAD = MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: intNextDx, refDy: intNextDy)
+                            let chromaSAD = MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
                             let chromaPenalty = chromaSAD / 4
                             
                             let totalNextPenalty = ((mutSADNext + baselinePenalty) + (structurePenalty + chromaPenalty))
@@ -1262,7 +1272,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         }
                     }
                     dynamicThreshold = max(1024, currContrast * 48)
-                    let finalSAD = dir ? (mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: intNextDx, refDy: intNextDy) / 4)) : prevSAD
+                    let finalSAD = dir ? (mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) / 4)) : prevSAD
                     switch true {
                     case dynamicThreshold < finalSAD:
                         dx[i] = 0

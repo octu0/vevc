@@ -322,8 +322,16 @@ struct CompareApp {
                     statsOut = stats
                     print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f | 50%%: %5.2f | 90%%: %5.2f | SD: %5.2f", 
                                 stats.avgPSNR, stats.minPSNR, stats.maxPSNR, stats.p50PSNR, stats.p90PSNR, stats.stddevPSNR))
-                    print(String(format: "  SSIM   : Avg: %5.4f | Min: %5.4f | Max: %5.4f | 50%%: %5.4f | 90%%: %5.4f | SD: %5.4f", 
+                    print(String(format: "  SSIM   : Avg: %5.4f | Min: %5.4f | Max: %5.4f | 50%%: %5.4f | 90%%: %5.4f | SD: %5.4f",
                                 stats.avgSSIM, stats.minSSIM, stats.maxSSIM, stats.p50SSIM, stats.p90SSIM, stats.stddevSSIM))
+                    // Worst-frame indices (decoded frame numbers): the min
+                    // values gate quality work, so name the frames they come
+                    // from.
+                    if let m = metrics, m.isEmpty != true {
+                        let minSsimIdx = m.indices.min(by: { m[$0].ssim < m[$1].ssim }) ?? 0
+                        let minPsnrIdx = m.indices.min(by: { m[$0].psnr < m[$1].psnr }) ?? 0
+                        print("  Worst  : SSIM min at decoded frame \(minSsimIdx) | PSNR min at decoded frame \(minPsnrIdx)")
+                    }
                 }
                 
                 return CodecBenchmarkResult(name: name, encTimeMs: count > 0 ? encMs / Double(count) : 0, decTimeMs: count > 0 ? decMs / Double(count) : 0, sizeKB: sizeKB, stats: statsOut)
