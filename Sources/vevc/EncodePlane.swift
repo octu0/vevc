@@ -94,19 +94,23 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    // Skip-map geometry for the layer2 extract: a luma 32-block at full
+    // resolution covers exactly one skip-map entry; a chroma 32-block on the
+    // half-resolution chroma plane spans 64 full-resolution pixels = 2×2
+    // entries (all four must be non-inter).
     var isSkipMap = [Bool](repeating: false, count: totalBlocks)
     if let sMap = skipMap, 0 < skipMapWidth {
         for i in 0..<rowCount {
             for j in 0..<colCount {
-                let lx = isChroma ? (j * 4) : (j * 2)
-                let ly = isChroma ? (i * 4) : (i * 2)
-                let count = isChroma ? 4 : 2
+                let lx = isChroma ? (j * 2) : j
+                let ly = isChroma ? (i * 2) : i
+                let count = isChroma ? 2 : 1
                 let idx = i * colCount + j
                 isSkipMap[idx] = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
             }
         }
     }
-    
+
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
@@ -292,19 +296,22 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    // Skip-map geometry for the layer1 extract (half-resolution planes): a
+    // luma 16-block covers exactly one skip-map entry; a chroma 16-block on
+    // the quarter-resolution chroma plane spans 2×2 entries.
     var isSkipMap = [Bool](repeating: false, count: totalBlocks)
     if let sMap = skipMap, 0 < skipMapWidth {
         for i in 0..<rowCount {
             for j in 0..<colCount {
-                let lx = isChroma ? (j * 4) : (j * 2)
-                let ly = isChroma ? (i * 4) : (i * 2)
-                let count = isChroma ? 4 : 2
+                let lx = isChroma ? (j * 2) : j
+                let ly = isChroma ? (i * 2) : i
+                let count = isChroma ? 2 : 1
                 let idx = i * colCount + j
                 isSkipMap[idx] = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
             }
         }
     }
-    
+
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
@@ -496,11 +503,14 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
                             if width <= w || height <= h { continue }
                             let view = blocks[(i * colCount) + j]
                             
+                            // Base8 geometry (quarter-resolution planes): a
+                            // luma 8-block covers one skip-map entry; a chroma
+                            // 8-block spans 2×2 entries.
                             var isSkip = false
                             if let sMap = skipMap, skipMapWidth > 0 {
-                                let lx = isChroma ? (j * 4) : (j * 2)
-                                let ly = isChroma ? (i * 4) : (i * 2)
-                                let count = isChroma ? 4 : 2
+                                let lx = isChroma ? (j * 2) : j
+                                let ly = isChroma ? (i * 2) : i
+                                let count = isChroma ? 2 : 1
                                 isSkip = isBlockAllSkip(skipMap: sMap, mapWidth: skipMapWidth, lxStart: lx, lyStart: ly, countX: count, countY: count)
                             }
                             

@@ -351,14 +351,24 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
     let base8CrBlocks = blocksBySlot[2]!
 
     // --- Stage 2: layer 0 reconstruction + L0 reference chain ---------------
+    // Skip blocks bypass dequant/IDWT (One-Pyramid §5, DecodeSkipBypass.swift)
+    // — bit-exact, their coefficients are all zero by construction.
     var baseImg = Image16(width: l0dx, height: l0dy, pool: pool, zeroed: false)
     let rc0Y = (l0dy + 7) / 8
     let cc0Y = (l0dx + 7) / 8
     let rc0C = (l0cbDy + 7) / 8
     let cc0C = (l0cbDx + 7) / 8
-    await decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: base8YBlocks, qt: qtY0, sub: &baseImg)
-    await decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: base8CbBlocks, qt: qtC0, sub: &baseImg)
-    await decodeBase8ProcessCr(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: base8CrBlocks, qt: qtC0, sub: &baseImg)
+    if let sMap = skipMap {
+        let bw = (dx + 31) / 32
+        let bh = (dy + 31) / 32
+        await decodeBase8ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: base8YBlocks, qt: qtY0, skipMap: sMap, sub: &baseImg)
+        await decodeBase8ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: base8CbBlocks, qt: qtC0, skipMap: sMap, skipBw: bw, skipBh: bh, sub: &baseImg)
+        await decodeBase8ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: base8CrBlocks, qt: qtC0, skipMap: sMap, skipBw: bw, skipBh: bh, sub: &baseImg)
+    } else {
+        await decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: base8YBlocks, qt: qtY0, sub: &baseImg)
+        await decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: base8CbBlocks, qt: qtC0, sub: &baseImg)
+        await decodeBase8ProcessCr(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: base8CrBlocks, qt: qtC0, sub: &baseImg)
+    }
     pool.putBlockViewArray64(base8YBlocks)
     pool.putBlockViewArray64(base8CbBlocks)
     pool.putBlockViewArray64(base8CrBlocks)
@@ -420,9 +430,19 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
         let cc1Y = (l1dx + 15) / 16
         let rc1C = (l1cbDy + 15) / 16
         let cc1C = (l1cbDx + 15) / 16
-        await decodeLayer16ProcessY(pool: pool, taskIdx: 0, chunkSize: rc1Y, rowCount: rc1Y, dx: l1dx, colCount: cc1Y, blocks: l1YBlocks, prev: current, qt: qtY1, sub: &l1Img)
-        await decodeLayer16ProcessCb(pool: pool, taskIdx: 0, chunkSize: rc1C, rowCount: rc1C, dx: l1cbDx, colCount: cc1C, blocks: l1CbBlocks, prev: current, qt: qtC1, sub: &l1Img)
-        await decodeLayer16ProcessCr(pool: pool, taskIdx: 0, chunkSize: rc1C, rowCount: rc1C, dx: l1cbDx, colCount: cc1C, blocks: l1CrBlocks, prev: current, qt: qtC1, sub: &l1Img)
+        // With layer2 present, layer2 skips the same block indices, so layer1
+        // skip blocks are never read — bypass their reconstruction entirely
+        // (One-Pyramid §5). Without layer2 this plane is the display output,
+        // so every block reconstructs.
+        if hasLayer2, let sMap = skipMap {
+            await decodeLayer16ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc1Y, rowCount: rc1Y, dx: l1dx, colCount: cc1Y, blocks: l1YBlocks, prev: current, qt: qtY1, skipMap: sMap, sub: &l1Img)
+            await decodeLayer16ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc1C, rowCount: rc1C, dx: l1cbDx, colCount: cc1C, blocks: l1CbBlocks, prev: current, qt: qtC1, skipMap: sMap, sub: &l1Img)
+            await decodeLayer16ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc1C, rowCount: rc1C, dx: l1cbDx, colCount: cc1C, blocks: l1CrBlocks, prev: current, qt: qtC1, skipMap: sMap, sub: &l1Img)
+        } else {
+            await decodeLayer16ProcessY(pool: pool, taskIdx: 0, chunkSize: rc1Y, rowCount: rc1Y, dx: l1dx, colCount: cc1Y, blocks: l1YBlocks, prev: current, qt: qtY1, sub: &l1Img)
+            await decodeLayer16ProcessCb(pool: pool, taskIdx: 0, chunkSize: rc1C, rowCount: rc1C, dx: l1cbDx, colCount: cc1C, blocks: l1CbBlocks, prev: current, qt: qtC1, sub: &l1Img)
+            await decodeLayer16ProcessCr(pool: pool, taskIdx: 0, chunkSize: rc1C, rowCount: rc1C, dx: l1cbDx, colCount: cc1C, blocks: l1CrBlocks, prev: current, qt: qtC1, sub: &l1Img)
+        }
         pool.putBlockViewArray256(l1YBlocks)
         pool.putBlockViewArray256(l1CbBlocks)
         pool.putBlockViewArray256(l1CrBlocks)
