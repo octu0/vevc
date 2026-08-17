@@ -532,6 +532,10 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
     let qtYStep = Int(qtY0.step)
     let qtCStep = Int(qtC0.step)
     var current = baseImg
+    // The full-resolution prediction built for the LL2 slot, reused for the
+    // layer2 reconstruction (fusePredictionPlane* is bit-identical to a
+    // second MC apply pass; requires the skip map for the replace regions).
+    var fullPForL2: PlaneData420? = nil
 
     // L0 closed loop (One-Pyramid §4): Base8 carries
     // r0 = LL2(source) − MC_L0(L0_ref); maintain the quarter-resolution
@@ -557,6 +561,9 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
             var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
             subtractPlanes(&slot, tP)
             current = slot
+            if skipMap != nil {
+                fullPForL2 = fullP
+            }
         }
 
         l0State.prev = newRef
@@ -609,8 +616,14 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
     pool.putBlockViewArray1024(l2CbBlocks)
     pool.putBlockViewArray1024(l2CrBlocks)
 
-    // MC: MV is layer0 precision -> layer2 (full resolution) mvScale=4
-    if let tPrev = predictedPd, let tMVs = mvs {
+    // MC: MV is layer0 precision -> layer2 (full resolution) mvScale=4.
+    // When the L0 chain already built the prediction plane, fuse it in
+    // instead of a second MC pass (bit-identical).
+    if let fullP = fullPForL2, let sMap = skipMap {
+        fusePredictionPlane32(recon: &l2Img.y, p: fullP.y, skipMap: sMap, width: l2dx, height: l2dy)
+        fusePredictionPlane16(recon: &l2Img.cb, p: fullP.cb, skipMap: sMap, width: l2cbDx, height: l2cbDy)
+        fusePredictionPlane16(recon: &l2Img.cr, p: fullP.cr, skipMap: sMap, width: l2cbDx, height: l2cbDy)
+    } else if let tPrev = predictedPd, let tMVs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
             await applyScaledBidirectionalMotionCompensationLuma(plane: &l2Img.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: l2dx, height: l2dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
             await applyScaledBidirectionalMotionCompensationChroma(plane: &l2Img.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: l2cbDx, height: l2cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)

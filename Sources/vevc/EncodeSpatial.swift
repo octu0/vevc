@@ -526,6 +526,10 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // decoder's layer0 chain). Requires an L0 reference from a preceding
     // I-frame; without one the legacy LL2(residual) semantics apply.
     var base8Input = sub1
+    // The full-resolution prediction built for the LL2 slot, reused for the
+    // layer2 reconstruction (fusePredictionPlane* is bit-identical to a
+    // second MC apply pass).
+    var fullPForRecon: PlaneData420? = nil
     if let l0Prev = l0State.prev {
         let tSrc = analyzeLL2(pd: pd)
         var r0 = Image16(width: tSrc.width, height: tSrc.height, y: tSrc.y, cb: tSrc.cb, cr: tSrc.cr)
@@ -559,6 +563,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         // The full loop's LL2 coefficient slot is L0_recon − LL2(P), with P
         // built by the identical MC call sequence the decoder uses.
         let fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: pPd, ltrPd: nPd, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        fullPForRecon = fullP
         let tP = analyzeLL2(pd: fullP)
         var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
         subtractPlanes(&slot, tP)
@@ -598,9 +603,18 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool, skipMap: sMap)
     var mutReconL2Cr = reconL2Cr
 
-    await applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-    await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-    await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    // With the L0 loop active, the full-resolution prediction plane was
+    // already built by the identical MC call sequence — fuse it in (add for
+    // inter blocks, replace for skip blocks) instead of a second MC pass.
+    if let fullP = fullPForRecon {
+        fusePredictionPlane32(recon: &mutReconL2Y, p: fullP.y, skipMap: sMap, width: dx, height: dy)
+        fusePredictionPlane16(recon: &mutReconL2Cb, p: fullP.cb, skipMap: sMap, width: cbDx, height: cbDy)
+        fusePredictionPlane16(recon: &mutReconL2Cr, p: fullP.cr, skipMap: sMap, width: cbDx, height: cbDy)
+    } else {
+        await applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    }
 
     let skipMapData = encodeSkipMap(map: skipMap)
     let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, profile: 0x02)

@@ -264,6 +264,74 @@ func analyzeLL1(pd: PlaneData420) -> PlaneData420 {
     return PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: y0, cb: cb0, cr: cr0)
 }
 
+// MARK: - Prediction plane fusion
+//
+// The L0 chain builds the prediction plane P with the exact MC call sequence
+// the reconstruction would use. Fusing P into the reconstruction is
+// bit-identical to re-running the MC apply pass:
+// - inter blocks: the apply adds a value independent of the destination, and
+//   P holds exactly that value (added into a zero plane) → recon &+= P.
+// - skip blocks: the apply REPLACES the region with a raw reference copy,
+//   and P holds exactly that copy → recon = P. (Replacement matters: the
+//   layer2 chroma reconstruction leaves small nonzero values in some skip
+//   regions — its skip test indexes the luma-geometry skip map with the
+//   chroma block grid — and the apply pass discards them, so adding would
+//   diverge.)
+// - intra blocks: the apply adds nothing and P is zero there → recon &+= 0.
+// One function per block size (the per-plane block grid is 1:1 with the
+// skip-map grid at every size: ceil(ceil(dx/2^k)/2^(5-k)) == ceil(dx/32)).
+
+@inline(__always)
+func fusePredictionPlane32(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int) {
+    fusePredictionPlane(recon: &recon, p: p, skipMap: skipMap, width: width, height: height, blockSize: 32)
+}
+
+@inline(__always)
+func fusePredictionPlane16(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int) {
+    fusePredictionPlane(recon: &recon, p: p, skipMap: skipMap, width: width, height: height, blockSize: 16)
+}
+
+@inline(__always)
+func fusePredictionPlane8(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int) {
+    fusePredictionPlane(recon: &recon, p: p, skipMap: skipMap, width: width, height: height, blockSize: 8)
+}
+
+@inline(__always)
+func fusePredictionPlane4(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int) {
+    fusePredictionPlane(recon: &recon, p: p, skipMap: skipMap, width: width, height: height, blockSize: 4)
+}
+
+@inline(__always)
+private func fusePredictionPlane(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int, blockSize: Int) {
+    let bw = (width + blockSize - 1) / blockSize
+    let bh = (height + blockSize - 1) / blockSize
+    withUnsafePointers(p, mut: &recon) { pBase, rBase in
+        for by in 0..<bh {
+            let y0 = by * blockSize
+            let h = min(blockSize, height - y0)
+            for bx in 0..<bw {
+                let x0 = bx * blockSize
+                let w = min(blockSize, width - x0)
+                if skipMap[by * bw + bx] != .inter {
+                    for y in 0..<h {
+                        let off = (y0 + y) * width + x0
+                        rBase.advanced(by: off).update(from: pBase.advanced(by: off), count: w)
+                    }
+                } else {
+                    for y in 0..<h {
+                        let off = (y0 + y) * width + x0
+                        let r = rBase.advanced(by: off)
+                        let pp = pBase.advanced(by: off)
+                        for x in 0..<w {
+                            r[x] &+= pp[x]
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Elementwise a −= b over all three planes (dimensions must match).
 @inline(__always)
 func subtractPlanes(_ a: inout Image16, _ b: PlaneData420) {
