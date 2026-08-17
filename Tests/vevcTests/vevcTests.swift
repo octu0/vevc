@@ -99,7 +99,7 @@ final class VevcTests: XCTestCase {
         malformed += [0, 0, 0, 100]
 
         do {
-            _ = try await vevc.decodeSpatialLayers(r: malformed, pool: pool, maxLayer: 2, dx: 64, dy: 64, roundOffset: 0)
+            _ = try await vevc.decodeSpatialLayers(r: malformed, pool: pool, maxLayer: 2, dx: 64, dy: 64, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil)
             XCTFail("Should have thrown DecodeError.insufficientData")
         } catch DecodeError.insufficientData {
             // Success
@@ -293,12 +293,12 @@ final class VevcTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
 
         // I-Frame: encode→reconstructを取得
-        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(
-            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayersIntra(
+            pd: pd0, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         defer { releaseI() }
 
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil)
         let iPd = PlaneData420(img16: iDecoded)
 
         // I-Frame品質確認
@@ -307,7 +307,7 @@ final class VevcTests: XCTestCase {
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
 
         let (pBytes, _, _, _, releaseP, _, _) = try await encodeSpatialLayers(
-            pd: pd3, pool: pool, predictedPd: iRecon, nextPd: iRecon, prevInput: pd3, ltrInput: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+            pd: pd3, pool: pool, predictedPd: iRecon, nextPd: iRecon, prevInput: pd3, ltrInput: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, gopPosition: 1, cachedNextSub2: nil, cachedNextSub1: nil)
         defer { releaseP() }
 
         // P-Frameのresidualの検証（省略して正常終了とする）

@@ -151,17 +151,17 @@ public actor StreamingDecoderActor {
             case 0:
                 img16 = try await decodeSpatialLayersBase8Only(
                     r: chunk, pool: pool, dx: width, dy: height,
-                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, entropyHistories: nil
                 )
             case 1:
                 img16 = try await decodeSpatialLayersWithLayer1(
                     r: chunk, pool: pool, dx: width, dy: height,
-                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, entropyHistories: nil
                 )
             default:
                 img16 = try await decodeSpatialLayersFull(
                     r: chunk, pool: pool, dx: width, dy: height,
-                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2
+                    predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2, entropyHistories: nil
                 )
             }
         }

@@ -284,11 +284,16 @@ actor LayersEncodeActor {
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0)
             
-            let (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayers(
-                pd: plane, pool: pool, maxbitrate: maxbitrate,
-                qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, roundOffset: 0, profile: profile, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale,
-                l0State: (profile == 0x02) ? l0State : nil
-            )
+            let (bytes, reconstructed, mvs, _, releaseRecon): ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void)
+            if profile == 0x02 {
+                (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayersIntraForProfile2(
+                    pd: plane, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold, l0State: l0State
+                )
+            } else {
+                (bytes, reconstructed, mvs, _, releaseRecon) = try await encodeSpatialLayersIntra(
+                    pd: plane, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold
+                )
+            }
             
             if self.qstep == nil {
                 rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))

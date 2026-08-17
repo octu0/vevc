@@ -58,6 +58,76 @@ func scaledSADThreshold(_ defaultSAD: Int, step: Int) -> Int {
     return (defaultSAD * min(step, 256)) / 48
 }
 
+/// Zero-MV SAD of one 16x16 luma sub-block plus its 8x8 chroma, with an
+/// early-out once `limit` is exceeded — the production skip criterion.
+@inline(__always)
+func computeZeroSAD16x16(
+    cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
+    cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
+    cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
+    bx: Int, by: Int, width: Int, limit: Int
+) -> Int {
+    var sad: Int = 0
+    let strideY = width
+    let strideC = (width + 1) / 2
+    let bxC = bx / 2
+    let byC = by / 2
+
+    for y in 0..<16 {
+        let offset = (by + y) * strideY + bx
+        for x in 0..<16 {
+            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
+        }
+        if limit < sad { return sad }
+    }
+
+    for y in 0..<8 {
+        let offset = (byC + y) * strideC + bxC
+        for x in 0..<8 {
+            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
+            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
+        }
+        if limit < sad { return sad }
+    }
+    return sad
+}
+
+/// computeZeroSAD16x16 for partial edge blocks (arbitrary sub-block size).
+@inline(__always)
+func computeZeroSADSubBlock(
+    cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
+    cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
+    cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
+    bx: Int, by: Int, width: Int, height: Int,
+    subWidth: Int, subHeight: Int, subWc: Int, subHc: Int,
+    limit: Int
+) -> Int {
+    var sad: Int = 0
+    let strideY = width
+    for y in 0..<subHeight {
+        let yy = by + y
+        let offset = yy * strideY + bx
+        for x in 0..<subWidth {
+            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
+        }
+        if limit < sad { return sad }
+    }
+
+    let bxC = bx / 2
+    let byC = by / 2
+    let strideC = (width + 1) / 2
+    for y in 0..<subHc {
+        let yy = byC + y
+        let offset = yy * strideC + bxC
+        for x in 0..<subWc {
+            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
+            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
+        }
+        if limit < sad { return sad }
+    }
+    return sad
+}
+
 /// Fast whole-frame SAD estimate (every 4th pixel) for scene-change
 /// detection: per-pixel average over Y plus a chroma term that catches
 /// scene changes where luminance is similar but the color palette differs

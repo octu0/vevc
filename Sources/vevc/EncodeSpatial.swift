@@ -1,12 +1,12 @@
 // MARK: - Encode Spatial
 import Foundation
 
+/// I-frame encode, profile 0x01: parent-conditioned entropy contexts with
+/// the shipped static tables.
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, dwtGainScale: Int = 1, l0State: L0RefState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+func encodeSpatialLayersIntra(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
 
     let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
     let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2)
@@ -18,77 +18,89 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
     let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
     let isPFrame = false
 
-    // Profile 0x02 selects models against the parent-free static AC tables
-    // (EntropyCodec.swift); profile 0x01 keeps the shipped tables.
-    let selectModel: ModelSelectorFn
-    if profile == 0x02 {
-        selectModel = unifiedSelectModelParentFree
-    } else {
-        selectModel = unifiedSelectModel
-    }
-
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
     defer { releaseL2() }
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: nil, occlusionScores: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
     defer { releaseL1() }
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: selectModel)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: unifiedSelectModel)
     defer { releaseBase() }
 
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
-
-    // L0 closed loop (One-Pyramid §4): the I-frame L0 reference is the
-    // dequantized Base8 output — identical on both sides by construction.
-    if profile == 0x02, let l0s = l0State {
-        let ref = freshCopy(baseImg)
-        l0s.prev = ref
-        l0s.ltr = ref
-    }
-
-    // Profile 0x02 codes AC contexts parent-free (EntropyCodec.swift);
-    // profile 0x01 keeps the parent-conditioned contexts.
-    let useParentCtx = (profile != 0x02)
-    let l1ParentY = useParentCtx ? base8YBlocks : parentFreeParents8(count: base8YBlocks.count)
-    let l1ParentCb = useParentCtx ? base8CbBlocks : parentFreeParents8(count: base8CbBlocks.count)
-    let l1ParentCr = useParentCtx ? base8CrBlocks : parentFreeParents8(count: base8CrBlocks.count)
 
     let l1dx = sub2.width
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: l1ParentY, parentCbBlocks: l1ParentCb, parentCrBlocks: l1ParentCr, selectModel: selectModel)
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks, selectModel: unifiedSelectModel)
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
     defer { r1Y(); r1Cb(); r1Cr() }
 
-    let l2ParentY = useParentCtx ? l1yBlocks : parentFreeParents16(count: l1yBlocks.count)
-    let l2ParentCb = useParentCtx ? l1cbBlocks : parentFreeParents16(count: l1cbBlocks.count)
-    let l2ParentCr = useParentCtx ? l1crBlocks : parentFreeParents16(count: l1crBlocks.count)
+    let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, selectModel: unifiedSelectModel)
+
+    let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
+
+    debugLog({
+        return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
+    }())
+
+    let out = serializeIntraFrame(layer0: layer0, layer1: layer1, layer2: layer2)
+    return (out, reconstructed, MotionVectors.empty, [], releaseRecon)
+}
+
+/// I-frame encode, profile 0x02: parent-free entropy contexts against the
+/// parent-free static tables (EntropyCodec.swift), and the L0 closed-loop
+/// chain starts here — the I-frame L0 reference is the dequantized Base8
+/// output, identical on both sides by construction (One-Pyramid §4).
+@inline(__always)
+func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, l0State: L0RefState) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void) {
+    let dx = pd.width
+    let dy = pd.height
+
+    let qtY2 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 2)
+    let qtC2 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 2)
+    let qtY1 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 1)
+    let qtC1 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 1)
+    let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
+    let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
+
+    let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
+    let isPFrame = false
+
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    defer { releaseL2() }
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: nil, occlusionScores: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    defer { releaseL1() }
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: unifiedSelectModelParentFree)
+    defer { releaseBase() }
+
+    let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
+
+    // The I-frame L0 reference: dequantized Base8 output.
+    let ref = freshCopy(baseImg)
+    l0State.prev = ref
+    l0State.ltr = ref
+
+    let l1dx = sub2.width
+    let l1dy = sub2.height
+    let l1cbDx = ((l1dx + 1) / 2)
+    let l1cbDy = ((l1dy + 1) / 2)
+    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), selectModel: unifiedSelectModelParentFree)
+
+    let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
+    let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    let (mutReconL1Cr, r1Cr) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
+    defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l2ParentY, parentCbBlocks: l2ParentCb, parentCrBlocks: l2ParentCr, selectModel: selectModel)
+    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), selectModel: unifiedSelectModelParentFree)
 
-    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
-    var mutReconL2Y = reconL2Y
-    let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    var mutReconL2Cb = reconL2Cb
-    let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
-    var mutReconL2Cr = reconL2Cr
+    let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
 
-    // Must be the decoder's exact I-frame deblock sequence (its mvs==nil
-    // branch): plain luma + applyDeblockingFilter16 chroma. The encoder
-    // previously used applyDeblockingFilterChroma16 with empty mvs, which
-    // differs by ±1 at some block edges; with the L0 closed loop that drift
-    // reaches the entropy contexts (LL2 slot couples P into the parent
-    // blocks) and desyncs backward-adaptive tables.
-    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4)
-    applyDeblockingFilter16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
-    applyDeblockingFilter16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
-
-    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
-
-    if profile == 0x02, let oracle = MultiRefOracle.shared {
+    if let oracle = MultiRefOracle.shared {
         // Random-access boundary: the candidate pool never crosses an I-frame.
         oracle.reset()
         oracle.push(recon: reconstructed)
@@ -98,14 +110,45 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, maxbitrate: Int,
         return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
     }())
 
+    let out = serializeIntraFrame(layer0: layer0, layer1: layer1, layer2: layer2)
+    return (out, reconstructed, MotionVectors.empty, [], releaseRecon)
+}
+
+/// Layer2 reconstruction + the decoder's exact I-frame deblock sequence (its
+/// mvs==nil branch): plain luma + applyDeblockingFilter16 chroma. The encoder
+/// previously used applyDeblockingFilterChroma16 with empty mvs, which
+/// differs by ±1 at some block edges; with the L0 closed loop that drift
+/// reaches the entropy contexts (LL2 slot couples P into the parent blocks)
+/// and desyncs backward-adaptive tables.
+private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1Img: Image16, l2yBlocks: [BlockView], l2cbBlocks: [BlockView], l2crBlocks: [BlockView], qtY2: QuantizationTable, qtC2: QuantizationTable) -> (PlaneData420, @Sendable () -> Void) {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+
+    let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
+    var mutReconL2Y = reconL2Y
+    let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cb = reconL2Cb
+    let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
+    var mutReconL2Cr = reconL2Cr
+
+    applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4)
+    applyDeblockingFilter16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
+    applyDeblockingFilter16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
+
+    let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
+    return (reconstructed, { r2Y(); r2Cb(); r2Cr() })
+}
+
+private func serializeIntraFrame(layer0: [UInt8], layer1: [UInt8], layer2: [UInt8]) -> [UInt8] {
     var out: [UInt8] = []
     let frameHeader = VEVCFrameHeader(frameType: .iFrame, mvsSize: 0, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: layer0)
     out.append(contentsOf: layer1)
     out.append(contentsOf: layer2)
-
-    return (out, reconstructed, MotionVectors.empty, [], { r2Y(); r2Cb(); r2Cr() })
+    return out
 }
 
 /// Profile 0x02 skip decision: skip_ltr for blocks static since the GOP head
@@ -272,7 +315,7 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
 /// skip blocks. Profile 0x02 lives in encodeSpatialLayersForProfile2 — the
 /// caller selects the pipeline, keeping each one branch-free.
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -294,9 +337,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutPdCb = pool.getInt16(count: pd.cb.count)
     var mutPdCr = pool.getInt16(count: pd.cr.count)
 
-    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
+    withUnsafePointers(pd.y, mut: &mutPdY) { src, dst in dst.update(from: src, count: pd.y.count) }
+    withUnsafePointers(pd.cb, mut: &mutPdCb) { src, dst in dst.update(from: src, count: pd.cb.count) }
+    withUnsafePointers(pd.cr, mut: &mutPdCr) { src, dst in dst.update(from: src, count: pd.cr.count) }
 
     let mvsConst = mvs
     let refDirsConst = refDirs
@@ -399,7 +442,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int = 0, skipThreshold: Int = 2, reconThresholdScale: Int = 1, staticCounters: inout [Int], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil, entropyHistories: FrameEntropyHistories? = nil, l0State: L0RefState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -440,9 +483,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     var mutPdCb = pool.getInt16(count: pd.cb.count)
     var mutPdCr = pool.getInt16(count: pd.cr.count)
 
-    mutPdY.withUnsafeMutableBufferPointer { dst in pd.y.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-    mutPdCb.withUnsafeMutableBufferPointer { dst in pd.cb.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
-    mutPdCr.withUnsafeMutableBufferPointer { dst in pd.cr.withUnsafeBufferPointer({ dst.baseAddress!.update(from: $0.baseAddress!, count: $0.count) }) }
+    withUnsafePointers(pd.y, mut: &mutPdY) { src, dst in dst.update(from: src, count: pd.y.count) }
+    withUnsafePointers(pd.cb, mut: &mutPdCb) { src, dst in dst.update(from: src, count: pd.cb.count) }
+    withUnsafePointers(pd.cr, mut: &mutPdCr) { src, dst in dst.update(from: src, count: pd.cr.count) }
 
     let sMap = skipMap
     let mvsConst = mvs
@@ -482,10 +525,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // MC_L0(L0_ref) instead of LL2(residual), so the quarter-resolution
     // reconstruction closes over the bitstream alone (bit-exact with the
     // decoder's layer0 chain). Requires an L0 reference from a preceding
-    // I-frame; without l0State the legacy LL2(residual) semantics apply.
-    let isL0Loop = (l0State?.prev != nil)
+    // I-frame; without one the legacy LL2(residual) semantics apply.
     var base8Input = sub1
-    if isL0Loop, let l0s = l0State, let l0Prev = l0s.prev {
+    if let l0Prev = l0State.prev {
         let tSrc = analyzeLL2(pd: pd)
         var r0 = Image16(width: tSrc.width, height: tSrc.height, y: tSrc.y, cb: tSrc.cb, cr: tSrc.cr)
         var pred0 = Image16(
@@ -494,7 +536,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             cb: [Int16](repeating: 0, count: tSrc.cb.count),
             cr: [Int16](repeating: 0, count: tSrc.cr.count)
         )
-        await applyL0MotionCompensation(img: &pred0, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        await applyL0MotionCompensation(img: &pred0, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
         subtractPlanes(&r0, PlaneData420(img16: pred0))
         clearL0SkipResidual(img: &r0, skipMap: sMap, fullDx: dx)
         base8Input = PlaneData420(img16: r0)
@@ -505,14 +547,14 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
 
     var baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
 
-    if isL0Loop, let l0s = l0State, let l0Prev = l0s.prev {
+    if let l0Prev = l0State.prev {
         // L0 reconstruction — the decoder's exact layer0 pipeline:
         // deq(r0) + MC_L0, clamp, deblock, skip copy.
         let baseCopy = freshCopy(baseImg)
         var l0Cur = Image16(width: baseRecon.width, height: baseRecon.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
-        await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
         finishL0Reconstruction(img: &l0Cur, qtYStepQ4: Int(qtY0.step), qtCStepQ4: Int(qtC0.step))
-        applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, skipMap: sMap, fullDx: dx)
+        applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, skipMap: sMap, fullDx: dx)
         let newRef = PlaneData420(img16: l0Cur)
 
         // The full loop's LL2 coefficient slot is L0_recon − LL2(P), with P
@@ -523,7 +565,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         subtractPlanes(&slot, tP)
         baseImg = slot
 
-        l0s.prev = newRef
+        l0State.prev = newRef
     }
 
     let l1dx = sub2.width
@@ -659,73 +701,6 @@ private func applyProfile2SkipCopy(skipMap: [BlockMode], ltrPd: PlaneData420, pr
             }
         }
     }
-}
-
-@inline(__always)
-func computeZeroSAD16x16(
-    cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
-    cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
-    cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
-    bx: Int, by: Int, width: Int, limit: Int = Int.max
-) -> Int {
-    var sad: Int = 0
-    let strideY = width
-    let strideC = (width + 1) / 2
-    let bxC = bx / 2
-    let byC = by / 2
-
-    for y in 0..<16 {
-        let offset = (by + y) * strideY + bx
-        for x in 0..<16 {
-            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
-        }
-        if limit < sad { return sad }
-    }
-
-    for y in 0..<8 {
-        let offset = (byC + y) * strideC + bxC
-        for x in 0..<8 {
-            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
-            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
-        }
-        if limit < sad { return sad }
-    }
-    return sad
-}
-
-@inline(__always)
-func computeZeroSADSubBlock(
-    cY: UnsafePointer<Int16>, rY: UnsafePointer<Int16>,
-    cCb: UnsafePointer<Int16>, rCb: UnsafePointer<Int16>,
-    cCr: UnsafePointer<Int16>, rCr: UnsafePointer<Int16>,
-    bx: Int, by: Int, width: Int, height: Int,
-    subWidth: Int, subHeight: Int, subWc: Int, subHc: Int,
-    limit: Int = Int.max
-) -> Int {
-    var sad: Int = 0
-    let strideY = width
-    for y in 0..<subHeight {
-        let yy = by + y
-        let offset = yy * strideY + bx
-        for x in 0..<subWidth {
-            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
-        }
-        if limit < sad { return sad }
-    }
-
-    let bxC = bx / 2
-    let byC = by / 2
-    let strideC = (width + 1) / 2
-    for y in 0..<subHc {
-        let yy = byC + y
-        let offset = yy * strideC + bxC
-        for x in 0..<subWc {
-            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
-            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
-        }
-        if limit < sad { return sad }
-    }
-    return sad
 }
 
 @inline(__always)

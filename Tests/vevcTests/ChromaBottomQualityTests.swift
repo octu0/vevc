@@ -254,12 +254,12 @@ final class ChromaBottomQualityTests: XCTestCase {
         let qtC = QuantizationTable(baseStep: 1)
 
         // I-Frame: encode → reconstruct
-        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayers(
-            pd: pd0, pool: pool, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+        let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayersIntra(
+            pd: pd0, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 0)
         defer { releaseI() }
 
         // I-Frame: decode
-        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, roundOffset: 0)
+        let iDecoded = try await decodeSpatialLayers(r: iBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil)
         let iDecodedPd = PlaneData420(img16: iDecoded)
 
         // I-Frameのクロマ差分
@@ -277,11 +277,11 @@ final class ChromaBottomQualityTests: XCTestCase {
 
         // P-Frame: encode (without motion compensation since it's removed)
         let (pBytes, pRecon, _, _, releaseP, _, _) = try await encodeSpatialLayers(
-            pd: pd1, pool: pool, predictedPd: iRecon, nextPd: iRecon, prevInput: pd1, ltrInput: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0)
+            pd: pd1, pool: pool, predictedPd: iRecon, nextPd: iRecon, prevInput: pd1, ltrInput: iRecon, prevMVs: nil, maxbitrate: 10000 * 1024, qtY: qtY, qtC: qtC, zeroThreshold: 0, roundOffset: 0, gopPosition: 1, cachedNextSub2: nil, cachedNextSub1: nil)
         defer { releaseP() }
 
         // P-Frame: decode
-        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon, roundOffset: 0)
+        let pDecoded = try await decodeSpatialLayers(r: pBytes, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: iRecon, nextPd: nil, roundOffset: 0, entropyHistories: nil)
         let pDecodedPd = PlaneData420(img16: pDecoded)
 
         // P-Frameの残差のクロマ差分

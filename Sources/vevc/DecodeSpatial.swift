@@ -116,7 +116,7 @@ private func finishProfile1AtLayer0(current: inout Image16, l0dx: Int, l0dy: Int
 /// so the three layers decode sequentially). Streams whose upper layers
 /// were stripped by the splitter (layer sizes 0) delegate to the generic
 /// decodeSpatialLayers.
-func decodeSpatialLayersFull(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+func decodeSpatialLayersFull(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
     guard 0 < p.frameHeader.layer1Size, 0 < p.frameHeader.layer2Size else {
         return try await decodeSpatialLayers(
@@ -160,7 +160,7 @@ func decodeSpatialLayersFull(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, 
 /// Frame decode, profile 0x01, maxLayer == 1: Base8 + Layer1, MC at half
 /// resolution. A stripped layer1 (size 0) delegates to the generic
 /// decodeSpatialLayers.
-func decodeSpatialLayersWithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+func decodeSpatialLayersWithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
     guard 0 < p.frameHeader.layer1Size else {
         return try await decodeSpatialLayers(
@@ -200,7 +200,7 @@ func decodeSpatialLayersWithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy:
 /// Frame decode, profile 0x01, maxLayer == 0: Base8 + MC at quarter
 /// resolution. Upper-layer payloads are never read, so no stripped-stream
 /// delegation is needed.
-func decodeSpatialLayersBase8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+func decodeSpatialLayersBase8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
 
     let l1dx = (dx + 1) / 2
@@ -226,7 +226,7 @@ func decodeSpatialLayersBase8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: 
 /// effective top layer is only known from the frame header. Production
 /// decoding uses the straight-line variants above, which delegate here
 /// only in those stripped cases.
-func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420? = nil, nextPd: PlaneData420? = nil, roundOffset: Int, entropyHistories: FrameEntropyHistories? = nil) async throws -> Image16 {
+func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     // Compute per-layer dimensions matching encoder DWT subband sizes:
     // Layer2 (32x32): original size
     // Layer1 (16x16): DWT LL subband of Layer2 = (dx+1)/2 × (dy+1)/2

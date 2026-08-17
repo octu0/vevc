@@ -175,8 +175,8 @@ final class Profile0x02Tests: XCTestCase {
         defer { rel1() }
         
         // I-frame
-        let (bytesI, encReconI, _, _, relEncI) = try await encodeSpatialLayers(
-            pd: pd0, pool: pool, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, profile: 0x02)
+        let (bytesI, encReconI, _, _, relEncI) = try await encodeSpatialLayersIntraForProfile2(
+            pd: pd0, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 5, l0State: L0RefState())
         defer { relEncI() }
         let decImg16I = try await decodeSpatialLayersForProfile2(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: nil, parallelEntropy: true)
         let decReconI = PlaneData420(img16: decImg16I)
@@ -188,7 +188,7 @@ final class Profile0x02Tests: XCTestCase {
         
         var counters = [Int](repeating: 0, count: bw * bh)
         let (bytesP, encReconP, _, _, relEncP, _, _) = try await encodeSpatialLayersForProfile2(
-            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, skipThreshold: 2, staticCounters: &counters)
+            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, gopPosition: 1, skipThreshold: 2, reconThresholdScale: 1, staticCounters: &counters, cachedNextSub2: nil, cachedNextSub1: nil, entropyHistories: nil, l0State: L0RefState())
         defer { relEncP() }
         
         let decImg16P = try await decodeSpatialLayersForProfile2(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: nil, parallelEntropy: true)
