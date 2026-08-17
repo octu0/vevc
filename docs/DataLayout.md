@@ -90,12 +90,12 @@ Data is stored continuously according to the sizes specified in the header.
 > rely on this to bypass dequantization and inverse DWT for skip blocks
 > (`DecodeSkipBypass.swift`) without changing the output.
 
-> **Layer0 payload semantics (Profile 0x02):** Layer0 carries the LL2
-> coefficients of the motion-compensated residual (`LL2(residual)`). An
-> alternative closed-loop mode (`enableL0Loop`, One-Pyramid Wave 1) codes
-> `r0 = LL2(source) − MC_L0(L0_ref)` instead, making the `maxLayer=0` output
-> bit-exact with the encoder. The mode is **not signaled in the bitstream**
-> and is off by default; encoder and decoder must agree on it out of band.
+> **Layer0 payload semantics (Profile 0x02):** Layer0 carries the L0
+> closed-loop residual `r0 = LL2(source) − MC_L0(L0_ref)` (One-Pyramid
+> Wave 1): both sides maintain a quarter-resolution L0 reference chain, so
+> the `maxLayer=0` output is bit-exact with the encoder's L0 reconstruction.
+> This is normative for Profile 0x02 P-frames whenever an L0 reference from
+> a preceding I-frame exists; it is not signaled per-stream.
 > See `docs/pskip-ltr-spec.md` §3.
 
 ---

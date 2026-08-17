@@ -48,21 +48,17 @@ public actor StreamingDecoderActor {
     // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
-    // Dormant One-Pyramid Wave-1 switch — must match the encoder's setting
-    // (the layer0 payload semantics differ). See LayersEncodeActor.
-    let enableL0Loop: Bool
     // Concurrent entropy decode of the 9 profile-2 streams. Wins per-frame
     // latency on a single stream; under GOP-parallel throughput decoding it
     // only adds overhead, so the GOP-parallel Decoder turns it off.
     let parallelEntropy: Bool
 
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, enableL0Loop: Bool = false, parallelEntropy: Bool = true) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, parallelEntropy: Bool = true) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
         self.profile = profile
-        self.enableL0Loop = enableL0Loop
         self.parallelEntropy = parallelEntropy
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
     }
@@ -134,7 +130,7 @@ public actor StreamingDecoderActor {
                 r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
                 predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                 entropyHistories: entropyHistories,
-                l0State: (enableL0Loop && 1 <= maxLayer) ? l0State : nil,
+                l0State: (1 <= maxLayer) ? l0State : nil,
                 parallelEntropy: parallelEntropy
             )
         } else {
