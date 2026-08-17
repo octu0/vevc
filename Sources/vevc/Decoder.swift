@@ -51,14 +51,19 @@ public actor StreamingDecoderActor {
     // Dormant One-Pyramid Wave-1 switch — must match the encoder's setting
     // (the layer0 payload semantics differ). See LayersEncodeActor.
     let enableL0Loop: Bool
+    // Concurrent entropy decode of the 9 profile-2 streams. Wins per-frame
+    // latency on a single stream; under GOP-parallel throughput decoding it
+    // only adds overhead, so the GOP-parallel Decoder turns it off.
+    let parallelEntropy: Bool
 
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, enableL0Loop: Bool = false) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, enableL0Loop: Bool = false, parallelEntropy: Bool = true) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
         self.profile = profile
         self.enableL0Loop = enableL0Loop
+        self.parallelEntropy = parallelEntropy
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
     }
 
@@ -129,7 +134,8 @@ public actor StreamingDecoderActor {
                 r: chunk, pool: pool, maxLayer: maxLayer, dx: width, dy: height,
                 predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                 entropyHistories: entropyHistories,
-                l0State: (enableL0Loop && 1 <= maxLayer) ? l0State : nil
+                l0State: (enableL0Loop && 1 <= maxLayer) ? l0State : nil,
+                parallelEntropy: parallelEntropy
             )
         } else {
             img16 = try await decodeSpatialLayers(
@@ -187,7 +193,9 @@ public struct Decoder: Sendable {
         let (imgStream, imgContinuation) = AsyncThrowingStream<YCbCrImage, Error>.makeStream()
         gopContinuation.yield(imgStream)
         
-        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height, profile: profile)
+        // GOP-parallel throughput decoding saturates the cores on its own;
+        // per-frame entropy fan-out helps only when this is the sole stream.
+        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height, profile: profile, parallelEntropy: maxConcurrency == 1)
         
         Task {
             await limiter.wait()
