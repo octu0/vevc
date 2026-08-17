@@ -574,8 +574,8 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     
     if let sMap = skipMap {
         await decodeLayer32ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, skipMap: sMap, sub: &sub)
-        await decodeLayer32ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, skipMap: sMap, sub: &sub)
-        await decodeLayer32ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, skipMap: sMap, sub: &sub)
+        await decodeLayer32ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, skipMap: sMap, skipBw: colCountY, skipBh: rowCountY, sub: &sub)
+        await decodeLayer32ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, skipMap: sMap, skipBw: colCountY, skipBh: rowCountY, sub: &sub)
     } else {
         await decodeLayer32ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, sub: &sub)
         await decodeLayer32ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, sub: &sub)
@@ -850,11 +850,10 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) async {
+func decodeLayer32ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], skipBw: Int, skipBh: Int, sub: inout Image16) async {
     let concurrency = min(rowCount, 4)
     let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
-    let sCount = skipMap.count
     let sSkip = skipMap.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let sPrev = prev.withUnsafeCbReadOnly { UnsafeSendablePointer(ptr: $0) }
     let sDest = sub.withUnsafeCb { UnsafeSendableMutablePointer(ptr: $0) }
@@ -872,7 +871,8 @@ func decodeLayer32ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkS
                     let rowOffset = i * colCount
                     for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                         let blockIndex: Int = rowOffset &+ xIdx
-                        if blockIndex < sCount && sSkip.ptr[blockIndex] != .inter {
+                        // Chroma blocks span 2×2 luma-geometry skip-map entries.
+                        if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
                             continue
                         }
                         let block: BlockView = sBlocks.ptr[blockIndex]
@@ -957,11 +957,10 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 }
 
 @Sendable @inline(__always)
-func decodeLayer32ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) async {
+func decodeLayer32ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], prev: Image16, qt: QuantizationTable, skipMap: [BlockMode], skipBw: Int, skipBh: Int, sub: inout Image16) async {
     let concurrency = min(rowCount, 4)
     let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
     let subConst = sub
-    let sCount = skipMap.count
     let sSkip = skipMap.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let sPrev = prev.withUnsafeCrReadOnly { UnsafeSendablePointer(ptr: $0) }
     let sDest = sub.withUnsafeCr { UnsafeSendableMutablePointer(ptr: $0) }
@@ -979,7 +978,8 @@ func decodeLayer32ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkS
                     let rowOffset = i * colCount
                     for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
                         let blockIndex: Int = rowOffset &+ xIdx
-                        if blockIndex < sCount && sSkip.ptr[blockIndex] != .inter {
+                        // Chroma blocks span 2×2 luma-geometry skip-map entries.
+                        if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
                             continue
                         }
                         let block: BlockView = sBlocks.ptr[blockIndex]

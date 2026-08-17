@@ -994,10 +994,9 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil, skipBw: Int = 0, skipBh: Int = 0) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
-    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -1016,13 +1015,12 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 let blk = blocks[idx]
                 idx += 1
                 
-                if let map = skipMap {
-                    let l2Index = row * colCount + col
-                    if l2Index < sCount && map[l2Index] != .inter {
-                        continue
-                    }
+                // Chroma blocks span 2×2 luma-geometry skip-map entries (a
+                // 32px chroma block covers 64px at full resolution).
+                if let map = skipMap, 0 < skipBw, base8ChromaAllSkip(skipMap: map, bw: skipBw, bh: skipBh, c: col, r: row) {
+                    continue
                 }
-                
+
                 let llX = startX / 2
                 let llY = startY / 2
                 prevImg.readCb(x: llX, y: llY, size: 16, into: blk)
@@ -1059,10 +1057,9 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil, skipBw: Int = 0, skipBh: Int = 0) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
-    let sCount = skipMap?.count ?? 0
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -1081,13 +1078,12 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 let blk = blocks[idx]
                 idx += 1
                 
-                if let map = skipMap {
-                    let l2Index = row * colCount + col
-                    if l2Index < sCount && map[l2Index] != .inter {
-                        continue
-                    }
+                // Chroma blocks span 2×2 luma-geometry skip-map entries (a
+                // 32px chroma block covers 64px at full resolution).
+                if let map = skipMap, 0 < skipBw, base8ChromaAllSkip(skipMap: map, bw: skipBw, bh: skipBh, c: col, r: row) {
+                    continue
                 }
-                
+
                 let llX = startX / 2
                 let llY = startY / 2
                 prevImg.readCr(x: llX, y: llY, size: 16, into: blk)

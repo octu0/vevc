@@ -32,12 +32,11 @@ final class BlockDataCompareTests: XCTestCase {
         let pool = BlockViewPool()
 
         // エンコーダ: Layer32 のバイト + blocks を取得
-        var (_, encYBlocks, encCbBlocks, encCrBlocks, rel) = try await preparePlaneLayer32(
-            pd: pd, pool: pool, sads: nil, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3)
+        var (_, encYBlocks, encCbBlocks, encCrBlocks, rel) = await preparePlaneLayer32(
+            pd: pd, pool: pool, qtY: qtY, qtC: qtC)
         defer { rel() }
-        let layer2Bytes = entropyEncodeLayer32(
-            dx: pd.width, dy: pd.height, layer: 2, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks,
-            parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+        let layer2Bytes = encodeLayer32PayloadNoParents(
+            dx: pd.width, dy: pd.height, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks)
 
         // デコーダ: 同じバイトからblocks をデコード
         // decodePlaneSubbands32 は decodePlaneSubbands32(data:blockCount:) で直接呼べる

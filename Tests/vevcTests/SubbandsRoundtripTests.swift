@@ -52,7 +52,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
 
         // エンコード後のHL
         var encAfterHL: [[Int16]] = []
@@ -159,7 +159,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
 
         // decodePlaneSubbands32
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: 3)
@@ -218,7 +218,7 @@ final class SubbandsRoundtripTests: XCTestCase {
 
         // encodePlaneSubbands32
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
 
         // decodePlaneSubbands32
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
@@ -282,7 +282,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
 
         var totalDiff = 0
@@ -348,7 +348,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             }
 
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-            let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil)
+            let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
             let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
 
             var totalDiff = 0
