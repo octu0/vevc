@@ -151,7 +151,7 @@ final class StaticRANSModels: @unchecked Sendable {
         1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
     ])
 
-    // Parent-free AC tables (profile 0x02, ParentFreeContext.swift): all AC
+    // Parent-free AC tables (profile 0x02, EntropyCodec.swift): all AC
     // traffic lands in contexts 0-1, so these are trained on the merged
     // parent-free assignment (`vevc-training train-tables-pf`, corpus:
     // miko1+ToS 121f dumps at 500k+2500k, 2026-08-14). Contexts 2-3 reuse

@@ -72,11 +72,6 @@ var packageTargets: [Target] = [
         path: "Sources/vevc-splitter"
     ),
     .executableTarget(
-        name: "vevc-training",
-        dependencies: ["vevc"],
-        path: "Sources/vevc-training"
-    ),
-    .executableTarget(
         name: "vevc-player",
         dependencies: [
             "vevc"

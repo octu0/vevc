@@ -223,7 +223,7 @@ final class Profile0x02Tests: XCTestCase {
         let bitstream02 = try await encoder02.encodeToData(images: frames)
         
         // skip機構のヘッダ増に加え、profile 0x02 は親なしACコンテキスト
-        // (ParentFreeContext.swift) で符号化するため、エントロピー段の
+        // (EntropyCodec.swift) で符号化するため、エントロピー段の
         // バイト列は profile 0x01 と一致しない。粗大なオーバーヘッドの
         // 検出が目的なので、全体の 2% までの差を許容する。
         let diff = abs(bitstream01.count - bitstream02.count)

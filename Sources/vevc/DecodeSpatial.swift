@@ -192,7 +192,7 @@ func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int
 }
 
 /// Frame decode, profile 0x02. The parent-free entropy contexts
-/// (ParentFreeContext.swift) make the 9 coefficient streams (3 layers × 3
+/// (EntropyCodec.swift) make the 9 coefficient streams (3 layers × 3
 /// planes) independent; with parallelEntropy they entropy-decode
 /// concurrently up front, otherwise sequentially — the outputs are
 /// bit-identical either way. Parallel wins per-frame latency (single-stream

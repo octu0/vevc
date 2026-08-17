@@ -289,8 +289,8 @@ internal func dequantizeDPCM(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Q
 /// Dequantization centroid offset for AC coefficients, in 1/16-step units,
 /// applied away from zero. The nominal k·Δ reconstruction sits at the bin's
 /// lower edge (dead-zone bins), while the Laplacian bin centroid lies
-/// ~0.3–0.9 steps above it (fit per subband by DequantOffsetMeasure /
-/// `vevc-training offsets`). 3/16 measured best end-to-end on live-stream
+/// ~0.3–0.9 steps above it (fit per subband by the offline `vevc-training
+/// offsets` tool, removed 2026-08-17 — in git history). 3/16 measured best end-to-end on live-stream
 /// content: miko1 +0.20〜0.40 dB PSNR at equal-or-smaller size across
 /// 800k–4000k with worst-frame SSIM intact; film content (ToS) is metric-
 /// neutral (−0.02 dB avg) and visually indistinguishable. Shared by the

@@ -1109,8 +1109,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
             encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
         }
 
-        CoeffDumper.shared?.stash("L0Y", blocks: blocks, planeW: dx, planeH: dy, blockSize: 8, includeLL: true)
-
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
         return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
@@ -1131,8 +1129,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
             encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
         }
 
-        CoeffDumper.shared?.stash("L0Cb", blocks: blocks, planeW: cbDx, planeH: cbDy, blockSize: 8, includeLL: true)
-
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
         return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
@@ -1151,8 +1147,6 @@ func encodePlaneBase8(pd: PlaneData420, pool: BlockViewPool, sads: [Int]?, occlu
         } else {
             encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
         }
-
-        CoeffDumper.shared?.stash("L0Cr", blocks: blocks, planeW: cbDx, planeH: cbDy, blockSize: 8, includeLL: true)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
