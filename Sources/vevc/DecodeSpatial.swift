@@ -12,6 +12,7 @@ private struct Profile1Prelude {
     let layer1Offset: Int
 }
 
+@inline(__always)
 private func parseProfile1Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?) throws -> Profile1Prelude {
     var offset = 0
     let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset, profile: 0x01)
@@ -60,6 +61,7 @@ private func parseProfile1Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 
 /// Layer2 data absent: MC + clamp + deblock at layer1 resolution
 /// (16x16 blocks, mvShift=1). No-op on I-frames (no MVs / no prediction).
+@inline(__always)
 private func finishProfile1AtLayer1(current: inout Image16, l1dx: Int, l1dy: Int, mvs: MotionVectors?, refDirs: [Bool]?, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, qtYStep: Int, qtCStep: Int) async {
     guard let tMVs = mvs, let tPrev = predictedPd else { return }
     let cbDx1 = (l1dx + 1) / 2
@@ -87,6 +89,7 @@ private func finishProfile1AtLayer1(current: inout Image16, l1dx: Int, l1dy: Int
 /// Upper layers absent: MC + clamp + deblock at layer0 resolution
 /// (8x8 blocks, mvShift=2 for luma, mvShift=1 for chroma). No-op on
 /// I-frames (no MVs / no prediction).
+@inline(__always)
 private func finishProfile1AtLayer0(current: inout Image16, l0dx: Int, l0dy: Int, mvs: MotionVectors?, refDirs: [Bool]?, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, qtYStep: Int, qtCStep: Int) async {
     guard let tMVs = mvs, let tPrev = predictedPd else { return }
     let cbDx0 = (l0dx + 1) / 2
@@ -116,6 +119,7 @@ private func finishProfile1AtLayer0(current: inout Image16, l0dx: Int, l0dy: Int
 /// so the three layers decode sequentially). Streams whose upper layers
 /// were stripped by the splitter (layer sizes 0) delegate to the generic
 /// decodeSpatialLayers.
+@inline(__always)
 func decodeSpatialLayersFull(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
     guard 0 < p.frameHeader.layer1Size, 0 < p.frameHeader.layer2Size else {
@@ -160,6 +164,7 @@ func decodeSpatialLayersFull(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, 
 /// Frame decode, profile 0x01, maxLayer == 1: Base8 + Layer1, MC at half
 /// resolution. A stripped layer1 (size 0) delegates to the generic
 /// decodeSpatialLayers.
+@inline(__always)
 func decodeSpatialLayersWithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
     guard 0 < p.frameHeader.layer1Size else {
@@ -200,6 +205,7 @@ func decodeSpatialLayersWithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy:
 /// Frame decode, profile 0x01, maxLayer == 0: Base8 + MC at quarter
 /// resolution. Upper-layer payloads are never read, so no stripped-stream
 /// delegation is needed.
+@inline(__always)
 func decodeSpatialLayersBase8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     let p = try parseProfile1Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
 
@@ -226,6 +232,7 @@ func decodeSpatialLayersBase8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: 
 /// effective top layer is only known from the frame header. Production
 /// decoding uses the straight-line variants above, which delegate here
 /// only in those stripped cases.
+@inline(__always)
 func decodeSpatialLayers(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?) async throws -> Image16 {
     // Compute per-layer dimensions matching encoder DWT subband sizes:
     // Layer2 (32x32): original size
@@ -344,6 +351,7 @@ private struct Profile2Prelude {
     let layer1Offset: Int
 }
 
+@inline(__always)
 private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?) throws -> Profile2Prelude {
     var offset = 0
     let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset, profile: 0x02)
@@ -400,6 +408,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 /// IDWT of the Base8 blocks (skip blocks bypass both — bit-exact, their
 /// coefficients are all zero by construction, One-Pyramid §5), then the
 /// block views return to the pool.
+@inline(__always)
 private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int, yBlocks: [BlockView], cbBlocks: [BlockView], crBlocks: [BlockView], qtY0: QuantizationTable, qtC0: QuantizationTable, skipMap: [BlockMode]?, fullDx: Int, fullDy: Int) async -> Image16 {
     let l0cbDx = (l0dx + 1) / 2
     let l0cbDy = (l0dy + 1) / 2
@@ -436,6 +445,7 @@ private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int,
 /// overhead, so the GOP-parallel Decoder requests the sequential path.
 /// Streams whose upper layers were stripped by the splitter (layer sizes 0)
 /// delegate to the generic decodeSpatialLayersForProfile2.
+@inline(__always)
 func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, parallelEntropy: Bool) async throws -> Image16 {
     let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
     guard 0 < p.frameHeader.layer1Size, 0 < p.frameHeader.layer2Size else {
@@ -680,6 +690,7 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
 /// resolution. Layer1 is the display output, so every block reconstructs
 /// (no skip bypass). A stripped layer1 (size 0) delegates to the generic
 /// decodeSpatialLayersForProfile2.
+@inline(__always)
 func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, parallelEntropy: Bool) async throws -> Image16 {
     let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
     guard 0 < p.frameHeader.layer1Size else {
@@ -872,6 +883,7 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
 /// resolution on the layer-matched chain. This pipeline IS the L0 loop's
 /// decode side (deq(r0) + MC_L0), so it needs no separate L0RefState and
 /// never reads the upper-layer payloads.
+@inline(__always)
 func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, parallelEntropy: Bool) async throws -> Image16 {
     let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
 
@@ -995,6 +1007,7 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
 /// effective top layer is only known from the frame header. Production
 /// decoding uses the straight-line variants above, which delegate here
 /// only in those stripped cases.
+@inline(__always)
 func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState?, parallelEntropy: Bool) async throws -> Image16 {
     let l2dx = dx
     let l2dy = dy

@@ -63,6 +63,7 @@ func evaluateQuantizeBase8(view: BlockView, qt: QuantizationTable) {
 /// Per-block skip flags for a layer's luma extract: every layer's luma block
 /// grid is the same ceil(width/32) lattice as the skip map, so one block maps
 /// 1:1 to one entry.
+@inline(__always)
 func lumaSkipFlags(skipMap: [BlockMode], mapWidth: Int, rowCount: Int, colCount: Int) -> [Bool] {
     var flags = [Bool](repeating: false, count: rowCount * colCount)
     for i in 0..<rowCount {
@@ -76,6 +77,7 @@ func lumaSkipFlags(skipMap: [BlockMode], mapWidth: Int, rowCount: Int, colCount:
 /// Per-block skip flags for a layer's chroma extract: a chroma block on the
 /// half-resolution plane spans 2×2 skip-map entries — all four must be
 /// non-inter for the block to be skippable.
+@inline(__always)
 func chromaSkipFlags(skipMap: [BlockMode], mapWidth: Int, rowCount: Int, colCount: Int) -> [Bool] {
     var flags = [Bool](repeating: false, count: rowCount * colCount)
     for i in 0..<rowCount {
@@ -136,6 +138,7 @@ private func gatherLL32(view: BlockView, w: Int, h: Int, subWidth: Int, subHeigh
     }
 }
 
+@inline(__always)
 func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
@@ -200,6 +203,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
 /// extractSingleTransformBlocks32 with a per-block skip flag (precomputed by
 /// the caller via lumaSkipFlags/chromaSkipFlags): skip blocks bypass
 /// read/DWT/quant and stay zero (One-Pyramid §5).
+@inline(__always)
 func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool]) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
@@ -382,6 +386,7 @@ private func gatherLL16(view: BlockView, w: Int, h: Int, subWidth: Int, subHeigh
     }
 }
 
+@inline(__always)
 func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
@@ -446,6 +451,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
 /// extractSingleTransformBlocks16 with a per-block skip flag (precomputed by
 /// the caller via lumaSkipFlags/chromaSkipFlags): skip blocks bypass
 /// read/DWT/quant and stay zero (One-Pyramid §5).
+@inline(__always)
 func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool]) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
@@ -593,6 +599,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     return (subband, { [subband] in pool.putInt16(subband) })
 }
 
+@inline(__always)
 func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
@@ -634,6 +641,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
 /// extractSingleTransformBlocksBase8 with a per-block skip flag (precomputed
 /// by the caller via lumaSkipFlags/chromaSkipFlags): skip blocks bypass
 /// read/DWT and stay zero (One-Pyramid §5).
+@inline(__always)
 func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool]) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
@@ -804,59 +812,62 @@ func preparePlaneLayer16WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: 
     return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
 }
 
+/// Assemble the layer2 payload: derive the per-plane zero thresholds, entropy
+/// encode the three coefficient planes (EncodeTransform.swift), and serialize
+/// the VEVCLayerData container.
 @inline(__always)
-func entropyEncodeLayer32(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, histories: [EntropyHistoryState]? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
+func encodeLayer32Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn) -> [UInt8] {
     // Layer2 (32x32) contains the highest-frequency DWT subbands with the
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=3) than Layer1 (threshold=2) without
     // perceptible quality loss.
     let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
-    
+
     let colCountY = (dx + 31) / 32
     let rowCountY = (dy + 31) / 32
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let colCountC = (cbDx + 31) / 32
     let rowCountC = (cbDy + 31) / 32
-    
-    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, colCount: colCountY, rowCount: rowCountY, history: histories?[0], selectModel: selectModel)
+
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, history: histories?[0], selectModel: selectModel)
     let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[1], selectModel: selectModel)
     let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2], selectModel: selectModel)
-    
+
     debugLog({
-        return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
+        return "  [Layer 2] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
     }())
-    
+
     return VEVCLayerData.serialize(
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
         bufY: bufY, bufCb: bufCb, bufCr: bufCr
     )
 }
 
+/// Assemble the layer1 payload: derive the per-plane zero thresholds, entropy
+/// encode the three coefficient planes (EncodeTransform.swift), and serialize
+/// the VEVCLayerData container.
 @inline(__always)
-func entropyEncodeLayer16(dx: Int, dy: Int, layer: UInt8, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, isPFrame: Bool = false, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView]?, parentCbBlocks: [BlockView]?, parentCrBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, histories: [EntropyHistoryState]? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
+func encodeLayer16Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn) -> [UInt8] {
     let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
-    
+
     let colCountY = (dx + 15) / 16
     let rowCountY = (dy + 15) / 16
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let colCountC = (cbDx + 15) / 16
     let rowCountC = (cbDy + 15) / 16
-    
-    // Note: SADs are evaluated at 32x32 granularity, so map Layer16 to Layer32 granularity
-    // In layered structure, we just pass sads arrays if aligned, or map if necessary.
-    // For now, only 32x32 blocks use it cleanly, but if Layer16 needs it:
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, sads: sads, occlusionScores: occlusionScores, colCount: colCountY, rowCount: rowCountY, history: histories?[0], selectModel: selectModel)
+
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, history: histories?[0], selectModel: selectModel)
     let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[1], selectModel: selectModel)
     let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2], selectModel: selectModel)
-    
+
     debugLog({
-        return "  [Layer \\(layer)] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
+        return "  [Layer 1] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
     }())
-    
+
     return VEVCLayerData.serialize(
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
         bufY: bufY, bufCb: bufCb, bufCr: bufCr
@@ -1283,10 +1294,10 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
     return (plane, { [plane] in pool.putInt16(plane) })
 }
 
-@inline(__always)
 /// Base8 encode, I-frame: static-table entropy coding (DPCM handled inside
 /// encodePlaneBaseSubbands8 via blockEncodeDPCM4/MED), no SAD gating, no
 /// history state. selectModel picks the profile's static AC tables.
+@inline(__always)
 func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, selectModel: @escaping ModelSelectorFn) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
@@ -1363,6 +1374,7 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
 /// Base8 encode, P-frame profile 0x01: SAD-gated luma residual clearing +
 /// the P-frame entropy path with the shipped static tables (no skip map, no
 /// history state).
+@inline(__always)
 func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
@@ -1452,6 +1464,7 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
 /// Base8 encode, P-frame profile 0x02: skip-block bypass (One-Pyramid §5),
 /// SAD-gated luma clearing, parent-free static tables, and backward-adaptive
 /// history streams.
+@inline(__always)
 func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode], skipMapWidth: Int, histories: [EntropyHistoryState]?) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height

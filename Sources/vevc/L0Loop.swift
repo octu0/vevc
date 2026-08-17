@@ -27,6 +27,7 @@ final class L0RefState: @unchecked Sendable {
 /// One full-block LeGall 5/3 analysis level, returning only the gathered LL
 /// plane. Identical code path to the encoder's extractSingleTransformBlocks*
 /// LL gather (same edge padding via Int16Reader, same dwt2DBlock kernels).
+@inline(__always)
 func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16] {
     let q = blockSize / 2
     let colCount = (w + blockSize - 1) / blockSize
@@ -66,6 +67,7 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
 /// Two-level LL analysis (32-block then 16-block) of a full-resolution
 /// PlaneData420, producing the quarter-resolution sub1-domain planes — the
 /// exact transform T whose output domain Base8 codes.
+@inline(__always)
 func analyzeLL2(pd: PlaneData420) -> PlaneData420 {
     let dx = pd.width
     let dy = pd.height
@@ -85,6 +87,7 @@ func analyzeLL2(pd: PlaneData420) -> PlaneData420 {
 /// Adds the L0-resolution motion-compensated prediction into `img` — the
 /// exact call sequence of the decoder's layer0 MC path (8x8 luma blocks
 /// mvShift 2, 4x4 chroma blocks mvShift 1).
+@inline(__always)
 func applyL0MotionCompensation(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async {
     let l0dx = img.width
     let l0dy = img.height
@@ -104,6 +107,7 @@ func applyL0MotionCompensation(img: inout Image16, prevPd: PlaneData420, ltrPd: 
 /// Clamp + deblock of the L0 reconstruction — the exact post-MC sequence of
 /// the decoder's layer0 path. qtYStepQ4/qtCStepQ4 are the raw Q4 steps as
 /// returned by decodeBase8 (Int(qt.step)).
+@inline(__always)
 func finishL0Reconstruction(img: inout Image16, qtYStepQ4: Int, qtCStepQ4: Int) {
     clampPlaneToPixelRange(plane: &img.y)
     clampPlaneToPixelRange(plane: &img.cb)
@@ -121,6 +125,7 @@ func finishL0Reconstruction(img: inout Image16, qtYStepQ4: Int, qtCStepQ4: Int) 
 /// Skip-block copy into the L0 reconstruction from the layer-matched
 /// reference planes — the exact geometry of the decoder's profile-0x02 skip
 /// copy at layer0 (scale 4, 8x8 luma / 4x4 chroma blocks).
+@inline(__always)
 func applyL0SkipCopy(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData420?, skipMap: [BlockMode], fullDx: Int) {
     let bw = (fullDx + 31) / 32
     let targetDx = img.width
@@ -170,6 +175,7 @@ func applyL0SkipCopy(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData4
 
 /// Pixel-range clamp shared by encoder and decoder L0 loops (identical to the
 /// decoder's internal plane clamp).
+@inline(__always)
 func clampPlaneToPixelRange(plane: inout [Int16]) {
     plane.withUnsafeMutableBufferPointer { ptr in
         guard let base = ptr.baseAddress else { return }
@@ -201,6 +207,7 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
 /// the layer2 MC (32-block, mvShift 0) into zeroed planes. Both sides derive
 /// LL2(P) from this, so it must be produced by the identical call sequence
 /// the decoder uses when adding prediction at layer2.
+@inline(__always)
 func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async -> PlaneData420 {
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
@@ -222,6 +229,7 @@ func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd
 /// Builds the layer1-resolution prediction by applying the decoder's layer1
 /// MC (16-block luma / 8-block chroma, mvShift 1) into zeroed planes. Used
 /// when layer2 is absent (splitter-truncated stream decoded at layer1).
+@inline(__always)
 func buildL1Prediction(l1dx: Int, l1dy: Int, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async -> PlaneData420 {
     let cbDx1 = (l1dx + 1) / 2
     let cbDy1 = (l1dy + 1) / 2
@@ -242,6 +250,7 @@ func buildL1Prediction(l1dx: Int, l1dy: Int, prevPd: PlaneData420, ltrPd: PlaneD
 
 /// One-level LL analysis (16-block) of a layer1-resolution PlaneData420 —
 /// the encoder chain's half-res → quarter-res step.
+@inline(__always)
 func analyzeLL1(pd: PlaneData420) -> PlaneData420 {
     let dx = pd.width
     let dy = pd.height
@@ -254,6 +263,7 @@ func analyzeLL1(pd: PlaneData420) -> PlaneData420 {
 }
 
 /// Elementwise a −= b over all three planes (dimensions must match).
+@inline(__always)
 func subtractPlanes(_ a: inout Image16, _ b: PlaneData420) {
     subtractInt16(&a.y, b.y)
     subtractInt16(&a.cb, b.cb)
@@ -273,6 +283,7 @@ private func subtractInt16(_ a: inout [Int16], _ b: [Int16]) {
 /// Deep copy into fresh (non-pool) storage, safe to retain across frames.
 /// Pool-backed buffers may be recycled by their release closures, so the L0
 /// reference chain always owns plain arrays.
+@inline(__always)
 func freshCopy(_ img: Image16) -> PlaneData420 {
     var y = [Int16](repeating: 0, count: img.y.count)
     var cb = [Int16](repeating: 0, count: img.cb.count)
@@ -286,6 +297,7 @@ func freshCopy(_ img: Image16) -> PlaneData420 {
 /// Zeroes r0 in skip blocks (8x8 luma / 4x4 chroma at quarter resolution).
 /// The decoder's skip copy overwrites these regions, so coding them is pure
 /// rate waste; both reconstructions are driven by the skip copy, not r0.
+@inline(__always)
 func clearL0SkipResidual(img: inout Image16, skipMap: [BlockMode], fullDx: Int) {
     let bw = (fullDx + 31) / 32
     let dx = img.width

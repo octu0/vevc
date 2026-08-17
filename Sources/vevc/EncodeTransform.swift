@@ -302,7 +302,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0, history: EntropyHistoryState? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -407,37 +407,25 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, sads: [Int]? = nil, occlusionScores: [Int]? = nil, colCount: Int = 0, rowCount: Int = 0, history: EntropyHistoryState? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
-    
+
+    // Spatial adaptive threshold: when colCount/rowCount are provided,
+    // apply higher zero-thresholds to peripheral blocks where human
+    // visual attention is lower, increasing zero-block rate at edges.
     let useSpatialWeight = 1 < colCount && 1 < rowCount
-    
+
     var zeroCount = 0
     for i in blocks.indices {
-        let safeCol = if 0 < colCount { colCount } else { 1 }
-        let col = i % safeCol
-        let row = i / safeCol
-        let colCount32 = (colCount + 1) / 2
-        let sadIdx = ((row / 2) * colCount32) + (col / 2)
-        
-        let isHighSAD = if let sads = sads, sadIdx < sads.count, 1500 <= sads[sadIdx] { true } else { false }
-        let occScore = if let occ = occlusionScores, sadIdx < occ.count { occ[sadIdx] } else { 0 }
-        let isHighOcc = 2 <= occScore
-        
-        let isHighError = isHighSAD || isHighOcc
         let blockThreshold: Int
-        switch true {
-        case isHighError:
-            // Adaptive AC Preservation: if the prediction error is significant,
-            // half the zero thresholds to preserve edge details and suppress ghosts,
-            // while still discarding the ±1 mosquito noise.
-            blockThreshold = if zeroThreshold == 0 { 0 } else { max(1, zeroThreshold / 2) }
-        case useSpatialWeight:
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
             blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
-        default:
+        } else {
             blockThreshold = zeroThreshold
         }
         if isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold) {

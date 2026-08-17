@@ -16,7 +16,6 @@ func encodeSpatialLayersIntra(pd: PlaneData420, pool: BlockViewPool, qtY: Quanti
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
 
     let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
-    let isPFrame = false
 
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2)
     defer { releaseL2() }
@@ -31,7 +30,7 @@ func encodeSpatialLayersIntra(pd: PlaneData420, pool: BlockViewPool, qtY: Quanti
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks, selectModel: unifiedSelectModel)
+    let layer1 = encodeLayer16Payload(dx: sub2.width, dy: sub2.height, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks, histories: nil, selectModel: unifiedSelectModel)
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -39,7 +38,7 @@ func encodeSpatialLayersIntra(pd: PlaneData420, pool: BlockViewPool, qtY: Quanti
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, selectModel: unifiedSelectModel)
+    let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, histories: nil, selectModel: unifiedSelectModel)
 
     let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
 
@@ -68,7 +67,6 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
 
     let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
-    let isPFrame = false
 
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2)
     defer { releaseL2() }
@@ -88,7 +86,7 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), selectModel: unifiedSelectModelParentFree)
+    let layer1 = encodeLayer16Payload(dx: sub2.width, dy: sub2.height, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), histories: nil, selectModel: unifiedSelectModelParentFree)
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -96,7 +94,7 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), selectModel: unifiedSelectModelParentFree)
+    let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), histories: nil, selectModel: unifiedSelectModelParentFree)
 
     let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
 
@@ -120,6 +118,7 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
 /// differs by ±1 at some block edges; with the L0 closed loop that drift
 /// reaches the entropy contexts (LL2 slot couples P into the parent blocks)
 /// and desyncs backward-adaptive tables.
+@inline(__always)
 private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1Img: Image16, l2yBlocks: [BlockView], l2cbBlocks: [BlockView], l2crBlocks: [BlockView], qtY2: QuantizationTable, qtC2: QuantizationTable) -> (PlaneData420, @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
@@ -141,6 +140,7 @@ private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1
     return (reconstructed, { r2Y(); r2Cb(); r2Cr() })
 }
 
+@inline(__always)
 private func serializeIntraFrame(layer0: [UInt8], layer1: [UInt8], layer2: [UInt8]) -> [UInt8] {
     var out: [UInt8] = []
     let frameHeader = VEVCFrameHeader(frameType: .iFrame, mvsSize: 0, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
@@ -155,6 +155,7 @@ private func serializeIntraFrame(layer0: [UInt8], layer1: [UInt8], layer2: [UInt
 /// that match the LTR input, skip_prev for blocks static for 4+ frames whose
 /// previous reconstruction also matches the current input. Updates
 /// staticCounters in place.
+@inline(__always)
 func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, predictedPd: PlaneData420, gopPosition: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int]) async -> [BlockMode] {
     let dx = pd.width
     let dy = pd.height
@@ -364,7 +365,6 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let resCr = await tCr
 
     let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
-    let isPFrame = true
 
     var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2)
     defer { releaseL2() }
@@ -379,7 +379,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)
     let l1cbDy = ((l1dy + 1) / 2)
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks)
+    let layer1 = encodeLayer16Payload(dx: sub2.width, dy: sub2.height, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: base8YBlocks, parentCbBlocks: base8CbBlocks, parentCrBlocks: base8CrBlocks, histories: nil, selectModel: unifiedSelectModel)
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -387,7 +387,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks)
+    let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, histories: nil, selectModel: unifiedSelectModel)
 
     let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
@@ -511,7 +511,6 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let resCr = await tCr
 
     let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
-    let isPFrame = true
 
     // Skip blocks bypass read/DWT/quant in the extracts (One-Pyramid §5) —
     // their residual is already zero, so the coded streams are unchanged.
@@ -574,7 +573,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let l1cbDy = ((l1dy + 1) / 2)
     // Parent-free AC contexts (EntropyCodec.swift): profile 0x02 never
     // conditions entropy coding on the parent layer.
-    let layer1 = entropyEncodeLayer16(dx: sub2.width, dy: sub2.height, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), histories: entropyHistories?.streams[1], selectModel: unifiedSelectModelParentFree)
+    let layer1 = encodeLayer16Payload(dx: sub2.width, dy: sub2.height, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), histories: entropyHistories?.streams[1], selectModel: unifiedSelectModelParentFree)
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -582,7 +581,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let layer2 = entropyEncodeLayer32(dx: pd.width, dy: pd.height, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, isPFrame: isPFrame, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), histories: entropyHistories?.streams[2], selectModel: unifiedSelectModelParentFree)
+    let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), histories: entropyHistories?.streams[2], selectModel: unifiedSelectModelParentFree)
 
     // skipMap must be passed here: the decoder's layer2 reconstruction skips
     // skip blocks entirely (they stay zero until the final skip copy), and
