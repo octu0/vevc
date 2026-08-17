@@ -18,11 +18,11 @@ func encodeSpatialLayersIntra(pd: PlaneData420, pool: BlockViewPool, qtY: Quanti
     let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
     let isPFrame = false
 
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2)
     defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: nil, occlusionScores: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1)
     defer { releaseL1() }
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: unifiedSelectModel)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = await encodePlaneBase8Intra(pd: sub1, pool: pool, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: unifiedSelectModel)
     defer { releaseBase() }
 
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
@@ -70,11 +70,11 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
     let resPd = PlaneData420(width: dx, height: dy, y: pd.y, cb: pd.cb, cr: pd.cr)
     let isPFrame = false
 
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: nil, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2)
     defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: nil, occlusionScores: nil, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1)
     defer { releaseL1() }
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: nil, occlusionScores: nil, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: unifiedSelectModelParentFree)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = await encodePlaneBase8Intra(pd: sub1, pool: pool, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, selectModel: unifiedSelectModelParentFree)
     defer { releaseBase() }
 
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
@@ -331,7 +331,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
 
-    let (mvs, sads, refDirs, occlusionScores, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: [], cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
+    let (mvs, sads, refDirs, _, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: [], cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
 
     var mutPdY = pool.getInt16(count: pd.y.count)
     var mutPdCb = pool.getInt16(count: pd.cb.count)
@@ -366,11 +366,11 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
     let isPFrame = true
 
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold)
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2)
     defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1)
     defer { releaseL1() }
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: sub1, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = await encodePlaneBase8PFrame(pd: sub1, pool: pool, sads: sads, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold)
     defer { releaseBase() }
 
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
@@ -462,7 +462,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
 
     MultiRefOracle.shared?.evaluate(pd: pd, skipMap: skipMap, skipThreshold: skipThreshold)
 
-    let (mvs_original, sads, refDirs_original, occlusionScores, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: skipMap, cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
+    let (mvs_original, sads, refDirs_original, _, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: skipMap, cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
     var mvs = mvs_original
     var refDirs = refDirs_original
     for i in 0..<skipMap.count {
@@ -516,9 +516,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // Skip blocks bypass read/DWT/quant in the extracts (One-Pyramid §5) —
     // their residual is already zero, so the coded streams are unchanged.
     let skipBw = (dx + 31) / 32
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = try await preparePlaneLayer32(pd: resPd, pool: pool, sads: sads, layer: 2, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, skipMap: skipMap, skipMapWidth: skipBw)
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32WithSkipMap(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw)
     defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = try await preparePlaneLayer16(pd: sub2, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 1, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, skipMap: skipMap, skipMapWidth: skipBw)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMap(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw)
     defer { releaseL1() }
 
     // L0 closed loop (One-Pyramid §4): Base8 codes r0 = LL2(source) −
@@ -542,7 +542,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         base8Input = PlaneData420(img16: r0)
     }
 
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = try await encodePlaneBase8(pd: base8Input, pool: pool, sads: sads, occlusionScores: occlusionScores, layer: 0, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, skipMap: skipMap, skipMapWidth: skipBw, histories: entropyHistories?.streams[0], selectModel: unifiedSelectModelParentFree)
+    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = await encodePlaneBase8PFrameWithSkipMap(pd: base8Input, pool: pool, sads: sads, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, skipMap: skipMap, skipMapWidth: skipBw, histories: entropyHistories?.streams[0])
     defer { releaseBase() }
 
     var baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
