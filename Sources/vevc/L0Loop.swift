@@ -42,9 +42,11 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
         for r in 0..<rowCount {
             for c in 0..<colCount {
                 reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view)
+                // LL-only forward lifting: bit-identical LL bytes, the other
+                // quadrants (never gathered here) stay unspecified.
                 switch blockSize {
-                case 32: dwt2DBlock32(view)
-                case 16: dwt2DBlock16(view)
+                case 32: dwt2DBlock32LL(view)
+                case 16: dwt2DBlock16LL(view)
                 default: dwt2DBlock8(view)
                 }
                 let dx0 = c * q

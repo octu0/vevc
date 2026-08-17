@@ -358,6 +358,66 @@ func inverseLift53Block32Vertical(_ base: UnsafeMutablePointer<Int16>, stride s:
     }
 }
 
+// MARK: - LL-only Vertical Lifting
+//
+// The L0-loop analysis (llAnalyzeLevel) reads ONLY the LL quadrant, so the
+// vertical stage can drop the high-pass column half (never read by LL) and
+// the high-row outputs (never stored). The arithmetic on the retained lanes
+// is identical to the full vertical lifting — same operands, same dithers —
+// so the LL bytes are bit-identical to dwt2DBlock32/16 followed by a gather.
+
+@inline(__always)
+func lift53Block32VerticalLLOnly(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
+    withUnsafeTemporaryAllocation(of: SIMD16<Int16>.self, capacity: 32) { tmp in
+        for y in 0..<32 {
+            tmp[y] = UnsafeRawPointer(base + y * s).loadUnaligned(as: SIMD16<Int16>.self)
+        }
+
+        for y in Swift.stride(from: 1, to: 31, by: 2) {
+            let d = SIMD16<Int16>(repeating: Int16((y / 2) & 1))
+            tmp[y] &-= (tmp[y - 1] &+ tmp[y + 1] &+ d) &>> 1
+        }
+        let d31 = SIMD16<Int16>(repeating: 1)
+        tmp[31] &-= (tmp[30] &+ tmp[30] &+ d31) &>> 1
+
+        let d0 = SIMD16<Int16>(repeating: 1)
+        tmp[0] &+= (tmp[1] &+ tmp[1] &+ d0) &>> 2
+        for y in Swift.stride(from: 2, to: 32, by: 2) {
+            let d = SIMD16<Int16>(repeating: Int16(((y / 2) & 1) == 0 ? 1 : 2))
+            tmp[y] &+= (tmp[y - 1] &+ tmp[y + 1] &+ d) &>> 2
+        }
+
+        for y in 0..<16 {
+            UnsafeMutableRawPointer(base + y * s).storeBytes(of: tmp[y * 2], as: SIMD16<Int16>.self)
+        }
+    }
+}
+
+@inline(__always)
+func lift53Block16VerticalLLOnly(_ base: UnsafeMutablePointer<Int16>, stride s: Int) {
+    withUnsafeTemporaryAllocation(of: SIMD8<Int16>.self, capacity: 16) { tmp in
+        for y in 0..<16 {
+            tmp[y] = UnsafeRawPointer(base + y * s).loadUnaligned(as: SIMD8<Int16>.self)
+        }
+
+        for y in Swift.stride(from: 1, to: 15, by: 2) {
+            let dither = SIMD8<Int16>(repeating: Int16((y / 2) & 1))
+            tmp[y] &-= (tmp[y - 1] &+ tmp[y + 1] &+ dither) &>> 1
+        }
+        tmp[15] &-= (tmp[14] &+ tmp[14] &+ SIMD8<Int16>(repeating: 1)) &>> 1
+
+        tmp[0] &+= (tmp[1] &+ tmp[1] &+ SIMD8<Int16>(repeating: 1)) &>> 2
+        for y in Swift.stride(from: 2, to: 16, by: 2) {
+            let dither = SIMD8<Int16>(repeating: Int16(((y / 2) & 1) == 0 ? 1 : 2))
+            tmp[y] &+= (tmp[y - 1] &+ tmp[y + 1] &+ dither) &>> 2
+        }
+
+        for y in 0..<8 {
+            UnsafeMutableRawPointer(base + y * s).storeBytes(of: tmp[y * 2], as: SIMD8<Int16>.self)
+        }
+    }
+}
+
 // MARK: - 2D DWT (Transpose-optimized)
 //
 // Strategy: rows first (contiguous memory, stride=1), then transpose,
@@ -409,6 +469,32 @@ func dwt2DBlock32(_ block: BlockView) {
     }
     // Vertical lifting directly without transpose
     lift53Block32Vertical(base, stride: width)
+}
+
+/// dwt2DBlock32 keeping only the LL quadrant valid (upper-left 16×16, bit-
+/// identical to the full transform there). The row stage is unchanged — LL
+/// columns depend on the row high-pass — and the vertical stage is LL-only.
+/// The other three quadrants are left unspecified.
+@inline(__always)
+func dwt2DBlock32LL(_ block: BlockView) {
+    let base = block.base
+    let width = block.stride
+    for y in 0..<32 {
+        lift53Block32(UnsafeMutableBufferPointer(start: base + (y * width), count: 32), stride: 1)
+    }
+    lift53Block32VerticalLLOnly(base, stride: width)
+}
+
+/// dwt2DBlock16 keeping only the LL quadrant valid (upper-left 8×8, bit-
+/// identical to the full transform there).
+@inline(__always)
+func dwt2DBlock16LL(_ block: BlockView) {
+    let base = block.base
+    let width = block.stride
+    for y in 0..<16 {
+        lift53Block16(UnsafeMutableBufferPointer(start: base + (y * width), count: 16), stride: 1)
+    }
+    lift53Block16VerticalLLOnly(base, stride: width)
 }
 
 @inline(__always)
