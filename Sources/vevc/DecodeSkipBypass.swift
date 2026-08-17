@@ -16,11 +16,11 @@
 //   caller therefore passes the skip map here only when layer2 is present.
 //
 // Index mapping: luma blocks of every layer grid are 1:1 with the skip map
-// (both are ceil(dx/32) × ceil(dy/32)); layer1/layer2 chroma blocks are also
-// 1:1 with each other, so direct indexing keeps the encoder, layer1 and
-// layer2 consistent. Base8 chroma blocks span 2×2 skip-map entries
-// geometrically, so their bypass requires all four to be non-inter
-// (base8ChromaAllSkip) — that is exactly the region the encoder zeroed.
+// (both are ceil(dx/32) × ceil(dy/32)). Chroma blocks of every layer cover
+// 64 full-resolution pixels and therefore span 2×2 skip-map entries; their
+// bypass requires all four to be non-inter (chromaAllSkip /
+// base8ChromaAllSkip) — that is exactly the region the encoder zeroed and
+// reconstructs symmetrically (reconstructPlaneLayer32Cb/Cr).
 
 @inline(__always)
 func chromaAllSkip(_ map: UnsafeBufferPointer<BlockMode>, bw: Int, bh: Int, c: Int, r: Int) -> Bool {
