@@ -36,6 +36,27 @@ func evaluateQuantizeLayer32(view: BlockView, qt: QuantizationTable) {
     quantize16(hh, q: qt.qHigh)
 }
 
+/// σ-normalized AQ variant: the block's source-activity class selects the
+/// dead-zone variant (same steps — the bitstream and decoder are unchanged).
+@inline(__always)
+func evaluateQuantizeLayer32WithActivity(view: BlockView, qt: QuantizationTable, activity: BlockActivityClass) {
+    let subs = getSubbands32(view: view)
+    switch activity {
+    case .flat:
+        quantize16(subs.hl, q: qt.qMidFlat)
+        quantize16(subs.lh, q: qt.qMidFlat)
+        quantize16(subs.hh, q: qt.qHighFlat)
+    case .textured:
+        quantize16(subs.hl, q: qt.qMidTextured)
+        quantize16(subs.lh, q: qt.qMidTextured)
+        quantize16(subs.hh, q: qt.qHighTextured)
+    case .normal:
+        quantize16(subs.hl, q: qt.qMid)
+        quantize16(subs.lh, q: qt.qMid)
+        quantize16(subs.hh, q: qt.qHigh)
+    }
+}
+
 @inline(__always)
 func evaluateQuantizeLayer16(view: BlockView, qt: QuantizationTable) {
     let subs = getSubbands16(view: view)
@@ -45,6 +66,25 @@ func evaluateQuantizeLayer16(view: BlockView, qt: QuantizationTable) {
     quantize8(hl, q: qt.qMid)
     quantize8(lh, q: qt.qMid)
     quantize8(hh, q: qt.qHigh)
+}
+
+@inline(__always)
+func evaluateQuantizeLayer16WithActivity(view: BlockView, qt: QuantizationTable, activity: BlockActivityClass) {
+    let subs = getSubbands16(view: view)
+    switch activity {
+    case .flat:
+        quantize8(subs.hl, q: qt.qMidFlat)
+        quantize8(subs.lh, q: qt.qMidFlat)
+        quantize8(subs.hh, q: qt.qHighFlat)
+    case .textured:
+        quantize8(subs.hl, q: qt.qMidTextured)
+        quantize8(subs.lh, q: qt.qMidTextured)
+        quantize8(subs.hh, q: qt.qHighTextured)
+    case .normal:
+        quantize8(subs.hl, q: qt.qMid)
+        quantize8(subs.lh, q: qt.qMid)
+        quantize8(subs.hh, q: qt.qHigh)
+    }
 }
 
 @inline(__always)
@@ -246,6 +286,77 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock32(view)
                             evaluateQuantizeLayer32(view: view, qt: qt)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    withUnsafePointers(mut: &subband) { dstBase in
+        for i in 0..<rowCount {
+            for j in 0..<colCount {
+                let blockIdx = (i * colCount) + j
+                let view = blocks[blockIdx]
+                if isSkip[blockIdx] || isZeroBlock(view: view) { continue }
+
+                let w = (j * 32)
+                let h = (i * 32)
+                if width <= w || height <= h { continue }
+                gatherLL32(view: view, w: w, h: h, subWidth: subWidth, subHeight: subHeight, dstBase: dstBase)
+            }
+        }
+    }
+
+    withExtendedLifetime(subband) {}
+    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
+}
+
+/// σ-normalized AQ variant of extractSingleTransformBlocks32WithSkipMap:
+/// identical pipeline, the per-block quantize call selects the dead-zone
+/// variant from the luma activity map (grid 1:1 with the block grid).
+func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool], activity: [BlockActivityClass]) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+    let subWidth = ((width + 1) / 2)
+    let subHeight = ((height + 1) / 2)
+    var subband = pool.getInt16(count: subWidth * subHeight)
+    subband.withUnsafeMutableBufferPointer { ptr in
+        ptr.initialize(repeating: 0)
+    }
+
+    let rowCount = ((height + 32 - 1) / 32)
+    let colCount = ((width + 32 - 1) / 32)
+    let totalBlocks = rowCount * colCount
+
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get1024())
+    }
+    let blocks = tmpBlocks
+    let chunkSize = 4
+
+    let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks, qt, isSkip, activity, safeSrc] in
+                let srcBase = safeSrc.ptr
+                for i in sRow..<endRow {
+                    let h = (i * 32)
+                    for j in 0..<colCount {
+                        let w = (j * 32)
+                        if width <= w || height <= h { continue }
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
+
+                        if isSkip[blockIdx] {
+                            clearBlockRegion(base: view.base, width: 32, height: 32, stride: view.stride)
+                            continue
+                        }
+                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
+                        if isZeroBlock(view: view) != true {
+                            dwt2DBlock32(view)
+                            evaluateQuantizeLayer32WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
                     }
                 }
@@ -520,6 +631,77 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
 
+/// σ-normalized AQ variant of extractSingleTransformBlocks16WithSkipMap (the
+/// half-resolution 16px luma grid is 1:1 with the full-resolution 32px grid,
+/// so the same activity map indexes both).
+func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool], activity: [BlockActivityClass]) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+    let subWidth = ((width + 1) / 2)
+    let subHeight = ((height + 1) / 2)
+    var subband = pool.getInt16(count: subWidth * subHeight)
+    subband.withUnsafeMutableBufferPointer { ptr in
+        ptr.initialize(repeating: 0)
+    }
+
+    let rowCount = ((height + 16 - 1) / 16)
+    let colCount = ((width + 16 - 1) / 16)
+    let totalBlocks = rowCount * colCount
+
+    var tmpBlocks = pool.getBlockViewArray(capacity: totalBlocks)
+    tmpBlocks.reserveCapacity(totalBlocks)
+    for _ in 0..<totalBlocks {
+        tmpBlocks.append(pool.get256())
+    }
+    let blocks = tmpBlocks
+    let chunkSize = 4
+
+    let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    await withTaskGroup(of: Void.self) { group in
+        for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
+            let endRow = min(sRow + chunkSize, rowCount)
+            group.addTask { [blocks, qt, isSkip, activity, safeSrc] in
+                let srcBase = safeSrc.ptr
+                for i in sRow..<endRow {
+                    let h = (i * 16)
+                    for j in 0..<colCount {
+                        let w = (j * 16)
+                        if width <= w || height <= h { continue }
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
+
+                        if isSkip[blockIdx] {
+                            clearBlockRegion(base: view.base, width: 16, height: 16, stride: view.stride)
+                            continue
+                        }
+                        r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
+                        if isZeroBlock(view: view) != true {
+                            dwt2DBlock16(view)
+                            evaluateQuantizeLayer16WithActivity(view: view, qt: qt, activity: activity[blockIdx])
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    withUnsafePointers(mut: &subband) { dstBase in
+        for i in 0..<rowCount {
+            for j in 0..<colCount {
+                let blockIdx = (i * colCount) + j
+                let view = blocks[blockIdx]
+                if isSkip[blockIdx] || isZeroBlock(view: view) { continue }
+
+                let w = (j * 16)
+                let h = (i * 16)
+                if width <= w || height <= h { continue }
+                gatherLL16(view: view, w: w, h: h, subWidth: subWidth, subHeight: subHeight, dstBase: dstBase)
+            }
+        }
+    }
+
+    withExtendedLifetime(subband) {}
+    return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
+}
+
 @inline(__always)
 func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool) async -> ([Int16], @Sendable () -> Void) {
     let subWidth = (width + 1) / 2
@@ -749,6 +931,42 @@ func preparePlaneLayer32WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: 
     return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
 }
 
+/// σ-normalized AQ variant: the LUMA plane quantizes with per-block dead-zone
+/// variants selected by the activity map; chroma is untouched (masking is
+/// luma-driven, and the chroma block grid spans 2×2 luma blocks).
+@inline(__always)
+func preparePlaneLayer32WithSkipMapAndActivity(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int, activity: [BlockActivityClass]) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+
+    let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
+    let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
+
+    async let taskBufY = { [ySkip, activity] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMapAndActivity(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip, activity: activity)
+        return (subband, blocks, r)
+    }()
+
+    async let taskBufCb = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
+        return (subband, blocks, r)
+    }()
+
+    async let taskBufCr = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
+        return (subband, blocks, r)
+    }()
+
+    let (subY, yBlocks, relY) = await taskBufY
+    let (subCb, cbBlocks, relCb) = await taskBufCb
+    let (subCr, crBlocks, relCr) = await taskBufCr
+
+    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
+    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
+}
+
 @inline(__always)
 func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
@@ -791,6 +1009,40 @@ func preparePlaneLayer16WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: 
 
     async let taskBufY = { [ySkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
         let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip)
+        return (subband, blocks, r)
+    }()
+
+    async let taskBufCb = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
+        return (subband, blocks, r)
+    }()
+
+    async let taskBufCr = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
+        return (subband, blocks, r)
+    }()
+
+    let (subY, yBlocks, relY) = await taskBufY
+    let (subCb, cbBlocks, relCb) = await taskBufCb
+    let (subCr, crBlocks, relCr) = await taskBufCr
+
+    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
+    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
+}
+
+/// σ-normalized AQ variant (luma-only, see preparePlaneLayer32WithSkipMapAndActivity).
+@inline(__always)
+func preparePlaneLayer16WithSkipMapAndActivity(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int, activity: [BlockActivityClass]) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+
+    let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (dy + 15) / 16, colCount: (dx + 15) / 16)
+    let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 15) / 16, colCount: (cbDx + 15) / 16)
+
+    async let taskBufY = { [ySkip, activity] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMapAndActivity(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip, activity: activity)
         return (subband, blocks, r)
     }()
 

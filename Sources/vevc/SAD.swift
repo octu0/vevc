@@ -203,6 +203,96 @@ func estimateLumaOffset(source: [Int16], reference: [Int16], width: Int, height:
     return max(-127, min(127, offset))
 }
 
+// MARK: - Block activity (σ-normalized AQ)
+
+/// SSIM weights a coded error by the local variance denominator 1/(2σ²+C):
+/// the same error is visible on flat blocks and masked on textured blocks.
+/// The per-32px-block luma variance map drives the block-adaptive dead-zone
+/// selection (Quant.swift) — encoder-only, the signaled step never changes.
+public enum BlockActivityClass: UInt8, Sendable {
+    case normal = 0
+    case flat = 1
+    case textured = 2
+}
+
+/// Default classification thresholds on the variance scale (σ² of stride-4
+/// samples). Swept on miko_700 500k against the fixed-dead-zone baseline:
+/// the TEXTURED side carries all of the gain (masked coefficients drop, the
+/// rate-control loop reinvests the freed bits: min +0.0030 / avg +0.0032
+/// SSIM at −16.6% size with σ² ≥ 600, delta 65536). The FLAT side (bias
+/// toward round-to-nearest) costs bits with no measurable SSIM return —
+/// disabled by default (threshold 0 classifies no block as flat).
+let aqFlatVarianceMaxDefault = 0
+let aqTexturedVarianceMinDefault = 1600
+/// Dead-zone bias delta in Q16 step units (16384 = 0.25 step) at full
+/// saturation; QuantizationTable ramps it with the qHigh saturation
+/// extension (zero at baseStep ≤ 2048). Stronger deltas measured better on
+/// SSIM (65536/σ²≥600: min +0.0030, −16.6% size) but visibly erode HUD
+/// text — text strokes are high-variance yet unmasked, and the erosion
+/// lives in HL/LH where the variance class cannot separate strokes from
+/// noise. 0.25 step only drops coefficients near the dead-zone edge.
+let aqBiasDeltaQ16Default = 16384
+
+/// Per-32px-block luma variance map (single row-major stride-4 pass,
+/// sum + sum-of-squares). Grid = ceil(width/32) × ceil(height/32) — 1:1 with
+/// the skip map and with every layer's luma block grid.
+@inline(__always)
+func computeBlockActivityMap(source: [Int16], width: Int, height: Int) -> [Int32] {
+    let bw = (width + 31) / 32
+    let bh = (height + 31) / 32
+    let blockCount = bw * bh
+    var sums = [Int](repeating: 0, count: blockCount)
+    var sumSqs = [Int](repeating: 0, count: blockCount)
+    var counts = [Int](repeating: 0, count: blockCount)
+    sums.withUnsafeMutableBufferPointer { sumsBuf in
+        sumSqs.withUnsafeMutableBufferPointer { sumSqsBuf in
+            counts.withUnsafeMutableBufferPointer { countsBuf in
+                let sumsBase = sumsBuf.baseAddress!
+                let sumSqsBase = sumSqsBuf.baseAddress!
+                let countsBase = countsBuf.baseAddress!
+                withUnsafePointers(source) { s in
+                    var y = 0
+                    while y < height {
+                        let rowBase = y * width
+                        let blockRowBase = (y / 32) * bw
+                        var x = 0
+                        while x < width {
+                            let v = Int(s[rowBase + x])
+                            let idx = blockRowBase + (x >> 5)
+                            sumsBase[idx] += v
+                            sumSqsBase[idx] += v * v
+                            countsBase[idx] += 1
+                            x += 4
+                        }
+                        y += 4
+                    }
+                }
+            }
+        }
+    }
+    var variances = [Int32](repeating: 0, count: blockCount)
+    for i in 0..<blockCount {
+        let n = counts[i]
+        if n == 0 { continue }
+        let mean = sums[i] / n
+        variances[i] = Int32(clamping: sumSqs[i] / n - mean * mean)
+    }
+    return variances
+}
+
+@inline(__always)
+func classifyBlockActivity(varianceMap: [Int32], flatVarianceMax: Int, texturedVarianceMin: Int) -> [BlockActivityClass] {
+    var classes = [BlockActivityClass](repeating: .normal, count: varianceMap.count)
+    for i in 0..<varianceMap.count {
+        if varianceMap[i] < Int32(flatVarianceMax) {
+            classes[i] = .flat
+        } else if Int32(texturedVarianceMin) <= varianceMap[i] {
+            classes[i] = .textured
+        }
+    }
+    return classes
+}
+
 /// Scene-cut detector constants (measured on miko_700 source pairs):
 /// a cut replaces content so per-32px-block mean diffs go BOTH ways
 /// (548→549: luma MAD 39.7, minority-side fraction 0.169), while a

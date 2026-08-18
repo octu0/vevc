@@ -206,7 +206,15 @@ This section records hard-won performance facts: where the compute cost actually
 - `sceneChangeThreshold` above `maxEstimateFastSAD` (765) disables all scene detection — deterministic tests rely on this (L0BitExactTests passes 1e9).
 - Measured (miko 500k): two cuts detected (214, 549 — both verified true cuts), ghosts eliminated, cut-GOP SSIM +0.025, global avg +0.0013, size −14 KB; ToS bit-identical (no cuts); miko 2500k min +0.0036.
 
-### 9.3. Pitfalls — Changes That Silently Make It Slower (or Break It)
+### 9.3. σ-Normalized Adaptive Quantization (2026-08-18, encoder-only)
+
+- SSIM weights a coded error by 1/(2σ²+C) (local-variance masking). Per-32px-block source-luma variance (`computeBlockActivityMap`, SAD.swift — grid 1:1 with the skip map) classifies blocks; TEXTURED blocks quantize layer-2/1 luma HL/LH/HH with a widened dead zone (`qMidTextured`/`qHighTextured`, Quant.swift). The signaled step never changes, so the bitstream format and decoder are untouched; `VEVC_AQ_BIAS=0` reproduces the fixed-dead-zone bitstream exactly.
+- **Saturation-ramped** like the qHigh extension (zero at baseStep ≤ 2048, full at 4096): unramped widening measured miko 2500k avg −0.0016 (real detail loss at fine steps); ramped, the 2500k bitstream is byte-identical to no-AQ.
+- **The FLAT side gives nothing**: biasing flat blocks toward round-to-nearest costs bits with no SSIM return (swept at multiple thresholds). All gain is on the textured side — dropping masked near-dead-zone coefficients lets rate control reinvest the bits across frames.
+- **Variance cannot separate text from texture**: HUD text strokes are high-variance but unmasked. Full-strength widening (1.0 step, σ² ≥ 600) measured best on metrics (min +0.0030 / −16.6% size) but visibly eroded scoreboard text; HH-only widening avoids the text but loses the entire gain (saturated HH is already dead — everything lives in HL/LH). Adopted: 0.25-step delta at σ² ≥ 1600, which only drops coefficients near the dead-zone edge — text strokes (large coefficients) are untouched, verified visually on frames 619/549.
+- Measured (miko 500k): min-SSIM +0.0018, avg +0.0006, size −4.5%; ToS and miko 2500k bit-identical.
+
+### 9.4. Pitfalls — Changes That Silently Make It Slower (or Break It)
 
 - **Reconstruction check on *both* `skip_ltr` and `skip_prev`:** −40% encode / −53% decode fps, +9% size. **Rejected.** Apply to `skip_prev` only.
 - **Layer0 4×4 fine-grained skip decision:** per-frame duplicate DWT LL extraction → *slower* despite lower per-op count; skip ratio collapsed to ~3% → larger size. **Rejected.**

@@ -497,6 +497,13 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     async let tWp = { [pdY = pd.y, pPdY = pPd.y] () -> Int in
         estimateLumaOffset(source: pdY, reference: pPdY, width: dx, height: dy)
     }()
+    // σ-normalized AQ: per-block source-luma activity classes select the
+    // dead-zone variants during layer 2/1 luma quantization (SAD.swift,
+    // Quant.swift). Computed concurrently with the MC-subtract tasks.
+    async let tAq = { [pdY = pd.y] () -> [BlockActivityClass] in
+        let variances = computeBlockActivityMap(source: pdY, width: dx, height: dy)
+        return classifyBlockActivity(varianceMap: variances, flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax, texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin)
+    }()
     let mvsConst = mvs
     let refDirsConst = refDirs
     async let tY = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
@@ -530,9 +537,10 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // their residual is already zero, so the coded streams are unchanged.
     let skipBw = (dx + 31) / 32
     let skipBh = (dy + 31) / 32
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32WithSkipMap(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw)
+    let activityMap = await tAq
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32WithSkipMapAndActivity(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
     defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMap(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
     defer { releaseL1() }
 
     // L0 closed loop (One-Pyramid §4): Base8 codes r0 = LL2(source) −

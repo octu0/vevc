@@ -703,6 +703,11 @@ public struct EncoderTuning: @unchecked Sendable {
     public let skipThreshold: Int?
     /// VEVC_RECON_THRESH_SCALE: overrides the caller's reconThresholdScale.
     public let reconThresholdScale: Int?
+    /// σ-normalized AQ knobs (SAD.swift defaults; VEVC_AQ_BIAS=0 disables —
+    /// the flat/textured quantizer variants collapse to qMid/qHigh).
+    public let aqFlatVarianceMax: Int
+    public let aqTexturedVarianceMin: Int
+    public let aqBiasDeltaQ16: Int
 
     public init(
         l0LumaThresholdPFrame: Int = 4,
@@ -718,6 +723,9 @@ public struct EncoderTuning: @unchecked Sendable {
         self.l32LumaThreshold = Self.envInt(key: "VEVC_TUNE_L32_LUMA", defaultValue: l32LumaThreshold)
         self.skipThreshold = Self.envIntOptional(key: "VEVC_SKIP_THRESH")
         self.reconThresholdScale = Self.envIntOptional(key: "VEVC_RECON_THRESH_SCALE")
+        self.aqFlatVarianceMax = Self.envInt(key: "VEVC_AQ_FLAT", defaultValue: aqFlatVarianceMaxDefault)
+        self.aqTexturedVarianceMin = Self.envInt(key: "VEVC_AQ_TEX", defaultValue: aqTexturedVarianceMinDefault)
+        self.aqBiasDeltaQ16 = Self.envInt(key: "VEVC_AQ_BIAS", defaultValue: aqBiasDeltaQ16Default)
     }
 
     @inline(__always)

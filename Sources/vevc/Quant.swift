@@ -43,6 +43,40 @@ struct QuantizationTable: Sendable {
     public let qLow: Quantizer
     public let qMid: Quantizer
     public let qHigh: Quantizer
+    /// Block-adaptive dead-zone variants (σ-normalized AQ, encoder-only).
+    ///
+    /// Derivation — SSIM's local form divides error energy by local variance:
+    ///
+    ///   SSIM(x,y) = [(2μxμy+C1)(2σxy+C2)] / [(μx²+μy²+C1)(σx²+σy²+C2)]
+    ///
+    ///   For a small mean-preserving coding error e = y − x:
+    ///     1 − SSIM(x, x+e) ≈ E[e²] / (2σx² + C2)          (first order)
+    ///   ⇒ perceptual block weight   w_k = 1 / (2σ_k² + C2)
+    ///   ⇒ RD-optimal per-block λ    λ_k = λ · (2σ_k² + C2)
+    ///
+    /// High σ² masks coding error (texture), low σ² exposes it (flats).
+    /// C2 = (0.03·255)² ≈ 58 on the 8-bit scale — masking only matters when
+    /// σ² ≫ 58, hence the textured threshold σ² ≥ 1600 (SAD.swift).
+    ///
+    /// The step is signaled per layer, so λ_k is expressed through the
+    /// dead-zone bias instead: same steps as qMid/qHigh — only the bias
+    /// differs — so the decoder dequantizes every variant with the signaled
+    /// step and needs no knowledge of the per-block choice. Widening drops
+    /// only coefficients near the dead-zone edge (the masked ones); the
+    /// rate controller reinvests the freed bits across frames.
+    ///
+    /// Measured boundaries (miko 500k, 2026-08-18): the FLAT side (bias
+    /// toward round-to-nearest) returns nothing on SSIM at any threshold —
+    /// disabled by default. Widening beyond 0.25 step scores better
+    /// (−16.6% size at 1.0 step / σ² ≥ 600) but visibly erodes HUD text:
+    /// text strokes are high-variance yet unmasked, and variance alone
+    /// cannot separate strokes from noise (both live in HL/LH; saturated
+    /// HH is already dead). A stroke-vs-noise discriminator would recover
+    /// that headroom.
+    public let qMidFlat: Quantizer
+    public let qHighFlat: Quantizer
+    public let qMidTextured: Quantizer
+    public let qHighTextured: Quantizer
 
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
         let s = max(16, min(baseStep, 4096))
@@ -125,6 +159,13 @@ struct QuantizationTable: Sendable {
 
         let offsetOn = Int(s) <= 2048
 
+        // σ-normalized AQ dead-zone delta, saturation-ramped like the qHigh
+        // extension: zero below the knee (baseStep 2048), full at 4096. At
+        // non-saturated rates the widening removes detail SSIM notices
+        // (measured miko 2500k avg −0.0016 unramped); at saturation the
+        // intra-frame reallocation is the only remaining degree of freedom.
+        let aqDelta = Int32((EncoderTuning.shared.aqBiasDeltaQ16 * ext) / 2048)
+
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(qLowCapQ4, max(16, baseStep / 8))
@@ -137,6 +178,10 @@ struct QuantizationTable: Sendable {
             self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC, centroidOffset: offsetOn)
             self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC, centroidOffset: offsetOn)
+            self.qMidFlat = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: min(32768, dzMidC + aqDelta), centroidOffset: offsetOn)
+            self.qHighFlat = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: min(32768, dzHighC + aqDelta), centroidOffset: offsetOn)
+            self.qMidTextured = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC - aqDelta, centroidOffset: offsetOn)
+            self.qHighTextured = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC - aqDelta, centroidOffset: offsetOn)
         } else {
             // qLow is the DC component: NEVER scale it!
             let lLow = min(qLowCapQ4, max(16, baseStep / qLowDivisor))
@@ -148,23 +193,14 @@ struct QuantizationTable: Sendable {
 
             let lHigh = min(1024, max(16, (baseStep * qHighNum) / qHighDen)) + (ext * 1024) / 2048
             self.qHigh = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY, centroidOffset: offsetOn)
+
+            self.qMidFlat = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: min(32768, dzMidY + aqDelta), centroidOffset: offsetOn)
+            self.qHighFlat = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: min(32768, dzHighY + aqDelta), centroidOffset: offsetOn)
+            self.qMidTextured = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY - aqDelta, centroidOffset: offsetOn)
+            self.qHighTextured = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY - aqDelta, centroidOffset: offsetOn)
         }
     }
 }
-
-// MARK: - Adaptive Quantization Table
-
-/// Block-level adaptive quantization.
-/// Pre-generates a discrete set of QuantizationTables with scaled qMid/qHigh
-/// to redistribute bits from flat blocks to edge/texture blocks.
-///
-/// Selection logic:
-///   - Measure each block's AC energy (sum of |HL| + |LH| + |HH| coefficients)
-///   - Compare against the frame-wide average AC energy
-///   - High-energy blocks (edges/textures) → higher qStep (coarser quantization, noise is masked)
-///   - Low-energy blocks (flat regions, faces) → lower qStep (finer quantization, prevents visible blockiness)
-///
-/// qLow is NOT scaled — base frequency quality must remain constant.
 
 // MARK: - Quantization SIMD
 

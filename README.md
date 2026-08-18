@@ -236,6 +236,30 @@ The encoder automatically selects the mode that minimizes total encoded size for
 
 **Backward-Adaptive History Tables (Profile 2)**: Encoder and decoder both maintain per-stream (layer × plane) decayed token counts across P-frames (`acc = acc/2 + current`). Once primed, the encoder can signal "reuse history" (flags bit `0x20`) and transmit no frequency tables at all — the decoder rebuilds identical models from the tokens it already decoded. State resets at every I-frame, keeping random access intact. On live-streaming content this removes most per-frame table overhead (measured 4.5–6% total bitrate reduction at equal quality, and ~8% at deeply saturated low-bitrate settings combined with the saturation-gated quantizer below).
 
+### σ-Normalized Adaptive Quantization (Profile 2)
+
+SSIM is not MSE: its local form divides the error energy by the signal's local variance, so the same coded error is highly visible on flat blocks and masked on textured ones. The derivation vevc's AQ is built on:
+
+```
+SSIM(x, y) = [(2μxμy + C1)(2σxy + C2)] / [(μx² + μy² + C1)(σx² + σy² + C2)]
+
+For a small coding error e = y − x that preserves the block mean (μy ≈ μx):
+
+    1 − SSIM(x, x+e)  ≈  E[e²] / (2σx² + C2)        (first order)
+
+⇒ perceptual weight of a block:      w_k = 1 / (2σ_k² + C2)
+⇒ RD-optimal per-block multiplier:   λ_k = λ · (2σ_k² + C2)
+```
+
+High-variance blocks tolerate coarser quantization (masking); flat blocks do not. C2 = (0.03·255)² ≈ 58 on the 8-bit scale, so the effect only matters when σ² ≫ 58 — vevc classifies a block as textured at σ² ≥ 1600 (σ ≥ 40).
+
+vevc signals ONE quantization step per layer, so per-block λ cannot change the step. It is expressed through the **encoder-side dead zone** instead: textured blocks quantize their layer-2/1 luma HL/LH/HH with the dead zone widened by 0.25 step (`qMidTextured`/`qHighTextured`), which drops only the coefficients near the dead-zone edge — exactly the masked ones — and the rate controller reinvests the freed bits across frames. The decoder dequantizes with the same signaled step and needs no knowledge of the per-block choice; the bitstream format is unchanged.
+
+- **σ² source**: one stride-4 pass over the source luma per frame (`computeBlockActivityMap`), on the same ceil(w/32) grid as the skip map. The DWT subband energies are the same multi-scale quantity — the transform already computes what MS-SSIM normalizes by.
+- **Saturation-ramped**: the dead-zone delta ramps with the qHigh saturation extension (zero at base step ≤ 2048, full at 4096). At non-saturated rates the widening removes detail SSIM notices (measured −0.0016 avg at 2500kbps unramped); ramped, non-saturated bitstreams are byte-identical to no-AQ.
+- **Known limit — variance cannot separate text from texture**: HUD text strokes are high-variance yet unmasked. Full-step widening measured best on metrics (−16.6% size) but visibly eroded scoreboard text; the adopted 0.25-step delta leaves large stroke coefficients untouched. A cheap stroke-vs-noise discriminator would recover the remaining headroom.
+- Measured (miko 1080p60 @500kbps, deep saturation): min-SSIM +0.0018, avg +0.0006 at −4.5% size; higher rates and film content bit-identical.
+
 ### Optimizations
 
 - **Interleaved 4-way**: 4 independent rANS states decoded in round-robin, enabling future SIMD4 parallelism
@@ -250,6 +274,7 @@ The encoder automatically selects the mode that minimizes total encoded size for
 - **Copy Frame Detection**: Duplicate input frames detected via SIMD16-accelerated pixel comparison, encoded as 1-byte markers
 - **Backward-Adaptive Entropy Tables**: Profile 2 P-frames can reuse rANS models rebuilt from decoded history (zero table headers, decoder stays in lockstep without signaling)
 - **Saturation-Gated Quantization Range**: the qHigh (HH) cap ramps up to 2× only when the rate controller saturates (base step beyond 2048), lowering the achievable rate floor by ~7% without touching normal-rate quality or worst-frame structure (qMid/qLow are never extended)
+- **σ-Normalized AQ (Profile 2)**: textured blocks (source-luma σ² ≥ 1600) widen their layer-2/1 luma dead zones by 0.25 step under saturation — SSIM's masking denominator 1/(2σ²+C₂) in closed form, encoder-side only (see the section above)
 - **Parent-Free Entropy Contexts (Profile 2)**: AC coefficient contexts condition only on the previous coefficient, never on the parent layer — measured smaller streams under the backward-adaptive tables, and it decouples the 9 coefficient streams (3 layers × 3 planes) from each other
 - **All-Layer Skip Bypass (Profile 2)**: skip blocks bypass the block read, DWT and quantization on the encoder and dequant/inverse-DWT on the decoder at every layer (bit-exact — their coefficients are zero by construction). On skip-heavy live content this is the difference between 11.4 and 9.4 ms/frame encode at 1080p60
 - **Latency-Mode Parallel Entropy Decode (Profile 2)**: the 9 independent streams can entropy-decode concurrently for single-stream low-latency playback (−13% per-frame latency); GOP-parallel throughput decoding keeps the sequential order, which is faster when all cores are already busy
