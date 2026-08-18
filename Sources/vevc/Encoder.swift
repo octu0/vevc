@@ -1,4 +1,13 @@
 import Foundation
+
+/// Quality-ceiling floor for the I-frame coding step (Q4 units, 512 = real
+/// step 32). The live-streaming target does not need the SSIM peaks that
+/// fine I-frame quantization produces; the unspent I-frame bits stay in the
+/// GOP budget and flow to the P frames (min-SSIM support). P-frame budgeting
+/// derives from the unfloored estimate, so P quality is free to exceed the
+/// floored I-frame level.
+let iFrameQStepFloorQ4: Int = 512
+
 // MARK: - VEVCEncoder
 
 public actor VEVCEncoder {
@@ -273,7 +282,16 @@ actor LayersEncodeActor {
                 let targetBits = rateController.beginGOP()
                 let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
                 self.qt = baseQt
-                baseStep = Int(baseQt.step)
+                // Quality-ceiling floor for the I-frame coding step,
+                // rate-scaled: 512 (real step 32) at 500kbps, relaxing
+                // inversely with bitrate so higher-rate operating points
+                // keep their finer I-frames. self.qt keeps the unfloored
+                // estimate, so P-frame budgeting is untouched and the bits
+                // the I-frame does not spend flow to the GOP's P frames.
+                // Fixed-qstep mode (explicit quality request) is never
+                // floored.
+                let scaledFloor = min(iFrameQStepFloorQ4, (iFrameQStepFloorQ4 * 500_000) / max(1, maxbitrate))
+                baseStep = max(Int(baseQt.step), scaledFloor)
             }
             
             framesSinceKeyframe = 0
