@@ -774,18 +774,18 @@ private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: In
     if copyCount <= 0 { return }
 
     withUnsafePointers(src, mut: &dst) { (sPtr: UnsafePointer<Int16>, dPtr: UnsafeMutablePointer<Int16>) in
-            let sBase = sPtr
-            let dBase = dPtr
-            if bx + blockSize <= width && by + blockSize <= height {
-                for y in 0..<blockSize {
-                    let offset = (by + y) * width + bx
-                    dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: blockSize)
-                }
-            } else {
-                for y in by..<maxY {
-                    let offset = y * width + bx
-                    dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: copyCount)
-                }
+        let sBase = sPtr
+        let dBase = dPtr
+        if bx + blockSize <= width && by + blockSize <= height {
+            for y in 0..<blockSize {
+                let offset = (by + y) * width + bx
+                dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: blockSize)
+            }
+        } else {
+            for y in by..<maxY {
+                let offset = y * width + bx
+                dBase.advanced(by: offset).update(from: sBase.advanced(by: offset), count: copyCount)
             }
         }
     }
+}

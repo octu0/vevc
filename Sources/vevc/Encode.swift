@@ -12,11 +12,6 @@ func getContext(prevVal: Int16, isParentZero: Bool) -> UInt8 {
 }
 
 @inline(__always)
-func getDPCMContext(prevVal: Int16) -> UInt8 {
-    return dpcmContext
-}
-
-@inline(__always)
 func encodeCoeffRun(val: Int16, encoder: inout EntropyEncoder, run: Int, context: UInt8) {
     encoder.addPair(run: UInt32(run), val: val, context: context)
 }
@@ -891,14 +886,12 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
         encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
         var run = 0
-        var prevVal: Int16 = 0
         for i in 0...lscpIdx {
             let diff = errors[i]
             if diff == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
-                prevVal = diff
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: dpcmContext)
                 run = 0
             }
         }
@@ -951,7 +944,7 @@ func blockEncodeDPCMErrorMED(_ x: Int16, _ a: Int16, _ b: Int16, _ c: Int16) -> 
 @inline(__always)
 func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
     withUnsafeTemporaryAllocation(of: Int16.self, capacity: 64) { ptrErr in
-        guard let baseErr = ptrErr.baseAddress else { return }
+        let baseErr = ptrErr.baseAddress!
         
         var last: Int16 = lastVal
         
@@ -998,14 +991,12 @@ func blockEncodeDPCM8(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
         lastVal = last
         
         var run = 0
-        var prevVal: Int16 = 0
         for i in 0...lscpIdx {
             let diff = baseErr[i]
             if diff == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
-                prevVal = diff
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: dpcmContext)
                 run = 0
             }
         }
@@ -1089,7 +1080,6 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
     lastVal = last
 
     var run = 0
-    var prevVal: Int16 = 0
     var currentIdx = 0
     last = originalLastVal
 
@@ -1098,8 +1088,7 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
     if diffRunFirst == 0 {
         run += 1
     } else {
-        encodeCoeffRun(val: diffRunFirst, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
-        prevVal = diffRunFirst
+        encodeCoeffRun(val: diffRunFirst, encoder: &encoder, run: run, context: dpcmContext)
         run = 0
     }
     currentIdx += 1
@@ -1110,8 +1099,7 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
             if diff == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
-                prevVal = diff
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: dpcmContext)
                 run = 0
             }
             currentIdx += 1
@@ -1129,8 +1117,7 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
             if diffY0 == 0 {
                 run += 1
             } else {
-                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
-                prevVal = diffY0
+                encodeCoeffRun(val: diffY0, encoder: &encoder, run: run, context: dpcmContext)
                 run = 0
             }
             currentIdx += 1
@@ -1141,8 +1128,7 @@ func blockEncodeDPCM16(encoder: inout EntropyEncoder, block: BlockView, lastVal:
                 if diff == 0 {
                     run += 1
                 } else {
-                    encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: getDPCMContext(prevVal: prevVal))
-                    prevVal = diff
+                    encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: dpcmContext)
                     run = 0
                 }
                 currentIdx += 1

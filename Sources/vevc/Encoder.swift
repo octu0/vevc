@@ -39,8 +39,8 @@ public actor VEVCEncoder {
         self.maxConcurrency = maxConcurrency
         self.qstep = nil
         self.profile = profile
-        self.skipThreshold = EncoderTuning.envInt(key: "VEVC_SKIP_THRESH", defaultValue: skipThreshold)
-        self.reconThresholdScale = EncoderTuning.envInt(key: "VEVC_RECON_THRESH_SCALE", defaultValue: reconThresholdScale)
+        self.skipThreshold = EncoderTuning.shared.skipThreshold ?? skipThreshold
+        self.reconThresholdScale = EncoderTuning.shared.reconThresholdScale ?? reconThresholdScale
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -70,8 +70,8 @@ public actor VEVCEncoder {
         self.maxConcurrency = maxConcurrency
         self.qstep = qstep
         self.profile = profile
-        self.skipThreshold = EncoderTuning.envInt(key: "VEVC_SKIP_THRESH", defaultValue: skipThreshold)
-        self.reconThresholdScale = EncoderTuning.envInt(key: "VEVC_RECON_THRESH_SCALE", defaultValue: reconThresholdScale)
+        self.skipThreshold = EncoderTuning.shared.skipThreshold ?? skipThreshold
+        self.reconThresholdScale = EncoderTuning.shared.reconThresholdScale ?? reconThresholdScale
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -668,6 +668,12 @@ private func estimateRiceBits4(block: BlockView) -> Int {
     return bodyBits + headerBits
 }
 
+/// Encoder tuning knobs. The singleton captures every environment override
+/// exactly once at init — environment variables are constant for the process
+/// lifetime, so no call site re-reads them. Values with built-in defaults
+/// are plain Ints; values whose default belongs to the caller (init
+/// parameters like skipThreshold) are optionals, consumed as
+/// `EncoderTuning.shared.x ?? callerDefault`.
 public struct EncoderTuning: @unchecked Sendable {
     public static let shared = EncoderTuning()
 
@@ -676,7 +682,11 @@ public struct EncoderTuning: @unchecked Sendable {
     public let iFrameQuantizationScale: Int
     public let l16LumaThreshold: Int
     public let l32LumaThreshold: Int
-    
+    /// VEVC_SKIP_THRESH: overrides the caller's skipThreshold when set.
+    public let skipThreshold: Int?
+    /// VEVC_RECON_THRESH_SCALE: overrides the caller's reconThresholdScale.
+    public let reconThresholdScale: Int?
+
     public init(
         l0LumaThresholdPFrame: Int = 4,
         l0ChromaThresholdScale: Int = 8,
@@ -689,14 +699,21 @@ public struct EncoderTuning: @unchecked Sendable {
         self.iFrameQuantizationScale = Self.envInt(key: "VEVC_TUNE_IFRAME_SCALE", defaultValue: iFrameQuantizationScale)
         self.l16LumaThreshold = Self.envInt(key: "VEVC_TUNE_L16_LUMA", defaultValue: l16LumaThreshold)
         self.l32LumaThreshold = Self.envInt(key: "VEVC_TUNE_L32_LUMA", defaultValue: l32LumaThreshold)
+        self.skipThreshold = Self.envIntOptional(key: "VEVC_SKIP_THRESH")
+        self.reconThresholdScale = Self.envIntOptional(key: "VEVC_RECON_THRESH_SCALE")
     }
-    
+
     @inline(__always)
-    internal static func envInt(key: String, defaultValue: Int) -> Int {
+    private static func envInt(key: String, defaultValue: Int) -> Int {
+        envIntOptional(key: key) ?? defaultValue
+    }
+
+    @inline(__always)
+    private static func envIntOptional(key: String) -> Int? {
         if let valStr = ProcessInfo.processInfo.environment[key], let val = Int(valStr) {
             return val
         }
-        return defaultValue
+        return nil
     }
 }
 

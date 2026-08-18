@@ -180,7 +180,7 @@ func applyL0SkipCopy(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData4
 @inline(__always)
 func clampPlaneToPixelRange(plane: inout [Int16]) {
     plane.withUnsafeMutableBufferPointer { ptr in
-        guard let base = ptr.baseAddress else { return }
+        let base = ptr.baseAddress!
         var x = 0
         let c = ptr.count
         let vMin = SIMD16<Int16>(repeating: -128)

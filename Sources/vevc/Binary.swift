@@ -1,4 +1,3 @@
-
 enum BinaryError: Error, CustomStringConvertible {
     case eof
     case insufficientData(message: String)
@@ -27,7 +26,6 @@ func appendUInt32BE(_ out: inout [UInt8], _ val: UInt32) {
     out.append(UInt8(val & 0xFF))
 }
 
-
 @inline(__always)
 public func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt16 {
     guard (offset + 2) <= r.count else {
@@ -55,11 +53,6 @@ func readUInt64BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt64 {
     let low = try readUInt32BEFromBytes(r, offset: &offset)
     return (UInt64(high) << 32) | UInt64(low)
 }
-
-
-
-
-
 
 @inline(__always)
 internal func readUInt16BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt16 {

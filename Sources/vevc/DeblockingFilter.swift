@@ -93,81 +93,81 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         let wRem = width - wFast
         let mvCount = mvs.dx.count
             
-            // Vertical Edges
-            for col in 1..<colCount {
-                let x = col * 32
-                if width <= x + 1 { continue }  // skip boundary columns where reading the right neighbor q1 would run out of range
-                for row in 0..<rowCount {
-                    let y = row * 32
-                    let idx = row * colCount + col
-                    let leftIdx = idx - 1
-                    
-                    if let sm = skipMap, idx < sm.count, leftIdx < sm.count {
-                        let leftMode = sm[leftIdx]
-                        let rightMode = sm[idx]
-                        if leftMode != .inter && rightMode != .inter && leftMode == rightMode {
-                            continue
-                        }
-                    }
-                    
-                    let leftDx: Int16 = if leftIdx < mvCount { mvDxBase[leftIdx] } else { 0 }
-                    let rightDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
-                    
-                    let leftIsIntra = leftDx == 32767
-                    let rightIsIntra = rightDx == 32767
-                    
-                    let isIntraBoundary = leftIsIntra || rightIsIntra
-                    let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
-                    let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
-                    
-                    if tc != 0 || beta != 0 {
-                        if y < hFast {
-                            deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
-                        } else {
-                            let safeH = min(hRem, height - y)
-                            deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
-                        }
-                    }
-                }
-            }
-            
-            // Horizontal Edges
-            for row in 1..<rowCount {
+        // Vertical Edges
+        for col in 1..<colCount {
+            let x = col * 32
+            if width <= x + 1 { continue }  // skip boundary columns where reading the right neighbor q1 would run out of range
+            for row in 0..<rowCount {
                 let y = row * 32
-                if height <= y + 1 { continue }  // skip boundary rows where reading the lower neighbor q1's row would run out of range
-                for col in 0..<colCount {
-                    let x = col * 32
-                    let idx = row * colCount + col
-                    let topIdx = idx - colCount
-                    
-                    if let sm = skipMap, idx < sm.count, topIdx < sm.count {
-                        let topMode = sm[topIdx]
-                        let bottomMode = sm[idx]
-                        if topMode != .inter && bottomMode != .inter && topMode == bottomMode {
-                            continue
-                        }
+                let idx = row * colCount + col
+                let leftIdx = idx - 1
+                
+                if let sm = skipMap, idx < sm.count, leftIdx < sm.count {
+                    let leftMode = sm[leftIdx]
+                    let rightMode = sm[idx]
+                    if leftMode != .inter && rightMode != .inter && leftMode == rightMode {
+                        continue
                     }
-                    
-                    let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
-                    let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
-                    
-                    let topIsIntra = topDx == 32767
-                    let bottomIsIntra = bottomDx == 32767
-                    
-                    let isIntraBoundary = topIsIntra || bottomIsIntra
-                    let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
-                    let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
-                    
-                    if tc != 0 || beta != 0 {
-                        if x < wFast {
-                            deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
-                        } else {
-                            let safeW = min(wRem, width - x)
-                            deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
-                        }
+                }
+                
+                let leftDx: Int16 = if leftIdx < mvCount { mvDxBase[leftIdx] } else { 0 }
+                let rightDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let leftIsIntra = leftDx == 32767
+                let rightIsIntra = rightDx == 32767
+                
+                let isIntraBoundary = leftIsIntra || rightIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if y < hFast {
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
+                    } else {
+                        let safeH = min(hRem, height - y)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
                     }
                 }
             }
+        }
+        
+        // Horizontal Edges
+        for row in 1..<rowCount {
+            let y = row * 32
+            if height <= y + 1 { continue }  // skip boundary rows where reading the lower neighbor q1's row would run out of range
+            for col in 0..<colCount {
+                let x = col * 32
+                let idx = row * colCount + col
+                let topIdx = idx - colCount
+                
+                if let sm = skipMap, idx < sm.count, topIdx < sm.count {
+                    let topMode = sm[topIdx]
+                    let bottomMode = sm[idx]
+                    if topMode != .inter && bottomMode != .inter && topMode == bottomMode {
+                        continue
+                    }
+                }
+                
+                let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
+                let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let topIsIntra = topDx == 32767
+                let bottomIsIntra = bottomDx == 32767
+                
+                let isIntraBoundary = topIsIntra || bottomIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if x < wFast {
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
+                    } else {
+                        let safeW = min(wRem, width - x)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -218,81 +218,81 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
         let wRem = width - wFast
         let mvCount = mvs.dx.count
             
-            // Vertical Edges
-            for col in 1..<colCountC {
-                let x = col * 16
-                if width <= x + 1 { continue }  // skip boundary columns where reading the right neighbor q1 would run out of range
-                for row in 0..<rowCountC {
-                    let y = row * 16
-                    let idx = row * mvColCount + col
-                    let leftIdx = idx - 1
-                    
-                    if let sm = skipMap, idx < sm.count, leftIdx < sm.count {
-                        let leftMode = sm[leftIdx]
-                        let rightMode = sm[idx]
-                        if leftMode != .inter && rightMode != .inter && leftMode == rightMode {
-                            continue
-                        }
-                    }
-                    
-                    let leftDx: Int16 = if leftIdx < mvCount { mvDxBase[leftIdx] } else { 0 }
-                    let rightDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
-                    
-                    let leftIsIntra = leftDx == 32767
-                    let rightIsIntra = rightDx == 32767
-                    
-                    let isIntraBoundary = leftIsIntra || rightIsIntra
-                    let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
-                    let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
-                    
-                    if tc != 0 || beta != 0 {
-                        if y < hFast {
-                            deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
-                        } else {
-                            let safeH = min(hRem, height - y)
-                            deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
-                        }
-                    }
-                }
-            }
-            
-            // Horizontal Edges
-            for row in 1..<rowCountC {
+        // Vertical Edges
+        for col in 1..<colCountC {
+            let x = col * 16
+            if width <= x + 1 { continue }  // skip boundary columns where reading the right neighbor q1 would run out of range
+            for row in 0..<rowCountC {
                 let y = row * 16
-                if height <= y + 1 { continue }  // skip boundary rows where reading the lower neighbor q1's row would run out of range
-                for col in 0..<colCountC {
-                    let x = col * 16
-                    let idx = row * mvColCount + col
-                    let topIdx = idx - mvColCount
-                    
-                    if let sm = skipMap, idx < sm.count, topIdx < sm.count {
-                        let topMode = sm[topIdx]
-                        let bottomMode = sm[idx]
-                        if topMode != .inter && bottomMode != .inter && topMode == bottomMode {
-                            continue
-                        }
+                let idx = row * mvColCount + col
+                let leftIdx = idx - 1
+                
+                if let sm = skipMap, idx < sm.count, leftIdx < sm.count {
+                    let leftMode = sm[leftIdx]
+                    let rightMode = sm[idx]
+                    if leftMode != .inter && rightMode != .inter && leftMode == rightMode {
+                        continue
                     }
-                    
-                    let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
-                    let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
-                    
-                    let topIsIntra = topDx == 32767
-                    let bottomIsIntra = bottomDx == 32767
-                    
-                    let isIntraBoundary = topIsIntra || bottomIsIntra
-                    let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
-                    let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
-                    
-                    if tc != 0 || beta != 0 {
-                        if x < wFast {
-                            deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
-                        } else {
-                            let safeW = min(wRem, width - x)
-                            deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
-                        }
+                }
+                
+                let leftDx: Int16 = if leftIdx < mvCount { mvDxBase[leftIdx] } else { 0 }
+                let rightDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let leftIsIntra = leftDx == 32767
+                let rightIsIntra = rightDx == 32767
+                
+                let isIntraBoundary = leftIsIntra || rightIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if y < hFast {
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
+                    } else {
+                        let safeH = min(hRem, height - y)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
                     }
                 }
             }
+        }
+        
+        // Horizontal Edges
+        for row in 1..<rowCountC {
+            let y = row * 16
+            if height <= y + 1 { continue }  // skip boundary rows where reading the lower neighbor q1's row would run out of range
+            for col in 0..<colCountC {
+                let x = col * 16
+                let idx = row * mvColCount + col
+                let topIdx = idx - mvColCount
+                
+                if let sm = skipMap, idx < sm.count, topIdx < sm.count {
+                    let topMode = sm[topIdx]
+                    let bottomMode = sm[idx]
+                    if topMode != .inter && bottomMode != .inter && topMode == bottomMode {
+                        continue
+                    }
+                }
+                
+                let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
+                let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let topIsIntra = topDx == 32767
+                let bottomIsIntra = bottomDx == 32767
+                
+                let isIntraBoundary = topIsIntra || bottomIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if x < wFast {
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
+                    } else {
+                        let safeW = min(wRem, width - x)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -1393,7 +1393,7 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
 @inline(__always)
 fileprivate func clampPlane(plane: inout [Int16]) {
     plane.withUnsafeMutableBufferPointer { ptr in
-        guard let base = ptr.baseAddress else { return }
+        let base = ptr.baseAddress!
         var x = 0
         let c = ptr.count
         let vMin = SIMD16<Int16>(repeating: -128)

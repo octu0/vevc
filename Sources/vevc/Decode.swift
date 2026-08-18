@@ -45,7 +45,6 @@ func predictMED(_ a: Int16, _ b: Int16, _ c: Int16) -> Int16 {
     return Int16(truncatingIfNeeded: ia + ib - ic)
 }
 
-
 @inline(__always)
 func decodeCoeffRun(decoder: inout EntropyDecoder, context: UInt8) throws -> (Int, Int16) {
     let pair = decoder.readPair(context: context)
@@ -259,7 +258,6 @@ func blockDecode8H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer
     }
 }
 
-
 @inline(__always)
 func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
@@ -290,7 +288,6 @@ func blockDecode8HWithParentBlock(decoder: inout EntropyDecoder, ptr base: Unsaf
     }
 }
 
-
 @inline(__always)
 func blockDecode4V(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
@@ -320,7 +317,6 @@ func blockDecode4V(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer
     }
 }
 
-
 @inline(__always)
 func blockDecode4H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
@@ -349,7 +345,6 @@ func blockDecode4H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer
         currentIdx += 1
     }
 }
-
 
 @inline(__always)
 func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
@@ -382,7 +377,6 @@ func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, ptr base: Unsaf
     }
 }
 
-
 @inline(__always)
 func blockDecodeDPCM4(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
@@ -395,10 +389,8 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoin
     }
 
     var currentIdx = 0
-    var prevVal: Int16 = 0
     while currentIdx <= lscpIdx {
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getDPCMContext(prevVal: prevVal))
-        prevVal = val
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: dpcmContext)
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -436,7 +428,6 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoin
     lastVal = ptr3[3]
 }
 
-
 @inline(__always)
 func blockDecodeDPCM8(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
@@ -449,10 +440,8 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoin
     }
 
     var currentIdx = 0
-    var prevVal: Int16 = 0
     while currentIdx <= lscpIdx {
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getDPCMContext(prevVal: prevVal))
-        prevVal = val
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: dpcmContext)
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -482,7 +471,6 @@ func blockDecodeDPCM8(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoin
     lastVal = last
 }
 
-
 @inline(__always)
 func blockDecodeDPCM16(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
@@ -495,10 +483,8 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoi
     }
 
     var currentIdx = 0
-    var prevVal: Int16 = 0
     while currentIdx <= lscpIdx {
-        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getDPCMContext(prevVal: prevVal))
-        prevVal = val
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: dpcmContext)
 
         currentIdx += run
         if currentIdx <= lscpIdx {
@@ -527,7 +513,6 @@ func blockDecodeDPCM16(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoi
     }
     lastVal = last
 }
-
 
 // MARK: - Internal Decode Functions
 
@@ -797,39 +782,39 @@ func decodeLayer32ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
     // when many GOPs decode in parallel.
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 32
-                    let rowOffset = i * colCount
-                    let py = h / 2
-                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        let px = w / 2
-                        
-                        if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
-                            copy16x16ContiguousDirect(srcBase: prevPtr, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
-                            dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                            dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                            dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                            inverseDWT2DBlock32(ptr: base, stride: 32)
-                            copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destPtr, destWidth: sWidth, x: w, y: h)
-                        } else {
-                            prev.readYDirect(srcBase: prevPtr, x: px, y: py, size: 16, into: block)
-                            dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                            dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                            dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                            inverseDWT2DBlock32(ptr: base, stride: 32)
-                            var blk = block
-                            subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
-                        }
-                    }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            let rowOffset = i * colCount
+            let py = h / 2
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                let px = w / 2
+                
+                if 0 <= px && 0 <= py && px + 16 <= pWidth && py + 16 <= pHeight && 0 <= w && 0 <= h && w + 32 <= sWidth && h + 32 <= sHeight {
+                    copy16x16ContiguousDirect(srcBase: prevPtr, srcWidth: pWidth, x: px, y: py, dstBase: base, dstStride: 32)
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                    inverseDWT2DBlock32(ptr: base, stride: 32)
+                    copy32x32ContiguousDirect(srcBase: base, srcStride: 32, destBase: destPtr, destWidth: sWidth, x: w, y: h)
+                } else {
+                    prev.readYDirect(srcBase: prevPtr, x: px, y: py, size: 16, into: block)
+                    dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                    dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                    inverseDWT2DBlock32(ptr: base, stride: 32)
+                    var blk = block
+                    subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
                 }
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -861,31 +846,31 @@ func decodeLayer32ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkS
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 32
-                    let rowOffset = i * colCount
-                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        // Chroma blocks span 2×2 luma-geometry skip-map entries.
-                        if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
-                            continue
-                        }
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        var blk = block
-                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
-                    }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            let rowOffset = i * colCount
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = rowOffset &+ xIdx
+                // Chroma blocks span 2×2 luma-geometry skip-map entries.
+                if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
+                    continue
                 }
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: base, stride: 32)
+                var blk = block
+                subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -916,27 +901,27 @@ func decodeLayer32ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 32
-                    let rowOffset = i * colCount
-                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        var blk = block
-                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            let rowOffset = i * colCount
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: base, stride: 32)
+                var blk = block
+                subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -968,31 +953,31 @@ func decodeLayer32ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkS
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 32
-                    let rowOffset = i * colCount
-                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        // Chroma blocks span 2×2 luma-geometry skip-map entries.
-                        if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
-                            continue
-                        }
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        var blk = block
-                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
-                    }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            let rowOffset = i * colCount
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = rowOffset &+ xIdx
+                // Chroma blocks span 2×2 luma-geometry skip-map entries.
+                if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
+                    continue
                 }
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: base, stride: 32)
+                var blk = block
+                subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1023,27 +1008,27 @@ func decodeLayer32ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 32
-                    let rowOffset = i * colCount
-                    for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
-                        dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
-                        dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
-                        inverseDWT2DBlock32(ptr: base, stride: 32)
-                        var blk = block
-                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 32
+            let rowOffset = i * colCount
+            for (xIdx, w) in stride(from: 0, to: dx, by: 32).enumerated() {
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 16, into: block)
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: base, stride: 32)
+                var blk = block
+                subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 32)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1077,28 +1062,28 @@ func decodeLayer16ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, ro
     // when many GOPs decode in parallel.
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 16
-                    let rowOffset = i * colCount
-                    for xIdx in 0..<colCount {
-                        let w = xIdx * 16
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readYDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
-                        dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
-                        dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
-                        dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                        inverseDWT2DBlock16(ptr: base, stride: 16)
-                        var blk = block
-                        subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 16
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 16
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readYDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
+                dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                inverseDWT2DBlock16(ptr: base, stride: 16)
+                var blk = block
+                subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1129,28 +1114,28 @@ func decodeLayer16ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 16
-                    let rowOffset = i * colCount
-                    for xIdx in 0..<colCount {
-                        let w = xIdx * 16
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
-                        dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
-                        dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
-                        dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                        inverseDWT2DBlock16(ptr: base, stride: 16)
-                        var blk = block
-                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 16
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 16
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readCbDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
+                dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                inverseDWT2DBlock16(ptr: base, stride: 16)
+                var blk = block
+                subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1181,28 +1166,28 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let prevPtr = sPrev.ptr
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 16
-                    let rowOffset = i * colCount
-                    for xIdx in 0..<colCount {
-                        let w = xIdx * 16
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
-                        dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
-                        dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
-                        dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
-                        inverseDWT2DBlock16(ptr: base, stride: 16)
-                        var blk = block
-                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let prevPtr = sPrev.ptr
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 16
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 16
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                prev.readCrDirect(srcBase: prevPtr, x: w / 2, y: h / 2, size: 8, into: block)
+                dequantize8(ptr: base.advanced(by: 8), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 128), stride: 16, q: qt.qMid)
+                dequantize8(ptr: base.advanced(by: 136), stride: 16, q: qt.qHigh)
+                inverseDWT2DBlock16(ptr: base, stride: 16)
+                var blk = block
+                subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 16)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1232,27 +1217,27 @@ func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowC
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 8
-                    let rowOffset = i * colCount
-                    for xIdx in 0..<colCount {
-                        let w = xIdx * 8
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                        dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                        dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                        dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                        inverseDWT2DBlock8(ptr: base, stride: 8)
-                        var blk = block
-                        subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 8
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 8
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                inverseDWT2DBlock8(ptr: base, stride: 8)
+                var blk = block
+                subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1282,27 +1267,27 @@ func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 8
-                    let rowOffset = i * colCount
-                    for xIdx in 0..<colCount {
-                        let w = xIdx * 8
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                        dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                        dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                        dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                        inverseDWT2DBlock8(ptr: base, stride: 8)
-                        var blk = block
-                        subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 8
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 8
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                inverseDWT2DBlock8(ptr: base, stride: 8)
+                var blk = block
+                subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain
@@ -1332,27 +1317,27 @@ func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, row
     // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let work: @Sendable (Int) -> Void = { tIdx in
-                let startRow: Int = tIdx * chunkSizeSlice
-                let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-                guard startRow < endRow else { return }
-                let destPtr = sDest.ptr
-                for i in startRow..<endRow {
-                    let h: Int = i * 8
-                    let rowOffset = i * colCount
-                    for xIdx in 0..<colCount {
-                        let w = xIdx * 8
-                        let blockIndex: Int = rowOffset &+ xIdx
-                        let block: BlockView = sBlocks.ptr[blockIndex]
-                        let base = block.base
-                        dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                        dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                        dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                        dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                        inverseDWT2DBlock8(ptr: base, stride: 8)
-                        var blk = block
-                        subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-                    }
-                }
+        let startRow: Int = tIdx * chunkSizeSlice
+        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
+        guard startRow < endRow else { return }
+        let destPtr = sDest.ptr
+        for i in startRow..<endRow {
+            let h: Int = i * 8
+            let rowOffset = i * colCount
+            for xIdx in 0..<colCount {
+                let w = xIdx * 8
+                let blockIndex: Int = rowOffset &+ xIdx
+                let block: BlockView = sBlocks.ptr[blockIndex]
+                let base = block.base
+                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+                inverseDWT2DBlock8(ptr: base, stride: 8)
+                var blk = block
+                subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+            }
+        }
     }
     // Only the dominant full-res luma pass benefits from intra-plane fan-out;
     // for everything smaller the task-spawn overhead outweighs the gain

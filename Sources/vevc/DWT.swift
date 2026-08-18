@@ -30,7 +30,7 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 
 @inline(__always)
 func lift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    guard let base = buffer.baseAddress else { return }
+    let base = buffer.baseAddress!
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var low = raw.evenHalf
     var high = raw.oddHalf
@@ -49,7 +49,7 @@ func lift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 
 @inline(__always)
 func lift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    guard let base = buffer.baseAddress else { return }
+    let base = buffer.baseAddress!
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD16<Int16>.self)
     var low = raw.evenHalf
     var high = raw.oddHalf
@@ -68,7 +68,7 @@ func lift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 
 @inline(__always)
 func lift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    guard let base = buffer.baseAddress else { return }
+    let base = buffer.baseAddress!
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD32<Int16>.self)
     var low = raw.evenHalf
     var high = raw.oddHalf

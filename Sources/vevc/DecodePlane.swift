@@ -165,11 +165,11 @@ func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
                     try blockDecode16HWithParentBlock(decoder: &decoder, ptr: lhBase, stride: 32, parentPtr: UnsafePointer(parentLH.base), parentStride: parentLH.stride)
                     try blockDecode16HWithParentBlock(decoder: &decoder, ptr: hhBase, stride: 32, parentPtr: UnsafePointer(parentHH.base), parentStride: parentHH.stride)
                 } else { // .split8
-                let v = task - 2
-                let tl = (v & 1) != 0
-                let tr = (v & 2) != 0
-                let bl = (v & 4) != 0
-                let br = (v & 8) != 0
+                    let v = task - 2
+                    let tl = (v & 1) != 0
+                    let tr = (v & 2) != 0
+                    let bl = (v & 4) != 0
+                    let br = (v & 8) != 0
                     if tl {
                         try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hlBase, stride: 32, parentPtr: UnsafePointer(parentHL.base), parentStride: parentHL.stride)
                         try blockDecode8HWithParentBlock(decoder: &decoder, ptr: lhBase, stride: 32, parentPtr: UnsafePointer(parentLH.base), parentStride: parentLH.stride)
@@ -204,11 +204,11 @@ func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
                     try blockDecode16H(decoder: &decoder, ptr: lhBase, stride: 32)
                     try blockDecode16H(decoder: &decoder, ptr: hhBase, stride: 32)
                 } else { // .split8
-                let v = task - 2
-                let tl = (v & 1) != 0
-                let tr = (v & 2) != 0
-                let bl = (v & 4) != 0
-                let br = (v & 8) != 0
+                    let v = task - 2
+                    let tl = (v & 1) != 0
+                    let tr = (v & 2) != 0
+                    let bl = (v & 4) != 0
+                    let br = (v & 8) != 0
                     if tl {
                         try blockDecodeDPCM8(decoder: &decoder, ptr: llBase, stride: 32, lastVal: &lastVal)
                         try blockDecode8H(decoder: &decoder, ptr: hlBase, stride: 32)
@@ -404,11 +404,11 @@ func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
                     try blockDecode8HWithParentBlock(decoder: &decoder, ptr: lhBase, stride: 16, parentPtr: UnsafePointer(parentLH.base), parentStride: parentLH.stride)
                     try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hhBase, stride: 16, parentPtr: UnsafePointer(parentHH.base), parentStride: parentHH.stride)
                 } else { // .split4
-                let v = task - 2
-                let tl = (v & 1) != 0
-                let tr = (v & 2) != 0
-                let bl = (v & 4) != 0
-                let br = (v & 8) != 0
+                    let v = task - 2
+                    let tl = (v & 1) != 0
+                    let tr = (v & 2) != 0
+                    let bl = (v & 4) != 0
+                    let br = (v & 8) != 0
                     if tl {
                         try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hlBase, stride: 16, parentPtr: UnsafePointer(parentHL.base), parentStride: parentHL.stride)
                         try blockDecode4HWithParentBlock(decoder: &decoder, ptr: lhBase, stride: 16, parentPtr: UnsafePointer(parentLH.base), parentStride: parentLH.stride)
@@ -441,11 +441,11 @@ func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
                     try blockDecode8H(decoder: &decoder, ptr: lhBase, stride: 16)
                     try blockDecode8H(decoder: &decoder, ptr: hhBase, stride: 16)
                 } else { // .split4
-                let v = task - 2
-                let tl = (v & 1) != 0
-                let tr = (v & 2) != 0
-                let bl = (v & 4) != 0
-                let br = (v & 8) != 0
+                    let v = task - 2
+                    let tl = (v & 1) != 0
+                    let tr = (v & 2) != 0
+                    let bl = (v & 4) != 0
+                    let br = (v & 8) != 0
                     if tl {
                         try blockDecode4H(decoder: &decoder, ptr: hlBase, stride: 16)
                         try blockDecode4H(decoder: &decoder, ptr: lhBase, stride: 16)
@@ -529,4 +529,3 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
         return blocks
     }
 }
-
