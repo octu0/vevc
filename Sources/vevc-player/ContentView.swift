@@ -2,36 +2,92 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct ContentView: View {
-    @StateObject private var viewModel = PlayerViewModel()
-    @State private var isFilePickerPresented = false
+    let args: PlayerArguments
+    
+    @State private var mode: AppMode
+    @StateObject private var layerPlayerViewModel = PlayerViewModel()
+    @StateObject private var compareViewModel: CompareViewModel
+    
+    enum AppMode: String, CaseIterable, Identifiable {
+        case compare = "720p Codec Compare"
+        case layer = "VEVC Layer Player"
+        
+        var id: String { rawValue }
+    }
+    
+    init(args: PlayerArguments = PlayerArguments()) {
+        self.args = args
+        self._mode = State(initialValue: args.isCompareMode ? .compare : .layer)
+        self._compareViewModel = StateObject(wrappedValue: CompareViewModel(
+            initialBitrate: args.bitrate,
+            initialProfile: args.profile
+        ))
+    }
     
     var body: some View {
-        VStack {
-            if viewModel.isLoading {
+        VStack(spacing: 0) {
+            // Mode Selector Bar
+            HStack {
+                Picker("Mode", selection: $mode) {
+                    ForEach(AppMode.allCases) { m in
+                        Text(m.rawValue).tag(m)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 350)
+                
                 Spacer()
-                ProgressView(viewModel.statusMessage)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(Color(NSColor.windowBackgroundColor))
+            
+            Divider()
+            
+            // Content View based on mode
+            if mode == .compare {
+                CompareView(viewModel: compareViewModel)
+            } else {
+                layerPlayerView
+            }
+        }
+        .onAppear {
+            if let path = args.inputPath {
+                let url = URL(fileURLWithPath: path)
+                if mode == .compare {
+                    compareViewModel.loadFile(url: url)
+                } else {
+                    layerPlayerViewModel.loadFile(url: url)
+                }
+            }
+        }
+    }
+    
+    // MARK: - Layer Player View
+    
+    @State private var isLayerFilePickerPresented = false
+    
+    private var layerPlayerView: some View {
+        VStack {
+            if layerPlayerViewModel.isLoading {
+                Spacer()
+                ProgressView(layerPlayerViewModel.statusMessage)
                     .padding()
                 Spacer()
             } else {
                 ScrollView([.horizontal, .vertical]) {
-                    if viewModel.videoWidth > viewModel.videoHeight {
+                    if layerPlayerViewModel.videoWidth > layerPlayerViewModel.videoHeight {
                         VStack(alignment: .center, spacing: 16) {
-                            // Layer 0: quarter resolution
-                            videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
-                            // Layer 0+1: half resolution
-                            videoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
-                            // Layer 0+1+2: full resolution
-                            videoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
+                            layerVideoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
+                            layerVideoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
+                            layerVideoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
                         }
                         .padding()
                     } else {
                         HStack(alignment: .bottom, spacing: 16) {
-                            // Layer 0: quarter resolution
-                            videoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
-                            // Layer 0+1: half resolution
-                            videoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
-                            // Layer 0+1+2: full resolution
-                            videoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
+                            layerVideoPane(title: "Layer 0", layerIndex: 0, weight: 1.0)
+                            layerVideoPane(title: "Layer 0+1", layerIndex: 1, weight: 2.0)
+                            layerVideoPane(title: "Layer 0+1+2", layerIndex: 2, weight: 4.0)
                         }
                         .padding()
                     }
@@ -41,19 +97,19 @@ struct ContentView: View {
             Divider()
             
             VStack {
-                if 0.0 < viewModel.totalFrames {
-                    Text("Frame: \(Int(viewModel.currentFrameIndex))")
+                if 0.0 < layerPlayerViewModel.totalFrames {
+                    Text("Frame: \(Int(layerPlayerViewModel.currentFrameIndex))")
                         .font(.headline)
                         .padding(.bottom, 4)
                 }
                 
                 HStack {
                     HStack(spacing: 8) {
-                        Text("Bitrate: \(viewModel.bitrate) kbps")
+                        Text("Bitrate: \(layerPlayerViewModel.bitrate) kbps")
                             .font(.callout)
                         Slider(value: Binding(
-                            get: { Double(viewModel.bitrate) },
-                            set: { viewModel.bitrate = Int($0) }
+                            get: { Double(layerPlayerViewModel.bitrate) },
+                            set: { layerPlayerViewModel.bitrate = Int($0) }
                         ), in: 100...8000)
                         .frame(width: 150)
                     }
@@ -61,80 +117,75 @@ struct ContentView: View {
                     HStack(spacing: 8) {
                         Text("Profile")
                         Toggle("1", isOn: Binding(
-                            get: { viewModel.profile == 1 },
-                            set: { if $0 { viewModel.profile = 1 } }
+                            get: { layerPlayerViewModel.profile == 1 },
+                            set: { if $0 { layerPlayerViewModel.profile = 1 } }
                         ))
                         .toggleStyle(.checkbox)
                         
                         Toggle("2", isOn: Binding(
-                            get: { viewModel.profile == 2 },
-                            set: { if $0 { viewModel.profile = 2 } }
+                            get: { layerPlayerViewModel.profile == 2 },
+                            set: { if $0 { layerPlayerViewModel.profile = 2 } }
                         ))
                         .toggleStyle(.checkbox)
                     }
                     .frame(width: 150)
-                    .disabled(viewModel.isLoading)
+                    .disabled(layerPlayerViewModel.isLoading)
                     
                     Button("Open File") {
-                        isFilePickerPresented = true
+                        isLayerFilePickerPresented = true
                     }
-                    .fileImporter(isPresented: $isFilePickerPresented, allowedContentTypes: [UTType.data, UTType.movie, UTType(filenameExtension: "y4m")!, UTType(filenameExtension: "vevc")!]) { result in
+                    .fileImporter(isPresented: $isLayerFilePickerPresented, allowedContentTypes: [UTType.data, UTType.movie, UTType(filenameExtension: "y4m")!, UTType(filenameExtension: "vevc")!]) { result in
                         switch result {
                         case .success(let url):
-                            viewModel.loadFile(url: url)
+                            layerPlayerViewModel.loadFile(url: url)
                         case .failure(let error):
                             print(error)
                         }
                     }
-                    .disabled(viewModel.isLoading)
+                    .disabled(layerPlayerViewModel.isLoading)
                     
                     Spacer()
                     
                     Button(action: {
-                        if viewModel.isPlaying {
-                            viewModel.pause()
+                        if layerPlayerViewModel.isPlaying {
+                            layerPlayerViewModel.pause()
                         } else {
-                            viewModel.play()
+                            layerPlayerViewModel.play()
                         }
                     }) {
-                        let icon = if viewModel.isPlaying { "pause.fill" } else { "play.fill" }
+                        let icon = if layerPlayerViewModel.isPlaying { "pause.fill" } else { "play.fill" }
                         Image(systemName: icon)
                             .font(.title)
                     }
-                    .disabled(viewModel.totalFrames <= 0.0 || viewModel.isLoading)
+                    .disabled(layerPlayerViewModel.totalFrames <= 0.0 || layerPlayerViewModel.isLoading)
                     
                     Spacer()
                 }
                 .padding()
             }
         }
-        // 1.5x width to accommodate Layer 2 (1.0) + Layer 1 (0.5) + Layer 0 (0.25) horizontally.
-        // We set ideal size so the window can grow with the video content.
         .frame(minWidth: 800, minHeight: 400)
-        .frame(
-            idealWidth: viewModel.videoWidth > viewModel.videoHeight ? viewModel.videoWidth * 1.75 : viewModel.videoWidth + 100,
-            idealHeight: viewModel.videoWidth > viewModel.videoHeight ? viewModel.videoHeight + 200 : viewModel.videoHeight * 1.75 + 100
-        )
     }
     
     @ViewBuilder
-    private func videoPane(title: String, layerIndex: Int, weight: CGFloat) -> some View {
+    private func layerVideoPane(title: String, layerIndex: Int, weight: CGFloat) -> some View {
         VStack {
             Text(title)
                 .font(.headline)
             
-            if let cgImage = viewModel.currentCGImage(for: layerIndex) {
+            if let cgImage = layerPlayerViewModel.currentCGImage(for: layerIndex) {
                 Image(cgImage, scale: 1.0, label: Text(title))
                     .resizable()
                     .aspectRatio(contentMode: .fit)
-                    // Assign relative layout width based on the layer's expected resolution proportion
-                    // Layer 2 gets weight 4.0, Layer 1 gets 2.0, Layer 0 gets 1.0
-                    .frame(width: viewModel.videoWidth * (weight / 4.0))
+                    .frame(width: max(160, layerPlayerViewModel.videoWidth * (weight / 4.0)))
                     .background(Color.black)
             } else {
                 Rectangle()
                     .fill(Color.black)
-                    .frame(width: viewModel.videoWidth * (weight / 4.0), height: viewModel.videoHeight * (weight / 4.0))
+                    .frame(
+                        width: max(160, layerPlayerViewModel.videoWidth * (weight / 4.0)),
+                        height: max(90, layerPlayerViewModel.videoHeight * (weight / 4.0))
+                    )
                     .aspectRatio(contentMode: .fit)
             }
         }
