@@ -264,6 +264,147 @@ func analyzeLL1(pd: PlaneData420) -> PlaneData420 {
     return PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: y0, cb: cb0, cr: cr0)
 }
 
+// MARK: - Weighted prediction (per-plane offsets, #21)
+//
+// P′ = P + offset on INTER blocks only: intra blocks carry no prediction and
+// skip blocks are raw reference copies (spec-pinned verbatim). The same call
+// runs on both sides at every point a prediction plane is formed — full
+// resolution, the L1 prediction, and the quarter-resolution L0 chain (the
+// LeGall lowpass has DC gain 1, so the full-resolution offset is also the
+// correct LL-domain offset). Every plane's block grid at every layer is 1:1
+// with the skip map (luma 32/16/8, chroma 16/8/4); intra blocks are marked
+// by the MV sentinel 32767.
+
+@inline(__always)
+func applyPredictionOffset32(plane: inout [Int16], offset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode], width: Int, height: Int) {
+    applyPredictionOffset(plane: &plane, offset: offset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: width, height: height, blockPx: 32)
+}
+
+@inline(__always)
+func applyPredictionOffset16(plane: inout [Int16], offset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode], width: Int, height: Int) {
+    applyPredictionOffset(plane: &plane, offset: offset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: width, height: height, blockPx: 16)
+}
+
+@inline(__always)
+func applyPredictionOffset8(plane: inout [Int16], offset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode], width: Int, height: Int) {
+    applyPredictionOffset(plane: &plane, offset: offset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: width, height: height, blockPx: 8)
+}
+
+@inline(__always)
+func applyPredictionOffset4(plane: inout [Int16], offset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode], width: Int, height: Int) {
+    applyPredictionOffset(plane: &plane, offset: offset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: width, height: height, blockPx: 4)
+}
+
+/// Frame-level offset application for a full-resolution prediction plane
+/// set (32px luma / 16px chroma blocks).
+@inline(__always)
+func applyPredictionOffsetsL2(pd: inout PlaneData420, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+    if lumaOffset != 0 {
+        applyPredictionOffset32(plane: &pd.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: pd.width, height: pd.height)
+    }
+    if chromaOffset != 0 {
+        let cw = (pd.width + 1) / 2
+        let ch = (pd.height + 1) / 2
+        applyPredictionOffset16(plane: &pd.cb, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+        applyPredictionOffset16(plane: &pd.cr, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+    }
+}
+
+/// Frame-level offset application for a full-resolution reconstruction image
+/// (32px luma / 16px chroma blocks).
+@inline(__always)
+func applyPredictionOffsetsL2(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+    if lumaOffset != 0 {
+        applyPredictionOffset32(plane: &img.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: img.width, height: img.height)
+    }
+    if chromaOffset != 0 {
+        let cw = (img.width + 1) / 2
+        let ch = (img.height + 1) / 2
+        applyPredictionOffset16(plane: &img.cb, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+        applyPredictionOffset16(plane: &img.cr, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+    }
+}
+
+/// Half-resolution variant (16px luma / 8px chroma blocks) for the L1
+/// prediction and the layer1 display path.
+@inline(__always)
+func applyPredictionOffsetsL1(pd: inout PlaneData420, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+    if lumaOffset != 0 {
+        applyPredictionOffset16(plane: &pd.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: pd.width, height: pd.height)
+    }
+    if chromaOffset != 0 {
+        let cw = (pd.width + 1) / 2
+        let ch = (pd.height + 1) / 2
+        applyPredictionOffset8(plane: &pd.cb, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+        applyPredictionOffset8(plane: &pd.cr, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+    }
+}
+
+@inline(__always)
+func applyPredictionOffsetsL1(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+    if lumaOffset != 0 {
+        applyPredictionOffset16(plane: &img.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: img.width, height: img.height)
+    }
+    if chromaOffset != 0 {
+        let cw = (img.width + 1) / 2
+        let ch = (img.height + 1) / 2
+        applyPredictionOffset8(plane: &img.cb, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+        applyPredictionOffset8(plane: &img.cr, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+    }
+}
+
+/// Quarter-resolution variant (8px luma / 4px chroma blocks) for the L0
+/// chain predictions and the layer0 display path.
+@inline(__always)
+func applyPredictionOffsetsL0(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+    if lumaOffset != 0 {
+        applyPredictionOffset8(plane: &img.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: img.width, height: img.height)
+    }
+    if chromaOffset != 0 {
+        let cw = (img.width + 1) / 2
+        let ch = (img.height + 1) / 2
+        applyPredictionOffset4(plane: &img.cb, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+        applyPredictionOffset4(plane: &img.cr, offset: chromaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: cw, height: ch)
+    }
+}
+
+@inline(__always)
+private func applyPredictionOffset(plane: inout [Int16], offset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode], width: Int, height: Int, blockPx: Int) {
+    let bw = (width + blockPx - 1) / blockPx
+    let bh = (height + blockPx - 1) / blockPx
+    let o = Int16(clamping: offset)
+    let mvCount = mvs.dx.count
+    let dirCount = refDirs.count
+    withUnsafePointers(mut: &plane) { base in
+        for by in 0..<bh {
+            let y0 = by * blockPx
+            let h = min(blockPx, height - y0)
+            for bx in 0..<bw {
+                let idx = by * bw + bx
+                if skipMap[idx] != .inter {
+                    continue
+                }
+                if idx < mvCount && mvs.dx[idx] == 32767 {
+                    continue
+                }
+                // The offset is estimated against the prev reference; blocks
+                // referencing the LTR (refDir true) keep P unchanged.
+                if idx < dirCount && refDirs[idx] {
+                    continue
+                }
+                let x0 = bx * blockPx
+                let w = min(blockPx, width - x0)
+                for y in 0..<h {
+                    let row = base.advanced(by: (y0 + y) * width + x0)
+                    for x in 0..<w {
+                        row[x] &+= o
+                    }
+                }
+            }
+        }
+    }
+}
+
 // MARK: - Prediction plane fusion
 //
 // The L0 chain builds the prediction plane P with the exact MC call sequence

@@ -382,7 +382,7 @@ actor LayersEncodeActor {
             }
 
             consecutiveCopyFrames += 1
-            let bytes = VEVCFrameHeader(frameType: .copyFrame).serialize()
+            let bytes = VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0).serialize()
             // Route the unspent frame budget to the rest of the GOP: the
             // remaining coded frames inherit it and the rate controller can
             // lower their qstep (min-SSIM support).

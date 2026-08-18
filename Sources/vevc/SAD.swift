@@ -140,6 +140,69 @@ func computeZeroSADSubBlock(
     return sad
 }
 
+/// Weighted-prediction luma offset estimate (#21): subsampled mean
+/// difference between the source and its prediction reference. Fades shift
+/// the whole frame's luminance, which motion compensation cannot express —
+/// signaling this offset and forming P′ = P + offset removes the DC of the
+/// fade residual (measured −30% MAD on fade frames, inert elsewhere).
+/// Encoder-only estimator: the value is signaled, so precision is a rate
+/// question, not a sync question. Works on per-32px-block means (8×8 samples
+/// at stride 4 per block) instead of a whole-plane mean: the offset is only
+/// valid when the luminance shift is spatially uniform. A localized flash
+/// produces a bimodal block-mean distribution, and at saturated qsteps the
+/// residual cannot repair a misapplied global offset (measured −2〜−3 dB on
+/// flash-exit frames), so the estimate is the MEDIAN block mean and is
+/// rejected entirely when the block-mean deviation exceeds
+/// maxBlockMeanStd. Zeroed inside the ±1 noise band and clamped to the
+/// signaled Int8 range.
+@inline(__always)
+func estimateLumaOffset(source: [Int16], reference: [Int16], width: Int, height: Int) -> Int {
+    guard source.count == reference.count, source.count == width * height else { return 0 }
+    let bw = width / 32
+    let bh = height / 32
+    let blockCount = bw * bh
+    guard 0 < blockCount else { return 0 }
+    // Per-block sums of 64 samples each (8×8 at stride 4); block mean =
+    // sum / 64. Row-major over the plane so the reads stay sequential.
+    var sums = [Int](repeating: 0, count: blockCount)
+    sums.withUnsafeMutableBufferPointer { sumsBuf in
+        let sumsBase = sumsBuf.baseAddress!
+        withUnsafePointers(source, reference) { s, r in
+            let xEnd = bw * 32
+            var y = 0
+            let yEnd = bh * 32
+            while y < yEnd {
+                let rowBase = y * width
+                let blockRowBase = (y / 32) * bw
+                var x = 0
+                while x < xEnd {
+                    let i = rowBase + x
+                    sumsBase[blockRowBase + (x >> 5)] += Int(s[i]) - Int(r[i])
+                    x += 4
+                }
+                y += 4
+            }
+        }
+    }
+    var total = 0
+    var totalSq = 0
+    for sum in sums {
+        total += sum
+        totalSq += sum * sum
+    }
+    // Uniformity gate: std of block means ≤ maxBlockMeanStd. On the block-sum
+    // scale (mean × 64): var_sum ≤ (maxBlockMeanStd × 64)².
+    let maxBlockMeanStd = 12
+    let meanSum = total / blockCount
+    let varSum = totalSq / blockCount - meanSum * meanSum
+    if (maxBlockMeanStd * 64) * (maxBlockMeanStd * 64) < varSum { return 0 }
+    sums.sort()
+    let median = sums[blockCount / 2]
+    let offset = median < 0 ? (median - 32) / 64 : (median + 32) / 64
+    if -2 < offset && offset < 2 { return 0 }
+    return max(-127, min(127, offset))
+}
+
 /// Exact near-duplicate test for CopyFrame emission: mean abs diff over ALL
 /// pixels (Y plus chroma at half weight), early-exiting once the bound is
 /// crossed. Sampling estimators (estimateFastSAD) are unusable here — they

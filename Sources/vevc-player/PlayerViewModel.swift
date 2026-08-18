@@ -249,6 +249,8 @@ class PlayerViewModel: ObservableObject {
             skipMapSize: frameHeader.skipMapSize,
             mvsSize: frameHeader.mvsSize,
             refDirSize: frameHeader.refDirSize,
+            lumaOffset: frameHeader.lumaOffset,
+            chromaOffset: frameHeader.chromaOffset,
             layer0Size: frameHeader.layer0Size,
             layer1Size: newLayer1Size,
             layer2Size: newLayer2Size

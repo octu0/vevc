@@ -731,7 +731,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
     var height = 0
     var profile: UInt8 = 0x01
     var frameIdx = 0
-    var csv = "frame,type,qy0,qy1,qy2,l0,l1,l2,total,skipPrev,skipLtr,inter\n"
+    var csv = "frame,type,qy0,qy1,qy2,l0,l1,l2,total,skipPrev,skipLtr,inter,wpLuma,wpChroma\n"
     while offset < data.count {
         if offset + 4 <= data.count && Array(data[offset..<(offset + 4)]) == VEVCFileHeader.magic {
             let fh = try VEVCFileHeader.deserialize(from: data, offset: &offset)
@@ -744,7 +744,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
         let fh = try VEVCFrameHeader.deserialize(from: data, offset: &offset, profile: profile)
         let headerSize = offset - start
         if fh.isCopyFrame {
-            csv += "\(frameIdx),C,0,0,0,0,0,0,\(headerSize),0,0,0\n"
+            csv += "\(frameIdx),C,0,0,0,0,0,0,\(headerSize),0,0,0,0,0\n"
             offset = start + headerSize
             frameIdx += 1
             continue
@@ -781,7 +781,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
         }
         let total = headerSize + fh.skipMapSize + fh.mvsSize + fh.refDirSize + fh.layer0Size + fh.layer1Size + fh.layer2Size
         let frameType = fh.isIFrame ? "I" : "P"
-        csv += "\(frameIdx),\(frameType),\(qtY0.step),\(qy1Step),\(qy2Step),\(fh.layer0Size),\(fh.layer1Size),\(fh.layer2Size),\(total),\(skipPrev),\(skipLtr),\(inter)\n"
+        csv += "\(frameIdx),\(frameType),\(qtY0.step),\(qy1Step),\(qy2Step),\(fh.layer0Size),\(fh.layer1Size),\(fh.layer2Size),\(total),\(skipPrev),\(skipLtr),\(inter),\(fh.lumaOffset),\(fh.chromaOffset)\n"
         offset = start + total
         frameIdx += 1
     }

@@ -48,16 +48,31 @@ Immediately following the File Metadata, "Frame Packets" are stored sequentially
 > The Frame Status byte encodes both the frame type (lower 4 bits) and the `hasRefDir` flag (bit 4, `0x10`). When bit 4 is set, the frame includes a Reference Direction bitset in the payload. This flag is only meaningful for P-Frames (`0x00`), yielding `0x10` for bidirectional P-Frames.
 
 ### 2.1. Frame Header (For I-Frames and P-Frames)
-If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes) for Profile 0x01, and **25 bytes fixed** for Profile 0x02.
+If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes) for Profile 0x01, and **25 bytes fixed** for Profile 0x02 I-Frames / **27 bytes fixed** for Profile 0x02 P-Frames (two weighted-prediction offset bytes).
 
 | Field Name | Size | Description |
 |---|---|---|
 | SkipMap Size | 4 Bytes (UInt32BE) | Byte size of the SkipMap payload. **(Profile 0x02 only)**. |
 | MVs Size | 4 Bytes (UInt32BE) | Byte size of the following MV Data payload. |
 | RefDir Size | 4 Bytes (UInt32BE) | Byte size of the Reference Direction payload. Stored as `0` if `hasRefDir` is false. |
+| Luma Offset | 1 Byte (Int8) | Weighted-prediction luma offset. **(Profile 0x02 P-Frames only, mandatory)**. |
+| Chroma Offset | 1 Byte (Int8) | Weighted-prediction chroma offset. **(Profile 0x02 P-Frames only, mandatory; currently always 0)**. |
 | Layer0 Size | 4 Bytes (UInt32BE) | Byte size of the Base Layer (8x8) payload. |
 | Layer1 Size | 4 Bytes (UInt32BE) | Byte size of Enhancement Layer 1 (16x16) payload. |
 | Layer2 Size | 4 Bytes (UInt32BE) | Byte size of Enhancement Layer 2 (32x32) payload. |
+
+> **Weighted prediction (Profile 0x02, normative):** the decoder forms
+> `P′ = P + offset` after motion compensation on **inter blocks that
+> reference the prev frame** — skip blocks (verbatim reference copies),
+> intra blocks, and LTR-referenced blocks (`refDir` set) are excluded. The
+> same offset value applies at every layer (the LeGall 5/3 lowpass is
+> mean-preserving, so the shift survives both DWT levels), using each
+> layer's own block geometry: 32/16/8 px luma and 16/8/4 px chroma at
+> L2/L1/L0. The offsets sit **before** the layer sizes so that
+> layer-dropping readers never reach past them. The encoder signals a
+> nonzero offset only for spatially uniform luminance shifts (fades); a
+> localized flash is rejected by a block-mean-deviation gate
+> (`estimateLumaOffset`, SAD.swift).
 
 > [!IMPORTANT]
 > **Derived Fields (not stored in header)**:

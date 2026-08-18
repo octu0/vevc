@@ -88,21 +88,33 @@ public struct VEVCFrameHeader {
         case iFrame = 0x02
     }
     
+    // Declaration order mirrors the serialized layout.
     public let frameType: FrameType
     public let hasRefDir: Bool
     public let skipMapSize: Int
     public let mvsSize: Int
     public let refDirSize: Int
+    /// Weighted-prediction offsets (profile 0x02 P-frames, mandatory
+    /// fields): the decoder forms P′ = P + offset on inter blocks per plane.
+    /// Serialized as two Int8 bytes placed after refDirSize and BEFORE the
+    /// layer sizes, so layer-dropping readers never have to reach past them.
+    /// A stream without the bytes fails to parse (profile 0x02 is in
+    /// development — no backward compatibility). chromaOffset is signaled
+    /// for symmetry; the current encoder always sends 0.
+    public let lumaOffset: Int
+    public let chromaOffset: Int
     public let layer0Size: Int
     public let layer1Size: Int
     public let layer2Size: Int
-    
-    public init(frameType: FrameType, hasRefDir: Bool = false, skipMapSize: Int = 0, mvsSize: Int = 0, refDirSize: Int = 0, layer0Size: Int = 0, layer1Size: Int = 0, layer2Size: Int = 0) {
+
+    public init(frameType: FrameType, hasRefDir: Bool, skipMapSize: Int, mvsSize: Int, refDirSize: Int, lumaOffset: Int, chromaOffset: Int, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
         self.skipMapSize = skipMapSize
         self.mvsSize = mvsSize
         self.refDirSize = refDirSize
+        self.lumaOffset = lumaOffset
+        self.chromaOffset = chromaOffset
         self.layer0Size = layer0Size
         self.layer1Size = layer1Size
         self.layer2Size = layer2Size
@@ -137,6 +149,10 @@ public struct VEVCFrameHeader {
             }
             appendUInt32BE(&out, UInt32(mvsSize))
             appendUInt32BE(&out, UInt32(refDirSize))
+            if profile == 0x02 && frameType == .pFrame {
+                out.append(UInt8(bitPattern: Int8(clamping: lumaOffset)))
+                out.append(UInt8(bitPattern: Int8(clamping: chromaOffset)))
+            }
             appendUInt32BE(&out, UInt32(layer0Size))
             appendUInt32BE(&out, UInt32(layer1Size))
             appendUInt32BE(&out, UInt32(layer2Size))
@@ -158,12 +174,20 @@ public struct VEVCFrameHeader {
         }
         
         if fType == .copyFrame {
-            return VEVCFrameHeader(frameType: .copyFrame)
+            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
         }
         
         let skipMapSize = (profile == 0x02 && fType == .pFrame) ? Int(try readUInt32BEFromBytes(r, offset: &offset)) : 0
         let mvsSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let refDirSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
+        var lumaOffset = 0
+        var chromaOffset = 0
+        if profile == 0x02 && fType == .pFrame {
+            guard offset + 1 < r.count else { throw BinaryError.insufficientData(message: "VEVCFrameHeader prediction offsets") }
+            lumaOffset = Int(Int8(bitPattern: r[offset]))
+            chromaOffset = Int(Int8(bitPattern: r[offset + 1]))
+            offset += 2
+        }
         let layer0Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer1Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer2Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
@@ -172,7 +196,7 @@ public struct VEVCFrameHeader {
             throw DecodeError.invalidHeader
         }
         
-        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }
 
@@ -267,4 +291,150 @@ public enum BlockMode: UInt8, Sendable {
     case inter = 0
     case skip_prev = 1
     case skip_ltr = 2
+}
+
+// MARK: - Stream splitting
+//
+// The splitter rewrites the exact structures defined above (file header,
+// frame header, payload order), so it lives next to them: any layout change
+// fails to compile here instead of silently truncating rebuilt headers.
+
+/// Result of a VEVC stream split operation.
+public struct SplitterResult: Sendable {
+    public let data: [UInt8]
+    public let processedFrames: Int
+    public let droppedLayer1Bytes: Int
+    public let droppedLayer2Bytes: Int
+
+    public var totalDroppedBytes: Int {
+        droppedLayer1Bytes + droppedLayer2Bytes
+    }
+}
+
+public enum SplitterError: Error {
+    case invalidMagic
+    case invalidFrameType(UInt8)
+    case unexpectedEOF
+    case invalidMaxLayer(Int)
+}
+
+/// Splits a VEVC bitstream in-memory, dropping layers above `maxLayer`.
+///
+/// - Parameters:
+///   - input: Full VEVC encoded data (all 3 layers).
+///   - maxLayer: Maximum layer to retain (0 = layer0 only, 1 = layer0+1, 2 = all layers).
+/// - Returns: A `SplitterResult` containing the stripped bitstream and statistics.
+@inline(__always)
+public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterResult {
+    guard 0 <= maxLayer, maxLayer <= 2 else {
+        throw SplitterError.invalidMaxLayer(maxLayer)
+    }
+
+    var readOffset = 0
+    let fileHeader = try VEVCFileHeader.deserialize(from: input, offset: &readOffset)
+    let profile = fileHeader.profile
+
+    // Copy the whole FileHeader to output
+    let headerSlice = input[0..<readOffset]
+
+    // Pre-allocate output buffer
+    var output = [UInt8]()
+    output.reserveCapacity(input.count)
+
+    // Write FileHeader to output
+    output.append(contentsOf: headerSlice)
+
+    @inline(__always)
+    func readFully(count: Int) throws -> ArraySlice<UInt8> {
+        let end = readOffset + count
+        guard end <= input.count else {
+            throw SplitterError.unexpectedEOF
+        }
+        let slice = input[readOffset..<end]
+        readOffset = end
+        return slice
+    }
+
+    var processedFrames = 0
+    var droppedLayer1Bytes = 0
+    var droppedLayer2Bytes = 0
+
+    while readOffset < input.count {
+        var frameOffset = readOffset
+        let frameHeader = try VEVCFrameHeader.deserialize(from: input, offset: &frameOffset, profile: profile)
+        readOffset = frameOffset
+
+        // CopyFrame
+        if frameHeader.isCopyFrame {
+            output.append(contentsOf: frameHeader.serialize(profile: profile))
+            processedFrames += 1
+            continue
+        }
+
+        // Rebuild header with trimmed layer sizes
+        let newLayer1Size = if 1 <= maxLayer { frameHeader.layer1Size } else { 0 }
+        let newLayer2Size = if 2 <= maxLayer { frameHeader.layer2Size } else { 0 }
+
+        let newHeader = VEVCFrameHeader(
+            frameType: frameHeader.frameType,
+            hasRefDir: frameHeader.hasRefDir,
+            skipMapSize: frameHeader.skipMapSize,
+            mvsSize: frameHeader.mvsSize,
+            refDirSize: frameHeader.refDirSize,
+            lumaOffset: frameHeader.lumaOffset,
+            chromaOffset: frameHeader.chromaOffset,
+            layer0Size: frameHeader.layer0Size,
+            layer1Size: newLayer1Size,
+            layer2Size: newLayer2Size
+        )
+        output.append(contentsOf: newHeader.serialize(profile: profile))
+
+        // SkipMap payload
+        if 0 < frameHeader.skipMapSize {
+            let payload = try readFully(count: frameHeader.skipMapSize)
+            output.append(contentsOf: payload)
+        }
+        // MVs payload
+        if 0 < frameHeader.mvsSize {
+            let payload = try readFully(count: frameHeader.mvsSize)
+            output.append(contentsOf: payload)
+        }
+        // RefDir payload
+        if 0 < frameHeader.refDirSize {
+            let payload = try readFully(count: frameHeader.refDirSize)
+            output.append(contentsOf: payload)
+        }
+        // Layer 0 payload (always retained)
+        if 0 < frameHeader.layer0Size {
+            let payload = try readFully(count: frameHeader.layer0Size)
+            output.append(contentsOf: payload)
+        }
+
+        // Layer 1 payload
+        if 0 < frameHeader.layer1Size {
+            let payload = try readFully(count: frameHeader.layer1Size)
+            if 1 <= maxLayer {
+                output.append(contentsOf: payload)
+            } else {
+                droppedLayer1Bytes += frameHeader.layer1Size
+            }
+        }
+        // Layer 2 payload
+        if 0 < frameHeader.layer2Size {
+            let payload = try readFully(count: frameHeader.layer2Size)
+            if 2 <= maxLayer {
+                output.append(contentsOf: payload)
+            } else {
+                droppedLayer2Bytes += frameHeader.layer2Size
+            }
+        }
+        processedFrames += 1
+    }
+
+    return SplitterResult(
+        data: output,
+        processedFrames: processedFrames,
+        droppedLayer1Bytes: droppedLayer1Bytes,
+        droppedLayer2Bytes: droppedLayer2Bytes
+    )
 }

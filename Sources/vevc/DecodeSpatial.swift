@@ -549,6 +549,9 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         let baseCopy = freshCopy(baseImg)
         var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
         await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+        if let map = skipMap {
+            applyPredictionOffsetsL0(img: &l0Cur, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+        }
         finishL0Reconstruction(img: &l0Cur, qtYStepQ4: qtYStep, qtCStepQ4: qtCStep)
         if let map = skipMap {
             applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, skipMap: map, fullDx: dx)
@@ -556,7 +559,10 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         let newRef = PlaneData420(img16: l0Cur)
 
         if let tPrev = predictedPd {
-            let fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            if let map = skipMap {
+                applyPredictionOffsetsL2(pd: &fullP, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+            }
             let tP = analyzeLL2(pd: fullP)
             var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
             subtractPlanes(&slot, tP)
@@ -632,6 +638,9 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
             await applyScaledMotionCompensationLuma(plane: &l2Img.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l2dx, height: l2dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
             await applyScaledMotionCompensationChroma(plane: &l2Img.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: l2cbDx, height: l2cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
             await applyScaledMotionCompensationChroma(plane: &l2Img.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: l2cbDx, height: l2cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        }
+        if let map = skipMap {
+            applyPredictionOffsetsL2(img: &l2Img, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
         }
     }
 
@@ -782,6 +791,9 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
         let baseCopy = freshCopy(baseImg)
         var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
         await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+        if let map = skipMap {
+            applyPredictionOffsetsL0(img: &l0Cur, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+        }
         finishL0Reconstruction(img: &l0Cur, qtYStepQ4: qtYStep, qtCStepQ4: qtCStep)
         if let map = skipMap {
             applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, skipMap: map, fullDx: dx)
@@ -789,7 +801,10 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
         let newRef = PlaneData420(img16: l0Cur)
 
         if let tPrev = predictedPd {
-            let l1P = await buildL1Prediction(l1dx: l1dx, l1dy: l1dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            var l1P = await buildL1Prediction(l1dx: l1dx, l1dy: l1dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            if let map = skipMap {
+                applyPredictionOffsetsL1(pd: &l1P, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+            }
             let tP = analyzeLL1(pd: l1P)
             var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
             subtractPlanes(&slot, tP)
@@ -828,6 +843,9 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
             await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
             await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
             await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        }
+        if let map = skipMap {
+            applyPredictionOffsetsL1(img: &current, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
         }
 
         clampPlane(plane: &current.y)
@@ -951,6 +969,9 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
             await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
             await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
             await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        }
+        if let map = skipMap {
+            applyPredictionOffsetsL0(img: &current, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
         }
 
         clampPlane(plane: &current.y)
@@ -1175,6 +1196,9 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
             let baseCopy = freshCopy(baseImg)
             var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
             await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            if let map = skipMap {
+                applyPredictionOffsetsL0(img: &l0Cur, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+            }
             finishL0Reconstruction(img: &l0Cur, qtYStepQ4: qtYStep, qtCStepQ4: qtCStep)
             if let map = skipMap {
                 applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, skipMap: map, fullDx: dx)
@@ -1184,10 +1208,16 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
             if let tPrev = predictedPd {
                 let tP: PlaneData420
                 if hasLayer2 {
-                    let fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    if let map = skipMap {
+                        applyPredictionOffsetsL2(pd: &fullP, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+                    }
                     tP = analyzeLL2(pd: fullP)
                 } else {
-                    let l1P = await buildL1Prediction(l1dx: l1dx, l1dy: l1dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    var l1P = await buildL1Prediction(l1dx: l1dx, l1dy: l1dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    if let map = skipMap {
+                        applyPredictionOffsetsL1(pd: &l1P, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+                    }
                     tP = analyzeLL1(pd: l1P)
                 }
                 var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
@@ -1264,6 +1294,9 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
                 await applyScaledMotionCompensationChroma(plane: &l2Img.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: l2cbDx, height: l2cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
                 await applyScaledMotionCompensationChroma(plane: &l2Img.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: l2cbDx, height: l2cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
             }
+            if let map = skipMap {
+                applyPredictionOffsetsL2(img: &l2Img, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+            }
         }
 
         if let tMVs = mvs, tMVs.isEmpty != true {
@@ -1291,6 +1324,9 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
                 await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
                 await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
             }
+            if let map = skipMap {
+                applyPredictionOffsetsL1(img: &current, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
+            }
 
             clampPlane(plane: &current.y)
             clampPlane(plane: &current.cb)
@@ -1315,6 +1351,9 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
                 await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
                 await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
                 await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+            }
+            if let map = skipMap {
+                applyPredictionOffsetsL0(img: &current, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
             }
 
             clampPlane(plane: &current.y)

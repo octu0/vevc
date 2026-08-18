@@ -143,7 +143,7 @@ private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1
 @inline(__always)
 private func serializeIntraFrame(layer0: [UInt8], layer1: [UInt8], layer2: [UInt8]) -> [UInt8] {
     var out: [UInt8] = []
-    let frameHeader = VEVCFrameHeader(frameType: .iFrame, mvsSize: 0, refDirSize: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .iFrame, hasRefDir: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize())
     out.append(contentsOf: layer0)
     out.append(contentsOf: layer1)
@@ -427,7 +427,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     }())
 
     var out: [UInt8] = []
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: 0, mvsSize: mvData.count, refDirSize: refDirBuf.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: 0, mvsSize: mvData.count, refDirSize: refDirBuf.count, lumaOffset: 0, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize(profile: 0x01))
     out.append(contentsOf: mvData)
     out.append(contentsOf: refDirBuf)
@@ -488,6 +488,15 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     withUnsafePointers(pd.cr, mut: &mutPdCr) { src, dst in dst.update(from: src, count: pd.cr.count) }
 
     let sMap = skipMap
+    // Weighted prediction (#21): global luma offset of this frame against
+    // the prediction reference, signaled in the frame header and applied as
+    // P′ = P + offset on inter blocks at every prediction site (full
+    // resolution, LL2 slot, L0 chain). The chroma offset is signaled for
+    // symmetry but not yet estimated. Estimated concurrently with the
+    // MC-subtract tasks; the value is first needed after tY resolves.
+    async let tWp = { [pdY = pd.y, pPdY = pPd.y] () -> Int in
+        estimateLumaOffset(source: pdY, reference: pPdY, width: dx, height: dy)
+    }()
     let mvsConst = mvs
     let refDirsConst = refDirs
     async let tY = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
@@ -506,9 +515,14 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         return cr
     }()
 
-    let resY = await tY
+    var resY = await tY
     let resCb = await tCb
     let resCr = await tCr
+    let wpLuma = await tWp
+
+    if wpLuma != 0 {
+        applyPredictionOffset32(plane: &resY, offset: -wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
+    }
 
     let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
 
@@ -541,6 +555,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             cr: [Int16](repeating: 0, count: tSrc.cr.count)
         )
         await applyL0MotionCompensation(img: &pred0, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        if wpLuma != 0 {
+            applyPredictionOffset8(plane: &pred0.y, offset: wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: pred0.width, height: pred0.height)
+        }
         subtractPlanes(&r0, PlaneData420(img16: pred0))
         clearL0SkipResidual(img: &r0, skipMap: sMap, fullDx: dx)
         base8Input = PlaneData420(img16: r0)
@@ -557,13 +574,21 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         let baseCopy = freshCopy(baseImg)
         var l0Cur = Image16(width: baseRecon.width, height: baseRecon.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
         await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        if wpLuma != 0 {
+            applyPredictionOffset8(plane: &l0Cur.y, offset: wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: l0Cur.width, height: l0Cur.height)
+        }
         finishL0Reconstruction(img: &l0Cur, qtYStepQ4: Int(qtY0.step), qtCStepQ4: Int(qtC0.step))
         applyL0SkipCopy(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, skipMap: sMap, fullDx: dx)
         let newRef = PlaneData420(img16: l0Cur)
 
         // The full loop's LL2 coefficient slot is L0_recon − LL2(P), with P
         // built by the identical MC call sequence the decoder uses.
-        let fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: pPd, ltrPd: nPd, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: pPd, ltrPd: nPd, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        if wpLuma != 0 {
+            // Baking the offset into P makes the LL2 slot (analyzeLL2) and
+            // the layer2 reconstruction (fusePredictionPlane) both see P′.
+            applyPredictionOffset32(plane: &fullP.y, offset: wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
+        }
         fullPForRecon = fullP
         let tP = analyzeLL2(pd: fullP)
         var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
@@ -615,6 +640,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         await applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        if wpLuma != 0 {
+            applyPredictionOffset32(plane: &mutReconL2Y, offset: wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
+        }
     }
 
     let skipMapData = encodeSkipMap(map: skipMap)
@@ -653,7 +681,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     }())
 
     var out: [UInt8] = []
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, lumaOffset: wpLuma, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize(profile: 0x02))
     out.append(contentsOf: skipMapData)
     out.append(contentsOf: mvData)
