@@ -717,6 +717,77 @@ final class BlockViewPool: @unchecked Sendable {
     }
 }
 
+// MARK: - Bitstream inspection
+
+/// Per-frame bitstream statistics as CSV: frame index, frame type (I/P/C),
+/// luma quantizer steps per layer, per-layer payload sizes and skip-map
+/// composition. This is the measurement view used by the quality/rate
+/// tuning workflow (vevc-inspect CLI); it reads only container headers and
+/// the skip map, never the coefficient payloads.
+@inline(__always)
+public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
+    var offset = 0
+    var width = 0
+    var height = 0
+    var profile: UInt8 = 0x01
+    var frameIdx = 0
+    var csv = "frame,type,qy0,qy1,qy2,l0,l1,l2,total,skipPrev,skipLtr,inter\n"
+    while offset < data.count {
+        if offset + 4 <= data.count && Array(data[offset..<(offset + 4)]) == VEVCFileHeader.magic {
+            let fh = try VEVCFileHeader.deserialize(from: data, offset: &offset)
+            width = fh.width
+            height = fh.height
+            profile = fh.profile
+            continue
+        }
+        let start = offset
+        let fh = try VEVCFrameHeader.deserialize(from: data, offset: &offset, profile: profile)
+        let headerSize = offset - start
+        if fh.isCopyFrame {
+            csv += "\(frameIdx),C,0,0,0,0,0,0,\(headerSize),0,0,0\n"
+            offset = start + headerSize
+            frameIdx += 1
+            continue
+        }
+        var skipPrev = 0
+        var skipLtr = 0
+        var inter = 0
+        if 0 < fh.skipMapSize {
+            let bw = (width + 31) / 32
+            let bh = (height + 31) / 32
+            let smData = Array(data[offset..<(offset + fh.skipMapSize)])
+            let map = try decodeSkipMap(data: smData, count: bw * bh)
+            for m in map {
+                switch m {
+                case .skip_prev: skipPrev += 1
+                case .skip_ltr: skipLtr += 1
+                default: inter += 1
+                }
+            }
+        }
+        let l0Offset = offset + fh.skipMapSize + fh.mvsSize + fh.refDirSize
+        let (qtY0, _, _, _, _) = try VEVCLayerData.deserialize(from: Array(data[l0Offset..<(l0Offset + fh.layer0Size)]), layer: 0, layerLabel: "Base8")
+        let l1Offset = l0Offset + fh.layer0Size
+        var qy1Step = 0
+        if 0 < fh.layer1Size {
+            let (qtY1, _, _, _, _) = try VEVCLayerData.deserialize(from: Array(data[l1Offset..<(l1Offset + fh.layer1Size)]), layer: 1, layerLabel: "Layer16")
+            qy1Step = Int(qtY1.step)
+        }
+        let l2Offset = l1Offset + fh.layer1Size
+        var qy2Step = 0
+        if 0 < fh.layer2Size {
+            let (qtY2, _, _, _, _) = try VEVCLayerData.deserialize(from: Array(data[l2Offset..<(l2Offset + fh.layer2Size)]), layer: 2, layerLabel: "Layer32")
+            qy2Step = Int(qtY2.step)
+        }
+        let total = headerSize + fh.skipMapSize + fh.mvsSize + fh.refDirSize + fh.layer0Size + fh.layer1Size + fh.layer2Size
+        let frameType = fh.isIFrame ? "I" : "P"
+        csv += "\(frameIdx),\(frameType),\(qtY0.step),\(qy1Step),\(qy2Step),\(fh.layer0Size),\(fh.layer1Size),\(fh.layer2Size),\(total),\(skipPrev),\(skipLtr),\(inter)\n"
+        offset = start + total
+        frameIdx += 1
+    }
+    return csv
+}
+
 // MARK: - FrameRateConverter
 
 /// Frame-rate conversion by frame repetition/dropping: feed input frames in

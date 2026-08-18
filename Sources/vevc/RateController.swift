@@ -311,4 +311,15 @@ struct RateController {
     mutating func resetStaticStreak() {
         self.staticStreak = 0
     }
+
+    /// A CopyFrame passed (header-only bits): advance the GOP frame
+    /// bookkeeping so the remaining coded frames inherit the unspent
+    /// per-frame budget, without touching the P-frame statistics — a copy is
+    /// not a coding sample.
+    @inline(__always)
+    mutating func consumeCopyFrame(bits: Int) {
+        self.gopRemainingBits -= bits
+        self.gopRemainingFrames -= 1
+        self.staticStreak = 0
+    }
 }

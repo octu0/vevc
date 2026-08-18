@@ -186,6 +186,7 @@ actor LayersEncodeActor {
     // Quarter-resolution L0 reference chain (One-Pyramid §4, profile 0x02).
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
+    private var consecutiveCopyFrames = 0
 
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
         self.width = width
@@ -239,8 +240,10 @@ actor LayersEncodeActor {
         let (plane, releasePlane) = toPlaneData420(image: image, pool: pool)
         
         var isSceneChange = false
+        var fastSADToPrevInput = Int.max
         if let prev = previousInputPlane {
             let sad = estimateFastSAD(a: plane, b: prev)
+            fastSADToPrevInput = sad
             isSceneChange = (sceneChangeThreshold < sad)
         }
         
@@ -274,6 +277,7 @@ actor LayersEncodeActor {
             }
             
             framesSinceKeyframe = 0
+            consecutiveCopyFrames = 0
 
             // Backward-adaptive entropy tables: random-access boundary reset.
             if profile == 0x02 {
@@ -333,18 +337,47 @@ actor LayersEncodeActor {
             return bytes
         }
         
-        // Duplicate frame detection
-        if let prevIn = previousInputPlane {
-            let isDuplicate = isPlaneIdentical(a: plane, b: prevIn)
-            if isDuplicate {
-                releasePlane()
-                
-                rateController.resetStaticStreak()
-                framesSinceKeyframe += 1
-                frameIndex += 1
-                return VEVCFrameHeader(frameType: .copyFrame).serialize()
+        // Near-duplicate frame detection: emit a CopyFrame when the input is
+        // within copyFrameMADLimitQ8 of the LAST CODED input (previousInputPlane
+        // is not updated on copy, so chained copies keep measuring drift
+        // against the anchor and the chain breaks once cumulative change
+        // exceeds the bound). Calibrated on miko_700: at 96/256 the worst
+        // affected pair SSIM is 0.9947. consecutiveCopyFrames caps a chain at
+        // maxConsecutiveCopyFrames (~83ms at 60fps) so sub-threshold motion
+        // such as HUD ticks cannot freeze indefinitely.
+        // The sampled fast SAD is a free prefilter: every calibrated
+        // MAD-eligible pair measured fastSAD == 0, so nonzero fast SAD can
+        // never be a near-duplicate and skips the scans. Exact identity
+        // (memcmp speed, common for pulldown/static content) is tried before
+        // the accumulate-to-bound MAD scan.
+        if let prevIn = previousInputPlane, fastSADToPrevInput == 0, consecutiveCopyFrames < maxConsecutiveCopyFrames, isPlaneIdentical(a: plane, b: prevIn) || isNearDuplicate(a: plane, b: prevIn, limitQ8: copyFrameMADLimitQ8) {
+            releasePlane()
+
+            // A copied frame is static by definition: advance the per-block
+            // static counters together with the GOP position, or the
+            // skip_ltr eligibility (staticCounters[i] == gopPosition) breaks
+            // for the rest of the GOP. The LTR pixel match itself is
+            // re-verified on every coded frame, so this cannot fabricate a
+            // false skip_ltr.
+            for i in staticCounters.indices {
+                staticCounters[i] += 1
             }
+
+            consecutiveCopyFrames += 1
+            let bytes = VEVCFrameHeader(frameType: .copyFrame).serialize()
+            // Route the unspent frame budget to the rest of the GOP: the
+            // remaining coded frames inherit it and the rate controller can
+            // lower their qstep (min-SSIM support).
+            if self.qstep == nil {
+                rateController.consumeCopyFrame(bits: bytes.count * 8)
+            } else {
+                rateController.resetStaticStreak()
+            }
+            framesSinceKeyframe += 1
+            frameIndex += 1
+            return bytes
         }
+        consecutiveCopyFrames = 0
         
         guard let baseQt = self.qt, let prevRecon = previousReconstructed, let firstRecon = firstReconstructed, let firstIn = firstInputPlane, let prevIn = previousInputPlane else {
             throw EncodeError.missingReferenceFramesForPFrame
