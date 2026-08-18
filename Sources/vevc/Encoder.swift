@@ -28,7 +28,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -59,7 +59,7 @@ public actor VEVCEncoder {
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 10, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -254,6 +254,13 @@ actor LayersEncodeActor {
             let sad = estimateFastSAD(a: plane, b: prev)
             fastSADToPrevInput = sad
             isSceneChange = (sceneChangeThreshold < sad)
+            // Sign-mix cut detector: a threshold above maxEstimateFastSAD
+            // means scene detection is intentionally off (deterministic
+            // tests); the fastSAD gate keeps the extra luma pass off normal
+            // frames.
+            if isSceneChange != true && sceneChangeThreshold <= maxEstimateFastSAD && sceneCutMinLumaMAD <= sad {
+                isSceneChange = detectSceneCut(source: plane.y, reference: prev.y, width: plane.width, height: plane.height)
+            }
         }
         
         var forceIFrame = forceKeyFrame
@@ -270,7 +277,8 @@ actor LayersEncodeActor {
             forceIFrame = true
         }
         
-        let isIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || isSceneChange || forceIFrame)
+        let isPeriodicIFrame = (keyint <= framesSinceKeyframe || frameIndex == 0 || forceIFrame)
+        let isIFrame = (isPeriodicIFrame || isSceneChange)
         
         if isIFrame {
             // Rate control
@@ -294,7 +302,16 @@ actor LayersEncodeActor {
                 baseStep = max(Int(baseQt.step), scaledFloor)
             }
             
-            framesSinceKeyframe = 0
+            // A cut-driven I-frame keeps the periodic keyint grid: the
+            // counter restarts mid-phase so the next periodic I still lands
+            // on the original frameIndex % keyint boundary. Without this the
+            // whole downstream I-grid shifts with every cut, which moves
+            // the reference distance of unrelated later frames (measured
+            // min-SSIM −0.05 on miko when the flash plateau lost its
+            // adjacent I). staticCounters start from the same base so the
+            // skip_ltr eligibility (staticCounters[i] == gopPosition) keeps
+            // meaning "static since this I-frame".
+            framesSinceKeyframe = isPeriodicIFrame ? 0 : (frameIndex % keyint)
             consecutiveCopyFrames = 0
 
             // Backward-adaptive entropy tables: random-access boundary reset.
@@ -344,7 +361,7 @@ actor LayersEncodeActor {
             releaseFirstInput = releaseFirstIn
             
             for i in 0..<self.staticCounters.count {
-                self.staticCounters[i] = 0
+                self.staticCounters[i] = framesSinceKeyframe
             }
             
             previousMVs = mvs

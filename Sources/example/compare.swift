@@ -11,7 +11,7 @@ struct Config {
     var inFps: Int? = nil
     var zeroThreshold: Int = 0
     var keyint: Int = 30
-    var sceneThreshold: Int = 2000
+    var sceneThreshold: Int = 500
     var maxLayer: Int = 2
     var quality: Bool = false
     var outputGraph: Bool = false

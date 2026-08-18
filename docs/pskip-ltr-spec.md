@@ -199,7 +199,14 @@ This section records hard-won performance facts: where the compute cost actually
 - **Decoder per-layer pipeline**: Layer0/1/2 MC (`applyScaled*MotionCompensation*`), deblocking (`applyDeblockingFilter*`), final skip copy (`copyBlockPointer` / `copyBlockSafe`).
 - **MC sub-pixel FIR interpolation** (`addMCBlockLuma32`, `subMCBlockChroma16`): heavy fractional-pixel filtering on inter blocks.
 
-### 9.2. Pitfalls — Changes That Silently Make It Slower (or Break It)
+### 9.2. Scene-Cut Detection (2026-08-18, encoder-only)
+
+- A hard cut crossed by a P-frame at saturated qstep leaves un-repairable ghosts of the previous scene (miko 548→549: megaphone/text outlines persisted for a full GOP), and the LTR keeps pointing at the old scene until the next periodic I. `detectSceneCut` (SAD.swift) separates cuts from flashes/fades by **sign mix**: a cut replaces content so per-32px-block mean diffs go both ways (548→549 minority-side fraction 0.169), a flash/fade shifts one way (all measured flash/fade transitions: 0.000). MAD alone cannot make this call (cut 39.7 vs flash 38.5).
+- A cut-driven I-frame does **not** reset the keyint grid phase (`framesSinceKeyframe` restarts at `frameIndex % keyint`, staticCounters start from the same base): resetting shifted every later I and cost min-SSIM −0.05 on miko when the flash plateau lost its adjacent I.
+- `sceneChangeThreshold` above `maxEstimateFastSAD` (765) disables all scene detection — deterministic tests rely on this (L0BitExactTests passes 1e9).
+- Measured (miko 500k): two cuts detected (214, 549 — both verified true cuts), ghosts eliminated, cut-GOP SSIM +0.025, global avg +0.0013, size −14 KB; ToS bit-identical (no cuts); miko 2500k min +0.0036.
+
+### 9.3. Pitfalls — Changes That Silently Make It Slower (or Break It)
 
 - **Reconstruction check on *both* `skip_ltr` and `skip_prev`:** −40% encode / −53% decode fps, +9% size. **Rejected.** Apply to `skip_prev` only.
 - **Layer0 4×4 fine-grained skip decision:** per-frame duplicate DWT LL extraction → *slower* despite lower per-op count; skip ratio collapsed to ~3% → larger size. **Rejected.**

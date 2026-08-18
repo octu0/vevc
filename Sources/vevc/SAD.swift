@@ -203,6 +203,74 @@ func estimateLumaOffset(source: [Int16], reference: [Int16], width: Int, height:
     return max(-127, min(127, offset))
 }
 
+/// Scene-cut detector constants (measured on miko_700 source pairs):
+/// a cut replaces content so per-32px-block mean diffs go BOTH ways
+/// (548→549: luma MAD 39.7, minority-side fraction 0.169), while a
+/// flash/fade shifts everything in ONE direction (worst flash transition
+/// 613→614: MAD 38.5, minority 0.000; fades ≤ 17.7 MAD, minority 0.000;
+/// normal motion 2.9 MAD, minority 0.012). MAD alone cannot separate a cut
+/// from a flash — the sign mix can, with a wide margin.
+let sceneCutMinLumaMAD = 16
+/// A block counts toward a side when |block mean| > 8 (on the 64-sample
+/// block-sum scale: 8 × 64).
+let sceneCutSideBlockSum = 8 * 64
+/// Cut when the minority side holds ≥ 1/16 of the blocks.
+let sceneCutMinorityDenominator = 16
+/// estimateFastSAD is a per-pixel mean (luma + both chroma terms), so it
+/// can never exceed 3 × 255. A sceneChangeThreshold above this value means
+/// the caller wants scene detection off entirely (e.g. deterministic
+/// tests) — the cut detector honors that too.
+let maxEstimateFastSAD = 765
+
+/// Scene-cut detector: one row-major stride-4 pass over the luma planes
+/// accumulating per-32px-block signed sums and the global abs sum, then
+/// the two-sided test described above. Encoder-only (drives the I-frame
+/// decision, nothing is signaled).
+@inline(__always)
+func detectSceneCut(source: [Int16], reference: [Int16], width: Int, height: Int) -> Bool {
+    guard source.count == reference.count, source.count == width * height else { return false }
+    let bw = width / 32
+    let bh = height / 32
+    let blockCount = bw * bh
+    guard 0 < blockCount else { return false }
+    var sums = [Int](repeating: 0, count: blockCount)
+    var sumAbs = 0
+    var sampleCount = 0
+    sums.withUnsafeMutableBufferPointer { sumsBuf in
+        let sumsBase = sumsBuf.baseAddress!
+        withUnsafePointers(source, reference) { s, r in
+            let xEnd = bw * 32
+            var y = 0
+            let yEnd = bh * 32
+            while y < yEnd {
+                let rowBase = y * width
+                let blockRowBase = (y / 32) * bw
+                var x = 0
+                while x < xEnd {
+                    let i = rowBase + x
+                    let d = Int(s[i]) - Int(r[i])
+                    sumsBase[blockRowBase + (x >> 5)] += d
+                    sumAbs += abs(d)
+                    x += 4
+                }
+                y += 4
+            }
+        }
+    }
+    sampleCount = (bw * 8) * (bh * 8)
+    if sumAbs < sceneCutMinLumaMAD * sampleCount { return false }
+    var pos = 0
+    var neg = 0
+    for sum in sums {
+        if sceneCutSideBlockSum < sum {
+            pos += 1
+        } else if sum < -sceneCutSideBlockSum {
+            neg += 1
+        }
+    }
+    return blockCount <= min(pos, neg) * sceneCutMinorityDenominator
+}
+
 /// Exact near-duplicate test for CopyFrame emission: mean abs diff over ALL
 /// pixels (Y plus chroma at half weight), early-exiting once the bound is
 /// crossed. Sampling estimators (estimateFastSAD) are unusable here — they
