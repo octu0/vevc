@@ -1,6 +1,9 @@
 struct RateController {
     let baseMaxBitrate: Int
-    private(set) var maxbitrate: Int
+    /// Gain-adjusted working bitrate (baseMaxBitrate scaled by the drift
+    /// feedback in beginGOP) — a var by design; the immutable input is
+    /// baseMaxBitrate.
+    private(set) var effectiveMaxBitrate: Int
     let framerate: Int
     let keyint: Int
     let targetDistortionQ8: Int
@@ -48,7 +51,7 @@ struct RateController {
 
     init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 600) {
         self.baseMaxBitrate = maxbitrate
-        self.maxbitrate = (maxbitrate * 410) / 256
+        self.effectiveMaxBitrate = (maxbitrate * 410) / 256
         self.framerate = framerate
         self.keyint = keyint
         self.targetDistortionQ8 = targetDistortion
@@ -88,18 +91,18 @@ struct RateController {
         
         // Distortion adaptation of 1.6x gain
         if self.isQualitySaturated {
-            self.maxbitrate = self.baseMaxBitrate
+            self.effectiveMaxBitrate = self.baseMaxBitrate
         } else {
             let margin = max(1, self.targetDistortionQ8 / 2)
             let diff = self.avgDistortionQ8 - self.targetDistortionQ8
             let rawGain = 256 + (diff * (410 - 256)) / margin
             let gainQ8 = max(256, min(410, rawGain))
-            self.maxbitrate = (self.baseMaxBitrate * gainQ8) / 256
+            self.effectiveMaxBitrate = (self.baseMaxBitrate * gainQ8) / 256
         }
         
-        self.maxbitrate = max(100, self.maxbitrate)
+        self.effectiveMaxBitrate = max(100, self.effectiveMaxBitrate)
         
-        let baseGOPBits = (self.maxbitrate * self.keyint) / self.framerate
+        let baseGOPBits = (self.effectiveMaxBitrate * self.keyint) / self.framerate
         // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
         var carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
         
@@ -128,7 +131,7 @@ struct RateController {
         // referenceGOPBits = maxbitrate * 60 / framerate (keyint=60 equivalent)
         // absoluteFloor = referenceGOPBits * 10% = maxbitrate * 60 / (framerate * 10)
         //               = maxbitrate * 6 / framerate
-        let absoluteFloor = (self.maxbitrate * 6) / self.framerate
+        let absoluteFloor = (self.effectiveMaxBitrate * 6) / self.framerate
         let iFrameBitsProp = (self.gopTargetBits * 5) / (self.keyint + 4)
         return max(1000, max(absoluteFloor, iFrameBitsProp))
     }

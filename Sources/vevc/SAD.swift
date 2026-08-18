@@ -152,7 +152,7 @@ func isNearDuplicate(a: PlaneData420, b: PlaneData420, limitQ8: Int) -> Bool {
     let bound = (limitQ8 * a.y.count) >> 8
     var sum = 0
     let exceeded = withUnsafePointers(a.y, b.y) { aY, bY -> Bool in
-        planeAbsDiffExceeds(aY, bY, count: a.y.count, weight: 1, sum: &sum, bound: bound)
+        lumaAbsDiffExceedsProgressive(aY, bY, count: a.y.count, sum: &sum, bound: bound)
     }
     if exceeded { return false }
     let cbExceeded = withUnsafePointers(a.cb, b.cb) { aCb, bCb -> Bool in
@@ -163,6 +163,41 @@ func isNearDuplicate(a: PlaneData420, b: PlaneData420, limitQ8: Int) -> Bool {
         planeAbsDiffExceeds(aCr, bCr, count: a.cr.count, weight: 2, sum: &sum, bound: bound)
     }
     return crExceeded != true
+}
+
+/// Luma pass with a progressive rejection bound: a frame that finishes within
+/// `bound` can have accumulated at most bound·(p + count/4)/count after p
+/// pixels unless its difference is pathologically back-loaded (the count/4
+/// slack tolerates front-loading). Ordinary non-duplicates sit far above the
+/// bound and reject after a few percent of the plane instead of accumulating
+/// all the way to it. The early exit is safe-direction only: it can forgo a
+/// copy opportunity, never produce a wrong copy.
+@inline(__always)
+private func lumaAbsDiffExceedsProgressive(_ a: UnsafePointer<Int16>, _ b: UnsafePointer<Int16>, count: Int, sum: inout Int, bound: Int) -> Bool {
+    let slack = count / 4
+    var i = 0
+    var chunkAcc = 0
+    while i + 16 <= count {
+        let va = UnsafeRawPointer(a + i).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb = UnsafeRawPointer(b + i).loadUnaligned(as: SIMD16<Int16>.self)
+        let d = va &- vb
+        let ad = d.replacing(with: 0 &- d, where: d .< 0)
+        chunkAcc += Int(ad.wrappedSum())
+        i += 16
+        if i % 4096 == 0 {
+            sum += chunkAcc
+            chunkAcc = 0
+            if bound * (i + slack) < sum * count {
+                return true
+            }
+        }
+    }
+    while i < count {
+        chunkAcc += Int((Int32(a[i]) - Int32(b[i])).magnitude)
+        i += 1
+    }
+    sum += chunkAcc
+    return bound < sum
 }
 
 /// Accumulates weight·Σ|a−b| into sum, returning true as soon as it exceeds
