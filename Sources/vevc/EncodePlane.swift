@@ -1088,7 +1088,33 @@ func encodeLayer32Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: Quantiz
     let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2], selectModel: selectModel)
 
     debugLog({
-        return "  [Layer 2] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
+        return "  [Layer 2] qtY=\(qtY.step), qtC=\(qtC.step) Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
+    }())
+
+    return VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
+}
+
+@inline(__always)
+func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn) -> [UInt8] {
+    let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
+    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
+
+    let colCountY = (dx + 31) / 32
+    let rowCountY = (dy + 31) / 32
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let colCountC = (cbDx + 31) / 32
+    let rowCountC = (cbDy + 31) / 32
+
+    let bufY = encodePlaneSubbands32WithSkipMap(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, isSkip: ySkip, history: histories?[0], selectModel: selectModel)
+    let bufCb = encodePlaneSubbands32WithSkipMap(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, history: histories?[1], selectModel: selectModel)
+    let bufCr = encodePlaneSubbands32WithSkipMap(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, history: histories?[2], selectModel: selectModel)
+
+    debugLog({
+        return "  [Layer 2] qtY=\(qtY.step), qtC=\(qtC.step) Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
     }())
 
     return VEVCLayerData.serialize(
@@ -1117,7 +1143,33 @@ func encodeLayer16Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: Quantiz
     let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, history: histories?[2], selectModel: selectModel)
 
     debugLog({
-        return "  [Layer 1] qtY=\\(qtY.step), qtC=\\(qtC.step) Y=\\(bufY.count) Cb=\\(bufCb.count) Cr=\\(bufCr.count) bytes"
+        return "  [Layer 1] qtY=\(qtY.step), qtC=\(qtC.step) Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
+    }())
+
+    return VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
+}
+
+@inline(__always)
+func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn) -> [UInt8] {
+    let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
+    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
+
+    let colCountY = (dx + 15) / 16
+    let rowCountY = (dy + 15) / 16
+    let cbDx = (dx + 1) / 2
+    let cbDy = (dy + 1) / 2
+    let colCountC = (cbDx + 15) / 16
+    let rowCountC = (cbDy + 15) / 16
+
+    let bufY = encodePlaneSubbands16WithSkipMap(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, isSkip: ySkip, history: histories?[0], selectModel: selectModel)
+    let bufCb = encodePlaneSubbands16WithSkipMap(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, history: histories?[1], selectModel: selectModel)
+    let bufCr = encodePlaneSubbands16WithSkipMap(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, history: histories?[2], selectModel: selectModel)
+
+    debugLog({
+        return "  [Layer 1] qtY=\(qtY.step), qtC=\(qtC.step) Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
     }())
 
     return VEVCLayerData.serialize(
@@ -1742,7 +1794,7 @@ func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sa
 
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[0], selectModel: unifiedSelectModelParentFree)
+        let buf = encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: &blocks, zeroThreshold: safeThreshold, isSkip: ySkip, history: histories?[0], selectModel: unifiedSelectModelParentFree)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
@@ -1756,7 +1808,7 @@ func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sa
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
-        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[1], selectModel: unifiedSelectModelParentFree)
+        let buf = encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: &blocks, zeroThreshold: safeThreshold, isSkip: cSkip, history: histories?[1], selectModel: unifiedSelectModelParentFree)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1770,7 +1822,7 @@ func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sa
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: histories?[2], selectModel: unifiedSelectModelParentFree)
+        let buf = encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: &blocks, zeroThreshold: safeThreshold, isSkip: cSkip, history: histories?[2], selectModel: unifiedSelectModelParentFree)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)

@@ -106,6 +106,17 @@ Data is stored continuously according to the sizes specified in the header.
 > layers — the encoder zeroes the block's residual before the DWT. Decoders
 > rely on this to bypass dequantization and inverse DWT for skip blocks
 > (`DecodeSkipBypass.swift`) without changing the output.
+>
+> **Skip-conditional BlockFlags (Profile 0x02 P-frames):** the per-block
+> flag bitmaps at the head of every plane payload (isZero 1 bit/block at
+> L2/L1, isZero+split 2 bits/block at L0) are written for NON-SKIP blocks
+> only, in ascending block order. Skip blocks omit their bits entirely —
+> the decoder derives isZero=true (and split=false at L0) from the skip
+> map, since skip coefficients are all-zero by the rule above. Plane skip
+> geometry: every layer's luma grid is 1:1 with the skip map; chroma uses
+> the 2×2 luma-geometry all-skip test. I-frames (no skip map) and Profile
+> 0x01 keep full bitmaps. Measured: 1,576 B/frame of flag bytes at zero
+> information content before this rule; −341 kbps on miko 500k.
 
 > **Layer0 payload semantics (Profile 0x02):** Layer0 carries the L0
 > closed-loop residual `r0 = LL2(source) − MC_L0(L0_ref)` (One-Pyramid

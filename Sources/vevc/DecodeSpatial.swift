@@ -484,31 +484,86 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
     let h0 = histories?.streams[0]
     let h1 = histories?.streams[1]
     let h2 = histories?.streams[2]
+
+    var ySkip0: [Bool]? = nil
+    var cSkip0: [Bool]? = nil
+    var ySkip1: [Bool]? = nil
+    var cSkip1: [Bool]? = nil
+    var ySkip2: [Bool]? = nil
+    var cSkip2: [Bool]? = nil
+    if isIFrame != true {
+        if let sMap = skipMap {
+            let skipBw = (dx + 31) / 32
+            ySkip0 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0dy + 7) / 8, colCount: (l0dx + 7) / 8)
+            cSkip0 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0cbDy + 7) / 8, colCount: (l0cbDx + 7) / 8)
+            ySkip1 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
+            cSkip1 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
+            ySkip2 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l2dy + 31) / 32, colCount: (l2dx + 31) / 32)
+            cSkip2 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l2cbDy + 31) / 32, colCount: (l2cbDx + 31) / 32)
+        }
+    }
+
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
-            group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
-            group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
-            group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
-            group.addTask { (3, try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)) }
-            group.addTask { (4, try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)) }
-            group.addTask { (5, try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)) }
-            group.addTask { (6, try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)) }
-            group.addTask { (7, try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)) }
-            group.addTask { (8, try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)) }
+            if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
+            }
+            if let ySkip1 = ySkip1, let cSkip1 = cSkip1 {
+                group.addTask { (3, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), isSkip: ySkip1, history: h1?[0], parentFreeStatics: true)) }
+                group.addTask { (4, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[1], parentFreeStatics: true)) }
+                group.addTask { (5, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (3, try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)) }
+                group.addTask { (4, try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)) }
+                group.addTask { (5, try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)) }
+            }
+            if let ySkip2 = ySkip2, let cSkip2 = cSkip2 {
+                group.addTask { (6, try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), isSkip: ySkip2, history: h2?[0], parentFreeStatics: true)) }
+                group.addTask { (7, try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[1], parentFreeStatics: true)) }
+                group.addTask { (8, try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (6, try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)) }
+                group.addTask { (7, try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)) }
+                group.addTask { (8, try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)) }
+            }
             for try await (slot, blocks) in group {
                 blocksBySlot[slot] = blocks
             }
         }
     } else {
-        blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
-        blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
-        blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
-        blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)
-        blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)
-        blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)
-        blocksBySlot[6] = try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)
-        blocksBySlot[7] = try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)
-        blocksBySlot[8] = try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)
+        if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
+        }
+        if let ySkip1 = ySkip1, let cSkip1 = cSkip1 {
+            blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), isSkip: ySkip1, history: h1?[0], parentFreeStatics: true)
+            blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[1], parentFreeStatics: true)
+            blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)
+            blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)
+            blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)
+        }
+        if let ySkip2 = ySkip2, let cSkip2 = cSkip2 {
+            blocksBySlot[6] = try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), isSkip: ySkip2, history: h2?[0], parentFreeStatics: true)
+            blocksBySlot[7] = try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[1], parentFreeStatics: true)
+            blocksBySlot[8] = try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[6] = try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)
+            blocksBySlot[7] = try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)
+            blocksBySlot[8] = try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)
+        }
     }
 
     // --- Stage 2: layer 0 reconstruction + L0 reference chain ---------------
@@ -737,25 +792,64 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
     var blocksBySlot = [[BlockView]?](repeating: nil, count: 6)
     let h0 = histories?.streams[0]
     let h1 = histories?.streams[1]
+
+    var ySkip0: [Bool]? = nil
+    var cSkip0: [Bool]? = nil
+    var ySkip1: [Bool]? = nil
+    var cSkip1: [Bool]? = nil
+    if isIFrame != true {
+        if let sMap = skipMap {
+            let skipBw = (dx + 31) / 32
+            ySkip0 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0dy + 7) / 8, colCount: (l0dx + 7) / 8)
+            cSkip0 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0cbDy + 7) / 8, colCount: (l0cbDx + 7) / 8)
+            ySkip1 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
+            cSkip1 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
+        }
+    }
+
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
-            group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
-            group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
-            group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
-            group.addTask { (3, try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)) }
-            group.addTask { (4, try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)) }
-            group.addTask { (5, try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)) }
+            if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
+            }
+            if let ySkip1 = ySkip1, let cSkip1 = cSkip1 {
+                group.addTask { (3, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), isSkip: ySkip1, history: h1?[0], parentFreeStatics: true)) }
+                group.addTask { (4, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[1], parentFreeStatics: true)) }
+                group.addTask { (5, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (3, try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)) }
+                group.addTask { (4, try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)) }
+                group.addTask { (5, try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)) }
+            }
             for try await (slot, blocks) in group {
                 blocksBySlot[slot] = blocks
             }
         }
     } else {
-        blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
-        blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
-        blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
-        blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)
-        blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)
-        blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)
+        if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
+        }
+        if let ySkip1 = ySkip1, let cSkip1 = cSkip1 {
+            blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), isSkip: ySkip1, history: h1?[0], parentFreeStatics: true)
+            blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[1], parentFreeStatics: true)
+            blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)
+            blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)
+            blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)
+        }
     }
 
     // --- Stage 2: layer 0 reconstruction + L0 reference chain ---------------
@@ -919,21 +1013,43 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
     let n0Y = ((l0dy + 7) / 8) * ((l0dx + 7) / 8)
     let n0C = ((l0cbDy + 7) / 8) * ((l0cbDx + 7) / 8)
 
+    var ySkip0: [Bool]? = nil
+    var cSkip0: [Bool]? = nil
+    if isIFrame != true {
+        if let sMap = skipMap {
+            let skipBw = (dx + 31) / 32
+            ySkip0 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0dy + 7) / 8, colCount: (l0dx + 7) / 8)
+            cSkip0 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0cbDy + 7) / 8, colCount: (l0cbDx + 7) / 8)
+        }
+    }
+
     var blocksBySlot = [[BlockView]?](repeating: nil, count: 3)
     let h0 = histories?.streams[0]
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
-            group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
-            group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
-            group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
+            if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
+            }
             for try await (slot, blocks) in group {
                 blocksBySlot[slot] = blocks
             }
         }
     } else {
-        blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
-        blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
-        blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
+        if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
+        }
     }
 
     // --- Stage 2: layer 0 reconstruction -------------------------------------
@@ -1098,38 +1214,97 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
     let h0 = histories?.streams[0]
     let h1 = histories?.streams[1]
     let h2 = histories?.streams[2]
-    if parallelEntropy {
-        try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
-            group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
-            group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
-            group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
+
+    var ySkip0: [Bool]? = nil
+    var cSkip0: [Bool]? = nil
+    var ySkip1: [Bool]? = nil
+    var cSkip1: [Bool]? = nil
+    var ySkip2: [Bool]? = nil
+    var cSkip2: [Bool]? = nil
+    if isIFrame != true {
+        if let sMap = skipMap {
+            let skipBw = (dx + 31) / 32
+            ySkip0 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0dy + 7) / 8, colCount: (l0dx + 7) / 8)
+            cSkip0 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l0cbDy + 7) / 8, colCount: (l0cbDx + 7) / 8)
             if hasLayer1 {
-                group.addTask { (3, try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)) }
-                group.addTask { (4, try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)) }
-                group.addTask { (5, try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)) }
+                ySkip1 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
+                cSkip1 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
             }
             if hasLayer2 {
-                group.addTask { (6, try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)) }
-                group.addTask { (7, try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)) }
-                group.addTask { (8, try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)) }
+                ySkip2 = lumaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l2dy + 31) / 32, colCount: (l2dx + 31) / 32)
+                cSkip2 = chromaSkipFlags(skipMap: sMap, mapWidth: skipBw, rowCount: (l2cbDy + 31) / 32, colCount: (l2cbDx + 31) / 32)
+            }
+        }
+    }
+
+    if parallelEntropy {
+        try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
+            if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)) }
+            } else {
+                group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)) }
+            }
+            if hasLayer1 {
+                if let ySkip1 = ySkip1, let cSkip1 = cSkip1 {
+                    group.addTask { (3, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), isSkip: ySkip1, history: h1?[0], parentFreeStatics: true)) }
+                    group.addTask { (4, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[1], parentFreeStatics: true)) }
+                    group.addTask { (5, try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[2], parentFreeStatics: true)) }
+                } else {
+                    group.addTask { (3, try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)) }
+                    group.addTask { (4, try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)) }
+                    group.addTask { (5, try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)) }
+                }
+            }
+            if hasLayer2 {
+                if let ySkip2 = ySkip2, let cSkip2 = cSkip2 {
+                    group.addTask { (6, try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), isSkip: ySkip2, history: h2?[0], parentFreeStatics: true)) }
+                    group.addTask { (7, try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[1], parentFreeStatics: true)) }
+                    group.addTask { (8, try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[2], parentFreeStatics: true)) }
+                } else {
+                    group.addTask { (6, try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)) }
+                    group.addTask { (7, try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)) }
+                    group.addTask { (8, try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)) }
+                }
             }
             for try await (slot, blocks) in group {
                 blocksBySlot[slot] = blocks
             }
         }
     } else {
-        blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
-        blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
-        blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
+        if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, history: h0?[2], parentFreeStatics: true)
+        } else {
+            blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true)
+        }
         if hasLayer1 {
-            blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)
-            blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)
-            blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)
+            if let ySkip1 = ySkip1, let cSkip1 = cSkip1 {
+                blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), isSkip: ySkip1, history: h1?[0], parentFreeStatics: true)
+                blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[1], parentFreeStatics: true)
+                blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocksAndSkipMap(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), isSkip: cSkip1, history: h1?[2], parentFreeStatics: true)
+            } else {
+                blocksBySlot[3] = try decodePlaneSubbands16WithParentBlocks(data: b1Y, pool: pool, blockCount: n1Y, parentBlocks: parentFreeParents8(count: n1Y), history: h1?[0], parentFreeStatics: true)
+                blocksBySlot[4] = try decodePlaneSubbands16WithParentBlocks(data: b1Cb, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[1], parentFreeStatics: true)
+                blocksBySlot[5] = try decodePlaneSubbands16WithParentBlocks(data: b1Cr, pool: pool, blockCount: n1C, parentBlocks: parentFreeParents8(count: n1C), history: h1?[2], parentFreeStatics: true)
+            }
         }
         if hasLayer2 {
-            blocksBySlot[6] = try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)
-            blocksBySlot[7] = try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)
-            blocksBySlot[8] = try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)
+            if let ySkip2 = ySkip2, let cSkip2 = cSkip2 {
+                blocksBySlot[6] = try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), isSkip: ySkip2, history: h2?[0], parentFreeStatics: true)
+                blocksBySlot[7] = try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[1], parentFreeStatics: true)
+                blocksBySlot[8] = try decodePlaneSubbands32WithParentBlocksAndSkipMap(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), isSkip: cSkip2, history: h2?[2], parentFreeStatics: true)
+            } else {
+                blocksBySlot[6] = try decodePlaneSubbands32WithParentBlocks(data: b2Y, pool: pool, blockCount: n2Y, parentBlocks: parentFreeParents16(count: n2Y), history: h2?[0], parentFreeStatics: true)
+                blocksBySlot[7] = try decodePlaneSubbands32WithParentBlocks(data: b2Cb, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[1], parentFreeStatics: true)
+                blocksBySlot[8] = try decodePlaneSubbands32WithParentBlocks(data: b2Cr, pool: pool, blockCount: n2C, parentBlocks: parentFreeParents16(count: n2C), history: h2?[2], parentFreeStatics: true)
+            }
         }
     }
     let base8YBlocks = blocksBySlot[0]!

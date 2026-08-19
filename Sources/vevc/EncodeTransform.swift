@@ -401,6 +401,113 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
     return out
 }
 
+@inline(__always)
+func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+    var bwFlags = BypassWriter()
+    var tasks: [(Int, EncodeTask32)] = []
+    tasks.reserveCapacity(blocks.count)
+    
+    let useSpatialWeight = 1 < colCount && 1 < rowCount
+    
+    var zeroCount = 0
+    for i in blocks.indices {
+        if isSkip[i] {
+            let view = blocks[i]
+            let half = 32 / 2
+            let base = view.base
+            clearBlockRegion(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            clearBlockRegion(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            clearBlockRegion(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            zeroCount += 1
+            continue
+        }
+        let blockThreshold: Int
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
+        } else {
+            blockThreshold = zeroThreshold
+        }
+        let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: blockThreshold)
+        if isZero {
+            bwFlags.writeBit(true)
+            let view = blocks[i]
+            let half = 32 / 2
+            let base = view.base
+            clearBlockRegion(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            clearBlockRegion(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            clearBlockRegion(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            zeroCount += 1
+        } else {
+            bwFlags.writeBit(false)
+            
+            let forceSplit = shouldSplit32WithoutLL(data: blocks[i].base)
+            if forceSplit {
+                bwFlags.writeBit(true)
+                
+                bwFlags.writeBit(false) // TL isZero = false
+                bwFlags.writeBit(false) // TL MB_Type = false (No further split)
+                
+                bwFlags.writeBit(false) // TR isZero = false
+                bwFlags.writeBit(false) // TR MB_Type = false
+                
+                bwFlags.writeBit(false) // BL isZero = false
+                bwFlags.writeBit(false) // BL MB_Type = false
+                
+                bwFlags.writeBit(false) // BR isZero = false
+                bwFlags.writeBit(false) // BR MB_Type = false
+                
+                tasks.append((i, .split8(true, true, true, true)))
+            } else {
+                bwFlags.writeBit(false) // MB_Type = false
+                tasks.append((i, .encode16))
+            }
+        }
+    }
+    bwFlags.flush()
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
+    
+    var encoder = EntropyEncoder()
+    var lastVal: Int16 = 0
+    
+    if let pb = parentBlocks {
+        for (i, task) in tasks {
+            if i < pb.count {
+                let pBlock = pb[i]
+                let pView = pBlock
+                let pSubs = getSubbands16(view: pView)
+                let view = blocks[i]
+                let subs = getSubbands32(view: view)
+                encodeSubbands32WithParent(task: task, encoder: &encoder, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
+            } else {
+                let view = blocks[i]
+                let subs = getSubbands32(view: view)
+                encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs, lastVal: &lastVal)
+            }
+        }
+        encoder.flush()
+        var out = bwFlags.bytes
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+        return out
+    }
+    
+    for (i, task) in tasks {
+        let view = blocks[i]
+        let subs = getSubbands32(view: view)
+        encodeSubbands32WithoutParent(task: task, encoder: &encoder, subs: subs, lastVal: &lastVal)
+    }
+    encoder.flush()
+    var out = bwFlags.bytes
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    return out
+}
+
 enum EncodeTask16 {
     case encode8
     case split4(Bool, Bool, Bool, Bool)
@@ -419,6 +526,110 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
 
     var zeroCount = 0
     for i in blocks.indices {
+        let blockThreshold: Int
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
+        } else {
+            blockThreshold = zeroThreshold
+        }
+        if isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold) {
+            bwFlags.writeBit(true)
+            let view = blocks[i]
+            let half = 16 / 2
+            let base = view.base
+            clearBlockRegion(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            clearBlockRegion(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            clearBlockRegion(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            zeroCount += 1
+        } else {
+            bwFlags.writeBit(false)
+            let forceSplit = shouldSplit16(data: blocks[i].base)
+            if forceSplit {
+                bwFlags.writeBit(true)
+                
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
+                
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
+                
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
+                
+                bwFlags.writeBit(false)
+                bwFlags.writeBit(false)
+                
+                tasks.append((i, .split4(true, true, true, true)))
+            } else {
+                bwFlags.writeBit(false)
+                tasks.append((i, .encode8))
+            }
+        }
+    }
+    bwFlags.flush()
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [Subbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
+    
+    var encoder = EntropyEncoder()
+    
+    if let pb = parentBlocks {
+        for (i, task) in tasks {
+            if i < pb.count {
+                let pBlock = pb[i]
+                let pView = pBlock
+                let pSubs = getSubbands8(view: pView)
+                let view = blocks[i]
+                let subs = getSubbands16(view: view)
+                encodeSubbands16WithParent(task: task, encoder: &encoder, subs: subs, parentHL: pSubs.hl, parentLH: pSubs.lh, parentHH: pSubs.hh)
+            } else {
+                let view = blocks[i]
+                let subs = getSubbands16(view: view)
+                encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
+            }
+        }
+        encoder.flush()
+        var out = bwFlags.bytes
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+        return out
+    }
+    
+    for (i, task) in tasks {
+        let view = blocks[i]
+        let subs = getSubbands16(view: view)
+        encodeSubbands16WithoutParent(task: task, encoder: &encoder, subs: subs)
+    }
+    encoder.flush()
+    var out = bwFlags.bytes
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    return out
+}
+
+@inline(__always)
+func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+    var bwFlags = BypassWriter()
+    var tasks: [(Int, EncodeTask16)] = []
+    tasks.reserveCapacity(blocks.count)
+
+    let useSpatialWeight = 1 < colCount && 1 < rowCount
+
+    var zeroCount = 0
+    for i in blocks.indices {
+        if isSkip[i] {
+            let view = blocks[i]
+            let half = 16 / 2
+            let base = view.base
+            clearBlockRegion(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            clearBlockRegion(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            clearBlockRegion(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            zeroCount += 1
+            continue
+        }
         let blockThreshold: Int
         if useSpatialWeight {
             let col = i % colCount
@@ -561,6 +772,60 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
     var nonZeroIndices: [Int] = []
     
     for i in blocks.indices {
+        let isZero = isEffectivelyZeroBase4PFrame(data: blocks[i].base, threshold: zeroThreshold)
+        if isZero {
+            bwFlags.writeBit(true)
+            bwFlags.writeBit(false)
+            let b = blocks[i]
+            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+        } else {
+            bwFlags.writeBit(false)
+            bwFlags.writeBit(false)
+            nonZeroIndices.append(i)
+        }
+    }
+    bwFlags.flush()
+    let zeroCount = blocks.count - nonZeroIndices.count
+    debugLog({
+        let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
+        let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
+        return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
+    }())
+    
+    var encoder = EntropyEncoder()
+    
+    var nzCur = 0
+    let nzCount = nonZeroIndices.count
+    for i in blocks.indices {
+        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+            nzCur += 1
+
+            let view = blocks[i]
+            let subs = getSubbands8(view: view)
+            blockEncode4H(encoder: &encoder, block: subs.ll)
+            blockEncode4V(encoder: &encoder, block: subs.hl)
+            blockEncode4H(encoder: &encoder, block: subs.lh)
+            blockEncode4H(encoder: &encoder, block: subs.hh)
+        }
+    }
+    
+    encoder.flush()
+    var out = bwFlags.bytes
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    return out
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, isSkip: [Bool], history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+    var bwFlags = BypassWriter()
+    var nonZeroIndices: [Int] = []
+    
+    for i in blocks.indices {
+        if isSkip[i] {
+            let b = blocks[i]
+            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+            continue
+        }
         let isZero = isEffectivelyZeroBase4PFrame(data: blocks[i].base, threshold: zeroThreshold)
         if isZero {
             bwFlags.writeBit(true)
