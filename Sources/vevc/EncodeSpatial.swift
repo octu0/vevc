@@ -402,13 +402,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 
     let mvData = encodeMVs(mvs: mvs, skipMap: [], profile: 0x01)
 
-    let refDirByteCount = (refDirs.count + 7) / 8
-    var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
-    for i in refDirs.indices {
-        if refDirs[i] {
-            refDirBuf[i / 8] |= UInt8(1 << (i % 8))
-        }
-    }
+    let refDirBuf = encodeRefDirsProfile1(refDirs: refDirs)
 
     // Must match the decoder's deblock invocation exactly (mvs + skipMap
     // variants) — see the profile-2 pipeline for the asymmetry history.
@@ -656,13 +650,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let skipMapData = encodeSkipMap(map: skipMap)
     let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, profile: 0x02)
 
-    let refDirByteCount = (refDirs.count + 7) / 8
-    var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
-    for i in refDirs.indices {
-        if refDirs[i] {
-            refDirBuf[i / 8] |= UInt8(1 << (i % 8))
-        }
-    }
+    let refDirBuf = encodeRefDirsProfile2(refDirs: refDirs, skipMap: skipMap)
 
     // Must match the decoder's deblock invocation exactly (mvs + skipMap
     // variants): the encoder previously filtered its reconstruction with the
@@ -824,4 +812,41 @@ private func copyBlock(from src: [Int16], to dst: inout [Int16], bx: Int, by: In
             }
         }
     }
+}
+
+@inline(__always)
+func encodeRefDirsProfile1(refDirs: [Bool]) -> [UInt8] {
+    let refDirByteCount = (refDirs.count + 7) / 8
+    var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
+    for i in refDirs.indices {
+        if refDirs[i] {
+            refDirBuf[i / 8] |= UInt8(1 << (i % 8))
+        }
+    }
+    return refDirBuf
+}
+
+@inline(__always)
+func encodeRefDirsProfile2(refDirs: [Bool], skipMap: [BlockMode]) -> [UInt8] {
+    var interCount = 0
+    for i in 0..<skipMap.count {
+        if skipMap[i] == .inter {
+            interCount += 1
+        }
+    }
+    if interCount == 0 {
+        return []
+    }
+    let refDirByteCount = (interCount + 7) / 8
+    var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
+    var bitIndex = 0
+    for i in 0..<skipMap.count {
+        if skipMap[i] == .inter {
+            if refDirs[i] {
+                refDirBuf[bitIndex / 8] |= UInt8(1 << (bitIndex % 8))
+            }
+            bitIndex += 1
+        }
+    }
+    return refDirBuf
 }

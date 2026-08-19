@@ -40,15 +40,7 @@ private func parseProfile1Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
         offset += refDirByteCount
 
         if nextPd != nil {
-            var dirs = [Bool]()
-            dirs.reserveCapacity(mvsCount)
-            for i in 0..<mvsCount {
-                let byteIdx = i / 8
-                let bitIdx = i % 8
-                let isBackward = (byteIdx < refDirBuf.count) && ((refDirBuf[byteIdx] & UInt8(1 << bitIdx)) != 0)
-                dirs.append(isBackward)
-            }
-            refDirs = dirs
+            refDirs = decodeRefDirsProfile1(buf: refDirBuf, count: mvsCount)
         }
     }
 
@@ -385,15 +377,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
         offset += refDirByteCount
 
         if nextPd != nil {
-            var dirs = [Bool]()
-            dirs.reserveCapacity(mvsCount)
-            for i in 0..<mvsCount {
-                let byteIdx = i / 8
-                let bitIdx = i % 8
-                let isBackward = (byteIdx < refDirBuf.count) && ((refDirBuf[byteIdx] & UInt8(1 << bitIdx)) != 0)
-                dirs.append(isBackward)
-            }
-            refDirs = dirs
+            refDirs = decodeRefDirsProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
         }
     }
 
@@ -1549,4 +1533,44 @@ func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<
             dst.advanced(by: offset).update(from: src.advanced(by: offset), count: copyCount)
         }
     }
+}
+
+@inline(__always)
+func decodeRefDirsProfile1(buf: [UInt8], count: Int) -> [Bool] {
+    var dirs = [Bool]()
+    dirs.reserveCapacity(count)
+    for i in 0..<count {
+        let byteIdx = i / 8
+        let bitIdx = i % 8
+        var isBackward = false
+        if byteIdx < buf.count {
+            if (buf[byteIdx] & UInt8(1 << bitIdx)) != 0 {
+                isBackward = true
+            }
+        }
+        dirs.append(isBackward)
+    }
+    return dirs
+}
+
+@inline(__always)
+func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [Bool] {
+    var dirs = [Bool](repeating: false, count: count)
+    guard let sm = skipMap else {
+        return dirs
+    }
+    var bitIndex = 0
+    for i in 0..<count {
+        if sm[i] == .inter {
+            let byteIdx = bitIndex / 8
+            let bitIdx = bitIndex % 8
+            if byteIdx < buf.count {
+                if (buf[byteIdx] & UInt8(1 << bitIdx)) != 0 {
+                    dirs[i] = true
+                }
+            }
+            bitIndex += 1
+        }
+    }
+    return dirs
 }

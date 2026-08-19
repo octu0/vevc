@@ -92,9 +92,11 @@ If the Status is not `0x01` (Copy-Frame), the following size information is stor
 ### 2.2. Frame Payload
 Data is stored continuously according to the sizes specified in the header.
 
-1. **SkipMap Data** (`SkipMap Size` bytes): A bitset mapping each 32x32 block to its skip mode (`skip_none`, `skip_prev`, `skip_ltr`). Present only in Profile 0x02.
+1. **SkipMap Data** (`SkipMap Size` bytes): Mapping each 32x32 block to its skip mode (`inter`, `skip_prev`, `skip_ltr`). Present only in Profile 0x02. Begins with a 1-byte mode flag (`0x00` = Raw RLE tokens via BypassWriter, `0x01` = rANS-encoded RLE tokens with compressed frequency tables). The encoder evaluates both modes and emits the smaller payload.
 2. **MV Data** (`MVs Size` bytes)
-3. **RefDir Data** (`RefDir Size` bytes): A bitset of flags used for bidirectional prediction or LTR direction. Stored only when `RefDir Size > 0`.
+3. **RefDir Data** (`RefDir Size` bytes): Bitset indicating reference direction (LTR or previous). Stored only when `RefDir Size > 0`.
+   - **Profile 0x01**: Full bitmap covering all blocks (`ceil(totalBlocks / 8)` bytes).
+   - **Profile 0x02**: Inter-only bitmap covering only `inter` blocks in ascending order (`ceil(interCount / 8)` bytes, or 0 bytes if `interCount == 0`). Skipped blocks (`skip_prev`, `skip_ltr`) omit refDir signaling.
 4. **Layer0 Data** (`Layer0 Size` bytes)
 5. **Layer1 Data** (`Layer1 Size` bytes)
 6. **Layer2 Data** (`Layer2 Size` bytes)

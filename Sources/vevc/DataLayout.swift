@@ -192,8 +192,14 @@ public struct VEVCFrameHeader {
         let layer1Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let layer2Size = Int(try readUInt32BEFromBytes(r, offset: &offset))
         
-        if (hasRefDir && refDirSize == 0) || (hasRefDir != true && refDirSize != 0) {
-            throw DecodeError.invalidHeader
+        if profile == 0x02 && fType == .pFrame {
+            if hasRefDir != true && refDirSize != 0 {
+                throw DecodeError.invalidHeader
+            }
+        } else {
+            if (hasRefDir && refDirSize == 0) || (hasRefDir != true && refDirSize != 0) {
+                throw DecodeError.invalidHeader
+            }
         }
         
         return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)

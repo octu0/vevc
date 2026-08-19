@@ -1119,10 +1119,87 @@ func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, profile: 
 }
 
 @inline(__always)
-func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
+private func encodeSkipMapRawRLE(runs: [(val: UInt8, count: UInt32)]) -> [UInt8] {
     var bypass = BypassWriter()
+    for run in runs {
+        bypass.writeBits(UInt32(run.val), count: 2)
+        let tokenInfo = valueTokenizeUnsigned(run.count)
+        bypass.writeBits(UInt32(tokenInfo.token), count: 6)
+        bypass.writeBits(tokenInfo.bypassBits, count: tokenInfo.bypassLen)
+    }
+    bypass.flush()
+    let bpData = bypass.bytes
+
+    var out = [UInt8]()
+    out.append(0)
+    writeVLQSize(&out, runs.count)
+    writeVLQSize(&out, bpData.count)
+    out.append(contentsOf: bpData)
+    return out
+}
+
+@inline(__always)
+private func encodeSkipMapRansRLE(runs: [(val: UInt8, count: UInt32)]) -> [UInt8] {
+    var tokensVal = [UInt8]()
+    var tokensCount = [UInt8]()
+    tokensVal.reserveCapacity(runs.count)
+    tokensCount.reserveCapacity(runs.count)
+
+    var bypass = BypassWriter()
+    var freqsVal = [UInt32](repeating: 0, count: 64)
+    var freqsCount = [UInt32](repeating: 0, count: 64)
+
+    for run in runs {
+        let tVal = run.val
+        tokensVal.append(tVal)
+        freqsVal[Int(tVal)] += 1
+
+        let tokenInfo = valueTokenizeUnsigned(run.count)
+        tokensCount.append(tokenInfo.token)
+        freqsCount[Int(tokenInfo.token)] += 1
+        bypass.writeBits(tokenInfo.bypassBits, count: tokenInfo.bypassLen)
+    }
+    bypass.flush()
+
+    var modelVal = rANSModel(buildLUT: false)
+    modelVal.normalize(tokenCounts: freqsVal.map(Int.init))
+
+    var modelCount = rANSModel(buildLUT: false)
+    modelCount.normalize(tokenCounts: freqsCount.map(Int.init))
+
+    var enc = rANSEncoder()
+    for i in stride(from: tokensVal.count - 1, through: 0, by: -1) {
+        let tc = tokensCount[i]
+        enc.encodeSymbol(cumFreq: modelCount.tokenCumFreqs[Int(tc)], freq: modelCount.tokenFreqs[Int(tc)])
+        let tv = tokensVal[i]
+        enc.encodeSymbol(cumFreq: modelVal.tokenCumFreqs[Int(tv)], freq: modelVal.tokenFreqs[Int(tv)])
+    }
+    enc.flush()
+
+    var out = [UInt8]()
+    out.append(1)
+    writeVLQSize(&out, runs.count)
+    writeCompressedFreqTable(&out, freqs: modelVal.tokenFreqs)
+    writeCompressedFreqTable(&out, freqs: modelCount.tokenFreqs)
+
+    let bpData = bypass.bytes
+    writeVLQSize(&out, bpData.count)
+    out.append(contentsOf: bpData)
+    out.append(contentsOf: enc.getBitstream())
+    return out
+}
+
+@inline(__always)
+func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
+    guard let firstMode = map.first else {
+        var out = [UInt8]()
+        out.append(0)
+        writeVLQSize(&out, 0)
+        writeVLQSize(&out, 0)
+        return out
+    }
     var runs = [(val: UInt8, count: UInt32)]()
-    var current: UInt8 = map.first?.rawValue ?? 0
+    var current: UInt8 = firstMode.rawValue
     var count: UInt32 = 0
     for mode in map {
         if mode.rawValue == current {
@@ -1133,41 +1210,32 @@ func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
             count = 1
         }
     }
-    if count > 0 {
+    if 0 < count {
         runs.append((current, count))
     }
-    
-    var out = [UInt8]()
-    writeVLQSize(&out, runs.count)
-    
-    for run in runs {
-        bypass.writeBits(UInt32(run.val), count: 2)
-        let tokenInfo = valueTokenizeUnsigned(run.count)
-        bypass.writeBits(UInt32(tokenInfo.token), count: 6)
-        bypass.writeBits(tokenInfo.bypassBits, count: tokenInfo.bypassLen)
+
+    let out0 = encodeSkipMapRawRLE(runs: runs)
+    let out1 = encodeSkipMapRansRLE(runs: runs)
+    if out1.count < out0.count {
+        return out1
     }
-    bypass.flush()
-    let bpData = bypass.bytes
-    writeVLQSize(&out, bpData.count)
-    out.append(contentsOf: bpData)
-    
-    return out
+    return out0
 }
 
 @inline(__always)
-public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
-    var offset = 0
-    let runCount = try readVLQSizeFromBytes(data, offset: &offset)
-    let bpLen = try readVLQSizeFromBytes(data, offset: &offset)
-    guard offset + bpLen <= data.count else { throw DecodeError.insufficientData }
-    
-    var map = [BlockMode]()
-    map.reserveCapacity(count)
-    
-    try data.withUnsafeBufferPointer { ptr in
-        guard let base = ptr.baseAddress else { throw DecodeError.insufficientData }
+private func decodeSkipMapRawRLE(data: [UInt8], count: Int) throws -> [BlockMode] {
+    return try withUnsafePointers(data) { base in
+        var offset = 1
+        let bufCount = data.count
+        let runCount = try readVLQSize(base, at: &offset, count: bufCount)
+        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
+        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
+
         var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-        
+
+        var map = [BlockMode]()
+        map.reserveCapacity(count)
+
         for _ in 0..<runCount {
             let valBits = bypassReader.readBits(count: 2)
             guard let mode = BlockMode(rawValue: UInt8(valBits)) else { throw DecodeError.invalidBlockData }
@@ -1175,15 +1243,79 @@ public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
             let bypassLen = valueBypassLengthUnsigned(for: UInt8(token))
             let bypassBits = bypassReader.readBits(count: bypassLen)
             let run = valueDetokenizeUnsigned(token: UInt8(token), bypassBits: bypassBits)
-            
+
             for _ in 0..<run {
                 map.append(mode)
             }
         }
+
+        guard map.count == count else { throw DecodeError.invalidBlockData }
+        return map
     }
-    
-    guard map.count == count else { throw DecodeError.invalidBlockData }
-    return map
+}
+
+@inline(__always)
+private func decodeSkipMapRansRLE(data: [UInt8], count: Int) throws -> [BlockMode] {
+    return try withUnsafePointers(data) { base in
+        var offset = 1
+        let bufCount = data.count
+
+        let runCount = try readVLQSize(base, at: &offset, count: bufCount)
+
+        let freqsVal = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+        let modelVal = rANSModel(tokenFreqs: freqsVal)
+
+        let freqsCount = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+        let modelCount = rANSModel(tokenFreqs: freqsCount)
+
+        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
+        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
+        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
+        offset += bpLen
+
+        guard offset <= bufCount else { throw DecodeError.insufficientData }
+        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
+
+        var map = [BlockMode]()
+        map.reserveCapacity(count)
+
+        for _ in 0..<runCount {
+            let tvCf = dec.getCumulativeFreq()
+            let tv = modelVal.findToken(cf: tvCf)
+            dec.advanceSymbol(cumFreq: tv.cumFreq, freq: tv.freq)
+
+            let tcCf = dec.getCumulativeFreq()
+            let tc = modelCount.findToken(cf: tcCf)
+            dec.advanceSymbol(cumFreq: tc.cumFreq, freq: tc.freq)
+
+            guard let mode = BlockMode(rawValue: tv.token) else { throw DecodeError.invalidBlockData }
+
+            let countBp = valueBypassLengthUnsigned(for: tc.token)
+            let countBv = bypassReader.readBits(count: countBp)
+            let run = valueDetokenizeUnsigned(token: tc.token, bypassBits: countBv)
+
+            for _ in 0..<run {
+                map.append(mode)
+            }
+        }
+
+        guard map.count == count else { throw DecodeError.invalidBlockData }
+        return map
+    }
+}
+
+@inline(__always)
+public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
+    guard 0 < data.count else { throw DecodeError.insufficientData }
+    let modeFlag = data[0]
+    switch modeFlag {
+    case 0:
+        return try decodeSkipMapRawRLE(data: data, count: count)
+    case 1:
+        return try decodeSkipMapRansRLE(data: data, count: count)
+    default:
+        throw DecodeError.invalidBlockData
+    }
 }
 
 // MARK: - Parent-free entropy contexts (Profile 0x02, One-Pyramid §6)
