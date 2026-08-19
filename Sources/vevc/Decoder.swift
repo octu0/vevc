@@ -37,10 +37,12 @@ public actor StreamingDecoderActor {
     let height: Int
     let pool: BlockViewPool
     let profile: UInt8
+    let gop: Int
     
     var previousReconstructed: PlaneData420? // internal for drift diagnostics
     private var firstReconstructed: PlaneData420?
     private var seenY = Set<UnsafeMutableRawPointer>()
+    private var framesSinceKeyframe = 0
     private var roundOffsetIndex = 0
     let entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
     private var cachedYCbCrImage: YCbCrImage?
@@ -53,12 +55,13 @@ public actor StreamingDecoderActor {
     // only adds overhead, so the GOP-parallel Decoder turns it off.
     let parallelEntropy: Bool
 
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, parallelEntropy: Bool = true) {
+    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, gop: Int = 12, parallelEntropy: Bool = true) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
         self.pool = BlockViewPool()
         self.profile = profile
+        self.gop = gop
         self.parallelEntropy = parallelEntropy
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
     }
@@ -88,6 +91,22 @@ public actor StreamingDecoderActor {
             guard let prev = previousReconstructed else {
                 throw DecodeError.insufficientDataContext("Copy frame without previous frame")
             }
+            if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+                if let old = firstReconstructed, let prevRecon = previousReconstructed {
+                    let oldY = old.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let prevY = prevRecon.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    if oldY != prevY {
+                        if seenY.contains(oldY) {
+                            seenY.remove(oldY)
+                            pool.putInt16(old.y)
+                            pool.putInt16(old.cb)
+                            pool.putInt16(old.cr)
+                        }
+                    }
+                }
+                firstReconstructed = previousReconstructed
+            }
+            framesSinceKeyframe += 1
             roundOffsetIndex += 1
             return renderToYCbCr(pd: prev)
         }
@@ -114,6 +133,7 @@ public actor StreamingDecoderActor {
             
             firstReconstructed = nil
             previousReconstructed = nil
+            framesSinceKeyframe = 0
 
             roundOffsetIndex = 0
             entropyHistories?.reset()
@@ -170,15 +190,40 @@ public actor StreamingDecoderActor {
         let yBase = pd.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
         seenY.insert(yBase)
         
-        if let oldPrev = previousReconstructed {
-            let oldYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-            let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-            if oldYBase != firstYBase {
-                if seenY.contains(oldYBase) {
-                    seenY.remove(oldYBase)
+        if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+            if let old = firstReconstructed {
+                let oldYBase = old.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                let prevYBase = previousReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                if oldYBase != prevYBase {
+                    if seenY.contains(oldYBase) {
+                        seenY.remove(oldYBase)
+                        pool.putInt16(old.y)
+                        pool.putInt16(old.cb)
+                        pool.putInt16(old.cr)
+                    }
+                }
+            }
+            firstReconstructed = pd
+            if let oldPrev = previousReconstructed {
+                let oldPrevYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                if seenY.contains(oldPrevYBase) {
+                    seenY.remove(oldPrevYBase)
                     pool.putInt16(oldPrev.y)
                     pool.putInt16(oldPrev.cb)
                     pool.putInt16(oldPrev.cr)
+                }
+            }
+        } else {
+            if let oldPrev = previousReconstructed {
+                let oldYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                if oldYBase != firstYBase {
+                    if seenY.contains(oldYBase) {
+                        seenY.remove(oldYBase)
+                        pool.putInt16(oldPrev.y)
+                        pool.putInt16(oldPrev.cb)
+                        pool.putInt16(oldPrev.cr)
+                    }
                 }
             }
         }
@@ -188,6 +233,7 @@ public actor StreamingDecoderActor {
             firstReconstructed = pd
         }
         
+        framesSinceKeyframe += 1
         roundOffsetIndex += 1
         return renderToYCbCr(pd: pd)
     }
@@ -209,7 +255,7 @@ public struct Decoder: Sendable {
     private func createGOPTask(
         gopContinuation: AsyncStream<AsyncThrowingStream<YCbCrImage, Error>>.Continuation,
         limiter: ConcurrencyLimiter,
-        maxLayer: Int, width: Int, height: Int, profile: UInt8
+        maxLayer: Int, width: Int, height: Int, profile: UInt8, gop: Int
     ) -> AsyncStream<[UInt8]>.Continuation {
         let (chunkStream, chunkContinuation) = AsyncStream<[UInt8]>.makeStream()
         let (imgStream, imgContinuation) = AsyncThrowingStream<YCbCrImage, Error>.makeStream()
@@ -217,7 +263,7 @@ public struct Decoder: Sendable {
         
         // GOP-parallel throughput decoding saturates the cores on its own;
         // per-frame entropy fan-out helps only when this is the sole stream.
-        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height, profile: profile, parallelEntropy: maxConcurrency == 1)
+        let decoderActor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height, profile: profile, gop: gop, parallelEntropy: maxConcurrency == 1)
         
         Task {
             await limiter.wait()
@@ -254,6 +300,7 @@ public struct Decoder: Sendable {
                     let effectiveHeight = fileHeader.height
                     let effectiveFps = fileHeader.framerate
                     let effectiveProfile = fileHeader.profile
+                    let effectiveGop = fileHeader.gop
                     let maxConcurrency = self.maxConcurrency
                     let maxLayer = self.maxLayer
                     
@@ -287,7 +334,7 @@ public struct Decoder: Sendable {
                             currentGOPInput = createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
-                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile, gop: effectiveGop
                             )
                         }
                         
@@ -297,7 +344,7 @@ public struct Decoder: Sendable {
                             let newInput = createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
-                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile
+                                maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile, gop: effectiveGop
                             )
                             currentGOPInput = newInput
                             newInput.yield(chunk)

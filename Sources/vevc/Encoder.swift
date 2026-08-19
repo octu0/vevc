@@ -23,12 +23,13 @@ public actor VEVCEncoder {
     public nonisolated let profile: UInt8
     public nonisolated let skipThreshold: Int
     public nonisolated let reconThresholdScale: Int
+    public nonisolated let gop: Int
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -41,6 +42,7 @@ public actor VEVCEncoder {
         self.profile = profile
         self.skipThreshold = EncoderTuning.shared.skipThreshold ?? skipThreshold
         self.reconThresholdScale = EncoderTuning.shared.reconThresholdScale ?? reconThresholdScale
+        self.gop = gop
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -55,11 +57,12 @@ public actor VEVCEncoder {
             qstep: nil,
             profile: profile,
             skipThreshold: self.skipThreshold,
-            reconThresholdScale: self.reconThresholdScale
+            reconThresholdScale: self.reconThresholdScale,
+            gop: gop
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -72,6 +75,7 @@ public actor VEVCEncoder {
         self.profile = profile
         self.skipThreshold = EncoderTuning.shared.skipThreshold ?? skipThreshold
         self.reconThresholdScale = EncoderTuning.shared.reconThresholdScale ?? reconThresholdScale
+        self.gop = gop
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -86,7 +90,8 @@ public actor VEVCEncoder {
             qstep: qstep,
             profile: profile,
             skipThreshold: self.skipThreshold,
-            reconThresholdScale: self.reconThresholdScale
+            reconThresholdScale: self.reconThresholdScale,
+            gop: gop
         )
     }
     
@@ -128,7 +133,7 @@ public actor VEVCEncoder {
         
         var result: [UInt8] = []
         if frameIndex == 0 {
-            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate, profile: profile)
+            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate, profile: profile, gop: gop)
             result.append(contentsOf: fileHeader.serialize())
         }
         result.append(contentsOf: bytes)
@@ -170,9 +175,11 @@ actor LayersEncodeActor {
     let profile: UInt8
     let skipThreshold: Int
     let reconThresholdScale: Int
+    let gop: Int
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
+    private var framesSinceLtrUpdate = 0
     private var frameIndex = 0
     private var qt: QuantizationTable?
     
@@ -197,7 +204,7 @@ actor LayersEncodeActor {
     let l0State = L0RefState()
     private var consecutiveCopyFrames = 0
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -210,6 +217,8 @@ actor LayersEncodeActor {
         self.profile = profile
         self.skipThreshold = skipThreshold
         self.reconThresholdScale = reconThresholdScale
+        self.gop = gop
+        self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
         let bw = (width + 31) / 32
@@ -217,7 +226,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -230,6 +239,8 @@ actor LayersEncodeActor {
         self.profile = profile
         self.skipThreshold = skipThreshold
         self.reconThresholdScale = reconThresholdScale
+        self.gop = gop
+        self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
         let bw = (width + 31) / 32
@@ -313,6 +324,7 @@ actor LayersEncodeActor {
             // skip_ltr eligibility (staticCounters[i] == gopPosition) keeps
             // meaning "static since this I-frame".
             framesSinceKeyframe = isPeriodicIFrame ? 0 : (frameIndex % keyint)
+            framesSinceLtrUpdate = framesSinceKeyframe
             consecutiveCopyFrames = 0
 
             // Backward-adaptive entropy tables: random-access boundary reset.
@@ -391,7 +403,7 @@ actor LayersEncodeActor {
 
             // A copied frame is static by definition: advance the per-block
             // static counters together with the GOP position, or the
-            // skip_ltr eligibility (staticCounters[i] == gopPosition) breaks
+            // skip_ltr eligibility (staticCounters[i] == ltrAge) breaks
             // for the rest of the GOP. The LTR pixel match itself is
             // re-verified on every coded frame, so this cannot fabricate a
             // false skip_ltr.
@@ -409,6 +421,28 @@ actor LayersEncodeActor {
             } else {
                 rateController.resetStaticStreak()
             }
+
+            if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+                releaseFirstRecon?()
+                firstReconstructed = previousReconstructed
+                releaseFirstRecon = releasePreviousRecon
+                releasePreviousRecon = nil
+
+                releaseFirstInput?()
+                let (firstIn, releaseFirstIn) = toPlaneData420(image: image, pool: pool)
+                firstInputPlane = firstIn
+                releaseFirstInput = releaseFirstIn
+
+                for i in 0..<self.staticCounters.count {
+                    self.staticCounters[i] = 0
+                }
+                framesSinceLtrUpdate = 0
+                cachedNextSub2 = nil
+                cachedNextSub1 = nil
+            } else {
+                framesSinceLtrUpdate += 1
+            }
+
             framesSinceKeyframe += 1
             frameIndex += 1
             return bytes
@@ -435,10 +469,11 @@ actor LayersEncodeActor {
         let encoded: ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16])
         if profile == 0x02 {
             var localCounters = self.staticCounters
+            let ltrAge = framesSinceLtrUpdate + 1
             encoded = try await encodeSpatialLayersForProfile2(
                 pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-                roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
+                roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, ltrAge: ltrAge, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
                 entropyHistories: self.entropyHistories,
                 l0State: l0State
@@ -467,18 +502,40 @@ actor LayersEncodeActor {
         previousInputPlane = plane
         releasePreviousInput = releasePlane
 
-        let oldRecon = previousReconstructed!
-        let oldRelease = releasePreviousRecon
-        
-        let isPrevFirst = withUnsafePointers(oldRecon.y, firstRecon.y) { p, f in
-            p == f
+        if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+            releaseFirstRecon?()
+            firstReconstructed = reconstructed
+            releaseFirstRecon = releaseRecon
+            releasePreviousRecon = nil
+
+            releaseFirstInput?()
+            let (firstIn, releaseFirstIn) = toPlaneData420(image: image, pool: pool)
+            firstInputPlane = firstIn
+            releaseFirstInput = releaseFirstIn
+
+            for i in 0..<self.staticCounters.count {
+                self.staticCounters[i] = 0
+            }
+            framesSinceLtrUpdate = 0
+            cachedNextSub2 = nil
+            cachedNextSub1 = nil
+        } else {
+            framesSinceLtrUpdate += 1
+
+            let oldRecon = previousReconstructed!
+            let oldRelease = releasePreviousRecon
+            
+            let isPrevFirst = withUnsafePointers(oldRecon.y, firstRecon.y) { p, f in
+                p == f
+            }
+            if isPrevFirst != true {
+                oldRelease?()
+            }
+            
+            releasePreviousRecon = releaseRecon
         }
-        if isPrevFirst != true {
-            oldRelease?()
-        }
-        
+
         previousReconstructed = reconstructed
-        releasePreviousRecon = releaseRecon
         previousMVs = mvs
         
         framesSinceKeyframe += 1

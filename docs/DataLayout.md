@@ -30,6 +30,7 @@ The metadata payload occupies exactly the number of bytes specified by `Metadata
 | Framerate | 2 Bytes (UInt16BE) | Video framerate (e.g., 30, 60). |
 | Timescale | 1 Byte | Currently always `0x00`. |
 | Table Flag | 1 Byte | `0x00`: Use built-in static tables (no table data follows). `0x01`: Custom learned tables follow in compressed format (reserved for future use). When `0x00`, the decoder uses the hardcoded `StaticRANSModels` as the fallback baseline. |
+| GOP / LTR Cycle | 1 Byte (UInt8) | **Profile 0x02 only**: LTR refresh interval in frames (e.g. 12; 0 disables periodic LTR refresh). |
 
 ---
 

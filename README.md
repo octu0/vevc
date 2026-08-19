@@ -300,6 +300,8 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 - `-keyint <keyint>`: Specifies the keyframe interval (maximum GOP size, automatically falls back to I-Frame for scene changes or end of stream).
 - `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size by aggressively skipping noise).
 - `-sceneThreshold <sad>`: Raw per-pixel SAD trigger for scene changes (default 500 ≒ off; the range is 0–765). Independent of this trigger, the encoder detects hard cuts with a sign-mix test — a cut moves block means in both directions, a flash/fade in one — and emits an I-frame that keeps the periodic keyint grid. Setting the threshold above 765 disables both detectors (deterministic encodes).
+- `-profile <0x01|0x02>`: Selects profile (`0x01` baseline, `0x02` P-skip/LTR + backward-adaptive entropy tables; default: `0x01`).
+- `-gop <frames>`: Sets the LTR refresh interval for Profile 0x02 in frames (default: 12; 0 disables periodic LTR refresh).
 
 ### Decode (`vevc-dec`)
 

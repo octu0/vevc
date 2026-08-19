@@ -11,6 +11,7 @@ var qstep: Int? = nil
 var profile: UInt8 = 0x01
 var skipThreshold: Int = 2
 var reconThresholdScale: Int = 1
+var gop: Int = 12
 var inFpsOpt: Int? = nil
 var outFpsOpt: Int? = nil
 
@@ -56,7 +57,17 @@ while i < args.count {
         }
     case "-profile":
         if (i + 1) < args.count {
-            if let v = UInt8(args[i + 1]) { profile = v }
+            let str = args[i + 1]
+            if str.hasPrefix("0x") {
+                if let v = UInt8(str.dropFirst(2), radix: 16) { profile = v }
+            } else {
+                if let v = UInt8(str) { profile = v }
+            }
+            i += 1
+        }
+    case "-gop":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { gop = v }
             i += 1
         }
     case "-skip-thresh":
@@ -86,7 +97,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-reconThresholdScale <scale>]\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-gop <gop>] [-reconThresholdScale <scale>]\n", stderr)
     exit(1)
 }
 
@@ -145,7 +156,8 @@ do {
             sceneChangeThreshold: sceneThreshold,
             profile: profile,
             skipThreshold: skipThreshold,
-            reconThresholdScale: reconThresholdScale
+            reconThresholdScale: reconThresholdScale,
+            gop: gop
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -158,7 +170,8 @@ do {
             sceneChangeThreshold: sceneThreshold,
             profile: profile,
             skipThreshold: skipThreshold,
-            reconThresholdScale: reconThresholdScale
+            reconThresholdScale: reconThresholdScale,
+            gop: gop
         )
     }
 

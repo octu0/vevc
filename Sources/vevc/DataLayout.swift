@@ -6,12 +6,14 @@ public struct VEVCFileHeader {
     public let colorGamut: UInt8 = 0x01 // BT.709
     public let framerate: Int
     public let timescale: UInt8 = 0x00 // 1000ms
+    public let gop: Int
     
-    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01) {
+    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01, gop: Int = 12) {
         self.width = width
         self.height = height
         self.framerate = framerate
         self.profile = profile
+        self.gop = gop
     }
     
     @inline(__always)
@@ -28,6 +30,10 @@ public struct VEVCFileHeader {
         // Table Flag: 0x00 = use built-in static tables (no table data follows)
         //             0x01 = custom tables follow in compressed format (reserved for future)
         payload.append(0x00)
+        
+        if profile == 0x02 {
+            payload.append(UInt8(clamping: gop))
+        }
         
         appendUInt16BE(&out, UInt16(payload.count))
         out.append(contentsOf: payload)
@@ -76,8 +82,19 @@ public struct VEVCFileHeader {
             throw DecodeError.insufficientDataContext("VEVC FileHeader unsupported Table Flag: \(tableFlag)")
         }
         
+        let gop: Int
+        if readProfile == 0x02 {
+            guard offset < payloadEnd else {
+                throw DecodeError.insufficientDataContext("VEVC FileHeader GOP missing for Profile 0x02")
+            }
+            gop = Int(chunk[offset])
+            offset += 1
+        } else {
+            gop = 0
+        }
+        
         offset = payloadEnd
-        return VEVCFileHeader(width: w, height: h, framerate: fps, profile: readProfile)
+        return VEVCFileHeader(width: w, height: h, framerate: fps, profile: readProfile, gop: gop)
     }
 }
 

@@ -22,6 +22,7 @@ struct Config {
     var qstep: Int? = nil
     var skipThreshold: Int = 2
     var profile: UInt8 = 0x01
+    var gop: Int = 12
     var maxFrames: Int? = nil
 }
 
@@ -199,7 +200,17 @@ struct CompareApp {
                 }
             case "-profile":
                 if (i + 1) < args.count {
-                    if let v = UInt8(args[i + 1]) { config.profile = v }
+                    let str = args[i + 1]
+                    if str.hasPrefix("0x") {
+                        if let v = UInt8(str.dropFirst(2), radix: 16) { config.profile = v }
+                    } else {
+                        if let v = UInt8(str) { config.profile = v }
+                    }
+                    i += 1
+                }
+            case "-gop":
+                if (i + 1) < args.count {
+                    if let v = Int(args[i + 1]) { config.gop = v }
                     i += 1
                 }
             case "-frames", "--frames":
@@ -219,7 +230,7 @@ struct CompareApp {
         }
 
         if positionalArgs.isEmpty && y4mPath == nil {
-            print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-quality] [-output-graph] [-vevc-only]")
+            print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-quality] [-output-graph] [-vevc-only]")
             exit(1)
         }
 

@@ -119,9 +119,9 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop)
     } else {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop)
     }
     
     let encStart1 = Date()
