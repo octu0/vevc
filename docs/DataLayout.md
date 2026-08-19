@@ -93,7 +93,9 @@ If the Status is not `0x01` (Copy-Frame), the following size information is stor
 Data is stored continuously according to the sizes specified in the header.
 
 1. **SkipMap Data** (`SkipMap Size` bytes): Mapping each 32x32 block to its skip mode (`inter`, `skip_prev`, `skip_ltr`). Present only in Profile 0x02. Begins with a 1-byte mode flag (`0x00` = Raw RLE tokens via BypassWriter, `0x01` = rANS-encoded RLE tokens with compressed frequency tables). The encoder evaluates both modes and emits the smaller payload.
-2. **MV Data** (`MVs Size` bytes)
+2. **MV Data** (`MVs Size` bytes): Motion vector data for inter blocks.
+   - **Profile 0x01**: Raw MV components (dx, dy) rANS-encoded directly without mode byte.
+   - **Profile 0x02**: Begins with a 1-byte mode flag (`0x00` = Raw values, `0x01` = Spatial prediction residuals). The encoder evaluates both modes and emits the smaller payload. Under spatial prediction (`0x01`), the prediction for block $i$ is `pred = median(A, B, C)` per component, where `A` is left (`0 < (i % cols) ? mv[i-1] : (0,0)`), `B` is top (`cols <= i ? mv[i-cols] : (0,0)`), and `C` is top-right (`cols <= i && (i % cols) < cols-1 ? mv[i-cols+1] : (0,0)`). Skipped neighbor blocks use `(0,0)` as their MV. Reconstructed MVs (`residual + pred`) are stored and referenced sequentially by subsequent blocks.
 3. **RefDir Data** (`RefDir Size` bytes): Bitset indicating reference direction (LTR or previous). Stored only when `RefDir Size > 0`.
    - **Profile 0x01**: Full bitmap covering all blocks (`ceil(totalBlocks / 8)` bytes).
    - **Profile 0x02**: Inter-only bitmap covering only `inter` blocks in ascending order (`ceil(interCount / 8)` bytes, or 0 bytes if `interCount == 0`). Skipped blocks (`skip_prev`, `skip_ltr`) omit refDir signaling.

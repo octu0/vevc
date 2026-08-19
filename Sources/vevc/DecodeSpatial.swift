@@ -366,7 +366,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 
     if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
         guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, profile: 0x02)
+        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02)
         offset += frameHeader.mvsSize
     }
 

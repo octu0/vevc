@@ -206,16 +206,22 @@ public struct VEVCFrameHeader {
     }
 }
 
+/// Derive MV block column count from frame width.
+@inline(__always)
+public func deriveMVColumns(width: Int) -> Int {
+    let l1dx = (width + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    return (l0dx + 7) / 8
+}
+
 /// Derive MV block count from frame dimensions.
 /// MV grid is 8x8 blocks at the **Base8 (L0) resolution**, which is the LL subband after 2 DWT stages.
 /// L0 dimensions: l0dx = ((dx+1)/2+1)/2, l0dy = ((dy+1)/2+1)/2
 @inline(__always)
 public func deriveMVCount(width: Int, height: Int) -> Int {
-    let l1dx = (width + 1) / 2
+    let cols = deriveMVColumns(width: width)
     let l1dy = (height + 1) / 2
-    let l0dx = (l1dx + 1) / 2
     let l0dy = (l1dy + 1) / 2
-    let cols = (l0dx + 7) / 8
     let rows = (l0dy + 7) / 8
     return cols * rows
 }

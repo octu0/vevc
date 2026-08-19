@@ -652,7 +652,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     }
 
     let skipMapData = encodeSkipMap(map: skipMap)
-    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, profile: 0x02)
+    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02)
 
     let refDirBuf = encodeRefDirsProfile2(refDirs: refDirs, skipMap: skipMap)
 
