@@ -12,27 +12,27 @@ final class RateControllerTests: XCTestCase {
 
         let iFrameTarget = controller.beginGOP()
 
-        // 1Mbps -> 33,333 bits per frame -> 500,000 bits per 15-frame GOP
-        XCTAssertEqual(controller.gopTargetBits, 500_000)
-        XCTAssertEqual(controller.gopRemainingBits, 500_000)
+        // 1Mbps * 1.3 -> 43,333 bits per frame -> 650,000 bits per 15-frame GOP
+        XCTAssertEqual(controller.gopTargetBits, 650_000)
+        XCTAssertEqual(controller.gopRemainingBits, 650_000)
         XCTAssertEqual(controller.gopRemainingFrames, 15)
 
-        // I-Frame gets ~26.3% of GOP budget initially (5 / (keyint + 4)) or absoluteFloor which is 200,000 (maxbitrate * 6 / framerate)
-        XCTAssertEqual(iFrameTarget, 200_000)
+        // I-Frame gets ~26.3% of GOP budget initially (5 / (keyint + 4)) or absoluteFloor which is 260,000 (plannedBitrate * 6 / framerate)
+        XCTAssertEqual(iFrameTarget, 260_000)
 
         // Simulate encoding an I-Frame
         controller.consumeIFrame(bits: 100_000, qStep: 32)
-        XCTAssertEqual(controller.gopRemainingBits, 400_000)
+        XCTAssertEqual(controller.gopRemainingBits, 550_000)
         XCTAssertEqual(controller.gopRemainingFrames, 14)
         XCTAssertEqual(controller.lastPFrameBits, 0)
 
         // P-Frame 1
         let p1SAD = 1000
         let qStep1 = controller.calculatePFrameQStep(currentSAD: p1SAD, baseStep: 32)
-        XCTAssertTrue(qStep1 >= 1 && qStep1 <= 128)
+        XCTAssertTrue(1 <= qStep1 && qStep1 <= 128)
 
         controller.consumePFrame(bits: 20_000, qStep: qStep1, sad: p1SAD, distortion: 500)
-        XCTAssertEqual(controller.gopRemainingBits, 380_000)
+        XCTAssertEqual(controller.gopRemainingBits, 530_000)
         XCTAssertEqual(controller.gopRemainingFrames, 13)
         XCTAssertEqual(controller.lastPFrameBits, 20_000)
         XCTAssertEqual(controller.lastPFrameQStep, qStep1)
@@ -41,7 +41,7 @@ final class RateControllerTests: XCTestCase {
         let p2SAD = 2000
         let qStep2 = controller.calculatePFrameQStep(currentSAD: p2SAD, baseStep: 32)
         controller.consumePFrame(bits: 50_000, qStep: qStep2, sad: p2SAD, distortion: 800)
-        XCTAssertEqual(controller.gopRemainingBits, 330_000)
+        XCTAssertEqual(controller.gopRemainingBits, 480_000)
         XCTAssertEqual(controller.gopRemainingFrames, 12)
     }
 

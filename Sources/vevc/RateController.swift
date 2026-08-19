@@ -1,17 +1,23 @@
 struct RateController {
     let baseMaxBitrate: Int
-    /// Gain-adjusted working bitrate (baseMaxBitrate scaled by the drift
-    /// feedback in beginGOP) — a var by design; the immutable input is
-    /// baseMaxBitrate.
-    private(set) var effectiveMaxBitrate: Int
+    /// Planned bitrate incorporating a 1.3x layer allowance.
+    /// The stream contains 3 spatial layers; the specified bitrate is priced
+    /// for the full-resolution layer, with the 1.3x allowance covering lower layers.
+    let plannedBitrate: Int
     let framerate: Int
     let keyint: Int
     let targetDistortionQ8: Int
+    
+    private(set) var consumedTotalBits: Int = 0
+    private(set) var plannedTotalScaled: Int = 0
     
     private(set) var gopTargetBits: Int = 0
     private(set) var gopRemainingBits: Int = 0
     private(set) var gopRemainingFrames: Int = 0
     
+    private(set) var lastIFrameBits: Int = 0
+    private(set) var lastIFrameQStep: Int = 0
+
     private(set) var avgPFrameSAD: Int = 0
     private(set) var lastPFrameBits: Int = 0
     private(set) var lastPFrameQStep: Int = 0
@@ -51,7 +57,7 @@ struct RateController {
 
     init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 600) {
         self.baseMaxBitrate = maxbitrate
-        self.effectiveMaxBitrate = (maxbitrate * 410) / 256
+        self.plannedBitrate = (maxbitrate * 13) / 10
         self.framerate = framerate
         self.keyint = keyint
         self.targetDistortionQ8 = targetDistortion
@@ -89,55 +95,29 @@ struct RateController {
             }
         }
         
-        // Distortion adaptation of 1.6x gain
+        let baseGOPBits = (self.plannedBitrate * self.keyint) / self.framerate
+        let balance = (self.plannedTotalScaled - (self.consumedTotalBits * self.framerate)) / self.framerate
+        var targetBits = baseGOPBits + balance
         if self.isQualitySaturated {
-            self.effectiveMaxBitrate = self.baseMaxBitrate
-        } else {
-            let margin = max(1, self.targetDistortionQ8 / 2)
-            let diff = self.avgDistortionQ8 - self.targetDistortionQ8
-            let rawGain = 256 + (diff * (410 - 256)) / margin
-            let gainQ8 = max(256, min(410, rawGain))
-            self.effectiveMaxBitrate = (self.baseMaxBitrate * gainQ8) / 256
+            targetBits = min(targetBits, baseGOPBits)
         }
-        
-        self.effectiveMaxBitrate = max(100, self.effectiveMaxBitrate)
-        
-        let baseGOPBits = (self.effectiveMaxBitrate * self.keyint) / self.framerate
-        // Carry over unused bits from the previous GOP (up to 1 GOP's worth) to handle complex scenes
-        var carryOver = max(0, min(baseGOPBits, self.gopRemainingBits))
-        
-        // Suppress carry-over when quality hits the ceiling to prevent useless size bloat
-        if self.isQualitySaturated {
-            carryOver = 0
-        }
-        
-        self.gopTargetBits = baseGOPBits + carryOver
+        self.gopTargetBits = max(baseGOPBits / 4, min(baseGOPBits * 2, targetBits))
         self.gopRemainingBits = self.gopTargetBits
         self.gopRemainingFrames = self.keyint
-        // lastPFrameBits / lastPFrameQStep / lastPFrameSAD are intentionally
-        // NOT reset here. Carrying over the previous GOP's last P-frame data
-        // allows the first P-frame of the new GOP to use it as a prediction
-        // reference, preventing the quality discontinuity at GOP boundaries.
-        // I-frame bit allocation with keyint-independent quality floor.
-        //
-        // Problem: with shorter GOPs, the GOP budget shrinks proportionally,
-        // and 15% of a smaller budget produces lower-quality I-frames.
-        // This defeats the purpose of shorter GOPs (better drift reset).
-        //
-        // Solution: compute the I-frame budget as if keyint=60 (reference GOP),
-        // then use that as the absolute floor. This ensures I-frame quality
-        // remains constant regardless of GOP length.
-        //
-        // referenceGOPBits = maxbitrate * 60 / framerate (keyint=60 equivalent)
-        // absoluteFloor = referenceGOPBits * 10% = maxbitrate * 60 / (framerate * 10)
-        //               = maxbitrate * 6 / framerate
-        let absoluteFloor = (self.effectiveMaxBitrate * 6) / self.framerate
+        
+        let absoluteFloor = (self.plannedBitrate * 6) / self.framerate
         let iFrameBitsProp = (self.gopTargetBits * 5) / (self.keyint + 4)
         return max(1000, max(absoluteFloor, iFrameBitsProp))
     }
     
     @inline(__always)
     mutating func consumeIFrame(bits: Int, qStep: Int) {
+        self.lastIFrameBits = bits
+        self.lastIFrameQStep = qStep
+
+        self.consumedTotalBits += bits
+        self.plannedTotalScaled += self.plannedBitrate
+        
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         
@@ -145,6 +125,25 @@ struct RateController {
         self.pPlanFrames = self.gopRemainingFrames
         
         self.staticStreak = 0
+    }
+    
+    /// Closed-loop I-frame step: proportional prediction from the previous
+    /// I-frame's (bits, step) pair, the same model calculatePFrameQStep uses
+    /// for P-frames. estimateQuantization's open-loop prediction misses by
+    /// up to 5x on live content (measured 332KB against a 65KB budget at
+    /// step 64); one previous sample corrects it. The open-loop estimate is
+    /// unreliably fine at stream start (measured ~8 at -b 4000 where the operative
+    /// value was the rate-scaled floor 64); a conservative absolute seed costs
+    /// 0.5s of startup quality and the closed loop corrects from the second I-frame.
+    /// A scene-cut I-frame mispredicts once (different content) and recovers on the
+    /// next sample.
+    @inline(__always)
+    func calculateIFrameQStep(targetBits: Int, estimatedStep: Int) -> Int {
+        if lastIFrameBits <= 0 || lastIFrameQStep <= 0 {
+            return min(16384, max(512, estimatedStep))
+        }
+        let val = (Int64(lastIFrameQStep) * Int64(lastIFrameBits)) / Int64(max(1, targetBits))
+        return Int(max(16, min(16384, val)))
     }
     
     @inline(__always)
@@ -193,8 +192,11 @@ struct RateController {
 
         switch true {
         case budgetRatioQ8 < 192:
-            // Budget tight (<0.75): Allow coarser quantization
-            maxStep = min(8192, baseStep * 8)
+            // Budget tight (<0.75): release the baseStep anchor entirely — the
+            // quantization table clamps at 4096 (Q4), so 16384 here means "as
+            // coarse as the format allows". Anchoring to baseStep kept P-frames
+            // finer than the budget demanded (measured 2.4x overshoot at -b 4000).
+            maxStep = 16384
         case 320 < budgetRatioQ8:
             // Budget surplus (>1.25): Allow finer quantization than I-frame
             minStep = max(16, (baseStep * 3) / 4)
@@ -231,7 +233,7 @@ struct RateController {
         // This is content-adaptive: no fixed parameters, responds to actual quality.
         // Half-strength blending: apply only 50% of the correction to avoid
         // over-reacting and causing excessive size increase.
-        if 0 < lastDistortionQ8 && 0 < avgDistortionQ8 {
+        if 256 <= budgetRatioQ8 && 0 < lastDistortionQ8 && 0 < avgDistortionQ8 {
             // fullCorrection = newStep * avgDistortion / lastDistortion
             // blended = (newStep + fullCorrection) / 2 → 50% correction strength
             let fullCorrection = (Int64(newStepInt) * Int64(avgDistortionQ8)) / Int64(lastDistortionQ8)
@@ -248,16 +250,15 @@ struct RateController {
         // finalQP = alpha * newQP + (1-alpha) * lastQP
         //
         // This has no fixed parameters — the smoothing strength adapts to content.
-        if 0 < lastPFrameQStep && 0 < avgPFrameSAD {
+        if 256 <= budgetRatioQ8 && 0 < lastPFrameQStep && 0 < avgPFrameSAD {
             let sceneSADRatio16 = (Int64(currentSAD) << 16) / Int64(max(1, avgPFrameSAD))
             // When transitioning to static scene (sceneSadRatio16 < 32768), use higher alpha to drop QP faster.
-            let minAlpha16 = if sceneSADRatio16 < 32768 {
-                Int64(29491) // 0.45
-            } else {
-                Int64(19661) // 0.3
+            var minAlpha16: Int64 = 19661 // 0.3
+            if sceneSADRatio16 < 32768 {
+                minAlpha16 = 29491 // 0.45
             }
             let alpha16 = max(minAlpha16, min(65536, sceneSADRatio16))
-            let smoothed = (Int64(newStepInt) * alpha16 + Int64(lastPFrameQStep) * (65536 - alpha16)) >> 16
+            let smoothed = ((Int64(newStepInt) * alpha16) + (Int64(lastPFrameQStep) * (65536 - alpha16))) >> 16
             newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), smoothed)))
         }
         
@@ -267,6 +268,9 @@ struct RateController {
     
     @inline(__always)
     mutating func consumePFrame(bits: Int, qStep: Int, sad: Int, distortion: Int) {
+        self.consumedTotalBits += bits
+        self.plannedTotalScaled += self.plannedBitrate
+        
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         
@@ -276,7 +280,7 @@ struct RateController {
         
         // Track reconstruction distortion with EMA.
         // Slow adaptation (7/8 weight on history) to establish a stable target.
-        let isCheap = self.avgPFrameBits > 0 && (bits * 2) < self.avgPFrameBits
+        let isCheap = 0 < self.avgPFrameBits && (bits * 2) < self.avgPFrameBits
         let isDistorted = (self.targetDistortionQ8 * 4) < distortion
         
         if isCheap && isDistorted {
@@ -321,6 +325,9 @@ struct RateController {
     /// not a coding sample.
     @inline(__always)
     mutating func consumeCopyFrame(bits: Int) {
+        self.consumedTotalBits += bits
+        self.plannedTotalScaled += self.plannedBitrate
+        
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         self.staticStreak = 0

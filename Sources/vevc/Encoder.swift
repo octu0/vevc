@@ -289,7 +289,8 @@ actor LayersEncodeActor {
             } else {
                 let targetBits = rateController.beginGOP()
                 let baseQt = estimateQuantization(img: image, targetBits: targetBits, rateController: rateController)
-                self.qt = baseQt
+                let loopStep = rateController.calculateIFrameQStep(targetBits: targetBits, estimatedStep: Int(baseQt.step))
+                self.qt = QuantizationTable(baseStep: max(16, loopStep), isChroma: false, layerIndex: 0)
                 // Quality-ceiling floor for the I-frame coding step,
                 // rate-scaled: 512 (real step 32) at 500kbps, relaxing
                 // inversely with bitrate so higher-rate operating points
@@ -299,7 +300,7 @@ actor LayersEncodeActor {
                 // Fixed-qstep mode (explicit quality request) is never
                 // floored.
                 let scaledFloor = min(iFrameQStepFloorQ4, (iFrameQStepFloorQ4 * 500_000) / max(1, maxbitrate))
-                baseStep = max(Int(baseQt.step), scaledFloor)
+                baseStep = max(loopStep, scaledFloor)
             }
             
             // A cut-driven I-frame keeps the periodic keyint grid: the

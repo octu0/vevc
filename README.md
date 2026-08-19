@@ -295,7 +295,7 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 
 - `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
-- `-b <kilobit>`: Target maximum bitrate in kbps (default: 500).
+- `-b <kilobit>`: Target average bitrate in kbps (default: 500). The rate controller tracks `-b × 1.3` as its planning rate — the stream carries 3 decodable layers, and the specified value prices the full-resolution layer while the 1.3× allowance covers the lower layers. Measured tracking on 1080p60 live content: actual ≤ 1.32–1.36× of the specified value whenever the target is reachable. Very low targets clamp at the quantizer-limited minimum output size (content-dependent; ~2.8 Mbps on busy 1080p60 game footage) instead of honoring the target.
 - `-qstep <val>`: CQP mode. Uses a constant quantization step, bypassing rate control.
 - `-keyint <keyint>`: Specifies the keyframe interval (maximum GOP size, automatically falls back to I-Frame for scene changes or end of stream).
 - `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size by aggressively skipping noise).
