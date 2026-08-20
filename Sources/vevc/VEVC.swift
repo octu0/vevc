@@ -731,7 +731,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
     var height = 0
     var profile: UInt8 = 0x01
     var frameIdx = 0
-    var csv = "frame,type,qy0,qy1,qy2,l0,l1,l2,total,skipPrev,skipLtr,inter,wpLuma,wpChroma,skipMapSize,mvsSize,refDirSize\n"
+    var csv = "frame,type,qy0,qy1,qy2,l0,l1,l2,total,skipPrev,skipLtr,inter,wpLuma,wpChroma,skipMapSize,mvsSize,refDirSize,treeMapSize\n"
     while offset < data.count {
         if offset + 4 <= data.count && Array(data[offset..<(offset + 4)]) == VEVCFileHeader.magic {
             let fh = try VEVCFileHeader.deserialize(from: data, offset: &offset)
@@ -744,7 +744,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
         let fh = try VEVCFrameHeader.deserialize(from: data, offset: &offset, profile: profile)
         let headerSize = offset - start
         if fh.isCopyFrame {
-            csv += "\(frameIdx),C,0,0,0,0,0,0,\(headerSize),0,0,0,0,0,0,0,0\n"
+            csv += "\(frameIdx),C,0,0,0,0,0,0,\(headerSize),0,0,0,0,0,0,0,0,0\n"
             offset = start + headerSize
             frameIdx += 1
             continue
@@ -765,7 +765,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
                 }
             }
         }
-        let l0Offset = offset + fh.skipMapSize + fh.mvsSize + fh.refDirSize
+        let l0Offset = offset + fh.skipMapSize + fh.mvsSize + fh.refDirSize + fh.treeMapSize
         let (qtY0, _, _, _, _) = try VEVCLayerData.deserialize(from: Array(data[l0Offset..<(l0Offset + fh.layer0Size)]), layer: 0, layerLabel: "Base8")
         let l1Offset = l0Offset + fh.layer0Size
         var qy1Step = 0
@@ -779,9 +779,9 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
             let (qtY2, _, _, _, _) = try VEVCLayerData.deserialize(from: Array(data[l2Offset..<(l2Offset + fh.layer2Size)]), layer: 2, layerLabel: "Layer32")
             qy2Step = Int(qtY2.step)
         }
-        let total = headerSize + fh.skipMapSize + fh.mvsSize + fh.refDirSize + fh.layer0Size + fh.layer1Size + fh.layer2Size
+        let total = headerSize + fh.skipMapSize + fh.mvsSize + fh.refDirSize + fh.treeMapSize + fh.layer0Size + fh.layer1Size + fh.layer2Size
         let frameType = fh.isIFrame ? "I" : "P"
-        csv += "\(frameIdx),\(frameType),\(qtY0.step),\(qy1Step),\(qy2Step),\(fh.layer0Size),\(fh.layer1Size),\(fh.layer2Size),\(total),\(skipPrev),\(skipLtr),\(inter),\(fh.lumaOffset),\(fh.chromaOffset),\(fh.skipMapSize),\(fh.mvsSize),\(fh.refDirSize)\n"
+        csv += "\(frameIdx),\(frameType),\(qtY0.step),\(qy1Step),\(qy2Step),\(fh.layer0Size),\(fh.layer1Size),\(fh.layer2Size),\(total),\(skipPrev),\(skipLtr),\(inter),\(fh.lumaOffset),\(fh.chromaOffset),\(fh.skipMapSize),\(fh.mvsSize),\(fh.refDirSize),\(fh.treeMapSize)\n"
         offset = start + total
         frameIdx += 1
     }

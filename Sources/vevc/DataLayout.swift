@@ -111,6 +111,7 @@ public struct VEVCFrameHeader {
     public let skipMapSize: Int
     public let mvsSize: Int
     public let refDirSize: Int
+    public let treeMapSize: Int
     /// Weighted-prediction offsets (profile 0x02 P-frames, mandatory
     /// fields): the decoder forms P′ = P + offset on inter blocks per plane.
     /// Serialized as two Int8 bytes placed after refDirSize and BEFORE the
@@ -124,12 +125,13 @@ public struct VEVCFrameHeader {
     public let layer1Size: Int
     public let layer2Size: Int
 
-    public init(frameType: FrameType, hasRefDir: Bool, skipMapSize: Int, mvsSize: Int, refDirSize: Int, lumaOffset: Int, chromaOffset: Int, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
+    public init(frameType: FrameType, hasRefDir: Bool, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int = 0, lumaOffset: Int = 0, chromaOffset: Int = 0, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
         self.skipMapSize = skipMapSize
         self.mvsSize = mvsSize
         self.refDirSize = refDirSize
+        self.treeMapSize = treeMapSize
         self.lumaOffset = lumaOffset
         self.chromaOffset = chromaOffset
         self.layer0Size = layer0Size
@@ -147,17 +149,23 @@ public struct VEVCFrameHeader {
         return frameType == .iFrame
     }
     
-    /// Compute payload size including derived refDirSize.
+    /// Compute payload size including derived refDirSize and treeMapSize.
     @inline(__always)
     public var payloadSize: Int {
         if frameType == .copyFrame { return 0 }
-        return skipMapSize + mvsSize + refDirSize + layer0Size + layer1Size + layer2Size
+        return skipMapSize + mvsSize + refDirSize + treeMapSize + layer0Size + layer1Size + layer2Size
     }
     
     @inline(__always)
     public func serialize(profile: UInt8 = 0x01) -> [UInt8] {
         var out = [UInt8]()
-        let refDirFlag: UInt8 = if hasRefDir { 0x10 } else { 0x00 }
+        let refDirFlag: UInt8
+        switch hasRefDir {
+        case true:
+            refDirFlag = 0x10
+        case false:
+            refDirFlag = 0x00
+        }
         let flag = frameType.rawValue | refDirFlag
         out.append(flag)
         if frameType != .copyFrame {
@@ -167,6 +175,7 @@ public struct VEVCFrameHeader {
             appendUInt32BE(&out, UInt32(mvsSize))
             appendUInt32BE(&out, UInt32(refDirSize))
             if profile == 0x02 && frameType == .pFrame {
+                appendUInt32BE(&out, UInt32(treeMapSize))
                 out.append(UInt8(bitPattern: Int8(clamping: lumaOffset)))
                 out.append(UInt8(bitPattern: Int8(clamping: chromaOffset)))
             }
@@ -191,15 +200,23 @@ public struct VEVCFrameHeader {
         }
         
         if fType == .copyFrame {
-            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
+            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, treeMapSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
         }
         
-        let skipMapSize = (profile == 0x02 && fType == .pFrame) ? Int(try readUInt32BEFromBytes(r, offset: &offset)) : 0
+        let skipMapSize: Int
+        switch profile == 0x02 && fType == .pFrame {
+        case true:
+            skipMapSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
+        case false:
+            skipMapSize = 0
+        }
         let mvsSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let refDirSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
+        var treeMapSize = 0
         var lumaOffset = 0
         var chromaOffset = 0
         if profile == 0x02 && fType == .pFrame {
+            treeMapSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
             guard offset + 1 < r.count else { throw BinaryError.insufficientData(message: "VEVCFrameHeader prediction offsets") }
             lumaOffset = Int(Int8(bitPattern: r[offset]))
             chromaOffset = Int(Int8(bitPattern: r[offset + 1]))
@@ -219,7 +236,7 @@ public struct VEVCFrameHeader {
             }
         }
         
-        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: treeMapSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }
 
@@ -401,8 +418,20 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
         }
 
         // Rebuild header with trimmed layer sizes
-        let newLayer1Size = if 1 <= maxLayer { frameHeader.layer1Size } else { 0 }
-        let newLayer2Size = if 2 <= maxLayer { frameHeader.layer2Size } else { 0 }
+        let newLayer1Size: Int
+        switch 1 <= maxLayer {
+        case true:
+            newLayer1Size = frameHeader.layer1Size
+        case false:
+            newLayer1Size = 0
+        }
+        let newLayer2Size: Int
+        switch 2 <= maxLayer {
+        case true:
+            newLayer2Size = frameHeader.layer2Size
+        case false:
+            newLayer2Size = 0
+        }
 
         let newHeader = VEVCFrameHeader(
             frameType: frameHeader.frameType,
@@ -410,6 +439,7 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
             skipMapSize: frameHeader.skipMapSize,
             mvsSize: frameHeader.mvsSize,
             refDirSize: frameHeader.refDirSize,
+            treeMapSize: frameHeader.treeMapSize,
             lumaOffset: frameHeader.lumaOffset,
             chromaOffset: frameHeader.chromaOffset,
             layer0Size: frameHeader.layer0Size,
@@ -431,6 +461,11 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
         // RefDir payload
         if 0 < frameHeader.refDirSize {
             let payload = try readFully(count: frameHeader.refDirSize)
+            output.append(contentsOf: payload)
+        }
+        // TreeMap payload
+        if 0 < frameHeader.treeMapSize {
+            let payload = try readFully(count: frameHeader.treeMapSize)
             output.append(contentsOf: payload)
         }
         // Layer 0 payload (always retained)

@@ -1,3 +1,5 @@
+import Foundation
+
 // MARK: - Transform Functions
 
 @inline(__always)
@@ -402,7 +404,35 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
 }
 
 @inline(__always)
-func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+func computeZeroFlags32(blocks: inout [BlockView], zeroThreshold: Int, colCount: Int, rowCount: Int, isSkip: [Bool]) -> [Bool] {
+    let useSpatialWeight = 1 < colCount && 1 < rowCount
+    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
+    for i in blocks.indices {
+        if isSkip[i] {
+            isZeroFlags[i] = true
+            continue
+        }
+        let blockThreshold: Int
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            switch zeroThreshold == 0 {
+            case true:
+                blockThreshold = 0
+            case false:
+                blockThreshold = (zeroThreshold * weight) / 1024
+            }
+        } else {
+            blockThreshold = zeroThreshold
+        }
+        isZeroFlags[i] = isEffectivelyZero32(data: blocks[i].base, threshold: blockThreshold)
+    }
+    return isZeroFlags
+}
+
+@inline(__always)
+func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -410,6 +440,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     let useSpatialWeight = 1 < colCount && 1 < rowCount
     
     var zeroCount = 0
+    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
     for i in blocks.indices {
         if isSkip[i] {
             let view = blocks[i]
@@ -419,6 +450,18 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             clearBlockRegion(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
             clearBlockRegion(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
             zeroCount += 1
+            isZeroFlags[i] = true
+            continue
+        }
+        if let tz = isTreez, tz[i] {
+            let view = blocks[i]
+            let half = 32 / 2
+            let base = view.base
+            clearBlockRegion(base: base.advanced(by: half), width: half, height: half, stride: 32)
+            clearBlockRegion(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
+            clearBlockRegion(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
+            zeroCount += 1
+            isZeroFlags[i] = true
             continue
         }
         let blockThreshold: Int
@@ -426,11 +469,17 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
+            switch zeroThreshold == 0 {
+            case true:
+                blockThreshold = 0
+            case false:
+                blockThreshold = (zeroThreshold * weight) / 1024
+            }
         } else {
             blockThreshold = zeroThreshold
         }
         let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: blockThreshold)
+        isZeroFlags[i] = isZero
         if isZero {
             bwFlags.writeBit(true)
             let view = blocks[i]
@@ -494,7 +543,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         encoder.flush()
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
-        return out
+        return (out, isZeroFlags)
     }
     
     for (i, task) in tasks {
@@ -505,7 +554,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
-    return out
+    return (out, isZeroFlags)
 }
 
 enum EncodeTask16 {
@@ -611,7 +660,35 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
 }
 
 @inline(__always)
-func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+func computeZeroFlags16(blocks: inout [BlockView], zeroThreshold: Int, colCount: Int, rowCount: Int, isSkip: [Bool]) -> [Bool] {
+    let useSpatialWeight = 1 < colCount && 1 < rowCount
+    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
+    for i in blocks.indices {
+        if isSkip[i] {
+            isZeroFlags[i] = true
+            continue
+        }
+        let blockThreshold: Int
+        if useSpatialWeight {
+            let col = i % colCount
+            let row = i / colCount
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            switch zeroThreshold == 0 {
+            case true:
+                blockThreshold = 0
+            case false:
+                blockThreshold = (zeroThreshold * weight) / 1024
+            }
+        } else {
+            blockThreshold = zeroThreshold
+        }
+        isZeroFlags[i] = isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold)
+    }
+    return isZeroFlags
+}
+
+@inline(__always)
+func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -619,6 +696,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     let useSpatialWeight = 1 < colCount && 1 < rowCount
 
     var zeroCount = 0
+    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
     for i in blocks.indices {
         if isSkip[i] {
             let view = blocks[i]
@@ -628,6 +706,18 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             clearBlockRegion(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
             clearBlockRegion(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
             zeroCount += 1
+            isZeroFlags[i] = true
+            continue
+        }
+        if let tz = isTreez, tz[i] {
+            let view = blocks[i]
+            let half = 16 / 2
+            let base = view.base
+            clearBlockRegion(base: base.advanced(by: half), width: half, height: half, stride: 16)
+            clearBlockRegion(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
+            clearBlockRegion(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
+            zeroCount += 1
+            isZeroFlags[i] = true
             continue
         }
         let blockThreshold: Int
@@ -635,11 +725,18 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
+            switch zeroThreshold == 0 {
+            case true:
+                blockThreshold = 0
+            case false:
+                blockThreshold = (zeroThreshold * weight) / 1024
+            }
         } else {
             blockThreshold = zeroThreshold
         }
-        if isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold) {
+        let isZero = isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold)
+        isZeroFlags[i] = isZero
+        if isZero {
             bwFlags.writeBit(true)
             let view = blocks[i]
             let half = 16 / 2
@@ -700,7 +797,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         encoder.flush()
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
-        return out
+        return (out, isZeroFlags)
     }
     
     for (i, task) in tasks {
@@ -711,7 +808,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
-    return out
+    return (out, isZeroFlags)
 }
 
 @inline(__always)
@@ -816,17 +913,39 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, isSkip: [Bool], history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+func computeZeroFlagsBase8(blocks: [BlockView], zeroThreshold: Int, isSkip: [Bool]) -> [Bool] {
+    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
+    for i in blocks.indices {
+        if isSkip[i] {
+            isZeroFlags[i] = true
+            continue
+        }
+        isZeroFlags[i] = isEffectivelyZeroBase4PFrame(data: blocks[i].base, threshold: zeroThreshold)
+    }
+    return isZeroFlags
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
+    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
     
     for i in blocks.indices {
         if isSkip[i] {
             let b = blocks[i]
             clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+            isZeroFlags[i] = true
+            continue
+        }
+        if let tz = isTreez, tz[i] {
+            let b = blocks[i]
+            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+            isZeroFlags[i] = true
             continue
         }
         let isZero = isEffectivelyZeroBase4PFrame(data: blocks[i].base, threshold: zeroThreshold)
+        isZeroFlags[i] = isZero
         if isZero {
             bwFlags.writeBit(true)
             bwFlags.writeBit(false)
@@ -866,7 +985,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroTh
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
-    return out
+    return (out, isZeroFlags)
 }
 
 // MARK: - Dedicated Subband Process Functions

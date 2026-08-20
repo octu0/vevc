@@ -619,8 +619,106 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         base8Input = PlaneData420(img16: r0)
     }
 
-    let (layer0, baseRecon, base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBase) = await encodePlaneBase8PFrameWithSkipMap(pd: base8Input, pool: pool, sads: sads, qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold, skipMap: skipMap, skipMapWidth: skipBw, histories: entropyHistories?.streams[0])
-    defer { releaseBase() }
+    var (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBaseBlocks) = await preparePlaneBase8WithSkipMap(
+        pd: base8Input, pool: pool, sads: sads,
+        qtY: qtY0, qtC: qtC0,
+        skipMap: skipMap, skipMapWidth: skipBw
+    )
+    defer { releaseBaseBlocks() }
+
+    let l1dx = sub2.width
+    let l1dy = sub2.height
+    let l1cbDx = ((l1dx + 1) / 2)
+    let l1cbDy = ((l1dy + 1) / 2)
+
+    let l2ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
+    let l2cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
+    let l1ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
+    let l1cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
+
+    // Compute zero flags for each plane and layer to identify zero trees (treez)
+    let safeThresholdY2 = min(3, min(zeroThreshold, max(0, Int(qtY2.step) / 64)))
+    let colCountY2 = (dx + 31) / 32
+    let rowCountY2 = (dy + 31) / 32
+    let l2yZeros = computeZeroFlags32(blocks: &l2yBlocks, zeroThreshold: safeThresholdY2, colCount: colCountY2, rowCount: rowCountY2, isSkip: l2ySkip)
+
+    let safeThresholdC2 = min(8, min(zeroThreshold, max(0, Int(qtC2.step) / 64)))
+    let colCountC2 = (cbDx + 31) / 32
+    let rowCountC2 = (cbDy + 31) / 32
+    let l2cbZeros = computeZeroFlags32(blocks: &l2cbBlocks, zeroThreshold: safeThresholdC2, colCount: colCountC2, rowCount: rowCountC2, isSkip: l2cSkip)
+    let l2crZeros = computeZeroFlags32(blocks: &l2crBlocks, zeroThreshold: safeThresholdC2, colCount: colCountC2, rowCount: rowCountC2, isSkip: l2cSkip)
+
+    let safeThresholdY1 = min(2, min(zeroThreshold, max(0, Int(qtY1.step) / 64)))
+    let colCountY1 = (l1dx + 15) / 16
+    let rowCountY1 = (l1dy + 15) / 16
+    let l1yZeros = computeZeroFlags16(blocks: &l1yBlocks, zeroThreshold: safeThresholdY1, colCount: colCountY1, rowCount: rowCountY1, isSkip: l1ySkip)
+
+    let safeThresholdC1 = min(8, min(zeroThreshold, max(0, Int(qtC1.step) / 64)))
+    let colCountC1 = (l1cbDx + 15) / 16
+    let rowCountC1 = (l1cbDy + 15) / 16
+    let l1cbZeros = computeZeroFlags16(blocks: &l1cbBlocks, zeroThreshold: safeThresholdC1, colCount: colCountC1, rowCount: rowCountC1, isSkip: l1cSkip)
+    let l1crZeros = computeZeroFlags16(blocks: &l1crBlocks, zeroThreshold: safeThresholdC1, colCount: colCountC1, rowCount: rowCountC1, isSkip: l1cSkip)
+
+    let safeThresholdY0 = min(1, min(zeroThreshold, max(0, Int(qtY0.step) / 64)))
+    let l0yZeros = computeZeroFlagsBase8(blocks: base8YBlocks, zeroThreshold: safeThresholdY0, isSkip: l2ySkip)
+
+    let safeThresholdC0 = min(8, max(0, (zeroThreshold / 8) - (Int(qtC0.step) / 32)))
+    let l0cbZeros = computeZeroFlagsBase8(blocks: base8CbBlocks, zeroThreshold: safeThresholdC0, isSkip: l2cSkip)
+    let l0crZeros = computeZeroFlagsBase8(blocks: base8CrBlocks, zeroThreshold: safeThresholdC0, isSkip: l2cSkip)
+
+    var isTreezY = [Bool](repeating: false, count: l2yBlocks.count)
+    for i in 0..<l2yBlocks.count {
+        if l2ySkip[i] != true {
+            if l0yZeros[i] {
+                if l1yZeros[i] {
+                    if l2yZeros[i] {
+                        isTreezY[i] = true
+                    }
+                }
+            }
+        }
+    }
+    var isTreezCb = [Bool](repeating: false, count: l2cbBlocks.count)
+    for i in 0..<l2cbBlocks.count {
+        if l2cSkip[i] != true {
+            if l0cbZeros[i] {
+                if l1cbZeros[i] {
+                    if l2cbZeros[i] {
+                        isTreezCb[i] = true
+                    }
+                }
+            }
+        }
+    }
+
+    var isTreezCr = [Bool](repeating: false, count: l2crBlocks.count)
+    for i in 0..<l2crBlocks.count {
+        if l2cSkip[i] != true {
+            if l0crZeros[i] {
+                if l1crZeros[i] {
+                    if l2crZeros[i] {
+                        isTreezCr[i] = true
+                    }
+                }
+            }
+        }
+    }
+
+    let treeMapBuf = encodeTreeMapProfile2(
+        isTreezY: isTreezY, ySkip: l2ySkip,
+        isTreezCb: isTreezCb, cbSkip: l2cSkip,
+        isTreezCr: isTreezCr, crSkip: l2cSkip
+    )
+
+    let (layer0, baseRecon, releaseBaseRecon, _, _, _) = serializePlaneBase8PFrameWithSkipMap(
+        pd: base8Input, pool: pool,
+        qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold,
+        base8YBlocks: &base8YBlocks, base8CbBlocks: &base8CbBlocks, base8CrBlocks: &base8CrBlocks,
+        skipMap: skipMap, skipMapWidth: skipBw,
+        isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
+        histories: entropyHistories?.streams[0]
+    )
+    defer { releaseBaseRecon() }
 
     var baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
 
@@ -654,15 +752,18 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         l0State.prev = newRef
     }
 
-    let l1dx = sub2.width
-    let l1dy = sub2.height
-    let l1cbDx = ((l1dx + 1) / 2)
-    let l1cbDy = ((l1dy + 1) / 2)
-    let l1ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
-    let l1cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
-    // Parent-free AC contexts (EntropyCodec.swift): profile 0x02 never
-    // conditions entropy coding on the parent layer.
-    let layer1 = encodeLayer16PayloadWithSkipMap(dx: sub2.width, dy: sub2.height, qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold, yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks, parentYBlocks: parentFreeParents8(count: base8YBlocks.count), parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count), parentCrBlocks: parentFreeParents8(count: base8CrBlocks.count), ySkip: l1ySkip, cSkip: l1cSkip, histories: entropyHistories?.streams[1], selectModel: unifiedSelectModelParentFree)
+    let (layer1, _, _, _) = encodeLayer16PayloadWithSkipMap(
+        dx: sub2.width, dy: sub2.height,
+        qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold,
+        yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks,
+        parentYBlocks: parentFreeParents8(count: base8YBlocks.count),
+        parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count),
+        parentCrBlocks: parentFreeParents8(count: base8CbBlocks.count),
+        ySkip: l1ySkip, cSkip: l1cSkip,
+        isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
+        histories: entropyHistories?.streams[1],
+        selectModel: unifiedSelectModelParentFree
+    )
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
     let (mutReconL1Cb, r1Cb) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: baseImg, width: l1cbDx, height: l1cbDy, qt: qtC1, pool: pool)
@@ -670,9 +771,18 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let l2ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
-    let l2cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
-    let layer2 = encodeLayer32PayloadWithSkipMap(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), ySkip: l2ySkip, cSkip: l2cSkip, histories: entropyHistories?.streams[2], selectModel: unifiedSelectModelParentFree)
+    let (layer2, _, _, _) = encodeLayer32PayloadWithSkipMap(
+        dx: pd.width, dy: pd.height,
+        qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold,
+        yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks,
+        parentYBlocks: parentFreeParents16(count: l1yBlocks.count),
+        parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count),
+        parentCrBlocks: parentFreeParents16(count: l1cbBlocks.count),
+        ySkip: l2ySkip, cSkip: l2cSkip,
+        isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
+        histories: entropyHistories?.streams[2],
+        selectModel: unifiedSelectModelParentFree
+    )
 
     // skipMap must be passed here: the decoder's layer2 reconstruction skips
     // skip blocks entirely (they stay zero until the final skip copy), and
@@ -735,11 +845,12 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     }())
 
     var out: [UInt8] = []
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, lumaOffset: wpLuma, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, treeMapSize: treeMapBuf.count, lumaOffset: wpLuma, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize(profile: 0x02))
     out.append(contentsOf: skipMapData)
     out.append(contentsOf: mvData)
     out.append(contentsOf: refDirBuf)
+    out.append(contentsOf: treeMapBuf)
     out.append(contentsOf: layer0)
     out.append(contentsOf: layer1)
     out.append(contentsOf: layer2)
@@ -907,4 +1018,46 @@ func encodeRefDirsProfile2(refDirs: [Bool], skipMap: [BlockMode]) -> [UInt8] {
         }
     }
     return refDirBuf
+}
+
+@inline(__always)
+func packPlaneTreeMap(isTreez: [Bool], isSkip: [Bool]) -> [UInt8] {
+    var interCount = 0
+    for i in 0..<isSkip.count {
+        if isSkip[i] != true {
+            interCount += 1
+        }
+    }
+    if interCount == 0 {
+        return []
+    }
+    let byteCount = (interCount + 7) / 8
+    var buf = [UInt8](repeating: 0, count: byteCount)
+    var bitIndex = 0
+    for i in 0..<isSkip.count {
+        if isSkip[i] != true {
+            if isTreez[i] {
+                buf[bitIndex / 8] |= UInt8(1 << (bitIndex % 8))
+            }
+            bitIndex += 1
+        }
+    }
+    return buf
+}
+
+@inline(__always)
+func encodeTreeMapProfile2(
+    isTreezY: [Bool], ySkip: [Bool],
+    isTreezCb: [Bool], cbSkip: [Bool],
+    isTreezCr: [Bool], crSkip: [Bool]
+) -> [UInt8] {
+    let bufY = packPlaneTreeMap(isTreez: isTreezY, isSkip: ySkip)
+    let bufCb = packPlaneTreeMap(isTreez: isTreezCb, isSkip: cbSkip)
+    let bufCr = packPlaneTreeMap(isTreez: isTreezCr, isSkip: crSkip)
+    var out: [UInt8] = []
+    out.reserveCapacity(bufY.count + bufCb.count + bufCr.count)
+    out.append(contentsOf: bufY)
+    out.append(contentsOf: bufCb)
+    out.append(contentsOf: bufCr)
+    return out
 }

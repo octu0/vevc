@@ -243,7 +243,7 @@ func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
 }
 
 @inline(__always)
-func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
+func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -253,6 +253,10 @@ func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
         defer { pool.putInt16(tasks) }
         for i in 0..<blockCount {
             if isSkip[i] {
+                tasks[i] = 0
+                continue
+            }
+            if let tz = isTreez, tz[i] {
                 tasks[i] = 0
                 continue
             }
@@ -621,7 +625,7 @@ func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
 }
 
 @inline(__always)
-func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
+func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -635,6 +639,10 @@ func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
         defer { pool.putInt16(tasks) }
         for i in 0..<blockCount {
             if isSkip[i] {
+                tasks[i] = 0
+                continue
+            }
+            if let tz = isTreez, tz[i] {
                 tasks[i] = 0
                 continue
             }
@@ -815,7 +823,7 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isSkip: [Bool], history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
+func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -829,6 +837,9 @@ func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockVie
         nonZeroIndices.reserveCapacity(blockCount)
         for i in 0..<blockCount {
             if isSkip[i] {
+                continue
+            }
+            if let tz = isTreez, tz[i] {
                 continue
             }
             let isZero = brFlags.readBit()

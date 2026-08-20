@@ -471,25 +471,39 @@ public struct Decoder: Sendable {
                             continuation.yield(chunk)
                         } else {
                             let isPFrame = (flag & 0x0F) == 0x00
-                            let headerSize = (currentProfile == 0x02 && isPFrame) ? 26 : 20
+                            let headerSize: Int
+                            if currentProfile == 0x02 && isPFrame {
+                                headerSize = 30
+                            } else {
+                                headerSize = 20
+                            }
                             let headerBytes = readFully(fileHandle: fileHandle, count: headerSize)
                             guard headerBytes.count == headerSize else { continuation.finish(); return }
                             chunk.append(contentsOf: headerBytes)
                             
                             var hsOffset = 0
-                            let skipMapSize = (currentProfile == 0x02 && isPFrame) ? Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset)) : 0
+                            let skipMapSize: Int
+                            if currentProfile == 0x02 && isPFrame {
+                                skipMapSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            } else {
+                                skipMapSize = 0
+                            }
                             let mvsSize = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let refDirBytes = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
+                            let treeMapBytes: Int
                             if currentProfile == 0x02 && isPFrame {
+                                treeMapBytes = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                                 // Prediction offsets (lumaOffset, chromaOffset) sit between
-                                // refDirSize and the layer sizes.
+                                // treeMapSize and the layer sizes.
                                 hsOffset += 2
+                            } else {
+                                treeMapBytes = 0
                             }
                             let layer0Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer1Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             let layer2Size = Int(try readUInt32BEFromBytes([UInt8](headerBytes), offset: &hsOffset))
                             
-                            let payloadSize = skipMapSize + mvsSize + refDirBytes + layer0Size + layer1Size + layer2Size
+                            let payloadSize = skipMapSize + mvsSize + refDirBytes + treeMapBytes + layer0Size + layer1Size + layer2Size
                             if 0 < payloadSize {
                                 let payloadBody = readFully(fileHandle: fileHandle, count: payloadSize)
                                 guard payloadBody.count == payloadSize else { continuation.finish(); return }

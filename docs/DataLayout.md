@@ -49,13 +49,14 @@ Immediately following the File Metadata, "Frame Packets" are stored sequentially
 > The Frame Status byte encodes both the frame type (lower 4 bits) and the `hasRefDir` flag (bit 4, `0x10`). When bit 4 is set, the frame includes a Reference Direction bitset in the payload. This flag is only meaningful for P-Frames (`0x00`), yielding `0x10` for bidirectional P-Frames.
 
 ### 2.1. Frame Header (For I-Frames and P-Frames)
-If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes) for Profile 0x01, and **25 bytes fixed** for Profile 0x02 I-Frames / **27 bytes fixed** for Profile 0x02 P-Frames (two weighted-prediction offset bytes).
+If the Status is not `0x01` (Copy-Frame), the following size information is stored next. These dictate the bounds of the payloads that follow. The frame header is **21 bytes fixed** (1 Byte status flag + 20 Bytes sizes) for Profile 0x01, **25 bytes fixed** for Profile 0x02 I-Frames, and **31 bytes fixed** for Profile 0x02 P-Frames (including TreeMap Size and two weighted-prediction offset bytes).
 
 | Field Name | Size | Description |
 |---|---|---|
 | SkipMap Size | 4 Bytes (UInt32BE) | Byte size of the SkipMap payload. **(Profile 0x02 only)**. |
 | MVs Size | 4 Bytes (UInt32BE) | Byte size of the following MV Data payload. |
 | RefDir Size | 4 Bytes (UInt32BE) | Byte size of the Reference Direction payload. Stored as `0` if `hasRefDir` is false. |
+| TreeMap Size | 4 Bytes (UInt32BE) | Byte size of the Zero-Tree Map payload. **(Profile 0x02 P-Frames only)**. |
 | Luma Offset | 1 Byte (Int8) | Weighted-prediction luma offset. **(Profile 0x02 P-Frames only, mandatory)**. |
 | Chroma Offset | 1 Byte (Int8) | Weighted-prediction chroma offset. **(Profile 0x02 P-Frames only, mandatory; currently always 0)**. |
 | Layer0 Size | 4 Bytes (UInt32BE) | Byte size of the Base Layer (8x8) payload. |
@@ -100,9 +101,10 @@ Data is stored continuously according to the sizes specified in the header.
 3. **RefDir Data** (`RefDir Size` bytes): Bitset indicating reference direction (LTR or previous). Stored only when `RefDir Size > 0`.
    - **Profile 0x01**: Full bitmap covering all blocks (`ceil(totalBlocks / 8)` bytes).
    - **Profile 0x02**: Inter-only bitmap covering only `inter` blocks in ascending order (`ceil(interCount / 8)` bytes, or 0 bytes if `interCount == 0`). Skipped blocks (`skip_prev`, `skip_ltr`) omit refDir signaling.
-4. **Layer0 Data** (`Layer0 Size` bytes)
-5. **Layer1 Data** (`Layer1 Size` bytes)
-6. **Layer2 Data** (`Layer2 Size` bytes)
+4. **TreeMap Data** (`TreeMap Size` bytes): Zero-Tree bitmap **(Profile 0x02 P-frames only)**. Formed by concatenating Y, Cb, and Cr bitmaps. Each plane's bitmap packs 1 bit per `inter` tree in ascending block order (`bit = 1` ⇔ all three layers L0, L1, L2 in that 32x32 tree region are all-zero). Trees with 0 inter blocks contribute 0 bytes.
+5. **Layer0 Data** (`Layer0 Size` bytes)
+6. **Layer1 Data** (`Layer1 Size` bytes)
+7. **Layer2 Data** (`Layer2 Size` bytes)
 
 > **Skip blocks are all-zero (normative, Profile 0x02):** every coefficient
 > belonging to a `skip_prev`/`skip_ltr` block is coded as zero at all three
@@ -110,16 +112,21 @@ Data is stored continuously according to the sizes specified in the header.
 > rely on this to bypass dequantization and inverse DWT for skip blocks
 > (`DecodeSkipBypass.swift`) without changing the output.
 >
+> **Zero-Tree Flag Aggregation (treeMap, Profile 0x02 P-frames):** for inter
+> trees where `treeMap` signals `1` (`isTreez == true`), per-block flag
+> outputs at the head of every layer plane (isZero 1 bit at L2/L1,
+> isZero+split 2 bits at L0) are completely omitted. Decoders infer
+> `isZero = true` (and `split = false` at L0). For non-treez inter trees,
+> per-block flags are written as normal for non-skip blocks.
+>
 > **Skip-conditional BlockFlags (Profile 0x02 P-frames):** the per-block
 > flag bitmaps at the head of every plane payload (isZero 1 bit/block at
-> L2/L1, isZero+split 2 bits/block at L0) are written for NON-SKIP blocks
-> only, in ascending block order. Skip blocks omit their bits entirely —
-> the decoder derives isZero=true (and split=false at L0) from the skip
-> map, since skip coefficients are all-zero by the rule above. Plane skip
-> geometry: every layer's luma grid is 1:1 with the skip map; chroma uses
-> the 2×2 luma-geometry all-skip test. I-frames (no skip map) and Profile
-> 0x01 keep full bitmaps. Measured: 1,576 B/frame of flag bytes at zero
-> information content before this rule; −341 kbps on miko 500k.
+> L2/L1, isZero+split 2 bits/block at L0) are written for NON-SKIP and
+> NON-TREEZ blocks only, in ascending block order. Skip blocks and treez blocks
+> omit their bits entirely.
+> Plane skip geometry: every layer's luma grid is 1:1 with the skip map; chroma uses
+> the 2×2 luma-geometry all-skip test. I-frames (no skip map, no tree map) and Profile
+> 0x01 keep full bitmaps.
 
 > **Layer0 payload semantics (Profile 0x02):** Layer0 carries the L0
 > closed-loop residual `r0 = LL2(source) − MC_L0(L0_ref)` (One-Pyramid
