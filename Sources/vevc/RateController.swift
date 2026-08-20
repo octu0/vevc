@@ -1,3 +1,6 @@
+/// 静止シーンリフレッシュは skip 支配のフレームに限る。inter が多いフレームの cheap+distorted は飽和や cadence 間引きの通常状態であり、静止の証拠ではない(src_1 で I 60.6% に暴発した実測に基づく)。
+let staticInterRatioMaxQ8: Int = 26
+
 struct RateController {
     let baseMaxBitrate: Int
     /// Planned bitrate incorporating a 1.3x layer allowance.
@@ -48,11 +51,16 @@ struct RateController {
     private(set) var isQualitySaturated: Bool = false
     
     private(set) var saturationAnchorStep: Int = 0
+    private(set) var driftStreak: Int = 0
     
+    /// 単発の歪みスパイクはノイズや正常な変動であり、2 フレーム連続の持続 + GOP 内位置ガードで暴走時のみ I を強制する(src_1 で drift-I が 5,287 枚 = 61% に暴発した実測に基づく)。本物のシーン変化は入力ベースのカット検出が拾う
     @inline(__always)
-    var isDriftAccelerating: Bool {
-        if avgDistortionQ8 == 0 { return false }
-        return (avgDistortionQ8 * 2) < lastDistortionQ8 && (32 * 256) < lastDistortionQ8
+    func isDriftAccelerating(framesSinceKeyframe: Int) -> Bool {
+        let limit = min(8, self.keyint / 2)
+        if 2 <= self.driftStreak && limit <= framesSinceKeyframe {
+            return true
+        }
+        return false
     }
 
     init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 600) {
@@ -125,6 +133,7 @@ struct RateController {
         self.pPlanFrames = self.gopRemainingFrames
         
         self.staticStreak = 0
+        self.driftStreak = 0
     }
     
     /// Closed-loop I-frame step: proportional prediction from the previous
@@ -267,7 +276,7 @@ struct RateController {
     }
     
     @inline(__always)
-    mutating func consumePFrame(bits: Int, qStep: Int, sad: Int, distortion: Int) {
+    mutating func consumePFrame(bits: Int, qStep: Int, sad: Int, distortion: Int, interRatioQ8: Int, detailThinned: Bool) {
         self.consumedTotalBits += bits
         self.plannedTotalScaled += self.plannedBitrate
         
@@ -283,13 +292,19 @@ struct RateController {
         let isCheap = 0 < self.avgPFrameBits && (bits * 2) < self.avgPFrameBits
         let isDistorted = (self.targetDistortionQ8 * 4) < distortion
         
-        if isCheap && isDistorted {
+        if isCheap && isDistorted && interRatioQ8 <= staticInterRatioMaxQ8 {
             self.staticStreak += 1
         } else {
             self.staticStreak = 0
         }
         
         self.lastDistortionQ8 = distortion
+        if detailThinned != true && 0 < self.avgDistortionQ8 && (self.avgDistortionQ8 * 2) < distortion && (32 * 256) < distortion {
+            self.driftStreak += 1
+        } else {
+            self.driftStreak = 0
+        }
+        // TODO: 間引きフレーム(detailThinned == true)による recon 歪みの上昇が avgDistortionQ8 の EMA を汚染する問題への対処を検討
         if self.avgDistortionQ8 == 0 {
             self.avgDistortionQ8 = distortion
         } else {

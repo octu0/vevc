@@ -291,7 +291,7 @@ actor LayersEncodeActor {
         }
         
         var forceIFrame = forceKeyFrame
-        if forceIFrame != true && rateController.isDriftAccelerating {
+        if forceIFrame != true && rateController.isDriftAccelerating(framesSinceKeyframe: framesSinceKeyframe) {
             forceIFrame = true
         }
         
@@ -483,10 +483,12 @@ actor LayersEncodeActor {
         // The two P-frame pipelines are separate functions so each stays
         // branch-free; the profile decides here, once.
         let encoded: ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16])
+        let interRatioQ8: Int
+        let detailThinned: Bool
         if profile == 0x02 {
             var localCounters = self.staticCounters
             let ltrAge = framesSinceLtrUpdate + 1
-            encoded = try await encodeSpatialLayersForProfile2(
+            let (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1, skipMap) = try await encodeSpatialLayersForProfile2(
                 pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, ltrAge: ltrAge, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
@@ -497,6 +499,16 @@ actor LayersEncodeActor {
                 l1Cadence: self.l1Cadence
             )
             self.staticCounters = localCounters
+            encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
+
+            var interCount = 0
+            for mode in skipMap {
+                if mode == .inter {
+                    interCount += 1
+                }
+            }
+            interRatioQ8 = (interCount * 256) / skipMap.count
+            detailThinned = shouldZeroCadence(cadence: self.l2Cadence, gopPosition: framesSinceKeyframe) || shouldZeroCadence(cadence: self.l1Cadence, gopPosition: framesSinceKeyframe)
         } else {
             encoded = try await encodeSpatialLayers(
                 pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
@@ -504,6 +516,8 @@ actor LayersEncodeActor {
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
             )
+            interRatioQ8 = 0
+            detailThinned = false
         }
         let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = encoded
         self.cachedNextSub2 = nSub2
@@ -513,7 +527,7 @@ actor LayersEncodeActor {
         let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
         
         if self.qstep == nil {
-            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion)
+            rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion, interRatioQ8: interRatioQ8, detailThinned: detailThinned)
         }
         
         releasePreviousInput?()

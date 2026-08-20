@@ -188,7 +188,7 @@ final class Profile0x02Tests: XCTestCase {
         let bh = (height + 31) / 32
         
         var counters = [Int](repeating: 0, count: bw * bh)
-        let (bytesP, encReconP, _, _, relEncP, _, _) = try await encodeSpatialLayersForProfile2(
+        let (bytesP, encReconP, _, _, relEncP, _, _, _) = try await encodeSpatialLayersForProfile2(
             pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, gopPosition: 2, ltrAge: 1, skipThreshold: 2, reconThresholdScale: 1, staticCounters: &counters, cachedNextSub2: nil, cachedNextSub1: nil, entropyHistories: nil, l0State: l0StateEnc)
         defer { relEncP() }
         
