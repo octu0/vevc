@@ -215,6 +215,7 @@ actor LayersEncodeActor {
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
     private var consecutiveCopyFrames = 0
+    private var sadBaseline: Int?
 
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2) {
         self.width = width
@@ -280,13 +281,36 @@ actor LayersEncodeActor {
         if let prev = previousInputPlane {
             let sad = estimateFastSAD(a: plane, b: prev)
             fastSADToPrevInput = sad
-            isSceneChange = (sceneChangeThreshold < sad)
-            // Sign-mix cut detector: a threshold above maxEstimateFastSAD
-            // means scene detection is intentionally off (deterministic
-            // tests); the fastSAD gate keeps the extra luma pass off normal
-            // frames.
-            if isSceneChange != true && sceneChangeThreshold <= maxEstimateFastSAD && sceneCutMinLumaMAD <= sad {
-                isSceneChange = detectSceneCut(source: plane.y, reference: prev.y, width: plane.width, height: plane.height)
+            if profile == 0x02 {
+                let baseline: Int
+                if let cur = sadBaseline {
+                    baseline = cur
+                } else {
+                    baseline = sad
+                }
+                let exceedsBaseline = (baseline * sceneCutBaselineRatio) < sad
+                isSceneChange = (sceneChangeThreshold < sad) && exceedsBaseline
+                if isSceneChange != true {
+                    if sceneChangeThreshold <= maxEstimateFastSAD && sceneCutMinLumaMAD <= sad && exceedsBaseline {
+                        isSceneChange = detectSceneCut(source: plane.y, reference: prev.y, width: plane.width, height: plane.height)
+                    }
+                }
+                if isSceneChange != true {
+                    if let cur = sadBaseline {
+                        sadBaseline = ((cur * 7) + sad) / 8
+                    } else {
+                        sadBaseline = sad
+                    }
+                }
+            } else {
+                isSceneChange = (sceneChangeThreshold < sad)
+                // Sign-mix cut detector: a threshold above maxEstimateFastSAD
+                // means scene detection is intentionally off (deterministic
+                // tests); the fastSAD gate keeps the extra luma pass off normal
+                // frames.
+                if isSceneChange != true && sceneChangeThreshold <= maxEstimateFastSAD && sceneCutMinLumaMAD <= sad {
+                    isSceneChange = detectSceneCut(source: plane.y, reference: prev.y, width: plane.width, height: plane.height)
+                }
             }
         }
         
