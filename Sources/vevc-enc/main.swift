@@ -12,6 +12,8 @@ var profile: UInt8 = 0x01
 var skipThreshold: Int = 2
 var reconThresholdScale: Int = 1
 var gop: Int = 12
+var l2Cadence: Int = 4
+var l1Cadence: Int = 2
 var inFpsOpt: Int? = nil
 var outFpsOpt: Int? = nil
 
@@ -80,6 +82,16 @@ while i < args.count {
             if let v = Int(args[i + 1]) { reconThresholdScale = v }
             i += 1
         }
+    case "-l2cadence", "--l2cadence":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { l2Cadence = v }
+            i += 1
+        }
+    case "-l1cadence", "--l1cadence":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { l1Cadence = v }
+            i += 1
+        }
     case "-framerate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { outFpsOpt = v }
@@ -97,7 +109,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-gop <gop>] [-reconThresholdScale <scale>]\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-gop <gop>] [-l2cadence <n>] [-l1cadence <n>] [-reconThresholdScale <scale>]\n", stderr)
     exit(1)
 }
 
@@ -157,7 +169,9 @@ do {
             profile: profile,
             skipThreshold: skipThreshold,
             reconThresholdScale: reconThresholdScale,
-            gop: gop
+            gop: gop,
+            l2Cadence: l2Cadence,
+            l1Cadence: l1Cadence
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -171,7 +185,9 @@ do {
             profile: profile,
             skipThreshold: skipThreshold,
             reconThresholdScale: reconThresholdScale,
-            gop: gop
+            gop: gop,
+            l2Cadence: l2Cadence,
+            l1Cadence: l1Cadence
         )
     }
 

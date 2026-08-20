@@ -231,3 +231,7 @@ This section records hard-won performance facts: where the compute cost actually
 - **MV scale conversion is Luma/Chroma-asymmetric:** `scaledMV(mvShift)` + `addMCBlockLuma32(>>2/&3)` vs `subMCBlockChroma16(>>3/&7)`. **`mvShift` must be validated separately for Luma and Chroma** — the Layer0 chroma corruption (§8.8) was a double-shift from assuming one value fit both. Never change `mvShift` without measuring both planes at every layer.
 - **Decoder-only changes** (e.g. the §8.8 chroma MC fix) do **not** change encoder output: stream size / PSNR / SSIM stay bit-identical, and `Profile0x02FixtureTests` (which exercise `maxLayer=2`) are unaffected. Verify which side a change touches before predicting its metric impact.
 - **Benchmark variance:** encode/decode fps fluctuate with machine load (observed Enc 72.9–99.7 fps for the *same* code). Always compare against a same-session baseline (`compare -y4m … -vevc-only -profile 2`), never across days/machines.
+
+### 9.6. P-frame Residual Temporal Decimation (Cadence) (2026-08-20, encoder-only)
+
+- L2/L1 detail residuals in Profile 0x02 P-frames are decimated according to `-l2cadence` (default: 4) and `-l1cadence` (default: 2), zeroing subbands when `framesSinceKeyframe % cadence != 0`. This is purely an encoder policy that relies on the legality of all-zero transform coefficients; there is no change to the bitstream specification or decoder.

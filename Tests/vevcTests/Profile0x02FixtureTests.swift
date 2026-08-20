@@ -47,11 +47,11 @@ final class Profile0x02FixtureTests: XCTestCase {
         }
         
         // 1. Encoding Determinism Test (2 consecutive runs produce bit-exact same SHA-256)
-        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02)
+        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02, l2Cadence: 1, l1Cadence: 1)
         let bitstream1 = try await encoder1.encodeToData(images: frames)
         let hash1 = SHA256.hash(data: Data(bitstream1)).compactMap { String(format: "%02x", $0) }.joined()
         
-        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02)
+        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02, l2Cadence: 1, l1Cadence: 1)
         let bitstream2 = try await encoder2.encodeToData(images: frames)
         let hash2 = SHA256.hash(data: Data(bitstream2)).compactMap { String(format: "%02x", $0) }.joined()
         

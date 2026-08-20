@@ -1,6 +1,48 @@
 // MARK: - Encode Spatial
 import Foundation
 
+@inline(__always)
+func zeroBlockSubbands32(view: BlockView) {
+    let base = view.base
+    clearBlockRegion(base: base.advanced(by: 16), width: 16, height: 16, stride: 32)
+    clearBlockRegion(base: base.advanced(by: 16 * 32), width: 16, height: 16, stride: 32)
+    clearBlockRegion(base: base.advanced(by: 16 * 32 + 16), width: 16, height: 16, stride: 32)
+}
+
+@inline(__always)
+func zeroBlocksSubbands32(blocks: inout [BlockView]) {
+    for i in 0..<blocks.count {
+        zeroBlockSubbands32(view: blocks[i])
+    }
+}
+
+@inline(__always)
+func zeroBlockSubbands16(view: BlockView) {
+    let base = view.base
+    clearBlockRegion(base: base.advanced(by: 8), width: 8, height: 8, stride: 16)
+    clearBlockRegion(base: base.advanced(by: 8 * 16), width: 8, height: 8, stride: 16)
+    clearBlockRegion(base: base.advanced(by: 8 * 16 + 8), width: 8, height: 8, stride: 16)
+}
+
+@inline(__always)
+func zeroBlocksSubbands16(blocks: inout [BlockView]) {
+    for i in 0..<blocks.count {
+        zeroBlockSubbands16(view: blocks[i])
+    }
+}
+
+@inline(__always)
+func shouldZeroCadence(cadence: Int, gopPosition: Int) -> Bool {
+    switch cadence {
+    case 0:
+        return true
+    case let n where 2 <= n:
+        return gopPosition % n != 0
+    default:
+        return false
+    }
+}
+
 /// I-frame encode, profile 0x01: parent-conditioned entropy contexts with
 /// the shipped static tables.
 @inline(__always)
@@ -436,7 +478,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -536,6 +578,18 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     defer { releaseL2() }
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
     defer { releaseL1() }
+
+    if shouldZeroCadence(cadence: l2Cadence, gopPosition: gopPosition) {
+        zeroBlocksSubbands32(blocks: &l2yBlocks)
+        zeroBlocksSubbands32(blocks: &l2cbBlocks)
+        zeroBlocksSubbands32(blocks: &l2crBlocks)
+    }
+
+    if shouldZeroCadence(cadence: l1Cadence, gopPosition: gopPosition) {
+        zeroBlocksSubbands16(blocks: &l1yBlocks)
+        zeroBlocksSubbands16(blocks: &l1cbBlocks)
+        zeroBlocksSubbands16(blocks: &l1crBlocks)
+    }
 
     // L0 closed loop (One-Pyramid §4): Base8 codes r0 = LL2(source) −
     // MC_L0(L0_ref) instead of LL2(residual), so the quarter-resolution

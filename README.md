@@ -302,6 +302,8 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 - `-sceneThreshold <sad>`: Raw per-pixel SAD trigger for scene changes (default 500 ≒ off; the range is 0–765). Independent of this trigger, the encoder detects hard cuts with a sign-mix test — a cut moves block means in both directions, a flash/fade in one — and emits an I-frame that keeps the periodic keyint grid. Setting the threshold above 765 disables both detectors (deterministic encodes).
 - `-profile <0x01|0x02>`: Selects profile (`0x01` baseline, `0x02` P-skip/LTR + backward-adaptive entropy tables; default: `0x01`).
 - `-gop <frames>`: Sets the LTR refresh interval for Profile 0x02 in frames (default: 12; 0 disables periodic LTR refresh).
+- `-l2cadence <n>`: Cadence interval for L2 detail residual in Profile 0x02 P-frames (default: 4; `0` disables L2 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
+- `-l1cadence <n>`: Cadence interval for L1 detail residual in Profile 0x02 P-frames (default: 2; `0` disables L1 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
 
 ### Decode (`vevc-dec`)
 
