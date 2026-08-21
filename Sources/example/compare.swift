@@ -25,6 +25,7 @@ struct Config {
     var gop: Int = 12
     var l2Cadence: Int = 4
     var l1Cadence: Int = 2
+    var motionMaskingPx: Int = 2
     var maxFrames: Int? = nil
 }
 
@@ -225,6 +226,11 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.l1Cadence = v }
                     i += 1
                 }
+            case "-mvt", "--mvt":
+                if (i + 1) < args.count {
+                    if let v = Int(args[i + 1]) { config.motionMaskingPx = v }
+                    i += 1
+                }
             case "-frames", "--frames":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.maxFrames = v }
@@ -242,7 +248,7 @@ struct CompareApp {
         }
 
         if positionalArgs.isEmpty && y4mPath == nil {
-            print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2cadence <n>] [-l1cadence <n>] [-quality] [-output-graph] [-vevc-only]")
+            print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2cadence <n>] [-l1cadence <n>] [-mvt <px>] [-quality] [-output-graph] [-vevc-only]")
             exit(1)
         }
 

@@ -16,6 +16,7 @@ var l2Cadence: Int = 4
 var l1Cadence: Int = 2
 var inFpsOpt: Int? = nil
 var outFpsOpt: Int? = nil
+var motionMaskingPx: Int = 2
 
 let args = CommandLine.arguments
 var i = 1
@@ -92,6 +93,11 @@ while i < args.count {
             if let v = Int(args[i + 1]) { l1Cadence = v }
             i += 1
         }
+    case "-mvt", "--mvt":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { motionMaskingPx = v }
+            i += 1
+        }
     case "-framerate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { outFpsOpt = v }
@@ -109,7 +115,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-gop <gop>] [-l2cadence <n>] [-l1cadence <n>] [-reconThresholdScale <scale>]\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-gop <gop>] [-l2cadence <n>] [-l1cadence <n>] [-reconThresholdScale <scale>] [-mvt <px>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n", stderr)
     exit(1)
 }
 
@@ -138,7 +144,6 @@ do {
     }
 
     let y4mReader = try Y4MReader(fileHandle: inFileHandle)
-    
     var fps = 30
     if y4mReader.fpsHeader.starts(with: "F") {
         let parts = y4mReader.fpsHeader.dropFirst().split(separator: ":")
@@ -171,7 +176,8 @@ do {
             reconThresholdScale: reconThresholdScale,
             gop: gop,
             l2Cadence: l2Cadence,
-            l1Cadence: l1Cadence
+            l1Cadence: l1Cadence,
+            motionMaskingPx: motionMaskingPx
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -187,7 +193,8 @@ do {
             reconThresholdScale: reconThresholdScale,
             gop: gop,
             l2Cadence: l2Cadence,
-            l1Cadence: l1Cadence
+            l1Cadence: l1Cadence,
+            motionMaskingPx: motionMaskingPx
         )
     }
 

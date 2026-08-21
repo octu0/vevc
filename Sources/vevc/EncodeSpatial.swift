@@ -474,11 +474,14 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     return (out, reconstructed, mvs, sads, { releaseY(); releaseCb(); releaseCr() }, nextSub2Res, nextSub1Res)
 }
 
+/// 動体マスキング詳細省略は量子化が深い(レート逼迫)フレームに限る。余裕のあるレートでは詳細を維持し、追従視コンテンツの可読性を守る
+let motionMaskingMinQStep: Int = 2048
+
 /// P-frame encode, profile 0x02: the profile-1 pipeline plus the skip map
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -579,10 +582,36 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
     defer { releaseL1() }
 
+    var effectiveMvtQ = 0
+    if 0 < motionMaskingPx {
+        effectiveMvtQ = (motionMaskingPx * 4 * 60) / max(1, framerate)
+    }
+
     if shouldZeroCadence(cadence: l2Cadence, gopPosition: gopPosition) {
         zeroBlocksSubbands32(blocks: &l2yBlocks)
         zeroBlocksSubbands32(blocks: &l2cbBlocks)
         zeroBlocksSubbands32(blocks: &l2crBlocks)
+    } else {
+        if 0 < motionMaskingPx {
+            if motionMaskingMinQStep <= adjustedStep {
+                let blockCount = min(l2yBlocks.count, min(skipMap.count, min(activityMap.count, min(mvs.dx.count, mvs.dy.count))))
+                for i in 0..<blockCount {
+                    switch skipMap[i] {
+                    case .inter:
+                        if activityMap[i] != .textured {
+                            let currDx = abs(Int(mvs.dx[i]))
+                            let currDy = abs(Int(mvs.dy[i]))
+                            let currMvMag = max(currDx, currDy)
+                            if effectiveMvtQ <= currMvMag {
+                                zeroBlockSubbands32(view: l2yBlocks[i])
+                            }
+                        }
+                    default:
+                        break
+                    }
+                }
+            }
+        }
     }
 
     if shouldZeroCadence(cadence: l1Cadence, gopPosition: gopPosition) {

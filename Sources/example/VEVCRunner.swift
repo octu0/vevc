@@ -119,9 +119,9 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, motionMaskingPx: config.motionMaskingPx)
     } else {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, motionMaskingPx: config.motionMaskingPx)
     }
     
     let encStart1 = Date()
