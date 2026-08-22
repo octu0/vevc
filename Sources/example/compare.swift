@@ -25,6 +25,7 @@ struct Config {
     var gop: Int = 12
     var l2Cadence: Int = 4
     var l1Cadence: Int = 2
+    var l0Cadence: Int = 1
     var motionMaskingPx: Int = 2
     var maxFrames: Int? = nil
 }
@@ -224,6 +225,11 @@ struct CompareApp {
             case "-l1cadence", "--l1cadence":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.l1Cadence = v }
+                    i += 1
+                }
+            case "-l0cadence", "--l0cadence":
+                if (i + 1) < args.count {
+                    if let v = Int(args[i + 1]) { config.l0Cadence = v }
                     i += 1
                 }
             case "-mvt", "--mvt":

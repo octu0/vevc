@@ -31,6 +31,21 @@ func zeroBlocksSubbands16(blocks: inout [BlockView]) {
     }
 }
 
+/// Base8 blocks are a single 8x8 DWT stage; temporal thinning codes the
+/// whole block as all-zero coefficients (legal like the L1/L2 cadence:
+/// dequant(zero) == 0 keeps encoder/decoder reconstructions identical).
+@inline(__always)
+func zeroBlockSubbandsBase8(view: BlockView) {
+    clearBlockRegion(base: view.base, width: 8, height: 8, stride: 8)
+}
+
+@inline(__always)
+func zeroBlocksSubbandsBase8(blocks: inout [BlockView]) {
+    for i in 0..<blocks.count {
+        zeroBlockSubbandsBase8(view: blocks[i])
+    }
+}
+
 @inline(__always)
 func shouldZeroCadence(cadence: Int, gopPosition: Int) -> Bool {
     switch cadence {
@@ -481,7 +496,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -655,6 +670,16 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     )
     defer { releaseBaseBlocks() }
 
+    // L0 temporal thinning (experimental -l0cadence): zero the whole Base8
+    // residual before flag computation so treeMap aggregation also sees the
+    // all-zero trees. The L0 closed loop reconstructs MC-only prediction on
+    // both sides (serializePlaneBase8PFrameWithSkipMap codes zeros; dequant
+    // maps them back to zero), keeping the chain bit-exact.
+    if shouldZeroCadence(cadence: l0Cadence, gopPosition: gopPosition) {
+        zeroBlocksSubbandsBase8(blocks: &base8YBlocks)
+        zeroBlocksSubbandsBase8(blocks: &base8CbBlocks)
+        zeroBlocksSubbandsBase8(blocks: &base8CrBlocks)
+    }
     let l1dx = sub2.width
     let l1dy = sub2.height
     let l1cbDx = ((l1dx + 1) / 2)

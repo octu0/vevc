@@ -14,6 +14,7 @@ var reconThresholdScale: Int = 1
 var gop: Int = 12
 var l2Cadence: Int = 4
 var l1Cadence: Int = 2
+var l0Cadence: Int = 1
 var inFpsOpt: Int? = nil
 var outFpsOpt: Int? = nil
 var motionMaskingPx: Int = 2
@@ -91,6 +92,11 @@ while i < args.count {
     case "-l1cadence", "--l1cadence":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { l1Cadence = v }
+            i += 1
+        }
+    case "-l0cadence", "--l0cadence":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { l0Cadence = v }
             i += 1
         }
     case "-mvt", "--mvt":
@@ -177,6 +183,7 @@ do {
             gop: gop,
             l2Cadence: l2Cadence,
             l1Cadence: l1Cadence,
+            l0Cadence: l0Cadence,
             motionMaskingPx: motionMaskingPx
         )
     } else {
@@ -194,6 +201,7 @@ do {
             gop: gop,
             l2Cadence: l2Cadence,
             l1Cadence: l1Cadence,
+            l0Cadence: l0Cadence,
             motionMaskingPx: motionMaskingPx
         )
     }

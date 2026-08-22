@@ -1,3 +1,5 @@
+import Foundation
+
 fileprivate struct SendableInt16Ptr: @unchecked Sendable {
     let ptr: UnsafeMutablePointer<Int16>
     init(_ ptr: UnsafeMutablePointer<Int16>) { self.ptr = ptr }
@@ -824,7 +826,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
 /// by the caller via lumaSkipFlags/chromaSkipFlags): skip blocks bypass
 /// read/DWT and stay zero (One-Pyramid §5).
 @inline(__always)
-func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool]) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool], cullSAD: Int = 0) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
     let totalBlocks = rowCount * colCount
@@ -840,7 +842,7 @@ func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, he
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, isSkip, r] in
+            group.addTask { [blocks, isSkip, r, cullSAD] in
                 r.data.withUnsafeBufferPointer { srcBuf in
                     let srcBase = srcBuf.baseAddress!
                     for i in sRow..<endRow {
@@ -856,6 +858,13 @@ func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, he
                                 continue
                             }
                             r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
+                            if 0 < cullSAD && base8BlockSAD(view) < cullSAD {
+                                // Small residual energy: cull the whole block
+                                // pre-DWT (encoder-only policy; all-zero
+                                // coefficients are always legal).
+                                clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
+                                continue
+                            }
                             if isZeroBlock(view: view) != true {
                                 dwt2DBlock8(view)
                             }
@@ -866,6 +875,22 @@ func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, he
         }
     }
     return (tmpBlocks, { [tmpBlocks] in pool.putBlockViewArray(tmpBlocks) })
+}
+
+/// Sum of absolute sample values of an 8x8 Base8 block (raw residual).
+@inline(__always)
+func base8BlockSAD(_ view: BlockView) -> Int {
+    var sum = 0
+    let base = view.base
+    let stride = view.stride
+    for y in 0..<8 {
+        let row = base.advanced(by: y * stride)
+        for x in 0..<8 {
+            let v = Int(row[x])
+            sum += v < 0 ? -v : v
+        }
+    }
+    return sum
 }
 
 @inline(__always)
@@ -1781,6 +1806,20 @@ func preparePlaneBase8WithSkipMap(
     let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: yRowCount8, colCount: yColCount8)
     let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 7) / 8, colCount: (cbDx + 7) / 8)
 
+    // Chroma residual culling (experimental): Base8 luma gets an SAD-gated
+    // whole-block clear (below) but Cb/Cr had no analog — measured on miko1
+    // motion clips the chroma nonzero-block rate ran ~2.5x luma's, making
+    // P-L0 chroma cost MORE than luma. Active only in the saturated regime
+    // (layer-0 chroma baseStep ≥ 2048 Q4) so normal-rate streams are untouched,
+    // and scaled by the same qstep curve as the luma gate. Env-tunable while
+    // under evaluation.
+    let chromaCullBaseSAD = Int(ProcessInfo.processInfo.environment["VEVC_L0C_CULL"] ?? "") ?? 96
+    let chromaCullActive = Int(qtC.step) >= 2048
+    // Same qstep-proportional curve as the luma gate: base 96 reaches the
+    // measured-good 512 at the saturated step (real 256) and backs off
+    // linearly below it.
+    let chromaCullSAD = chromaCullActive ? scaledSADThreshold(chromaCullBaseSAD, step: (Int(qtC.step) + 8) >> 4) : 0
+
     async let taskY = { [ySkip] () -> ([BlockView], @Sendable () -> Void) in
         let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, isSkip: ySkip)
         for i in blocks.indices {
@@ -1798,16 +1837,16 @@ func preparePlaneBase8WithSkipMap(
         return (blocks, relBlocks)
     }()
 
-    async let taskCb = { [cSkip] () -> ([BlockView], @Sendable () -> Void) in
-        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip)
+    async let taskCb = { [cSkip, chromaCullSAD] () -> ([BlockView], @Sendable () -> Void) in
+        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip, cullSAD: chromaCullSAD)
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
         return (blocks, relBlocks)
     }()
 
-    async let taskCr = { [cSkip] () -> ([BlockView], @Sendable () -> Void) in
-        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip)
+    async let taskCr = { [cSkip, chromaCullSAD] () -> ([BlockView], @Sendable () -> Void) in
+        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip, cullSAD: chromaCullSAD)
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }

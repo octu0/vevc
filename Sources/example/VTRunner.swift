@@ -47,12 +47,19 @@ class QualityBox: @unchecked Sendable {
 func runH264(y4mPath: String, config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
     var encTime: Double = 0
     var compSize: Int = 0
-    
+
     class FrameBox: @unchecked Sendable {
         var frames: [VTFrameData] = []
         let lock = NSLock()
+        let dumpHandle: FileHandle?
+        init(dumpEnv: String) {
+            if let p = ProcessInfo.processInfo.environment[dumpEnv] {
+                FileManager.default.createFile(atPath: p, contents: nil)
+                dumpHandle = FileHandle(forWritingAtPath: p)
+            } else { dumpHandle = nil }
+        }
     }
-    let frameBox = FrameBox()
+    let frameBox = FrameBox(dumpEnv: "VEVC_DUMP_H264")
     
     var encoderSpec: CFDictionary? = nil
     if disableHWA {
@@ -84,11 +91,12 @@ func runH264(y4mPath: String, config: Config, width: Int, height: Int, disableHW
             
             box.lock.lock()
             box.frames.append(VTFrameData(pts: pts, formatDesc: formatDesc, data: data))
+            box.dumpHandle?.write(Data(data))
             box.lock.unlock()
         },
         refcon: Unmanaged.passUnretained(frameBox).toOpaque(),
         compressionSessionOut: &compressionSessionOut)
-    
+
     guard status == noErr, let compressionSession = compressionSessionOut else {
         throw NSError(domain: "VTCompressionSessionCreate", code: Int(status), userInfo: nil)
     }
@@ -253,9 +261,16 @@ func runHEVC(y4mPath: String, config: Config, width: Int, height: Int, disableHW
     class FrameBox: @unchecked Sendable {
         var frames: [VTFrameData] = []
         let lock = NSLock()
+        let dumpHandle: FileHandle?
+        init(dumpEnv: String) {
+            if let p = ProcessInfo.processInfo.environment[dumpEnv] {
+                FileManager.default.createFile(atPath: p, contents: nil)
+                dumpHandle = FileHandle(forWritingAtPath: p)
+            } else { dumpHandle = nil }
+        }
     }
-    let frameBox = FrameBox()
-    
+    let frameBox = FrameBox(dumpEnv: "VEVC_DUMP_HEVC")
+
     var encoderSpec: CFDictionary? = nil
     if disableHWA {
         encoderSpec = [
@@ -263,7 +278,7 @@ func runHEVC(y4mPath: String, config: Config, width: Int, height: Int, disableHW
             kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder: false
         ] as CFDictionary
     }
-    
+
     var compressionSessionOut: VTCompressionSession?
     let status = VTCompressionSessionCreate(
         allocator: kCFAllocatorDefault,
@@ -286,12 +301,13 @@ func runHEVC(y4mPath: String, config: Config, width: Int, height: Int, disableHW
             
             box.lock.lock()
             box.frames.append(VTFrameData(pts: pts, formatDesc: formatDesc, data: data))
+            box.dumpHandle?.write(Data(data))
             box.lock.unlock()
         },
         refcon: Unmanaged.passUnretained(frameBox).toOpaque(),
         compressionSessionOut: &compressionSessionOut
     )
-    
+
     guard status == noErr, let compressionSession = compressionSessionOut else {
         throw NSError(domain: "VTCompressionSessionCreate (HEVC)", code: Int(status), userInfo: nil)
     }
