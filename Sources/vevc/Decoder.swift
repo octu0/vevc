@@ -45,6 +45,7 @@ public actor StreamingDecoderActor {
     private var framesSinceKeyframe = 0
     private var roundOffsetIndex = 0
     let entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
+    let mvPredictionState: MVPredictionState?
     private var cachedYCbCrImage: YCbCrImage?
     // Quarter-resolution L0 reference chain (One-Pyramid §4). Only needed
     // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
@@ -64,6 +65,7 @@ public actor StreamingDecoderActor {
         self.gop = gop
         self.parallelEntropy = parallelEntropy
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
+        self.mvPredictionState = (profile == 0x02) ? MVPredictionState() : nil
     }
 
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
@@ -137,6 +139,7 @@ public actor StreamingDecoderActor {
 
             roundOffsetIndex = 0
             entropyHistories?.reset()
+            mvPredictionState?.resetForKeyframe()
         }
 
         let isPFrame = (previousReconstructed != nil)
@@ -151,19 +154,19 @@ public actor StreamingDecoderActor {
                 img16 = try await decodeSpatialLayersForProfile2Base8Only(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
-                    entropyHistories: entropyHistories, parallelEntropy: parallelEntropy
+                    entropyHistories: entropyHistories, mvState: mvPredictionState, parallelEntropy: parallelEntropy
                 )
             case 1:
                 img16 = try await decodeSpatialLayersForProfile2WithLayer1(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
-                    entropyHistories: entropyHistories, l0State: l0State, parallelEntropy: parallelEntropy
+                    entropyHistories: entropyHistories, l0State: l0State, mvState: mvPredictionState, parallelEntropy: parallelEntropy
                 )
             default:
                 img16 = try await decodeSpatialLayersForProfile2Full(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: previousReconstructed, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
-                    entropyHistories: entropyHistories, l0State: l0State, parallelEntropy: parallelEntropy
+                    entropyHistories: entropyHistories, l0State: l0State, mvState: mvPredictionState, parallelEntropy: parallelEntropy
                 )
             }
         } else {

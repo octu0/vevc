@@ -346,8 +346,20 @@ private struct Profile2Prelude {
     let layer1Offset: Int
 }
 
-@inline(__always)
-private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?) throws -> Profile2Prelude {
+/// Boxed temporal-MV-predictor state shared across frames (reference
+/// semantics, like L0RefState): holds the last coded P-frame's reconstructed
+/// MV array so the next frame can code co-located prediction residuals.
+final class MVPredictionState: @unchecked Sendable {
+    var previous: MotionVectors? = nil
+    let payloadHistory = MVPayloadHistory()
+
+    func resetForKeyframe() {
+        previous = nil
+        payloadHistory.reset()
+    }
+}
+
+private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?, mvState: MVPredictionState?) throws -> Profile2Prelude {
     var offset = 0
     let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset, profile: 0x02)
     if frameHeader.isCopyFrame {
@@ -369,8 +381,14 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 
     if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
         guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02)
+        let prev = mvState?.previous
+        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prev, history: mvState?.payloadHistory)
         offset += frameHeader.mvsSize
+        mvState?.previous = mvs
+    } else if frameHeader.isIFrame == true {
+        // GOP boundary: the temporal MV predictor and the payload history
+        // reset with the keyframe.
+        mvState?.resetForKeyframe()
     }
 
     if frameHeader.hasRefDir {
@@ -459,13 +477,26 @@ private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int,
 /// Streams whose upper layers were stripped by the splitter (layer sizes 0)
 /// delegate to the generic decodeSpatialLayersForProfile2.
 @inline(__always)
-func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, parallelEntropy: Bool) async throws -> Image16 {
-    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, mvState: MVPredictionState? = nil, parallelEntropy: Bool) async throws -> Image16 {
+    // Peek the layer sizes without mutating the MV state: stripped-stream
+    // frames delegate below and must not parse (and double-update) twice.
+    do {
+        var peek = 0
+        let hdr = try VEVCFrameHeader.deserialize(from: r, offset: &peek, profile: 0x02)
+        guard 0 < hdr.layer1Size, 0 < hdr.layer2Size else {
+            return try await decodeSpatialLayersForProfile2(
+                r: r, pool: pool, maxLayer: 2, dx: dx, dy: dy,
+                predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset,
+                entropyHistories: entropyHistories, l0State: l0State, mvState: mvState, parallelEntropy: parallelEntropy
+            )
+        }
+    }
+    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd, mvState: mvState)
     guard 0 < p.frameHeader.layer1Size, 0 < p.frameHeader.layer2Size else {
         return try await decodeSpatialLayersForProfile2(
             r: r, pool: pool, maxLayer: 2, dx: dx, dy: dy,
             predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset,
-            entropyHistories: entropyHistories, l0State: l0State, parallelEntropy: parallelEntropy
+            entropyHistories: entropyHistories, l0State: l0State, mvState: mvState, parallelEntropy: parallelEntropy
         )
     }
 
@@ -784,13 +815,25 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
 /// (no skip bypass). A stripped layer1 (size 0) delegates to the generic
 /// decodeSpatialLayersForProfile2.
 @inline(__always)
-func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, parallelEntropy: Bool) async throws -> Image16 {
-    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, mvState: MVPredictionState? = nil, parallelEntropy: Bool) async throws -> Image16 {
+    // Peek before mutating MV state (stripped streams delegate below).
+    do {
+        var peek = 0
+        let hdr = try VEVCFrameHeader.deserialize(from: r, offset: &peek, profile: 0x02)
+        guard 0 < hdr.layer1Size else {
+            return try await decodeSpatialLayersForProfile2(
+                r: r, pool: pool, maxLayer: 1, dx: dx, dy: dy,
+                predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset,
+                entropyHistories: entropyHistories, l0State: l0State, mvState: mvState, parallelEntropy: parallelEntropy
+            )
+        }
+    }
+    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd, mvState: mvState)
     guard 0 < p.frameHeader.layer1Size else {
         return try await decodeSpatialLayersForProfile2(
             r: r, pool: pool, maxLayer: 1, dx: dx, dy: dy,
             predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffset,
-            entropyHistories: entropyHistories, l0State: l0State, parallelEntropy: parallelEntropy
+            entropyHistories: entropyHistories, l0State: l0State, mvState: mvState, parallelEntropy: parallelEntropy
         )
     }
 
@@ -1028,8 +1071,8 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
 /// decode side (deq(r0) + MC_L0), so it needs no separate L0RefState and
 /// never reads the upper-layer payloads.
 @inline(__always)
-func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, parallelEntropy: Bool) async throws -> Image16 {
-    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, mvState: MVPredictionState? = nil, parallelEntropy: Bool) async throws -> Image16 {
+    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd, mvState: mvState)
 
     let l1dx = (dx + 1) / 2
     let l1dy = (dy + 1) / 2
@@ -1180,7 +1223,7 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
 /// decoding uses the straight-line variants above, which delegate here
 /// only in those stripped cases.
 @inline(__always)
-func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState?, parallelEntropy: Bool) async throws -> Image16 {
+func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState?, mvState: MVPredictionState? = nil, parallelEntropy: Bool) async throws -> Image16 {
     let l2dx = dx
     let l2dy = dy
     let l1dx = (dx + 1) / 2
@@ -1188,7 +1231,7 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
     let l0dx = (l1dx + 1) / 2
     let l0dy = (l1dy + 1) / 2
 
-    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd)
+    let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd, mvState: mvState)
     let frameHeader = p.frameHeader
     let skipMap = p.skipMap
     let mvs = p.mvs

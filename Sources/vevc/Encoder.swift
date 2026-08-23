@@ -223,6 +223,7 @@ actor LayersEncodeActor {
     private var cachedNextSub2: [Int16]?
     private var cachedNextSub1: [Int16]?
     var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
+    var mvPayloadHistory: MVPayloadHistory?
     // Quarter-resolution L0 reference chain (One-Pyramid §4, profile 0x02).
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
@@ -387,6 +388,8 @@ actor LayersEncodeActor {
             if profile == 0x02 {
                 if entropyHistories == nil { entropyHistories = FrameEntropyHistories() }
                 entropyHistories?.reset()
+                if mvPayloadHistory == nil { mvPayloadHistory = MVPayloadHistory() }
+                mvPayloadHistory?.reset()
             }
 
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
@@ -534,6 +537,7 @@ actor LayersEncodeActor {
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, ltrAge: ltrAge, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
                 entropyHistories: self.entropyHistories,
+                mvPayloadHistory: self.mvPayloadHistory,
                 l0State: l0State,
                 l2Cadence: self.l2Cadence,
                 l1Cadence: self.l1Cadence,

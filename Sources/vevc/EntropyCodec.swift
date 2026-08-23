@@ -1,3 +1,5 @@
+import Foundation
+
 // MARK: - Context Constants
 
 /// Number of rANS contexts in the unified entropy stream.
@@ -1000,8 +1002,56 @@ struct EntropyDecoder {
 
 // MARK: - Motion Vector rANS Codec
 
+/// Backward-adaptive token-count history for one MV stream (dx/dy value
+/// models): mirrors EntropyHistoryState's acc = acc/2 + cur decay. The
+/// encoder feeds what it encoded, the decoder what it decoded, so both hold
+/// identical state without signaling.
+final class MVPayloadHistory: @unchecked Sendable {
+    private(set) var dxCounts = [Int](repeating: 0, count: 64)
+    private(set) var dyCounts = [Int](repeating: 0, count: 64)
+    private(set) var primed = false
+
+    func reset() {
+        for t in 0..<64 { dxCounts[t] = 0; dyCounts[t] = 0 }
+        primed = false
+    }
+
+    func update(dxCnts: [Int], dyCnts: [Int]) {
+        for t in 0..<64 {
+            dxCounts[t] = dxCounts[t] / 2 + min(65535, dxCnts[t])
+            dyCounts[t] = dyCounts[t] / 2 + min(65535, dyCnts[t])
+        }
+        primed = true
+    }
+
+    /// Normalized models rebuilt from the accumulated history.
+    func models() -> (dx: rANSModel, dy: rANSModel) {
+        var md = rANSModel()
+        md.normalize(tokenCounts: dxCounts)
+        var my = rANSModel()
+        my.normalize(tokenCounts: dyCounts)
+        return (md, my)
+    }
+}
+
+/// Cross-entropy of this frame's token histogram under a normalized model,
+/// in bits — cheap stand-in for the exact rANS size when cost-selecting
+/// between per-frame tables and the backward-adaptive models.
 @inline(__always)
-private func encodeMVPayload(dxList: [Int16], dyList: [Int16]) -> [UInt8] {
+private func shannonBits(counts: [UInt32], model: rANSModel) -> Double {
+    var total = 0
+    for f in model.tokenFreqs { total += Int(f) }
+    if total == 0 { return .infinity }
+    var bits = 0.0
+    for t in 0..<64 where counts[t] > 0 {
+        let p = Double(Int(model.tokenFreqs[t])) / Double(total)
+        if p > 0 { bits -= Double(counts[t]) * log2(p) }
+    }
+    return bits
+}
+
+@inline(__always)
+private func encodeMVPayload(dxList: [Int16], dyList: [Int16], history: MVPayloadHistory? = nil) -> (data: [UInt8], usedHistory: Bool, dxCnts: [Int], dyCnts: [Int]) {
     let count = dxList.count
     var tokensDx = [UInt8]()
     var tokensDy = [UInt8]()
@@ -1031,29 +1081,52 @@ private func encodeMVPayload(dxList: [Int16], dyList: [Int16]) -> [UInt8] {
     var modelDy = rANSModel(buildLUT: false)
     modelDy.normalize(tokenCounts: freqsDy.map(Int.init))
     
+    let dxCnts = freqsDx.map(Int.init)
+    let dyCnts = freqsDy.map(Int.init)
+
+    var encModelDx = modelDx
+    var encModelDy = modelDy
+    var usedHistory = false
+    if let h = history, h.primed {
+        let (hd, hy) = h.models()
+        let histBits = shannonBits(counts: freqsDx, model: hd) + shannonBits(counts: freqsDy, model: hy)
+        let staticBits = shannonBits(counts: freqsDx, model: modelDx) + shannonBits(counts: freqsDy, model: modelDy)
+        var tablesTmp = [UInt8]()
+        writeCompressedFreqTable(&tablesTmp, freqs: modelDx.tokenFreqs)
+        writeCompressedFreqTable(&tablesTmp, freqs: modelDy.tokenFreqs)
+        if histBits < staticBits + Double(tablesTmp.count) * 8 {
+            encModelDx = hd
+            encModelDy = hy
+            usedHistory = true
+        }
+    }
+
     var enc = rANSEncoder()
     for i in stride(from: count - 1, through: 0, by: -1) {
         let ty = tokensDy[i]
-        enc.encodeSymbol(cumFreq: modelDy.tokenCumFreqs[Int(ty)], freq: modelDy.tokenFreqs[Int(ty)])
+        enc.encodeSymbol(cumFreq: encModelDy.tokenCumFreqs[Int(ty)], freq: encModelDy.tokenFreqs[Int(ty)])
         let tx = tokensDx[i]
-        enc.encodeSymbol(cumFreq: modelDx.tokenCumFreqs[Int(tx)], freq: modelDx.tokenFreqs[Int(tx)])
+        enc.encodeSymbol(cumFreq: encModelDx.tokenCumFreqs[Int(tx)], freq: encModelDx.tokenFreqs[Int(tx)])
     }
     enc.flush()
-    
+
     var out = [UInt8]()
-    writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
-    writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
-    
+    if !usedHistory {
+        writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
+        writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
+    }
+
     let bpData = bypass.bytes
     writeVLQSize(&out, bpData.count)
     out.append(contentsOf: bpData)
-    
-    out.append(contentsOf: enc.getBitstream())
-    return out
+
+    let ransData = enc.getBitstream()
+    out.append(contentsOf: ransData)
+    return (out, usedHistory, dxCnts, dyCnts)
 }
 
 @inline(__always)
-func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01) -> [UInt8] {
+func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil) -> [UInt8] {
     if profile == 0x01 {
         var tokensDx = [UInt8]()
         var tokensDy = [UInt8]()
@@ -1151,18 +1224,56 @@ func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, p
         predDys.append(resDy)
     }
 
-    let payloadRaw = encodeMVPayload(dxList: rawDxs, dyList: rawDys)
-    let payloadPred = encodeMVPayload(dxList: predDxs, dyList: predDys)
+    let payloadRaw = encodeMVPayload(dxList: rawDxs, dyList: rawDys, history: history)
+    let payloadPred = encodeMVPayload(dxList: predDxs, dyList: predDys, history: history)
+
+    struct Candidate {
+        let mode: UInt8
+        let data: [UInt8]
+        let usedHistory: Bool
+        let dxCnts: [Int]
+        let dyCnts: [Int]
+    }
+    var candidates: [Candidate] = [
+        Candidate(mode: 0x00, data: payloadRaw.data, usedHistory: payloadRaw.usedHistory, dxCnts: payloadRaw.dxCnts, dyCnts: payloadRaw.dyCnts),
+        Candidate(mode: 0x01, data: payloadPred.data, usedHistory: payloadPred.usedHistory, dxCnts: payloadPred.dxCnts, dyCnts: payloadPred.dyCnts),
+    ]
+    if let pm = prevMVs, pm.count == mvs.count {
+        // Temporal (co-located) prediction: residual against the previous
+        // coded frame's reconstructed MV array — both sides hold zeros at
+        // skip positions, so the arrays are index-aligned.
+        var tempDxs = [Int16]()
+        var tempDys = [Int16]()
+        tempDxs.reserveCapacity(rawDxs.count)
+        tempDys.reserveCapacity(rawDys.count)
+        for i in 0..<mvs.count {
+            if let sm = skipMap, sm[i] != .inter {
+                continue
+            }
+            tempDxs.append(Int16(Int(mvs.dx[i]) - Int(pm.dx[i])))
+            tempDys.append(Int16(Int(mvs.dy[i]) - Int(pm.dy[i])))
+        }
+        let payloadTemp = encodeMVPayload(dxList: tempDxs, dyList: tempDys, history: history)
+        candidates.append(Candidate(mode: 0x02, data: payloadTemp.data, usedHistory: payloadTemp.usedHistory, dxCnts: payloadTemp.dxCnts, dyCnts: payloadTemp.dyCnts))
+    }
+
+    // Smallest payload wins; ties prefer the non-history variant (identical
+    // size means the tables were free under the Shannon estimate anyway).
+    var best = candidates[0]
+    for c in candidates.dropFirst() where c.data.count < best.data.count {
+        best = c
+    }
 
     var out = [UInt8]()
-    if payloadPred.count < payloadRaw.count {
-        out.reserveCapacity(1 + payloadPred.count)
-        out.append(0x01)
-        out.append(contentsOf: payloadPred)
-    } else {
-        out.reserveCapacity(1 + payloadRaw.count)
-        out.append(0x00)
-        out.append(contentsOf: payloadRaw)
+    out.append(best.mode | (best.usedHistory ? 0x80 : 0x00))
+    out.append(contentsOf: best.data)
+
+    // History lockstep: feed the CHOSEN payload's tokens exactly once per
+    // coded stream (empty streams neither use nor update history).
+    if let h = history {
+        if 0 < rawDxs.count {
+            h.update(dxCnts: best.dxCnts, dyCnts: best.dyCnts)
+        }
     }
     return out
 }
@@ -1218,16 +1329,25 @@ private func decodeMVsProfile1(data: [UInt8], count: Int) throws -> MotionVector
 }
 
 @inline(__always)
-private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?) throws -> MotionVectors {
+private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
         let bufCount = data.count
         
-        let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelDx = rANSModel(tokenFreqs: freqsDx)
-        
-        let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelDy = rANSModel(tokenFreqs: freqsDy)
+        var dxCnts = [Int](repeating: 0, count: 64)
+        var dyCnts = [Int](repeating: 0, count: 64)
+        var modelDx: rANSModel
+        var modelDy: rANSModel
+        if useHistoryModels {
+            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
+            (modelDx, modelDy) = h.models()
+        } else {
+            let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            modelDx = rANSModel(tokenFreqs: freqsDx)
+            
+            let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            modelDy = rANSModel(tokenFreqs: freqsDy)
+        }
         
         let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
         guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
@@ -1265,25 +1385,39 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?) thro
             let dyBv = bypassReader.readBits(count: dyBp)
             let dy = valueDetokenize(token: ty.token, bypassBits: dyBv)
             
+            dxCnts[Int(tx.token)] += 1
+            dyCnts[Int(ty.token)] += 1
             mvsDx.append(dx)
             mvsDy.append(dy)
         }
         
+        if let h = history, 0 < count {
+            h.update(dxCnts: dxCnts, dyCnts: dyCnts)
+        }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
     }
 }
 
 @inline(__always)
-private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int) throws -> MotionVectors {
+private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
+        var dxCnts = [Int](repeating: 0, count: 64)
+        var dyCnts = [Int](repeating: 0, count: 64)
         let bufCount = data.count
         
-        let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelDx = rANSModel(tokenFreqs: freqsDx)
-        
-        let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelDy = rANSModel(tokenFreqs: freqsDy)
+        var modelDx: rANSModel
+        var modelDy: rANSModel
+        if useHistoryModels {
+            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
+            (modelDx, modelDy) = h.models()
+        } else {
+            let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            modelDx = rANSModel(tokenFreqs: freqsDx)
+            
+            let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            modelDy = rANSModel(tokenFreqs: freqsDy)
+        }
         
         let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
         guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
@@ -1346,27 +1480,108 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
             
             let recDx = Int16(predDx + Int(resDx))
             let recDy = Int16(predDy + Int(resDy))
-            
+
+            dxCnts[Int(tx.token)] += 1
+            dyCnts[Int(ty.token)] += 1
             mvsDx.append(recDx)
             mvsDy.append(recDy)
         }
         
+        if let h = history, 0 < count {
+            h.update(dxCnts: dxCnts, dyCnts: dyCnts)
+        }
+        return MotionVectors(dx: mvsDx, dy: mvsDy)
+    }
+}
+
+private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false) throws -> MotionVectors {
+    return try withUnsafePointers(data) { base in
+        var offset = 1
+        var dxCnts = [Int](repeating: 0, count: 64)
+        var dyCnts = [Int](repeating: 0, count: 64)
+        let bufCount = data.count
+        
+        var modelDx: rANSModel
+        var modelDy: rANSModel
+        if useHistoryModels {
+            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
+            (modelDx, modelDy) = h.models()
+        } else {
+            let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            modelDx = rANSModel(tokenFreqs: freqsDx)
+            
+            let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            modelDy = rANSModel(tokenFreqs: freqsDy)
+        }
+        
+        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
+        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
+        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
+        offset += bpLen
+        
+        guard offset <= bufCount else { throw DecodeError.insufficientData }
+        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
+        
+        var mvsDx = [Int16]()
+        var mvsDy = [Int16]()
+        mvsDx.reserveCapacity(count)
+        mvsDy.reserveCapacity(count)
+        
+        for i in 0..<count {
+            if let sm = skipMap, sm[i] != .inter {
+                mvsDx.append(0)
+                mvsDy.append(0)
+                continue
+            }
+            // Co-located predictor from the previous coded frame's MV array.
+            let predDx: Int = i < prevMVs.count ? Int(prevMVs.dx[i]) : 0
+            let predDy: Int = i < prevMVs.count ? Int(prevMVs.dy[i]) : 0
+            
+            let txCf = dec.getCumulativeFreq()
+            let tx = modelDx.findToken(cf: txCf)
+            dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
+            
+            let tyCf = dec.getCumulativeFreq()
+            let ty = modelDy.findToken(cf: tyCf)
+            dec.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
+            
+            let dxBp = valueBypassLength(for: tx.token)
+            let dxBv = bypassReader.readBits(count: dxBp)
+            let resDx = valueDetokenize(token: tx.token, bypassBits: dxBv)
+            
+            let dyBp = valueBypassLength(for: ty.token)
+            let dyBv = bypassReader.readBits(count: dyBp)
+            let resDy = valueDetokenize(token: ty.token, bypassBits: dyBv)
+            
+            dxCnts[Int(tx.token)] += 1
+            dyCnts[Int(ty.token)] += 1
+            mvsDx.append(Int16(predDx + Int(resDx)))
+            mvsDy.append(Int16(predDy + Int(resDy)))
+        }
+        
+        if let h = history, 0 < count {
+            h.update(dxCnts: dxCnts, dyCnts: dyCnts)
+        }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
     }
 }
 
 @inline(__always)
-func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01) throws -> MotionVectors {
+func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil) throws -> MotionVectors {
     if profile == 0x01 {
         return try decodeMVsProfile1(data: data, count: count)
     }
     guard 0 < data.count else { throw DecodeError.insufficientData }
     let modeFlag = data[0]
-    switch modeFlag {
+    let useHist = (modeFlag & 0x80) != 0
+    switch modeFlag & 0x7F {
     case 0:
-        return try decodeMVsRaw(data: data, count: count, skipMap: skipMap)
+        return try decodeMVsRaw(data: data, count: count, skipMap: skipMap, history: history, useHistoryModels: useHist)
     case 1:
-        return try decodeMVsSpatialPred(data: data, count: count, skipMap: skipMap, cols: cols)
+        return try decodeMVsSpatialPred(data: data, count: count, skipMap: skipMap, cols: cols, history: history, useHistoryModels: useHist)
+    case 2:
+        guard let pm = prevMVs else { throw DecodeError.invalidBlockData }
+        return try decodeMVsTemporalPred(data: data, count: count, skipMap: skipMap, prevMVs: pm, history: history, useHistoryModels: useHist)
     default:
         throw DecodeError.invalidBlockData
     }
