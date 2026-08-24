@@ -21,12 +21,12 @@ while i < args.count {
             outDir = args[i + 1]
             i += 1
         }
-    case "-maxLayer":
+    case "-max-layer", "-maxLayer":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { maxLayer = v }
             i += 1
         }
-    case "-maxFrames":
+    case "-max-frames", "-maxFrames":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { maxFrames = v }
             i += 1
@@ -38,7 +38,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty {
-    print("Usage: vevc-dec -i <input.vevc> [-o output_dir] [-maxLayer 0-2] [-maxFrames 1|2|4] [-one]")
+    print("Usage: example-dec -i <input.vevc> [-o <output_dir>] [-max-layer 0-2] [-max-frames 1|2|4]")
     exit(1)
 }
 

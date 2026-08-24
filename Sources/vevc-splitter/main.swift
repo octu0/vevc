@@ -1,7 +1,7 @@
 import Foundation
 
 func printUsage() {
-    print("usage: vevc-splitter -i <input.vevc> -o <output.vevc> [-maxLayer 0-2]")
+    print("usage: vevc-splitter -i <input.vevc> -o <output.vevc> [-max-layer 0-2]")
 }
 
 var inputPath: String? = nil
@@ -11,20 +11,28 @@ var maxLayer: Int = 1
 var i = 1
 while i < CommandLine.arguments.count {
     let arg = CommandLine.arguments[i]
-    if arg == "-i", i + 1 < CommandLine.arguments.count {
-        inputPath = CommandLine.arguments[i + 1]
-        i += 2
-    } else if arg == "-o", i + 1 < CommandLine.arguments.count {
-        outputPath = CommandLine.arguments[i + 1]
-        i += 2
-    } else if arg == "-maxLayer", i + 1 < CommandLine.arguments.count {
-        if let val = Int(CommandLine.arguments[i + 1]) {
-            maxLayer = val
+    switch arg {
+    case "-i":
+        if i + 1 < CommandLine.arguments.count {
+            inputPath = CommandLine.arguments[i + 1]
+            i += 1
         }
-        i += 2
-    } else {
-        i += 1
+    case "-o":
+        if i + 1 < CommandLine.arguments.count {
+            outputPath = CommandLine.arguments[i + 1]
+            i += 1
+        }
+    case "-max-layer", "-maxLayer":
+        if i + 1 < CommandLine.arguments.count {
+            if let val = Int(CommandLine.arguments[i + 1]) {
+                maxLayer = val
+            }
+            i += 1
+        }
+    default:
+        ()
     }
+    i += 1
 }
 
 guard let input = inputPath, let output = outputPath else {

@@ -13,25 +13,32 @@ public struct PlayerArguments {
         var i = 1
         while i < argv.count {
             let arg = argv[i]
-            if arg == "-compare" || arg == "--compare" {
+            switch arg {
+            case "-compare", "--compare":
                 args.isCompareMode = true
-            } else if arg == "-y4m" || arg == "--y4m" || arg == "-i" || arg == "--input" {
+            case "-y4m", "--y4m", "-i", "--input":
                 if i + 1 < argv.count {
+                    args.inputPath = argv[i + 1]
                     i += 1
-                    args.inputPath = argv[i]
                 }
-            } else if arg == "-bitrate" || arg == "--bitrate" || arg == "-b" {
-                if i + 1 < argv.count, let br = Int(argv[i]) {
+            case "-b", "--bitrate", "-bitrate":
+                if i + 1 < argv.count {
+                    if let br = Int(argv[i + 1]) {
+                        args.bitrate = br
+                    }
                     i += 1
-                    args.bitrate = br
                 }
-            } else if arg == "-profile" || arg == "--profile" || arg == "-p" {
-                if i + 1 < argv.count, let p = UInt8(argv[i]) {
+            case "-p", "--profile", "-profile":
+                if i + 1 < argv.count {
+                    if let p = UInt8(argv[i + 1]) {
+                        args.profile = p
+                    }
                     i += 1
-                    args.profile = p
                 }
-            } else if !arg.starts(with: "-") {
-                args.inputPath = arg
+            default:
+                if arg.starts(with: "-") != true {
+                    args.inputPath = arg
+                }
             }
             i += 1
         }

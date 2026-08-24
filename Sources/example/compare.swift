@@ -145,7 +145,7 @@ struct CompareApp {
         while i < args.count {
             let arg = args[i]
             switch arg {
-            case "-bitrate":
+            case "-b", "--bitrate", "-bitrate":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.bitrate = v }
                     i += 1
@@ -160,7 +160,7 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.inFps = v }
                     i += 1
                 }
-            case "-zeroThreshold":
+            case "-zero-threshold", "-zeroThreshold":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.zeroThreshold = v }
                     i += 1
@@ -170,12 +170,12 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.keyint = v }
                     i += 1
                 }
-            case "-sceneThreshold":
+            case "-scene-threshold", "-sceneThreshold":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.sceneThreshold = v }
                     i += 1
                 }
-            case "-maxLayer":
+            case "-max-layer", "-maxLayer":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.maxLayer = v }
                     i += 1
@@ -198,7 +198,7 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.qstep = v }
                     i += 1
                 }
-            case "-skip-thresh":
+            case "-skip-threshold", "-skip-thresh":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.skipThreshold = v }
                     i += 1
@@ -218,17 +218,17 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.gop = v }
                     i += 1
                 }
-            case "-l2cadence", "--l2cadence":
+            case "-l2-cadence", "-l2cadence", "--l2cadence":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.l2Cadence = v }
                     i += 1
                 }
-            case "-l1cadence", "--l1cadence":
+            case "-l1-cadence", "-l1cadence", "--l1cadence":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.l1Cadence = v }
                     i += 1
                 }
-            case "-l0cadence", "--l0cadence":
+            case "-l0-cadence", "-l0cadence", "--l0cadence":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.l0Cadence = v }
                     i += 1
@@ -243,7 +243,7 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.l0smooth = v }
                     i += 1
                 }
-            case "-frames", "--frames":
+            case "-frames", "--frames", "-max-frames", "-maxFrames":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.maxFrames = v }
                     i += 1
@@ -260,7 +260,7 @@ struct CompareApp {
         }
 
         if positionalArgs.isEmpty && y4mPath == nil {
-            print("Usage: compare [-y4m <input.y4m>] [-bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] [-maxLayer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2cadence <n>] [-l1cadence <n>] [-mvt <px>] [-quality] [-output-graph] [-vevc-only]")
+            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-l0smooth <0|1>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
             exit(1)
         }
 

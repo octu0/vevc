@@ -35,7 +35,7 @@ while i < args.count {
             outPath = args[i + 1]
             i += 1
         }
-    case "-b":
+    case "-b", "--bitrate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { bitrate = v }
             i += 1
@@ -50,12 +50,12 @@ while i < args.count {
             if let v = Int(args[i + 1]) { keyint = v }
             i += 1
         }
-    case "-zeroThreshold":
+    case "-zero-threshold", "-zeroThreshold":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { zeroThreshold = v }
             i += 1
         }
-    case "-sceneThreshold":
+    case "-scene-threshold", "-sceneThreshold":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { sceneThreshold = v }
             i += 1
@@ -75,27 +75,27 @@ while i < args.count {
             if let v = Int(args[i + 1]) { gop = v }
             i += 1
         }
-    case "-skip-thresh":
+    case "-skip-threshold", "-skip-thresh":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { skipThreshold = v }
             i += 1
         }
-    case "-reconThresholdScale", "--recon-threshold-scale":
+    case "-recon-threshold-scale", "-reconThresholdScale", "--recon-threshold-scale":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { reconThresholdScale = v }
             i += 1
         }
-    case "-l2cadence", "--l2cadence":
+    case "-l2-cadence", "-l2cadence", "--l2cadence":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { l2Cadence = v }
             i += 1
         }
-    case "-l1cadence", "--l1cadence":
+    case "-l1-cadence", "-l1cadence", "--l1cadence":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { l1Cadence = v }
             i += 1
         }
-    case "-l0cadence", "--l0cadence":
+    case "-l0-cadence", "-l0cadence", "--l0cadence":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { l0Cadence = v }
             i += 1
@@ -127,7 +127,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zeroThreshold <threshold>] [-sceneThreshold <sad>] [-profile <profile>] [-gop <gop>] [-l2cadence <n>] [-l1cadence <n>] [-reconThresholdScale <scale>] [-mvt <px>] [-l0smooth <0|1>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n  -l0smooth <0|1>: 逼迫フレームの残差平滑化 (既定: 1, 0で無効)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-l0smooth <0|1>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n  -l0smooth <0|1>: 逼迫フレームの残差平滑化 (既定: 1, 0で無効)\n", stderr)
     exit(1)
 }
 

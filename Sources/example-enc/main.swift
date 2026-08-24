@@ -14,7 +14,7 @@ var i = 1
 while i < args.count {
     let arg = args[i]
     switch arg {
-    case "-bitrate":
+    case "-b", "--bitrate", "-bitrate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { bitrate = v }
             i += 1
@@ -24,7 +24,7 @@ while i < args.count {
             outPath = args[i + 1]
             i += 1
         }
-    case "-zeroThreshold":
+    case "-zero-threshold", "-zeroThreshold":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { zeroThreshold = v }
             i += 1
@@ -34,7 +34,7 @@ while i < args.count {
             if let v = Int(args[i + 1]) { keyint = v }
             i += 1
         }
-    case "-sceneThreshold":
+    case "-scene-threshold", "-sceneThreshold":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { sceneThreshold = v }
             i += 1
@@ -46,7 +46,7 @@ while i < args.count {
 }
 
 if positionalArgs.isEmpty {
-    print("Usage: vevc-enc -o <output.vevc> [-bitrate <kbits>] [-zeroThreshold <threshold>] [-keyint <frames>] [-sceneThreshold <sad>] <input1.y4m> [input2.y4m ...]")
+    print("Usage: example-enc -o <output.vevc> [-b <kbits> | --bitrate <kbits>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] <input1.y4m> [input2.y4m ...]")
     exit(1)
 }
 

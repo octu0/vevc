@@ -28,7 +28,7 @@ At decode or delivery time, specific spatial resolutions can be instantly extrac
 
 **Extraction Patterns (assuming a 1080p source):**
 
-| Target Use Case           | Spatial (`-maxLayer`) | Result Output | Server-Side Action (CPU Cost: Near Zero) |
+| Target Use Case           | Spatial (`-max-layer`) | Result Output | Server-Side Action (CPU Cost: Near Zero) |
 | :------------------------ | :-------------------- | :------------ | :--------------------------------------- |
 | **Max Quality (Archive)** | `2` (Layer 0,1,2)     | 1080p         | None (Transfer bitstream as-is)          |
 | **Medium (Preview)**      | `1` (Layer 0,1)       | 540p          | **O(1) Drop Layer 2 packets**            |
@@ -297,16 +297,16 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 
 - `-i <path|->`: Specifies the input `.y4m` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.vevc` file path or standard output (`-`).
-- `-b <kilobit>`: Target average bitrate in kbps (default: 500). The rate controller tracks `-b × 1.3` as its planning rate — the stream carries 3 decodable layers, and the specified value prices the full-resolution layer while the 1.3× allowance covers the lower layers. Measured tracking on 1080p60 live content: actual ≤ 1.32–1.36× of the specified value whenever the target is reachable. Very low targets clamp at the quantizer-limited minimum output size (content-dependent; ~2.8 Mbps on busy 1080p60 game footage) instead of honoring the target.
+- `-b <kilobit> | --bitrate <kilobit>`: Target average bitrate in kbps (default: 500). The rate controller tracks `-b × 1.3` as its planning rate — the stream carries 3 decodable layers, and the specified value prices the full-resolution layer while the 1.3× allowance covers the lower layers. Measured tracking on 1080p60 live content: actual ≤ 1.32–1.36× of the specified value whenever the target is reachable. Very low targets clamp at the quantizer-limited minimum output size (content-dependent; ~2.8 Mbps on busy 1080p60 game footage) instead of honoring the target.
 - `-qstep <val>`: CQP mode. Uses a constant quantization step, bypassing rate control.
 - `-keyint <keyint>`: Specifies the keyframe interval (maximum GOP size, automatically falls back to I-Frame for scene changes or end of stream).
-- `-zeroThreshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size by aggressively skipping noise).
-- `-sceneThreshold <sad>`: Raw per-pixel SAD trigger for scene changes (default 500 ≒ off; the range is 0–765). Independent of this trigger, the encoder detects hard cuts with a sign-mix test — a cut moves block means in both directions, a flash/fade in one — and emits an I-frame that keeps the periodic keyint grid. Setting the threshold above 765 disables both detectors (deterministic encodes).
+- `-zero-threshold <threshold>`: Sets the threshold for treating DWT coefficients as zero (reduces size by aggressively skipping noise).
+- `-scene-threshold <sad>`: Raw per-pixel SAD trigger for scene changes (default 500 ≒ off; the range is 0–765). Independent of this trigger, the encoder detects hard cuts with a sign-mix test — a cut moves block means in both directions, a flash/fade in one — and emits an I-frame that keeps the periodic keyint grid. Setting the threshold above 765 disables both detectors (deterministic encodes).
 - `-profile <0x01|0x02>`: Selects profile (`0x01` baseline, `0x02` P-skip/LTR + backward-adaptive entropy tables; default: `0x01`).
 - `-gop <frames>`: Sets the LTR refresh interval for Profile 0x02 in frames (default: 12; 0 disables periodic LTR refresh).
-- `-l2cadence <n>`: Cadence interval for L2 detail residual in Profile 0x02 P-frames (default: 4; `0` disables L2 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
-- `-l1cadence <n>`: Cadence interval for L1 detail residual in Profile 0x02 P-frames (default: 2; `0` disables L1 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
-- `-mvt <px>`: px/フレーム単位の動体マスキング閾値 (既定: 2, 0 で無効)。Chebyshev ノルム ($\max(|dx|, |dy|) \ge \text{effectiveMvtQ}$, $\text{effectiveMvtQ} = \text{motionMaskingPx} \times 4 \times 60 / \text{framerate}$) かつ量子化が深い (`motionMaskingMinQStep <= adjustedStep`, 既定 2048 以上) 場合のみ、L2 の高周波残差を省略してビットレートを削減します (テキスト・ストローク等の高活性テクスチャブロックは保護)。詳細回復は次の cadence リフレッシュ(最大 l2cadence フレーム、既定 4 = 67ms@60fps)。skip_prev への誤捕捉は recon 検査が防ぐ。
+- `-l2-cadence <n>`: Cadence interval for L2 detail residual in Profile 0x02 P-frames (default: 4; `0` disables L2 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
+- `-l1-cadence <n>`: Cadence interval for L1 detail residual in Profile 0x02 P-frames (default: 2; `0` disables L1 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
+- `-mvt <px>`: px/フレーム単位の動体マスキング閾値 (既定: 2, 0 で無効)。Chebyshev ノルム ($\max(|dx|, |dy|) \ge \text{effectiveMvtQ}$, $\text{effectiveMvtQ} = \text{motionMaskingPx} \times 4 \times 60 / \text{framerate}$) かつ量子化が深い (`motionMaskingMinQStep <= adjustedStep`, 既定 2048 以上) 場合のみ、L2 の高周波残差を省略してビットレートを削減します (テキスト・ストローク等の高活性テクスチャブロックは保護)。詳細回復は次の cadence リフレッシュ(最大 l2-cadence フレーム、既定 4 = 67ms@60fps)。skip_prev への誤捕捉は recon 検査が防ぐ。
 - `-l0smooth <0|1>`: 逼迫フレームの残差平滑化 (既定: 1, 0 で無効)。量子化が深い (`motionMaskingMinQStep <= adjustedStep`, 2048 以上) Profile 0x02 P フレームの L0 輝度残差に対して 2D 分離型 [1,2,1]/4 二項平滑化を事前適用し、高周波 AC スパイクを抑制して符号化効率を向上させます (エンコーダ専用ポリシー、形式不変、閉ループ Δ≡0)。
 
 ### Decode (`vevc-dec`)
@@ -321,11 +321,11 @@ $ swift run -c release vevc-dec -i output.vevc -o output.y4m
 
 - `-i <path|->`: Specifies the input `.vevc` file path or standard input (`-`).
 - `-o <path|->`: Specifies the output `.y4m` file path or standard output (`-`).
-- `-maxLayer <0-2>`: Specifies the maximum level of spatial layers to decode.
+- `-max-layer <0-2>`: Specifies the maximum level of spatial layers to decode.
   - `0`: 1/4 size (for rough thumbnails)
   - `1`: 1/2 size (for previews)
   - `2`: Original size (default)
-- `-maxFrames <1|2|4>`: Specifies the maximum number of multi-threaded frames to decode concurrently (default: 4).
+- `-max-frames <1|2|4>`: Specifies the maximum number of multi-threaded frames to decode concurrently (default: 4).
 
 ---
 
