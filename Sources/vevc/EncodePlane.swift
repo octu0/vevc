@@ -181,6 +181,187 @@ private func gatherLL32(view: BlockView, w: Int, h: Int, subWidth: Int, subHeigh
     }
 }
 
+/// 3-tap separable [1, 2, 1]/4 binomial smoothing for 8x8 residual blocks.
+/// Applied in-place before DWT on selected luma blocks.
+func smoothResidualBlock8(base: UnsafeMutablePointer<Int16>, stride: Int) {
+    let twoVec = SIMD8<Int16>(repeating: 2)
+    let p0 = base
+    let p1 = base.advanced(by: (1 * stride))
+    let p2 = base.advanced(by: (2 * stride))
+    let p3 = base.advanced(by: (3 * stride))
+    let p4 = base.advanced(by: (4 * stride))
+    let p5 = base.advanced(by: (5 * stride))
+    let p6 = base.advanced(by: (6 * stride))
+    let p7 = base.advanced(by: (7 * stride))
+
+    // --- 1. Row-wise (horizontal) smoothing ---
+    let h0 = UnsafeRawPointer(p0).loadUnaligned(as: SIMD8<Int16>.self)
+    let l0 = SIMD8<Int16>(h0[0], h0[0], h0[1], h0[2], h0[3], h0[4], h0[5], h0[6])
+    let r0 = SIMD8<Int16>(h0[1], h0[2], h0[3], h0[4], h0[5], h0[6], h0[7], h0[7])
+    let s0 = (l0 &+ (h0 &<< 1) &+ r0 &+ twoVec) &>> 2
+
+    let h1 = UnsafeRawPointer(p1).loadUnaligned(as: SIMD8<Int16>.self)
+    let l1 = SIMD8<Int16>(h1[0], h1[0], h1[1], h1[2], h1[3], h1[4], h1[5], h1[6])
+    let r1 = SIMD8<Int16>(h1[1], h1[2], h1[3], h1[4], h1[5], h1[6], h1[7], h1[7])
+    let s1 = (l1 &+ (h1 &<< 1) &+ r1 &+ twoVec) &>> 2
+
+    let h2 = UnsafeRawPointer(p2).loadUnaligned(as: SIMD8<Int16>.self)
+    let l2 = SIMD8<Int16>(h2[0], h2[0], h2[1], h2[2], h2[3], h2[4], h2[5], h2[6])
+    let r2 = SIMD8<Int16>(h2[1], h2[2], h2[3], h2[4], h2[5], h2[6], h2[7], h2[7])
+    let s2 = (l2 &+ (h2 &<< 1) &+ r2 &+ twoVec) &>> 2
+
+    let h3 = UnsafeRawPointer(p3).loadUnaligned(as: SIMD8<Int16>.self)
+    let l3 = SIMD8<Int16>(h3[0], h3[0], h3[1], h3[2], h3[3], h3[4], h3[5], h3[6])
+    let r3 = SIMD8<Int16>(h3[1], h3[2], h3[3], h3[4], h3[5], h3[6], h3[7], h3[7])
+    let s3 = (l3 &+ (h3 &<< 1) &+ r3 &+ twoVec) &>> 2
+
+    let h4 = UnsafeRawPointer(p4).loadUnaligned(as: SIMD8<Int16>.self)
+    let l4 = SIMD8<Int16>(h4[0], h4[0], h4[1], h4[2], h4[3], h4[4], h4[5], h4[6])
+    let r4 = SIMD8<Int16>(h4[1], h4[2], h4[3], h4[4], h4[5], h4[6], h4[7], h4[7])
+    let s4 = (l4 &+ (h4 &<< 1) &+ r4 &+ twoVec) &>> 2
+
+    let h5 = UnsafeRawPointer(p5).loadUnaligned(as: SIMD8<Int16>.self)
+    let l5 = SIMD8<Int16>(h5[0], h5[0], h5[1], h5[2], h5[3], h5[4], h5[5], h5[6])
+    let r5 = SIMD8<Int16>(h5[1], h5[2], h5[3], h5[4], h5[5], h5[6], h5[7], h5[7])
+    let s5 = (l5 &+ (h5 &<< 1) &+ r5 &+ twoVec) &>> 2
+
+    let h6 = UnsafeRawPointer(p6).loadUnaligned(as: SIMD8<Int16>.self)
+    let l6 = SIMD8<Int16>(h6[0], h6[0], h6[1], h6[2], h6[3], h6[4], h6[5], h6[6])
+    let r6 = SIMD8<Int16>(h6[1], h6[2], h6[3], h6[4], h6[5], h6[6], h6[7], h6[7])
+    let s6 = (l6 &+ (h6 &<< 1) &+ r6 &+ twoVec) &>> 2
+
+    let h7 = UnsafeRawPointer(p7).loadUnaligned(as: SIMD8<Int16>.self)
+    let l7 = SIMD8<Int16>(h7[0], h7[0], h7[1], h7[2], h7[3], h7[4], h7[5], h7[6])
+    let r7 = SIMD8<Int16>(h7[1], h7[2], h7[3], h7[4], h7[5], h7[6], h7[7], h7[7])
+    let s7 = (l7 &+ (h7 &<< 1) &+ r7 &+ twoVec) &>> 2
+
+    // --- 2. Column-wise (vertical) smoothing ---
+    let out0 = (s0 &+ (s0 &<< 1) &+ s1 &+ twoVec) &>> 2
+    let out1 = (s0 &+ (s1 &<< 1) &+ s2 &+ twoVec) &>> 2
+    let out2 = (s1 &+ (s2 &<< 1) &+ s3 &+ twoVec) &>> 2
+    let out3 = (s2 &+ (s3 &<< 1) &+ s4 &+ twoVec) &>> 2
+    let out4 = (s3 &+ (s4 &<< 1) &+ s5 &+ twoVec) &>> 2
+    let out5 = (s4 &+ (s5 &<< 1) &+ s6 &+ twoVec) &>> 2
+    let out6 = (s5 &+ (s6 &<< 1) &+ s7 &+ twoVec) &>> 2
+    let out7 = (s6 &+ (s7 &<< 1) &+ s7 &+ twoVec) &>> 2
+
+    UnsafeMutableRawPointer(p0).storeBytes(of: out0, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p1).storeBytes(of: out1, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p2).storeBytes(of: out2, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p3).storeBytes(of: out3, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p4).storeBytes(of: out4, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p5).storeBytes(of: out5, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p6).storeBytes(of: out6, as: SIMD8<Int16>.self)
+    UnsafeMutableRawPointer(p7).storeBytes(of: out7, as: SIMD8<Int16>.self)
+}
+
+/// 3-tap separable [1, 2, 1]/4 binomial smoothing for 16x16 residual blocks.
+/// Applied in-place before DWT on selected luma blocks.
+func smoothResidualBlock16(base: UnsafeMutablePointer<Int16>, stride: Int) {
+    let twoVec = SIMD16<Int16>(repeating: 2)
+    withUnsafeTemporaryAllocation(of: SIMD16<Int16>.self, capacity: 16) { sBuf in
+        let s = sBuf.baseAddress!
+
+        // 1. Horizontal smoothing
+        for r in 0..<16 {
+            let p = base.advanced(by: (r * stride))
+            let h = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
+            let l = SIMD16<Int16>(
+                h[0], h[0], h[1], h[2],
+                h[3], h[4], h[5], h[6],
+                h[7], h[8], h[9], h[10],
+                h[11], h[12], h[13], h[14]
+            )
+            let rVal = SIMD16<Int16>(
+                h[1], h[2], h[3], h[4],
+                h[5], h[6], h[7], h[8],
+                h[9], h[10], h[11], h[12],
+                h[13], h[14], h[15], h[15]
+            )
+            s[r] = (l &+ (h &<< 1) &+ rVal &+ twoVec) &>> 2
+        }
+
+        // 2. Vertical smoothing (separated edge & inner)
+        let out0 = (s[0] &+ (s[0] &<< 1) &+ s[1] &+ twoVec) &>> 2
+        UnsafeMutableRawPointer(base).storeBytes(of: out0, as: SIMD16<Int16>.self)
+
+        for r in 1..<15 {
+            let out = (s[r - 1] &+ (s[r] &<< 1) &+ s[r + 1] &+ twoVec) &>> 2
+            let p = base.advanced(by: (r * stride))
+            UnsafeMutableRawPointer(p).storeBytes(of: out, as: SIMD16<Int16>.self)
+        }
+
+        let out15 = (s[14] &+ (s[15] &<< 1) &+ s[15] &+ twoVec) &>> 2
+        let p15 = base.advanced(by: (15 * stride))
+        UnsafeMutableRawPointer(p15).storeBytes(of: out15, as: SIMD16<Int16>.self)
+    }
+}
+
+/// 3-tap separable [1, 2, 1]/4 binomial smoothing for 32x32 residual blocks.
+/// Applied in-place before DWT on selected luma blocks.
+func smoothResidualBlock32(base: UnsafeMutablePointer<Int16>, stride: Int) {
+    let twoVec = SIMD16<Int16>(repeating: 2)
+    withUnsafeTemporaryAllocation(of: SIMD16<Int16>.self, capacity: 64) { sBuf in
+        let sL = sBuf.baseAddress!
+        let sR = sBuf.baseAddress!.advanced(by: 32)
+
+        // 1. Horizontal smoothing
+        for r in 0..<32 {
+            let p = base.advanced(by: (r * stride))
+            let hL = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
+            let hR = UnsafeRawPointer(p.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+
+            let lL = SIMD16<Int16>(
+                hL[0], hL[0], hL[1], hL[2],
+                hL[3], hL[4], hL[5], hL[6],
+                hL[7], hL[8], hL[9], hL[10],
+                hL[11], hL[12], hL[13], hL[14]
+            )
+            let rL = SIMD16<Int16>(
+                hL[1], hL[2], hL[3], hL[4],
+                hL[5], hL[6], hL[7], hL[8],
+                hL[9], hL[10], hL[11], hL[12],
+                hL[13], hL[14], hL[15], hR[0]
+            )
+            sL[r] = (lL &+ (hL &<< 1) &+ rL &+ twoVec) &>> 2
+
+            let lR = SIMD16<Int16>(
+                hL[15], hR[0], hR[1], hR[2],
+                hR[3], hR[4], hR[5], hR[6],
+                hR[7], hR[8], hR[9], hR[10],
+                hR[11], hR[12], hR[13], hR[14]
+            )
+            let rR = SIMD16<Int16>(
+                hR[1], hR[2], hR[3], hR[4],
+                hR[5], hR[6], hR[7], hR[8],
+                hR[9], hR[10], hR[11], hR[12],
+                hR[13], hR[14], hR[15], hR[15]
+            )
+            sR[r] = (lR &+ (hR &<< 1) &+ rR &+ twoVec) &>> 2
+        }
+
+        // 2. Vertical smoothing (separated edge & inner)
+        let outL0 = (sL[0] &+ (sL[0] &<< 1) &+ sL[1] &+ twoVec) &>> 2
+        let outR0 = (sR[0] &+ (sR[0] &<< 1) &+ sR[1] &+ twoVec) &>> 2
+        UnsafeMutableRawPointer(base).storeBytes(of: outL0, as: SIMD16<Int16>.self)
+        UnsafeMutableRawPointer(base.advanced(by: 16)).storeBytes(of: outR0, as: SIMD16<Int16>.self)
+
+        for r in 1..<31 {
+            let p = base.advanced(by: (r * stride))
+            let outL = (sL[r - 1] &+ (sL[r] &<< 1) &+ sL[r + 1] &+ twoVec) &>> 2
+            let outR = (sR[r - 1] &+ (sR[r] &<< 1) &+ sR[r + 1] &+ twoVec) &>> 2
+            UnsafeMutableRawPointer(p).storeBytes(of: outL, as: SIMD16<Int16>.self)
+            UnsafeMutableRawPointer(p.advanced(by: 16)).storeBytes(of: outR, as: SIMD16<Int16>.self)
+        }
+
+        let outL31 = (sL[30] &+ (sL[31] &<< 1) &+ sL[31] &+ twoVec) &>> 2
+        let outR31 = (sR[30] &+ (sR[31] &<< 1) &+ sR[31] &+ twoVec) &>> 2
+        let p31 = base.advanced(by: (31 * stride))
+        UnsafeMutableRawPointer(p31).storeBytes(of: outL31, as: SIMD16<Int16>.self)
+        UnsafeMutableRawPointer(p31.advanced(by: 16)).storeBytes(of: outR31, as: SIMD16<Int16>.self)
+    }
+}
+
 @inline(__always)
 func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
@@ -318,7 +499,7 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
 /// σ-normalized AQ variant of extractSingleTransformBlocks32WithSkipMap:
 /// identical pipeline, the per-block quantize call selects the dead-zone
 /// variant from the luma activity map (grid 1:1 with the block grid).
-func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool], activity: [BlockActivityClass]) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool], activity: [BlockActivityClass], smoothFlags: [Bool]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -342,7 +523,7 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, isSkip, activity, safeSrc] in
+            group.addTask { [blocks, qt, isSkip, activity, safeSrc, smoothFlags] in
                 let srcBase = safeSrc.ptr
                 for i in sRow..<endRow {
                     let h = (i * 32)
@@ -358,6 +539,9 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
                         }
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            if let smooth = smoothFlags, smooth[blockIdx] {
+                                smoothResidualBlock32(base: view.base, stride: view.stride)
+                            }
                             dwt2DBlock32(view)
                             evaluateQuantizeLayer32WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
@@ -637,7 +821,7 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
 /// σ-normalized AQ variant of extractSingleTransformBlocks16WithSkipMap (the
 /// half-resolution 16px luma grid is 1:1 with the full-resolution 32px grid,
 /// so the same activity map indexes both).
-func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool], activity: [BlockActivityClass]) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, qt: QuantizationTable, isSkip: [Bool], activity: [BlockActivityClass], smoothFlags: [Bool]? = nil) async -> (blocks: [BlockView], subband: [Int16], releaseFn: @Sendable () -> Void) {
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
@@ -661,7 +845,7 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, isSkip, activity, safeSrc] in
+            group.addTask { [blocks, qt, isSkip, activity, safeSrc, smoothFlags] in
                 let srcBase = safeSrc.ptr
                 for i in sRow..<endRow {
                     let h = (i * 16)
@@ -677,6 +861,9 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
                         }
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            if let smooth = smoothFlags, smooth[blockIdx] {
+                                smoothResidualBlock16(base: view.base, stride: view.stride)
+                            }
                             dwt2DBlock16(view)
                             evaluateQuantizeLayer16WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
@@ -827,7 +1014,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
 /// by the caller via lumaSkipFlags/chromaSkipFlags): skip blocks bypass
 /// read/DWT and stay zero (One-Pyramid §5).
 @inline(__always)
-func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool], cullSAD: Int = 0) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool], cullSAD: Int = 0, smoothFlags: [Bool]? = nil) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
     let totalBlocks = rowCount * colCount
@@ -843,7 +1030,7 @@ func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, he
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, isSkip, r, cullSAD] in
+            group.addTask { [blocks, isSkip, r, cullSAD, smoothFlags] in
                 r.data.withUnsafeBufferPointer { srcBuf in
                     let srcBase = srcBuf.baseAddress!
                     for i in sRow..<endRow {
@@ -867,6 +1054,9 @@ func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, he
                                 continue
                             }
                             if isZeroBlock(view: view) != true {
+                                if let smooth = smoothFlags, smooth[blockIdx] {
+                                    smoothResidualBlock8(base: view.base, stride: view.stride)
+                                }
                                 dwt2DBlock8(view)
                             }
                         }
@@ -961,7 +1151,7 @@ func preparePlaneLayer32WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: 
 /// variants selected by the activity map; chroma is untouched (masking is
 /// luma-driven, and the chroma block grid spans 2×2 luma blocks).
 @inline(__always)
-func preparePlaneLayer32WithSkipMapAndActivity(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int, activity: [BlockActivityClass]) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer32WithSkipMapAndActivity(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int, activity: [BlockActivityClass], smoothFlags: [Bool]? = nil) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -970,8 +1160,8 @@ func preparePlaneLayer32WithSkipMapAndActivity(pd: PlaneData420, pool: BlockView
     let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
     let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
 
-    async let taskBufY = { [ySkip, activity] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMapAndActivity(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip, activity: activity)
+    async let taskBufY = { [ySkip, activity, smoothFlags] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMapAndActivity(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip, activity: activity, smoothFlags: smoothFlags)
         return (subband, blocks, r)
     }()
 
@@ -1058,7 +1248,7 @@ func preparePlaneLayer16WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: 
 
 /// σ-normalized AQ variant (luma-only, see preparePlaneLayer32WithSkipMapAndActivity).
 @inline(__always)
-func preparePlaneLayer16WithSkipMapAndActivity(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int, activity: [BlockActivityClass]) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func preparePlaneLayer16WithSkipMapAndActivity(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int, activity: [BlockActivityClass], smoothFlags: [Bool]? = nil) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1067,8 +1257,8 @@ func preparePlaneLayer16WithSkipMapAndActivity(pd: PlaneData420, pool: BlockView
     let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (dy + 15) / 16, colCount: (dx + 15) / 16)
     let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 15) / 16, colCount: (cbDx + 15) / 16)
 
-    async let taskBufY = { [ySkip, activity] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMapAndActivity(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip, activity: activity)
+    async let taskBufY = { [ySkip, activity, smoothFlags] () -> ([Int16], [BlockView], @Sendable () -> Void) in
+        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMapAndActivity(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip, activity: activity, smoothFlags: smoothFlags)
         return (subband, blocks, r)
     }()
 
@@ -1794,7 +1984,8 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
 func preparePlaneBase8WithSkipMap(
     pd: PlaneData420, pool: BlockViewPool, sads: [Int],
     qtY: QuantizationTable, qtC: QuantizationTable,
-    skipMap: [BlockMode], skipMapWidth: Int
+    skipMap: [BlockMode], skipMapWidth: Int,
+    smoothFlags: [Bool]? = nil
 ) async -> ([BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
@@ -1821,8 +2012,8 @@ func preparePlaneBase8WithSkipMap(
     // linearly below it.
     let chromaCullSAD = chromaCullActive ? scaledSADThreshold(chromaCullBaseSAD, step: (Int(qtC.step) + 8) >> 4) : 0
 
-    async let taskY = { [ySkip] () -> ([BlockView], @Sendable () -> Void) in
-        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, isSkip: ySkip)
+    async let taskY = { [ySkip, smoothFlags] () -> ([BlockView], @Sendable () -> Void) in
+        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, isSkip: ySkip, smoothFlags: smoothFlags)
         for i in blocks.indices {
             if i < sads.count {
                 let col = i % yColCount8
@@ -1919,11 +2110,12 @@ func serializePlaneBase8PFrameWithSkipMap(
 /// SAD-gated luma clearing, parent-free static tables, and backward-adaptive
 /// history streams.
 @inline(__always)
-func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode], skipMapWidth: Int, isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void, [Bool], [Bool], [Bool]) {
+func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode], skipMapWidth: Int, isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?, smoothFlags: [Bool]? = nil) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void, [Bool], [Bool], [Bool]) {
     let (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBlocks) = await preparePlaneBase8WithSkipMap(
         pd: pd, pool: pool, sads: sads,
         qtY: qtY, qtC: qtC,
-        skipMap: skipMap, skipMapWidth: skipMapWidth
+        skipMap: skipMap, skipMapWidth: skipMapWidth,
+        smoothFlags: smoothFlags
     )
     var mutYBlocks = base8YBlocks
     var mutCbBlocks = base8CbBlocks

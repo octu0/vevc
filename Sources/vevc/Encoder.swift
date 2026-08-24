@@ -28,12 +28,15 @@ public actor VEVCEncoder {
     public nonisolated let l1Cadence: Int
     public nonisolated let l0Cadence: Int
     public nonisolated let motionMaskingPx: Int
+    public nonisolated let smoothL2: Int
+    public nonisolated let smoothL1: Int
+    public nonisolated let smoothL0: Int
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -51,6 +54,9 @@ public actor VEVCEncoder {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
+        self.smoothL2 = smoothL2
+        self.smoothL1 = smoothL1
+        self.smoothL0 = smoothL0
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -70,11 +76,14 @@ public actor VEVCEncoder {
             l2Cadence: l2Cadence,
             l1Cadence: l1Cadence,
             l0Cadence: l0Cadence,
-            motionMaskingPx: motionMaskingPx
+            motionMaskingPx: motionMaskingPx,
+            smoothL2: smoothL2,
+            smoothL1: smoothL1,
+            smoothL0: smoothL0
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -92,6 +101,9 @@ public actor VEVCEncoder {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
+        self.smoothL2 = smoothL2
+        self.smoothL1 = smoothL1
+        self.smoothL0 = smoothL0
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -111,7 +123,10 @@ public actor VEVCEncoder {
             l2Cadence: l2Cadence,
             l1Cadence: l1Cadence,
             l0Cadence: l0Cadence,
-            motionMaskingPx: motionMaskingPx
+            motionMaskingPx: motionMaskingPx,
+            smoothL2: smoothL2,
+            smoothL1: smoothL1,
+            smoothL0: smoothL0
         )
     }
     
@@ -200,6 +215,9 @@ actor LayersEncodeActor {
     let l1Cadence: Int
     let l0Cadence: Int
     let motionMaskingPx: Int
+    let smoothL2: Int
+    let smoothL1: Int
+    let smoothL0: Int
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
@@ -230,7 +248,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -248,6 +266,9 @@ actor LayersEncodeActor {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
+        self.smoothL2 = smoothL2
+        self.smoothL1 = smoothL1
+        self.smoothL0 = smoothL0
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
@@ -256,7 +277,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -274,6 +295,9 @@ actor LayersEncodeActor {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
+        self.smoothL2 = smoothL2
+        self.smoothL1 = smoothL1
+        self.smoothL0 = smoothL0
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
@@ -544,7 +568,10 @@ actor LayersEncodeActor {
                 l0Cadence: self.l0Cadence,
                 framerate: self.framerate,
                 motionMaskingPx: self.motionMaskingPx,
-                adjustedStep: adjustedStep
+                adjustedStep: adjustedStep,
+                smoothL2: self.smoothL2,
+                smoothL1: self.smoothL1,
+                smoothL0: self.smoothL0
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
