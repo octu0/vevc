@@ -18,7 +18,6 @@ var l0Cadence: Int = 1
 var inFpsOpt: Int? = nil
 var outFpsOpt: Int? = nil
 var motionMaskingPx: Int = 2
-var l0smooth: Int = 1
 
 let args = CommandLine.arguments
 var i = 1
@@ -105,11 +104,6 @@ while i < args.count {
             if let v = Int(args[i + 1]) { motionMaskingPx = v }
             i += 1
         }
-    case "-l0smooth", "--l0smooth":
-        if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { l0smooth = v }
-            i += 1
-        }
     case "-framerate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { outFpsOpt = v }
@@ -127,7 +121,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-l0smooth <0|1>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n  -l0smooth <0|1>: 逼迫フレームの残差平滑化 (既定: 1, 0で無効)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n", stderr)
     exit(1)
 }
 
@@ -190,8 +184,7 @@ do {
             l2Cadence: l2Cadence,
             l1Cadence: l1Cadence,
             l0Cadence: l0Cadence,
-            motionMaskingPx: motionMaskingPx,
-            l0smooth: l0smooth
+            motionMaskingPx: motionMaskingPx
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -209,8 +202,7 @@ do {
             l2Cadence: l2Cadence,
             l1Cadence: l1Cadence,
             l0Cadence: l0Cadence,
-            motionMaskingPx: motionMaskingPx,
-            l0smooth: l0smooth
+            motionMaskingPx: motionMaskingPx
         )
     }
 

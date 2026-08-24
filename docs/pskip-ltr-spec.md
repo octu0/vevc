@@ -255,7 +255,3 @@ This section records hard-won performance facts: where the compute cost actually
 - **Decoder note:** the layer-size peek in `decodeSpatialLayersForProfile2Full` / `WithLayer1` must not parse the prelude twice — the fallback dispatcher path would double-update the MV prediction/history state and desync the lockstep (fixed 2026-08-22 by header-only peeking before state mutation).
 - **Measured dead ends (do not revisit without new evidence):** identical-MV run-length coding (runs average 1.1–1.2 blocks/frame on motion content); global-motion-vector residualization (per-frame median MV is (0,0) on miko1 — motion is object-local, not camera pan). MV bytes break down as ~60% rANS tokens / ~36% bypass bits (51% of values exceed ±15 quarter-pel units) / ~4% tables; after history tables the remainder is genuine entropy at this precision.
 
-### 9.10. Pre-DWT L0 Luma Residual Smoothing (2026-08-24, encoder-only)
-
-- In Profile 0x02 P-frames, `-l0smooth <0|1>` (default: 1, 0 disables) applies a 2D separable 3-tap Binomial filter `[1, 2, 1]/4` (`smoothResidualBlock8`) to L0 luma residuals prior to 2D-DWT only when quantization is deep (`motionMaskingMinQStep <= adjustedStep`, 2048+ Q4). This suppresses high-frequency AC spikes and double-edge MC noise under severe bit-budget constraints without degrading mid-rate textures (encoder-only policy, bitstream format and decoder unchanged, closed-loop $\Delta \equiv 0$).
-

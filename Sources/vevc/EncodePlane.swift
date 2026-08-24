@@ -102,92 +102,6 @@ func evaluateQuantizeBase8(view: BlockView, qt: QuantizationTable) {
     quantize4(hh, q: qt.qHigh)
 }
 
-/// 1. Row-wise (horizontal) smoothing with clamped boundaries:
-///    left = (r[0], r[0], r[1], r[2], r[3], r[4], r[5], r[6])
-///    right = (r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[7])
-///    s = (left + (r << 1) + right + 2) >> 2
-/// 2. Column-wise (vertical) smoothing with clamped boundaries on s0..s7:
-///    out0 = (s0 + (s0 << 1) + s1 + 2) >> 2
-///    out[y] = (s[y-1] + (s[y] << 1) + s[y+1] + 2) >> 2
-///    out7 = (s6 + (s7 << 1) + s7 + 2) >> 2
-///
-/// Invariants & Rules:
-/// - Fully unrolled (no loops, no branch instructions in inner path)
-/// - Pure SIMD vector operations (SIMD8<Int16>) with additions and bit shifts only (no multiplications)
-/// - Intermediate row results kept in SIMD registers across horizontal and vertical passes
-/// - Direct unaligned pointer memory access
-@inline(__always)
-func smoothResidualBlock8(base: UnsafeMutablePointer<Int16>, stride: Int) {
-    let twoVec = SIMD8<Int16>(repeating: 2)
-    let p0 = base
-    let p1 = base.advanced(by: stride)
-    let p2 = base.advanced(by: 2 * stride)
-    let p3 = base.advanced(by: 3 * stride)
-    let p4 = base.advanced(by: 4 * stride)
-    let p5 = base.advanced(by: 5 * stride)
-    let p6 = base.advanced(by: 6 * stride)
-    let p7 = base.advanced(by: 7 * stride)
-
-    // --- 1. Row-wise (horizontal) smoothing ---
-    let h0 = UnsafeRawPointer(p0).loadUnaligned(as: SIMD8<Int16>.self)
-    let l0 = SIMD8<Int16>(h0[0], h0[0], h0[1], h0[2], h0[3], h0[4], h0[5], h0[6])
-    let r0 = SIMD8<Int16>(h0[1], h0[2], h0[3], h0[4], h0[5], h0[6], h0[7], h0[7])
-    let s0 = (l0 &+ (h0 &<< 1) &+ r0 &+ twoVec) &>> 2
-
-    let h1 = UnsafeRawPointer(p1).loadUnaligned(as: SIMD8<Int16>.self)
-    let l1 = SIMD8<Int16>(h1[0], h1[0], h1[1], h1[2], h1[3], h1[4], h1[5], h1[6])
-    let r1 = SIMD8<Int16>(h1[1], h1[2], h1[3], h1[4], h1[5], h1[6], h1[7], h1[7])
-    let s1 = (l1 &+ (h1 &<< 1) &+ r1 &+ twoVec) &>> 2
-
-    let h2 = UnsafeRawPointer(p2).loadUnaligned(as: SIMD8<Int16>.self)
-    let l2 = SIMD8<Int16>(h2[0], h2[0], h2[1], h2[2], h2[3], h2[4], h2[5], h2[6])
-    let r2 = SIMD8<Int16>(h2[1], h2[2], h2[3], h2[4], h2[5], h2[6], h2[7], h2[7])
-    let s2 = (l2 &+ (h2 &<< 1) &+ r2 &+ twoVec) &>> 2
-
-    let h3 = UnsafeRawPointer(p3).loadUnaligned(as: SIMD8<Int16>.self)
-    let l3 = SIMD8<Int16>(h3[0], h3[0], h3[1], h3[2], h3[3], h3[4], h3[5], h3[6])
-    let r3 = SIMD8<Int16>(h3[1], h3[2], h3[3], h3[4], h3[5], h3[6], h3[7], h3[7])
-    let s3 = (l3 &+ (h3 &<< 1) &+ r3 &+ twoVec) &>> 2
-
-    let h4 = UnsafeRawPointer(p4).loadUnaligned(as: SIMD8<Int16>.self)
-    let l4 = SIMD8<Int16>(h4[0], h4[0], h4[1], h4[2], h4[3], h4[4], h4[5], h4[6])
-    let r4 = SIMD8<Int16>(h4[1], h4[2], h4[3], h4[4], h4[5], h4[6], h4[7], h4[7])
-    let s4 = (l4 &+ (h4 &<< 1) &+ r4 &+ twoVec) &>> 2
-
-    let h5 = UnsafeRawPointer(p5).loadUnaligned(as: SIMD8<Int16>.self)
-    let l5 = SIMD8<Int16>(h5[0], h5[0], h5[1], h5[2], h5[3], h5[4], h5[5], h5[6])
-    let r5 = SIMD8<Int16>(h5[1], h5[2], h5[3], h5[4], h5[5], h5[6], h5[7], h5[7])
-    let s5 = (l5 &+ (h5 &<< 1) &+ r5 &+ twoVec) &>> 2
-
-    let h6 = UnsafeRawPointer(p6).loadUnaligned(as: SIMD8<Int16>.self)
-    let l6 = SIMD8<Int16>(h6[0], h6[0], h6[1], h6[2], h6[3], h6[4], h6[5], h6[6])
-    let r6 = SIMD8<Int16>(h6[1], h6[2], h6[3], h6[4], h6[5], h6[6], h6[7], h6[7])
-    let s6 = (l6 &+ (h6 &<< 1) &+ r6 &+ twoVec) &>> 2
-
-    let h7 = UnsafeRawPointer(p7).loadUnaligned(as: SIMD8<Int16>.self)
-    let l7 = SIMD8<Int16>(h7[0], h7[0], h7[1], h7[2], h7[3], h7[4], h7[5], h7[6])
-    let r7 = SIMD8<Int16>(h7[1], h7[2], h7[3], h7[4], h7[5], h7[6], h7[7], h7[7])
-    let s7 = (l7 &+ (h7 &<< 1) &+ r7 &+ twoVec) &>> 2
-
-    // --- 2. Column-wise (vertical) smoothing ---
-    let out0 = (s0 &+ (s0 &<< 1) &+ s1 &+ twoVec) &>> 2
-    let out1 = (s0 &+ (s1 &<< 1) &+ s2 &+ twoVec) &>> 2
-    let out2 = (s1 &+ (s2 &<< 1) &+ s3 &+ twoVec) &>> 2
-    let out3 = (s2 &+ (s3 &<< 1) &+ s4 &+ twoVec) &>> 2
-    let out4 = (s3 &+ (s4 &<< 1) &+ s5 &+ twoVec) &>> 2
-    let out5 = (s4 &+ (s5 &<< 1) &+ s6 &+ twoVec) &>> 2
-    let out6 = (s5 &+ (s6 &<< 1) &+ s7 &+ twoVec) &>> 2
-    let out7 = (s6 &+ (s7 &<< 1) &+ s7 &+ twoVec) &>> 2
-
-    UnsafeMutableRawPointer(p0).storeBytes(of: out0, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p1).storeBytes(of: out1, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p2).storeBytes(of: out2, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p3).storeBytes(of: out3, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p4).storeBytes(of: out4, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p5).storeBytes(of: out5, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p6).storeBytes(of: out6, as: SIMD8<Int16>.self)
-    UnsafeMutableRawPointer(p7).storeBytes(of: out7, as: SIMD8<Int16>.self)
-}
 
 /// Per-block skip flags for a layer's luma extract: every layer's luma block
 /// grid is the same ceil(width/32) lattice as the skip map, so one block maps
@@ -913,7 +827,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
 /// by the caller via lumaSkipFlags/chromaSkipFlags): skip blocks bypass
 /// read/DWT and stay zero (One-Pyramid §5).
 @inline(__always)
-func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool], cullSAD: Int = 0, smooth: Bool = false) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
+func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, height: Int, pool: BlockViewPool, isSkip: [Bool], cullSAD: Int = 0) async -> (blocks: [BlockView], releaseFn: @Sendable () -> Void) {
     let rowCount = ((height + 8 - 1) / 8)
     let colCount = ((width + 8 - 1) / 8)
     let totalBlocks = rowCount * colCount
@@ -953,9 +867,6 @@ func extractSingleTransformBlocksBase8WithSkipMap(r: Int16Reader, width: Int, he
                                 continue
                             }
                             if isZeroBlock(view: view) != true {
-                                if smooth {
-                                    smoothResidualBlock8(base: view.base, stride: view.stride)
-                                }
                                 dwt2DBlock8(view)
                             }
                         }
@@ -1883,8 +1794,7 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
 func preparePlaneBase8WithSkipMap(
     pd: PlaneData420, pool: BlockViewPool, sads: [Int],
     qtY: QuantizationTable, qtC: QuantizationTable,
-    skipMap: [BlockMode], skipMapWidth: Int,
-    smoothLuma: Bool = false
+    skipMap: [BlockMode], skipMapWidth: Int
 ) async -> ([BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
@@ -1911,8 +1821,8 @@ func preparePlaneBase8WithSkipMap(
     // linearly below it.
     let chromaCullSAD = chromaCullActive ? scaledSADThreshold(chromaCullBaseSAD, step: (Int(qtC.step) + 8) >> 4) : 0
 
-    async let taskY = { [ySkip, smoothLuma] () -> ([BlockView], @Sendable () -> Void) in
-        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, isSkip: ySkip, smooth: smoothLuma)
+    async let taskY = { [ySkip] () -> ([BlockView], @Sendable () -> Void) in
+        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, isSkip: ySkip)
         for i in blocks.indices {
             if i < sads.count {
                 let col = i % yColCount8
@@ -1929,7 +1839,7 @@ func preparePlaneBase8WithSkipMap(
     }()
 
     async let taskCb = { [cSkip, chromaCullSAD] () -> ([BlockView], @Sendable () -> Void) in
-        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip, cullSAD: chromaCullSAD, smooth: false)
+        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip, cullSAD: chromaCullSAD)
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
@@ -1937,7 +1847,7 @@ func preparePlaneBase8WithSkipMap(
     }()
 
     async let taskCr = { [cSkip, chromaCullSAD] () -> ([BlockView], @Sendable () -> Void) in
-        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip, cullSAD: chromaCullSAD, smooth: false)
+        let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, isSkip: cSkip, cullSAD: chromaCullSAD)
         for i in blocks.indices {
             evaluateQuantizeBase8(view: blocks[i], qt: qtC)
         }
@@ -2009,12 +1919,11 @@ func serializePlaneBase8PFrameWithSkipMap(
 /// SAD-gated luma clearing, parent-free static tables, and backward-adaptive
 /// history streams.
 @inline(__always)
-func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode], skipMapWidth: Int, isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?, smoothLuma: Bool = false) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void, [Bool], [Bool], [Bool]) {
+func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode], skipMapWidth: Int, isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void, [Bool], [Bool], [Bool]) {
     let (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBlocks) = await preparePlaneBase8WithSkipMap(
         pd: pd, pool: pool, sads: sads,
         qtY: qtY, qtC: qtC,
-        skipMap: skipMap, skipMapWidth: skipMapWidth,
-        smoothLuma: smoothLuma
+        skipMap: skipMap, skipMapWidth: skipMapWidth
     )
     var mutYBlocks = base8YBlocks
     var mutCbBlocks = base8CbBlocks
