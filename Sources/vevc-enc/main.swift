@@ -20,7 +20,7 @@ var outFpsOpt: Int? = nil
 var motionMaskingPx: Int = 2
 var smoothL2: Int = 1
 var smoothL1: Int = 2
-var smoothL0: Int = 0
+var smoothL0: Int = 1
 
 let args = CommandLine.arguments
 var i = 1
@@ -139,7 +139,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth-l2 <0|1>] [-smooth-l1 <px>] [-smooth-l0 <0|1>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n  -smooth-l2 <0|1>: 動き 1〜2px 帯の L2 残差平滑化 (既定: 1)\n  -smooth-l1 <px>: 動き ≥ px ブロックの L1 残差平滑化 (既定: 2, 0で無効)\n  -smooth-l0 <0|1>: 動き ≥ 2px かつ非 textured の L0 残差平滑化 (既定: 0)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth-l2 <0|1>] [-smooth-l1 <px>] [-smooth-l0 <0|1>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n  -smooth-l2 <0|1>: 動き 1〜2px 帯の L2 残差平滑化 (既定: 1)\n  -smooth-l1 <px>: 動き ≥ px ブロックの L1 残差平滑化 (既定: 2, 0で無効)\n  -smooth-l0 <0|1>: 動き ≥ 8px かつ非 textured の L0 残差平滑化 (既定: 1)\n", stderr)
     exit(1)
 }
 

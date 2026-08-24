@@ -29,7 +29,7 @@ struct Config {
     var motionMaskingPx: Int = 2
     var smoothL2: Int = 1
     var smoothL1: Int = 2
-    var smoothL0: Int = 0
+    var smoothL0: Int = 1
     var maxFrames: Int? = nil
 }
 

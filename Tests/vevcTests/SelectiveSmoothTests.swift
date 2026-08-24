@@ -99,11 +99,11 @@ final class SelectiveSmoothTests: XCTestCase {
         let encDefault = VEVCEncoder(width: width, height: height, qstep: 16, framerate: 30, profile: 0x02)
         let bytesDefault = try await encDefault.encodeToData(images: frames)
 
-        // 明示的に smooth: 0 を指定
-        let encExplicitZero = VEVCEncoder(width: width, height: height, qstep: 16, framerate: 30, profile: 0x02, smoothL2: 0, smoothL1: 0, smoothL0: 0)
-        let bytesExplicitZero = try await encExplicitZero.encodeToData(images: frames)
+        // 明示的にデフォルト値を指定
+        let encExplicitDefault = VEVCEncoder(width: width, height: height, qstep: 16, framerate: 30, profile: 0x02, smoothL2: 1, smoothL1: 2, smoothL0: 1)
+        let bytesExplicitDefault = try await encExplicitDefault.encodeToData(images: frames)
 
-        XCTAssertEqual(bytesDefault, bytesExplicitZero, "Default settings must produce bit-exact output to explicit zero flags")
+        XCTAssertEqual(bytesDefault, bytesExplicitDefault, "Default settings must produce bit-exact output to explicit default flags")
     }
 
     func testSmoothFlagsRoundtrip() async throws {

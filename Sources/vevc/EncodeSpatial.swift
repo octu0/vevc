@@ -644,6 +644,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         }
 
         if smoothL0 == 1 {
+            let effective8PxQ = (8 * 4 * 60) / max(1, framerate)
             var flags = [Bool](repeating: false, count: blockCount)
             for i in 0..<blockCount {
                 switch skipMap[i] {
@@ -652,7 +653,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
                         let currDx = abs(Int(mvs.dx[i]))
                         let currDy = abs(Int(mvs.dy[i]))
                         let currMvMag = max(currDx, currDy)
-                        if effective2PxQ <= currMvMag {
+                        if effective8PxQ <= currMvMag {
                             flags[i] = true
                         }
                     }
