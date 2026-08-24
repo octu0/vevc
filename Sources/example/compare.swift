@@ -27,8 +27,8 @@ struct Config {
     var l1Cadence: Int = 2
     var l0Cadence: Int = 1
     var motionMaskingPx: Int = 2
-    var smoothL2: Int = 0
-    var smoothL1: Int = 0
+    var smoothL2: Int = 1
+    var smoothL1: Int = 2
     var smoothL0: Int = 0
     var maxFrames: Int? = nil
 }
