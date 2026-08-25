@@ -119,9 +119,9 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smoothL2: config.smoothL2, smoothL1: config.smoothL1, smoothL0: config.smoothL0, temporalLayers: config.temporalLayers)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers)
     } else {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smoothL2: config.smoothL2, smoothL1: config.smoothL1, smoothL0: config.smoothL0, temporalLayers: config.temporalLayers)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers)
     }
     
     let encStart1 = Date()

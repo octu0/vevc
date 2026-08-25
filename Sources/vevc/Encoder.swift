@@ -41,16 +41,14 @@ public actor VEVCEncoder {
     public nonisolated let l1Cadence: Int
     public nonisolated let l0Cadence: Int
     public nonisolated let motionMaskingPx: Int
-    public nonisolated let smoothL2: Int
-    public nonisolated let smoothL1: Int
-    public nonisolated let smoothL0: Int
+    public nonisolated let smooth: Int
     public nonisolated let temporalLayers: Int
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -68,9 +66,7 @@ public actor VEVCEncoder {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
-        self.smoothL2 = smoothL2
-        self.smoothL1 = smoothL1
-        self.smoothL0 = smoothL0
+        self.smooth = smooth
         self.temporalLayers = temporalLayers
         
         self.pool = BlockViewPool()
@@ -92,14 +88,12 @@ public actor VEVCEncoder {
             l1Cadence: l1Cadence,
             l0Cadence: l0Cadence,
             motionMaskingPx: motionMaskingPx,
-            smoothL2: smoothL2,
-            smoothL1: smoothL1,
-            smoothL0: smoothL0,
+            smooth: smooth,
             temporalLayers: temporalLayers
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -117,9 +111,7 @@ public actor VEVCEncoder {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
-        self.smoothL2 = smoothL2
-        self.smoothL1 = smoothL1
-        self.smoothL0 = smoothL0
+        self.smooth = smooth
         self.temporalLayers = temporalLayers
         
         self.pool = BlockViewPool()
@@ -141,9 +133,7 @@ public actor VEVCEncoder {
             l1Cadence: l1Cadence,
             l0Cadence: l0Cadence,
             motionMaskingPx: motionMaskingPx,
-            smoothL2: smoothL2,
-            smoothL1: smoothL1,
-            smoothL0: smoothL0,
+            smooth: smooth,
             temporalLayers: temporalLayers
         )
     }
@@ -233,9 +223,7 @@ actor LayersEncodeActor {
     let l1Cadence: Int
     let l0Cadence: Int
     let motionMaskingPx: Int
-    let smoothL2: Int
-    let smoothL1: Int
-    let smoothL0: Int
+    let smooth: Int
     let temporalLayers: Int
     
     private var rateController: RateController
@@ -273,7 +261,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -291,9 +279,7 @@ actor LayersEncodeActor {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
-        self.smoothL2 = smoothL2
-        self.smoothL1 = smoothL1
-        self.smoothL0 = smoothL0
+        self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
@@ -303,7 +289,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -321,9 +307,7 @@ actor LayersEncodeActor {
         self.l1Cadence = l1Cadence
         self.l0Cadence = l0Cadence
         self.motionMaskingPx = motionMaskingPx
-        self.smoothL2 = smoothL2
-        self.smoothL1 = smoothL1
-        self.smoothL0 = smoothL0
+        self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
@@ -656,17 +640,11 @@ actor LayersEncodeActor {
             updateL0 = true
         }
 
-        let effSmoothL2: Int
-        let effSmoothL1: Int
-        let effSmoothL0: Int
+        let effSmooth: Int
         if temporalLayers == 2 && isT0 {
-            effSmoothL2 = 0
-            effSmoothL1 = 0
-            effSmoothL0 = 0
+            effSmooth = 0
         } else {
-            effSmoothL2 = self.smoothL2
-            effSmoothL1 = self.smoothL1
-            effSmoothL0 = self.smoothL0
+            effSmooth = self.smooth
         }
 
         // The two P-frame pipelines are separate functions so each stays
@@ -691,9 +669,7 @@ actor LayersEncodeActor {
                 framerate: self.framerate,
                 motionMaskingPx: self.motionMaskingPx,
                 adjustedStep: adjustedStep,
-                smoothL2: effSmoothL2,
-                smoothL1: effSmoothL1,
-                smoothL0: effSmoothL0,
+                smooth: effSmooth,
                 updateL0Prev: updateL0
             )
             self.staticCounters = localCounters

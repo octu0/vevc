@@ -496,7 +496,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0, updateL0Prev: Bool = true) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -585,89 +585,31 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         applyPredictionOffset32(plane: &resY, offset: -wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
     }
 
+    let activityMap = await tAq
+
+    if smooth == 1 && motionMaskingMinQStep <= adjustedStep {
+        var tempY = pool.getInt16(count: resY.count)
+        var smoothedY = pool.getInt16(count: resY.count)
+        withUnsafePointers(resY, mut: &smoothedY) { srcPtr, dstPtr in
+            withUnsafePointers(mut: &tempY) { tmpPtr in
+                smoothResidualPlaneContinuous(src: srcPtr, dst: dstPtr, temp: tmpPtr, width: dx, height: dy, activityMap: activityMap, stride: dx)
+            }
+        }
+        pool.putInt16(tempY)
+        pool.putInt16(resY)
+        resY = smoothedY
+    }
+
     let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
 
     // Skip blocks bypass read/DWT/quant in the extracts (One-Pyramid §5) —
     // their residual is already zero, so the coded streams are unchanged.
     let skipBw = (dx + 31) / 32
     let skipBh = (dy + 31) / 32
-    let activityMap = await tAq
 
-    var smoothL2Flags: [Bool]? = nil
-    var smoothL1Flags: [Bool]? = nil
-    var smoothL0Flags: [Bool]? = nil
-
-    if motionMaskingMinQStep <= adjustedStep {
-        let blockCount = min(skipMap.count, min(activityMap.count, min(mvs.dx.count, mvs.dy.count)))
-        let effective1PxQ = (1 * 4 * 60) / max(1, framerate)
-        let effective2PxQ = (2 * 4 * 60) / max(1, framerate)
-
-        if smoothL2 == 1 {
-            var flags = [Bool](repeating: false, count: blockCount)
-            for i in 0..<blockCount {
-                switch skipMap[i] {
-                case .inter:
-                    if activityMap[i] != .textured {
-                        let currDx = abs(Int(mvs.dx[i]))
-                        let currDy = abs(Int(mvs.dy[i]))
-                        let currMvMag = max(currDx, currDy)
-                        if effective1PxQ <= currMvMag && currMvMag < effective2PxQ {
-                            flags[i] = true
-                        }
-                    }
-                default:
-                    break
-                }
-            }
-            smoothL2Flags = flags
-        }
-
-        if 0 < smoothL1 {
-            let effectiveL1Q = (smoothL1 * 4 * 60) / max(1, framerate)
-            var flags = [Bool](repeating: false, count: blockCount)
-            for i in 0..<blockCount {
-                switch skipMap[i] {
-                case .inter:
-                    if activityMap[i] != .textured {
-                        let currDx = abs(Int(mvs.dx[i]))
-                        let currDy = abs(Int(mvs.dy[i]))
-                        let currMvMag = max(currDx, currDy)
-                        if effectiveL1Q <= currMvMag {
-                            flags[i] = true
-                        }
-                    }
-                default:
-                    break
-                }
-            }
-            smoothL1Flags = flags
-        }
-
-        if smoothL0 == 1 {
-            let effective8PxQ = (8 * 4 * 60) / max(1, framerate)
-            var flags = [Bool](repeating: false, count: blockCount)
-            for i in 0..<blockCount {
-                switch skipMap[i] {
-                case .inter:
-                    if activityMap[i] != .textured {
-                        let currDx = abs(Int(mvs.dx[i]))
-                        let currDy = abs(Int(mvs.dy[i]))
-                        let currMvMag = max(currDx, currDy)
-                        if effective8PxQ <= currMvMag {
-                            flags[i] = true
-                        }
-                    }
-                default:
-                    break
-                }
-            }
-            smoothL0Flags = flags
-        }
-    }
-
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32WithSkipMapAndActivity(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap, smoothFlags: smoothL2Flags)
+    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32WithSkipMapAndActivity(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
     defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap, smoothFlags: smoothL1Flags)
+    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
     defer { releaseL1() }
 
     var effectiveMvtQ = 0
@@ -739,8 +681,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     var (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBaseBlocks) = await preparePlaneBase8WithSkipMap(
         pd: base8Input, pool: pool, sads: sads,
         qtY: qtY0, qtC: qtC0,
-        skipMap: skipMap, skipMapWidth: skipBw,
-        smoothFlags: smoothL0Flags
+        skipMap: skipMap, skipMapWidth: skipBw
     )
     defer { releaseBaseBlocks() }
 

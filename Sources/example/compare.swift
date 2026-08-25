@@ -27,9 +27,7 @@ struct Config {
     var l1Cadence: Int = 2
     var l0Cadence: Int = 1
     var motionMaskingPx: Int = 2
-    var smoothL2: Int = 1
-    var smoothL1: Int = 2
-    var smoothL0: Int = 1
+    var smooth: Int = 1
     var temporalLayers: Int = 1
     var maxFrames: Int? = nil
 }
@@ -241,19 +239,9 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.motionMaskingPx = v }
                     i += 1
                 }
-            case "-smooth-l2", "--smooth-l2":
+            case "-smooth", "--smooth":
                 if (i + 1) < args.count {
-                    if let v = Int(args[i + 1]) { config.smoothL2 = v }
-                    i += 1
-                }
-            case "-smooth-l1", "--smooth-l1":
-                if (i + 1) < args.count {
-                    if let v = Int(args[i + 1]) { config.smoothL1 = v }
-                    i += 1
-                }
-            case "-smooth-l0", "--smooth-l0":
-                if (i + 1) < args.count {
-                    if let v = Int(args[i + 1]) { config.smoothL0 = v }
+                    if let v = Int(args[i + 1]) { config.smooth = v }
                     i += 1
                 }
             case "-temporal-layers", "--temporal-layers":
@@ -278,7 +266,7 @@ struct CompareApp {
         }
 
         if positionalArgs.isEmpty && y4mPath == nil {
-            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-smooth-l2 <0|1>] [-smooth-l1 <px>] [-smooth-l0 <0|1>] [-temporal-layers <1|2>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
+            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
             exit(1)
         }
 
