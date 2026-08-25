@@ -213,6 +213,71 @@ public enum BlockActivityClass: UInt8, Sendable {
     case normal = 0
     case flat = 1
     case textured = 2
+    case incoherentTextured = 3
+}
+
+/// Compute gradient direction coherence C in [0.0, 1.0] for a 32x32 block using 3x3 Sobel filter.
+/// C = sqrt((sum Gx)^2 + (sum Gy)^2) / sum sqrt(Gx^2 + Gy^2)
+@inline(__always)
+func computeBlockCoherence(
+    source: UnsafePointer<Int16>,
+    stride: Int,
+    width: Int,
+    height: Int,
+    bx: Int,
+    by: Int,
+    bw: Int,
+    bh: Int
+) -> Double {
+    let startY = max(1, by)
+    let endY = min(height - 2, by + bh - 1)
+    let startX = max(1, bx)
+    let endX = min(width - 2, bx + bw - 1)
+
+    if endY < startY {
+        return 1.0
+    }
+    if endX < startX {
+        return 1.0
+    }
+
+    var sumGx: Double = 0.0
+    var sumGy: Double = 0.0
+    var sumMag: Double = 0.0
+
+    for y in startY...endY {
+        let prevRow = source.advanced(by: (y - 1) * stride)
+        let currRow = source.advanced(by: y * stride)
+        let nextRow = source.advanced(by: (y + 1) * stride)
+
+        for x in startX...endX {
+            let p00 = Double(prevRow[x - 1])
+            let p02 = Double(prevRow[x + 1])
+            let p10 = Double(currRow[x - 1])
+            let p12 = Double(currRow[x + 1])
+            let p20 = Double(nextRow[x - 1])
+            let p22 = Double(nextRow[x + 1])
+
+            let gx = (p02 + (2.0 * p12) + p22) - (p00 + (2.0 * p10) + p20)
+
+            let p01 = Double(prevRow[x])
+            let p21 = Double(nextRow[x])
+
+            let gy = (p20 + (2.0 * p21) + p22) - (p00 + (2.0 * p01) + p02)
+
+            let mag = ((gx * gx) + (gy * gy)).squareRoot()
+            sumGx += gx
+            sumGy += gy
+            sumMag += mag
+        }
+    }
+
+    if sumMag <= 1e-6 {
+        return 1.0
+    }
+
+    let totalNorm = ((sumGx * sumGx) + (sumGy * sumGy)).squareRoot()
+    return totalNorm / sumMag
 }
 
 /// Default classification thresholds on the variance scale (σ² of stride-4
@@ -281,13 +346,49 @@ func computeBlockActivityMap(source: [Int16], width: Int, height: Int) -> [Int32
 }
 
 @inline(__always)
-func classifyBlockActivity(varianceMap: [Int32], flatVarianceMax: Int, texturedVarianceMin: Int) -> [BlockActivityClass] {
+func classifyBlockActivity(
+    varianceMap: [Int32],
+    flatVarianceMax: Int,
+    texturedVarianceMin: Int,
+    source: [Int16]? = nil,
+    width: Int = 0,
+    height: Int = 0,
+    coherenceEnabled: Bool = true
+) -> [BlockActivityClass] {
     var classes = [BlockActivityClass](repeating: .normal, count: varianceMap.count)
+    let bw = (width + 31) / 32
+    let colCount = bw
     for i in 0..<varianceMap.count {
         if varianceMap[i] < Int32(flatVarianceMax) {
             classes[i] = .flat
-        } else if Int32(texturedVarianceMin) <= varianceMap[i] {
-            classes[i] = .textured
+        }
+        if Int32(texturedVarianceMin) <= varianceMap[i] {
+            if coherenceEnabled {
+                if let src = source {
+                    if 0 < width {
+                        if 0 < height {
+                            let r = i / colCount
+                            let c = i % colCount
+                            let bx = c * 32
+                            let by = r * 32
+                            let blockW = min(32, width - bx)
+                            let blockH = min(32, height - by)
+                            let coherence = withUnsafePointers(src) { ptr in
+                                computeBlockCoherence(source: ptr, stride: width, width: width, height: height, bx: bx, by: by, bw: blockW, bh: blockH)
+                            }
+                            if coherence < 0.85 {
+                                classes[i] = .incoherentTextured
+                            }
+                            if 0.85 <= coherence {
+                                classes[i] = .textured
+                            }
+                        }
+                    }
+                }
+            }
+            if coherenceEnabled != true || source == nil {
+                classes[i] = .textured
+            }
         }
     }
     return classes

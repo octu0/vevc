@@ -556,7 +556,16 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // Quant.swift). Computed concurrently with the MC-subtract tasks.
     async let tAq = { [pdY = pd.y] () -> [BlockActivityClass] in
         let variances = computeBlockActivityMap(source: pdY, width: dx, height: dy)
-        return classifyBlockActivity(varianceMap: variances, flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax, texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin)
+        let isSmoothOn = (smooth == 1)
+        return classifyBlockActivity(
+            varianceMap: variances,
+            flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
+            texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
+            source: pdY,
+            width: dx,
+            height: dy,
+            coherenceEnabled: isSmoothOn
+        )
     }()
     let mvsConst = mvs
     let refDirsConst = refDirs

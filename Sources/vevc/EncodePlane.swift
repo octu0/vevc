@@ -52,6 +52,10 @@ func evaluateQuantizeLayer32WithActivity(view: BlockView, qt: QuantizationTable,
         quantize16(subs.hl, q: qt.qMidTextured)
         quantize16(subs.lh, q: qt.qMidTextured)
         quantize16(subs.hh, q: qt.qHighTextured)
+    case .incoherentTextured:
+        quantize16(subs.hl, q: qt.qMidIncoherent)
+        quantize16(subs.lh, q: qt.qMidIncoherent)
+        quantize16(subs.hh, q: qt.qHighIncoherent)
     case .normal:
         quantize16(subs.hl, q: qt.qMid)
         quantize16(subs.lh, q: qt.qMid)
@@ -82,6 +86,10 @@ func evaluateQuantizeLayer16WithActivity(view: BlockView, qt: QuantizationTable,
         quantize8(subs.hl, q: qt.qMidTextured)
         quantize8(subs.lh, q: qt.qMidTextured)
         quantize8(subs.hh, q: qt.qHighTextured)
+    case .incoherentTextured:
+        quantize8(subs.hl, q: qt.qMidIncoherent)
+        quantize8(subs.lh, q: qt.qMidIncoherent)
+        quantize8(subs.hh, q: qt.qHighIncoherent)
     case .normal:
         quantize8(subs.hl, q: qt.qMid)
         quantize8(subs.lh, q: qt.qMid)

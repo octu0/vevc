@@ -77,6 +77,8 @@ struct QuantizationTable: Sendable {
     public let qHighFlat: Quantizer
     public let qMidTextured: Quantizer
     public let qHighTextured: Quantizer
+    public let qMidIncoherent: Quantizer
+    public let qHighIncoherent: Quantizer
 
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
         let s = max(16, min(baseStep, 4096))
@@ -121,31 +123,34 @@ struct QuantizationTable: Sendable {
         var dzMidY: Int32 = -4000
         var dzHighY: Int32 = -8000
         
-        if layerIndex == 2 {
+        switch layerIndex {
+        case 2:
             dzMidY = 0
             dzHighY = -8000
-        } else if layerIndex == 1 {
+        case 1:
             dzMidY = 8192
             dzHighY = 0
-        } else if layerIndex == 0 {
+        case 0:
             dzMidY = 16384  // +0.25 positive bias to boost Luma SSIM
             dzHighY = 8192
+        default:
+            break
         }
         
-        let dzMidC: Int32
-        let dzHighC: Int32
+        var dzMidC: Int32 = -32000
+        var dzHighC: Int32 = -64000
         
-        if layerIndex == 0 {
+        switch layerIndex {
+        case 0:
             dzMidC = -8000
             dzHighC = -16000
-        } else if layerIndex == 1 {
+        case 1:
             dzMidC = -16000
             dzHighC = -32000
-        } else {
+        default:
             dzMidC = -32000
             dzHighC = -64000
         }
-
 
         // Saturation-gated extended range: below the knee (baseStep 2048) the
         // caps match the original tuning exactly, so normal-rate quality is
@@ -166,6 +171,8 @@ struct QuantizationTable: Sendable {
         // intra-frame reallocation is the only remaining degree of freedom.
         let aqDelta = Int32((EncoderTuning.shared.aqBiasDeltaQ16 * ext) / 2048)
 
+        let y2BiasDelta: Int32 = 52429  // +0.80Δ dead-zone widening for incoherent textured blocks
+
         if isChroma {
             // qLow is the DC component: NEVER scale it to avoid destroying base color/brightness!
             let cLow = min(qLowCapQ4, max(16, baseStep / 8))
@@ -182,6 +189,8 @@ struct QuantizationTable: Sendable {
             self.qHighFlat = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: min(32768, dzHighC + aqDelta), centroidOffset: offsetOn)
             self.qMidTextured = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC - aqDelta, centroidOffset: offsetOn)
             self.qHighTextured = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC - aqDelta, centroidOffset: offsetOn)
+            self.qMidIncoherent = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC - y2BiasDelta, centroidOffset: offsetOn)
+            self.qHighIncoherent = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC - y2BiasDelta, centroidOffset: offsetOn)
         } else {
             // qLow is the DC component: NEVER scale it!
             let lLow = min(qLowCapQ4, max(16, baseStep / qLowDivisor))
@@ -198,6 +207,8 @@ struct QuantizationTable: Sendable {
             self.qHighFlat = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: min(32768, dzHighY + aqDelta), centroidOffset: offsetOn)
             self.qMidTextured = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY - aqDelta, centroidOffset: offsetOn)
             self.qHighTextured = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY - aqDelta, centroidOffset: offsetOn)
+            self.qMidIncoherent = Quantizer(step: Int(lMid), roundToNearest: false, deadZoneBias: dzMidY - y2BiasDelta, centroidOffset: offsetOn)
+            self.qHighIncoherent = Quantizer(step: Int(lHigh), roundToNearest: false, deadZoneBias: dzHighY - y2BiasDelta, centroidOffset: offsetOn)
         }
     }
 }
