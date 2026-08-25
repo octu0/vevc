@@ -30,6 +30,7 @@ struct Config {
     var smoothL2: Int = 1
     var smoothL1: Int = 2
     var smoothL0: Int = 1
+    var temporalLayers: Int = 1
     var maxFrames: Int? = nil
 }
 
@@ -255,6 +256,11 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.smoothL0 = v }
                     i += 1
                 }
+            case "-temporal-layers", "--temporal-layers":
+                if (i + 1) < args.count {
+                    if let v = Int(args[i + 1]) { config.temporalLayers = v }
+                    i += 1
+                }
             case "-frames", "--frames", "-max-frames", "-maxFrames":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.maxFrames = v }
@@ -272,7 +278,7 @@ struct CompareApp {
         }
 
         if positionalArgs.isEmpty && y4mPath == nil {
-            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
+            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-smooth-l2 <0|1>] [-smooth-l1 <px>] [-smooth-l0 <0|1>] [-temporal-layers <1|2>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
             exit(1)
         }
 

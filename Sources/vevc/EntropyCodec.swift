@@ -421,7 +421,7 @@ struct EntropyEncoder {
     }
 
     @inline(__always)
-    mutating func getData(selectModel: ModelSelectorFn, history: EntropyHistoryState? = nil) -> [UInt8] {
+    mutating func getData(selectModel: ModelSelectorFn, history: EntropyHistoryState? = nil, updateHistory: Bool = true) -> [UInt8] {
         var out = [UInt8]()
         let pairCount = pairRuns.count
         out.reserveCapacity(pairCount * 4 + 128)
@@ -575,7 +575,9 @@ struct EntropyEncoder {
 
         // The decoder mirrors this update with its decoded token counts after
         // every rANS-coded stream (raw/empty streams return before this point).
-        history?.update(runTokenCounts: runTokenCounts, valTokenCounts: valTokenCounts)
+        if updateHistory {
+            history?.update(runTokenCounts: runTokenCounts, valTokenCounts: valTokenCounts)
+        }
         
         // 4-way bypass data
         for lane in 0..<4 {
@@ -738,7 +740,7 @@ struct EntropyDecoder {
     private var decRunCounts: [[Int]] = []
     private var decValCounts: [[Int]] = []
 
-    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws {
+    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws {
         self.history = history
         var offset = startOffset
         
@@ -798,10 +800,12 @@ struct EntropyDecoder {
         self.hasTrailingZeros = hasTrailingZeros
 
         // rANS-coded stream: mirror the encoder's history accumulation.
-        if history != nil {
-            self.countTokens = true
-            self.decRunCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
-            self.decValCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+        if updateHistory {
+            if history != nil {
+                self.countTokens = true
+                self.decRunCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+                self.decValCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
+            }
         }
         
         let totalPairEntries = try readVLQSize(base, at: &offset, count: count)
@@ -1126,7 +1130,7 @@ private func encodeMVPayload(dxList: [Int16], dyList: [Int16], history: MVPayloa
 }
 
 @inline(__always)
-func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil) -> [UInt8] {
+func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) -> [UInt8] {
     if profile == 0x01 {
         var tokensDx = [UInt8]()
         var tokensDy = [UInt8]()
@@ -1270,7 +1274,7 @@ func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, p
 
     // History lockstep: feed the CHOSEN payload's tokens exactly once per
     // coded stream (empty streams neither use nor update history).
-    if let h = history {
+    if updateHistory, let h = history {
         if 0 < rawDxs.count {
             h.update(dxCnts: best.dxCnts, dyCnts: best.dyCnts)
         }
@@ -1329,7 +1333,7 @@ private func decodeMVsProfile1(data: [UInt8], count: Int) throws -> MotionVector
 }
 
 @inline(__always)
-private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false) throws -> MotionVectors {
+private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
         let bufCount = data.count
@@ -1391,7 +1395,7 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
             mvsDy.append(dy)
         }
         
-        if let h = history, 0 < count {
+        if updateHistory, let h = history, 0 < count {
             h.update(dxCnts: dxCnts, dyCnts: dyCnts)
         }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
@@ -1399,7 +1403,7 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
 }
 
 @inline(__always)
-private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false) throws -> MotionVectors {
+private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
         var dxCnts = [Int](repeating: 0, count: 64)
@@ -1487,14 +1491,14 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
             mvsDy.append(recDy)
         }
         
-        if let h = history, 0 < count {
+        if updateHistory, let h = history, 0 < count {
             h.update(dxCnts: dxCnts, dyCnts: dyCnts)
         }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
     }
 }
 
-private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false) throws -> MotionVectors {
+private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
         var dxCnts = [Int](repeating: 0, count: 64)
@@ -1559,7 +1563,7 @@ private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMod
             mvsDy.append(Int16(predDy + Int(resDy)))
         }
         
-        if let h = history, 0 < count {
+        if updateHistory, let h = history, 0 < count {
             h.update(dxCnts: dxCnts, dyCnts: dyCnts)
         }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
@@ -1567,7 +1571,7 @@ private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMod
 }
 
 @inline(__always)
-func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil) throws -> MotionVectors {
+func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) throws -> MotionVectors {
     if profile == 0x01 {
         return try decodeMVsProfile1(data: data, count: count)
     }
@@ -1576,12 +1580,12 @@ func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int
     let useHist = (modeFlag & 0x80) != 0
     switch modeFlag & 0x7F {
     case 0:
-        return try decodeMVsRaw(data: data, count: count, skipMap: skipMap, history: history, useHistoryModels: useHist)
+        return try decodeMVsRaw(data: data, count: count, skipMap: skipMap, history: history, useHistoryModels: useHist, updateHistory: updateHistory)
     case 1:
-        return try decodeMVsSpatialPred(data: data, count: count, skipMap: skipMap, cols: cols, history: history, useHistoryModels: useHist)
+        return try decodeMVsSpatialPred(data: data, count: count, skipMap: skipMap, cols: cols, history: history, useHistoryModels: useHist, updateHistory: updateHistory)
     case 2:
         guard let pm = prevMVs else { throw DecodeError.invalidBlockData }
-        return try decodeMVsTemporalPred(data: data, count: count, skipMap: skipMap, prevMVs: pm, history: history, useHistoryModels: useHist)
+        return try decodeMVsTemporalPred(data: data, count: count, skipMap: skipMap, prevMVs: pm, history: history, useHistoryModels: useHist, updateHistory: updateHistory)
     default:
         throw DecodeError.invalidBlockData
     }

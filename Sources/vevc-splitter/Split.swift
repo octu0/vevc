@@ -3,7 +3,7 @@ import vevc
 
 /// CLI wrapper that performs VEVC stream splitting via file I/O.
 /// Core logic is provided by `splitVEVCStream` from the vevc library.
-func runSplitter(input: String, output: String, maxLayer: Int) throws {
+func runSplitter(input: String, output: String, maxLayer: Int, maxTemporalLayer: Int = 1) throws {
     // Read input data
     let inputData: [UInt8]
     if input == "-" {
@@ -19,7 +19,7 @@ func runSplitter(input: String, output: String, maxLayer: Int) throws {
     }
 
     // Split using the library API
-    let result = try splitVEVCStream(input: inputData, maxLayer: maxLayer)
+    let result = try splitVEVCStream(input: inputData, maxLayer: maxLayer, maxTemporalLayer: maxTemporalLayer)
 
     // Write output data
     if output == "-" {

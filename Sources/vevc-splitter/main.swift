@@ -1,31 +1,39 @@
 import Foundation
 
 func printUsage() {
-    print("usage: vevc-splitter -i <input.vevc> -o <output.vevc> [-max-layer 0-2]")
+    print("usage: vevc-splitter -i <input.vevc> -o <output.vevc> [-max-layer 0-2] [-max-temporal-layer 0-1]")
 }
 
 var inputPath: String? = nil
 var outputPath: String? = nil
-var maxLayer: Int = 1
+var maxLayer: Int = 2
+var maxTemporalLayer: Int = 1
 
 var i = 1
 while i < CommandLine.arguments.count {
     let arg = CommandLine.arguments[i]
     switch arg {
     case "-i":
-        if i + 1 < CommandLine.arguments.count {
+        if (i + 1) < CommandLine.arguments.count {
             inputPath = CommandLine.arguments[i + 1]
             i += 1
         }
     case "-o":
-        if i + 1 < CommandLine.arguments.count {
+        if (i + 1) < CommandLine.arguments.count {
             outputPath = CommandLine.arguments[i + 1]
             i += 1
         }
     case "-max-layer", "-maxLayer":
-        if i + 1 < CommandLine.arguments.count {
+        if (i + 1) < CommandLine.arguments.count {
             if let val = Int(CommandLine.arguments[i + 1]) {
                 maxLayer = val
+            }
+            i += 1
+        }
+    case "-max-temporal-layer", "-maxTemporalLayer":
+        if (i + 1) < CommandLine.arguments.count {
+            if let val = Int(CommandLine.arguments[i + 1]) {
+                maxTemporalLayer = val
             }
             i += 1
         }
@@ -41,7 +49,7 @@ guard let input = inputPath, let output = outputPath else {
 }
 
 do {
-    try runSplitter(input: input, output: output, maxLayer: maxLayer)
+    try runSplitter(input: input, output: output, maxLayer: maxLayer, maxTemporalLayer: maxTemporalLayer)
 } catch {
     print("Error: \(error)")
     exit(1)

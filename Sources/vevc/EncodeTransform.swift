@@ -304,7 +304,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -388,7 +388,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         }
         encoder.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
         return out
     }
     
@@ -399,7 +399,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
     }
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
     return out
 }
 
@@ -432,7 +432,7 @@ func computeZeroFlags32(blocks: inout [BlockView], zeroThreshold: Int, colCount:
 }
 
 @inline(__always)
-func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> ([UInt8], [Bool]) {
+func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -542,7 +542,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         }
         encoder.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
         return (out, isZeroFlags)
     }
     
@@ -553,7 +553,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     }
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
     return (out, isZeroFlags)
 }
 
@@ -563,7 +563,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -644,7 +644,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         }
         encoder.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
         return out
     }
     
@@ -655,7 +655,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
     }
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
     return out
 }
 
@@ -688,7 +688,7 @@ func computeZeroFlags16(blocks: inout [BlockView], zeroThreshold: Int, colCount:
 }
 
 @inline(__always)
-func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> ([UInt8], [Bool]) {
+func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -796,7 +796,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         }
         encoder.flush()
         var out = bwFlags.bytes
-        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
         return (out, isZeroFlags)
     }
     
@@ -807,7 +807,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     }
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
     return (out, isZeroFlags)
 }
 
@@ -864,7 +864,7 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, sel
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int, history: EntropyHistoryState? = nil, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
+func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int, history: EntropyHistoryState? = nil, selectModel: ModelSelectorFn = unifiedSelectModel, updateHistory: Bool = true) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -908,7 +908,7 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
     
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
     return out
 }
 
@@ -926,7 +926,7 @@ func computeZeroFlagsBase8(blocks: [BlockView], zeroThreshold: Int, isSkip: [Boo
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn) -> ([UInt8], [Bool]) {
+func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     var isZeroFlags = [Bool](repeating: true, count: blocks.count)
@@ -984,7 +984,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroTh
     
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
     return (out, isZeroFlags)
 }
 

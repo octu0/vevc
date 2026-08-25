@@ -8,6 +8,19 @@ import Foundation
 /// floored I-frame level.
 let iFrameQStepFloorQ4: Int = 512
 
+private final class SafeReleaseAction: @unchecked Sendable {
+    private var action: (@Sendable () -> Void)?
+    init(_ action: @escaping @Sendable () -> Void) {
+        self.action = action
+    }
+    func release() {
+        if let act = action {
+            action = nil
+            act()
+        }
+    }
+}
+
 // MARK: - VEVCEncoder
 
 public actor VEVCEncoder {
@@ -31,12 +44,13 @@ public actor VEVCEncoder {
     public nonisolated let smoothL2: Int
     public nonisolated let smoothL1: Int
     public nonisolated let smoothL0: Int
+    public nonisolated let temporalLayers: Int
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -57,6 +71,7 @@ public actor VEVCEncoder {
         self.smoothL2 = smoothL2
         self.smoothL1 = smoothL1
         self.smoothL0 = smoothL0
+        self.temporalLayers = temporalLayers
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -79,11 +94,12 @@ public actor VEVCEncoder {
             motionMaskingPx: motionMaskingPx,
             smoothL2: smoothL2,
             smoothL1: smoothL1,
-            smoothL0: smoothL0
+            smoothL0: smoothL0,
+            temporalLayers: temporalLayers
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -104,6 +120,7 @@ public actor VEVCEncoder {
         self.smoothL2 = smoothL2
         self.smoothL1 = smoothL1
         self.smoothL0 = smoothL0
+        self.temporalLayers = temporalLayers
         
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -126,7 +143,8 @@ public actor VEVCEncoder {
             motionMaskingPx: motionMaskingPx,
             smoothL2: smoothL2,
             smoothL1: smoothL1,
-            smoothL0: smoothL0
+            smoothL0: smoothL0,
+            temporalLayers: temporalLayers
         )
     }
     
@@ -168,7 +186,7 @@ public actor VEVCEncoder {
         
         var result: [UInt8] = []
         if frameIndex == 0 {
-            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate, profile: profile, gop: gop)
+            let fileHeader = VEVCFileHeader(width: width, height: height, framerate: framerate, profile: profile, gop: gop, temporalLayers: temporalLayers)
             result.append(contentsOf: fileHeader.serialize())
         }
         result.append(contentsOf: bytes)
@@ -218,22 +236,29 @@ actor LayersEncodeActor {
     let smoothL2: Int
     let smoothL1: Int
     let smoothL0: Int
+    let temporalLayers: Int
     
     private var rateController: RateController
     private var framesSinceKeyframe = 0
     private var framesSinceLtrUpdate = 0
     private var frameIndex = 0
+    private var temporalFrameIndex = 0
     private var qt: QuantizationTable?
     
     private var previousInputPlane: PlaneData420?
     private var releasePreviousInput: (@Sendable () -> Void)?
+    private var previousT0InputPlane: PlaneData420?
+    private var releasePreviousT0Input: (@Sendable () -> Void)?
     private var previousMVs: MotionVectors?
+    private var previousT0MVs: MotionVectors?
     
     private var firstReconstructed: PlaneData420?
     private var releaseFirstRecon: (@Sendable () -> Void)?
     
     var previousReconstructed: PlaneData420? // internal for drift diagnostics
     private var releasePreviousRecon: (@Sendable () -> Void)?
+    private var previousT0Reconstructed: PlaneData420?
+    private var releasePreviousT0Recon: (@Sendable () -> Void)?
     
     private var firstInputPlane: PlaneData420?
     private var releaseFirstInput: (@Sendable () -> Void)?
@@ -248,7 +273,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -269,6 +294,7 @@ actor LayersEncodeActor {
         self.smoothL2 = smoothL2
         self.smoothL1 = smoothL1
         self.smoothL0 = smoothL0
+        self.temporalLayers = temporalLayers
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
@@ -277,7 +303,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smoothL2: Int = 1, smoothL1: Int = 2, smoothL0: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -298,6 +324,7 @@ actor LayersEncodeActor {
         self.smoothL2 = smoothL2
         self.smoothL1 = smoothL1
         self.smoothL0 = smoothL0
+        self.temporalLayers = temporalLayers
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         
@@ -308,7 +335,9 @@ actor LayersEncodeActor {
     
     deinit {
         releasePreviousInput?()
+        releasePreviousT0Input?()
         releasePreviousRecon?()
+        releasePreviousT0Recon?()
         releaseFirstRecon?()
         releaseFirstInput?()
     }
@@ -407,6 +436,9 @@ actor LayersEncodeActor {
             framesSinceKeyframe = isPeriodicIFrame ? 0 : (frameIndex % keyint)
             framesSinceLtrUpdate = framesSinceKeyframe
             consecutiveCopyFrames = 0
+            if temporalLayers == 2 {
+                temporalFrameIndex = 0
+            }
 
             // Backward-adaptive entropy tables: random-access boundary reset.
             if profile == 0x02 {
@@ -436,7 +468,9 @@ actor LayersEncodeActor {
             
             // Clean up old state
             releasePreviousInput?()
+            releasePreviousT0Input?()
             releasePreviousRecon?()
+            releasePreviousT0Recon?()
             releaseFirstRecon?()
             releaseFirstInput?()
             
@@ -455,6 +489,12 @@ actor LayersEncodeActor {
             let (firstIn, releaseFirstIn) = toPlaneData420(image: image, pool: pool)
             firstInputPlane = firstIn
             releaseFirstInput = releaseFirstIn
+
+            if temporalLayers == 2 {
+                previousT0InputPlane = firstIn
+                previousT0Reconstructed = reconstructed
+                previousT0MVs = mvs
+            }
             
             for i in 0..<self.staticCounters.count {
                 self.staticCounters[i] = framesSinceKeyframe
@@ -464,6 +504,9 @@ actor LayersEncodeActor {
             
             framesSinceKeyframe += 1
             frameIndex += 1
+            if temporalLayers == 2 {
+                temporalFrameIndex += 1
+            }
             
             return bytes
         }
@@ -481,7 +524,13 @@ actor LayersEncodeActor {
         // never be a near-duplicate and skips the scans. Exact identity
         // (memcmp speed, common for pulldown/static content) is tried before
         // the accumulate-to-bound MAD scan.
-        if let prevIn = previousInputPlane, fastSADToPrevInput == 0, consecutiveCopyFrames < maxConsecutiveCopyFrames, isPlaneIdentical(a: plane, b: prevIn) || isNearDuplicate(a: plane, b: prevIn, limitQ8: copyFrameMADLimitQ8) {
+        var allowCopyFrame = true
+        if temporalLayers == 2 {
+            if temporalFrameIndex % 2 == 0 {
+                allowCopyFrame = false
+            }
+        }
+        if allowCopyFrame && consecutiveCopyFrames < maxConsecutiveCopyFrames, let prevIn = previousInputPlane, fastSADToPrevInput == 0, isPlaneIdentical(a: plane, b: prevIn) || isNearDuplicate(a: plane, b: prevIn, limitQ8: copyFrameMADLimitQ8) {
             releasePlane()
 
             // A copied frame is static by definition: advance the per-block
@@ -505,7 +554,24 @@ actor LayersEncodeActor {
                 rateController.resetStaticStreak()
             }
 
-            if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+            var canPromoteLTR = false
+            if profile == 0x02 {
+                if 0 < gop {
+                    if 0 < framesSinceKeyframe {
+                        if framesSinceKeyframe % gop == 0 {
+                            if temporalLayers == 2 {
+                                if temporalFrameIndex % 2 == 0 {
+                                    canPromoteLTR = true
+                                }
+                            } else {
+                                canPromoteLTR = true
+                            }
+                        }
+                    }
+                }
+            }
+
+            if canPromoteLTR {
                 releaseFirstRecon?()
                 firstReconstructed = previousReconstructed
                 releaseFirstRecon = releasePreviousRecon
@@ -516,6 +582,16 @@ actor LayersEncodeActor {
                 firstInputPlane = firstIn
                 releaseFirstInput = releaseFirstIn
 
+                if temporalLayers == 2 {
+                    releasePreviousT0Recon?()
+                    previousT0Reconstructed = previousReconstructed
+                    releasePreviousT0Recon = nil
+
+                    releasePreviousT0Input?()
+                    previousT0InputPlane = firstIn
+                    releasePreviousT0Input = nil
+                }
+
                 for i in 0..<self.staticCounters.count {
                     self.staticCounters[i] = 0
                 }
@@ -524,10 +600,19 @@ actor LayersEncodeActor {
                 cachedNextSub1 = nil
             } else {
                 framesSinceLtrUpdate += 1
+                if temporalLayers == 2 {
+                    if temporalFrameIndex % 2 == 0 {
+                        previousT0Reconstructed = previousReconstructed
+                        previousT0InputPlane = previousInputPlane
+                    }
+                }
             }
 
             framesSinceKeyframe += 1
             frameIndex += 1
+            if temporalLayers == 2 {
+                temporalFrameIndex += 1
+            }
             return bytes
         }
         consecutiveCopyFrames = 0
@@ -547,6 +632,43 @@ actor LayersEncodeActor {
         let qtY = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: false, layerIndex: 0)
         let qtC = QuantizationTable(baseStep: max(16, adjustedStep), isChroma: true, layerIndex: 0)
         
+        let isT0 = (temporalFrameIndex % 2 == 0)
+        let refPrevRecon: PlaneData420
+        let refPrevIn: PlaneData420
+        let refPrevMVs: MotionVectors?
+        if temporalLayers == 2 {
+            guard let t0Recon = previousT0Reconstructed, let t0In = previousT0InputPlane else {
+                throw EncodeError.missingReferenceFramesForPFrame
+            }
+            refPrevRecon = t0Recon
+            refPrevIn = t0In
+            refPrevMVs = previousT0MVs
+        } else {
+            refPrevRecon = prevRecon
+            refPrevIn = prevIn
+            refPrevMVs = previousMVs
+        }
+
+        let updateL0: Bool
+        if temporalLayers == 2 {
+            updateL0 = isT0
+        } else {
+            updateL0 = true
+        }
+
+        let effSmoothL2: Int
+        let effSmoothL1: Int
+        let effSmoothL0: Int
+        if temporalLayers == 2 && isT0 {
+            effSmoothL2 = 0
+            effSmoothL1 = 0
+            effSmoothL0 = 0
+        } else {
+            effSmoothL2 = self.smoothL2
+            effSmoothL1 = self.smoothL1
+            effSmoothL0 = self.smoothL0
+        }
+
         // The two P-frame pipelines are separate functions so each stays
         // branch-free; the profile decides here, once.
         let encoded: ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16])
@@ -556,7 +678,7 @@ actor LayersEncodeActor {
             var localCounters = self.staticCounters
             let ltrAge = framesSinceLtrUpdate + 1
             let (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1, skipMap) = try await encodeSpatialLayersForProfile2(
-                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
+                pd: plane, pool: pool, predictedPd: refPrevRecon, nextPd: firstRecon, prevInput: refPrevIn, ltrInput: firstIn, prevMVs: refPrevMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, ltrAge: ltrAge, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
@@ -569,9 +691,10 @@ actor LayersEncodeActor {
                 framerate: self.framerate,
                 motionMaskingPx: self.motionMaskingPx,
                 adjustedStep: adjustedStep,
-                smoothL2: self.smoothL2,
-                smoothL1: self.smoothL1,
-                smoothL0: self.smoothL0
+                smoothL2: effSmoothL2,
+                smoothL1: effSmoothL1,
+                smoothL0: effSmoothL0,
+                updateL0Prev: updateL0
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
@@ -586,7 +709,7 @@ actor LayersEncodeActor {
             detailThinned = shouldZeroCadence(cadence: self.l2Cadence, gopPosition: framesSinceKeyframe) || shouldZeroCadence(cadence: self.l1Cadence, gopPosition: framesSinceKeyframe) || shouldZeroCadence(cadence: self.l0Cadence, gopPosition: framesSinceKeyframe)
         } else {
             encoded = try await encodeSpatialLayers(
-                pd: plane, pool: pool, predictedPd: prevRecon, nextPd: firstRecon, prevInput: prevIn, ltrInput: firstIn, prevMVs: previousMVs,
+                pd: plane, pool: pool, predictedPd: refPrevRecon, nextPd: firstRecon, prevInput: refPrevIn, ltrInput: firstIn, prevMVs: refPrevMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
@@ -599,26 +722,58 @@ actor LayersEncodeActor {
         self.cachedNextSub1 = nSub1
         
         // Using masked recon distortion for quality metric
+        let safeRecon = SafeReleaseAction(releaseRecon)
+        let safePlane = SafeReleaseAction(releasePlane)
+        let safeReleaseRecon: @Sendable () -> Void = { safeRecon.release() }
+        let safeReleasePlane: @Sendable () -> Void = { safePlane.release() }
+
         let reconDistortion = computeMaskedReconDistortion(original: plane, reconstructed: reconstructed, sads: sads)
         
         if self.qstep == nil {
             rateController.consumePFrame(bits: bytes.count * 8, qStep: Int(adjustedStep), sad: frameSAD, distortion: reconDistortion, interRatioQ8: interRatioQ8, detailThinned: detailThinned)
         }
         
-        releasePreviousInput?()
-        previousInputPlane = plane
-        releasePreviousInput = releasePlane
+        var canPromoteLTR = false
+        if profile == 0x02 {
+            if 0 < gop {
+                if 0 < framesSinceKeyframe {
+                    if framesSinceKeyframe % gop == 0 {
+                        if temporalLayers == 2 {
+                            if isT0 {
+                                canPromoteLTR = true
+                            }
+                        } else {
+                            canPromoteLTR = true
+                        }
+                    }
+                }
+            }
+        }
 
-        if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+        if canPromoteLTR {
             releaseFirstRecon?()
             firstReconstructed = reconstructed
-            releaseFirstRecon = releaseRecon
+            releaseFirstRecon = safeReleaseRecon
             releasePreviousRecon = nil
 
             releaseFirstInput?()
             let (firstIn, releaseFirstIn) = toPlaneData420(image: image, pool: pool)
             firstInputPlane = firstIn
             releaseFirstInput = releaseFirstIn
+
+            releasePreviousInput?()
+            previousInputPlane = plane
+            releasePreviousInput = safeReleasePlane
+
+            if temporalLayers == 2 {
+                releasePreviousT0Recon?()
+                previousT0Reconstructed = reconstructed
+                releasePreviousT0Recon = nil
+
+                releasePreviousT0Input?()
+                previousT0InputPlane = plane
+                releasePreviousT0Input = nil
+            }
 
             for i in 0..<self.staticCounters.count {
                 self.staticCounters[i] = 0
@@ -635,18 +790,61 @@ actor LayersEncodeActor {
             let isPrevFirst = withUnsafePointers(oldRecon.y, firstRecon.y) { p, f in
                 p == f
             }
-            if isPrevFirst != true {
+            let isPrevT0: Bool
+            if temporalLayers == 2, let t0 = previousT0Reconstructed {
+                isPrevT0 = withUnsafePointers(oldRecon.y, t0.y) { p, t in
+                    p == t
+                }
+            } else {
+                isPrevT0 = false
+            }
+            if isPrevFirst != true && isPrevT0 != true {
                 oldRelease?()
             }
             
-            releasePreviousRecon = releaseRecon
+            releasePreviousRecon = safeReleaseRecon
+
+            releasePreviousInput?()
+            previousInputPlane = plane
+            releasePreviousInput = safeReleasePlane
+
+            if temporalLayers == 2 {
+                if isT0 {
+                    if let oldT0Recon = previousT0Reconstructed {
+                        let oldT0Release = releasePreviousT0Recon
+                        let isT0First = withUnsafePointers(oldT0Recon.y, firstRecon.y) { p, f in
+                            p == f
+                        }
+                        let isT0Prev = withUnsafePointers(oldT0Recon.y, oldRecon.y) { p, o in
+                            p == o
+                        }
+                        if isT0First != true && isT0Prev != true {
+                            oldT0Release?()
+                        }
+                    }
+                    previousT0Reconstructed = reconstructed
+                    releasePreviousT0Recon = safeReleaseRecon
+
+                    releasePreviousT0Input?()
+                    previousT0InputPlane = plane
+                    releasePreviousT0Input = safeReleasePlane
+                }
+            }
         }
 
         previousReconstructed = reconstructed
         previousMVs = mvs
+        if temporalLayers == 2 {
+            if isT0 {
+                previousT0MVs = mvs
+            }
+        }
         
         framesSinceKeyframe += 1
         frameIndex += 1
+        if temporalLayers == 2 {
+            temporalFrameIndex += 1
+        }
         
         return bytes
     }

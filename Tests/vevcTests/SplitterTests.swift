@@ -169,7 +169,7 @@ struct SplitterTests {
         // 1. Split to maxLayer = 1
         let l1Result = try splitVEVCStream(input: bytes, maxLayer: 1)
         #expect(l1Result.processedFrames == 5)
-        #expect(l1Result.droppedLayer2Bytes > 0)
+        #expect(0 < l1Result.droppedLayer2Bytes)
         #expect(l1Result.droppedLayer1Bytes == 0)
         
         // Decode l1
@@ -180,8 +180,8 @@ struct SplitterTests {
         // 2. Split to maxLayer = 0
         let l0Result = try splitVEVCStream(input: bytes, maxLayer: 0)
         #expect(l0Result.processedFrames == 5)
-        #expect(l0Result.droppedLayer2Bytes > 0)
-        #expect(l0Result.droppedLayer1Bytes > 0)
+        #expect(0 < l0Result.droppedLayer2Bytes)
+        #expect(0 < l0Result.droppedLayer1Bytes)
         
         // Decode l0
         let decoder0 = Decoder(maxLayer: 0)
@@ -198,5 +198,41 @@ struct SplitterTests {
         let decoder2 = Decoder(maxLayer: 2)
         let decL2Frames = try await decoder2.decode(data: l2Result.data)
         #expect(decL2Frames.count == 5)
+    }
+
+    @Test
+    func testSplitVEVCExtractTemporalLayers() async throws {
+        let y4mPath = "Tests/vevcSpecV1/testdata/spec_1080p_60f.y4m"
+        guard FileManager.default.fileExists(atPath: y4mPath) else {
+            print("Skipping testSplitVEVCExtractTemporalLayers, file not found: \(y4mPath)")
+            return
+        }
+        let fileHandle = try FileHandle(forReadingFrom: URL(fileURLWithPath: y4mPath))
+        let reader = try Y4MReader(fileHandle: fileHandle)
+        var frames = [YCbCrImage]()
+        while let frame = try reader.readFrame() {
+            frames.append(frame)
+        }
+        
+        let encoder = VEVCEncoder(
+            width: frames[0].width,
+            height: frames[0].height,
+            maxbitrate: 1000 * 1024,
+            zeroThreshold: 3,
+            keyint: 10,
+            profile: 0x02,
+            temporalLayers: 2
+        )
+        
+        let bitstream = try await encoder.encodeToData(images: Array(frames.prefix(10)))
+        let bytes = [UInt8](bitstream)
+        
+        // Split with maxTemporalLayer = 0 (retain T0 only = 5 frames)
+        let t0Result = try splitVEVCStream(input: bytes, maxLayer: 2, maxTemporalLayer: 0)
+        #expect(t0Result.processedFrames == 5)
+        
+        let decoder = Decoder(maxLayer: 2)
+        let decFrames = try await decoder.decode(data: t0Result.data)
+        #expect(decFrames.count == 5)
     }
 }

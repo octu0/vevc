@@ -496,7 +496,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smoothL2: Int = 0, smoothL1: Int = 0, smoothL0: Int = 0, updateL0Prev: Bool = true) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -844,7 +844,8 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         base8YBlocks: &base8YBlocks, base8CbBlocks: &base8CbBlocks, base8CrBlocks: &base8CrBlocks,
         skipMap: skipMap, skipMapWidth: skipBw,
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
-        histories: entropyHistories?.streams[0]
+        histories: entropyHistories?.streams[0],
+        updateHistory: updateL0Prev
     )
     defer { releaseBaseRecon() }
 
@@ -877,7 +878,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         subtractPlanes(&slot, tP)
         baseImg = slot
 
-        l0State.prev = newRef
+        if updateL0Prev {
+            l0State.prev = newRef
+        }
     }
 
     let (layer1, _, _, _) = encodeLayer16PayloadWithSkipMap(
@@ -890,7 +893,8 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         ySkip: l1ySkip, cSkip: l1cSkip,
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
         histories: entropyHistories?.streams[1],
-        selectModel: unifiedSelectModelParentFree
+        selectModel: unifiedSelectModelParentFree,
+        updateHistory: updateL0Prev
     )
 
     let (mutReconL1Y, r1Y) = reconstructPlaneLayer16Y(blocks: l1yBlocks, prevImg: baseImg, width: l1dx, height: l1dy, qt: qtY1, pool: pool)
@@ -909,7 +913,8 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         ySkip: l2ySkip, cSkip: l2cSkip,
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
         histories: entropyHistories?.streams[2],
-        selectModel: unifiedSelectModelParentFree
+        selectModel: unifiedSelectModelParentFree,
+        updateHistory: updateL0Prev
     )
 
     // skipMap must be passed here: the decoder's layer2 reconstruction skips
@@ -944,7 +949,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     }
 
     let skipMapData = encodeSkipMap(map: skipMap)
-    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prevMVs, history: mvPayloadHistory)
+    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prevMVs, history: mvPayloadHistory, updateHistory: updateL0Prev)
 
     let refDirBuf = encodeRefDirsProfile2(refDirs: refDirs, skipMap: skipMap)
 

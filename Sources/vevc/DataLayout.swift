@@ -7,13 +7,15 @@ public struct VEVCFileHeader {
     public let framerate: Int
     public let timescale: UInt8 = 0x00 // 1000ms
     public let gop: Int
+    public let temporalLayers: Int
     
-    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01, gop: Int = 12) {
+    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01, gop: Int = 12, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.framerate = framerate
         self.profile = profile
         self.gop = gop
+        self.temporalLayers = temporalLayers
     }
     
     @inline(__always)
@@ -33,6 +35,9 @@ public struct VEVCFileHeader {
         
         if profile == 0x02 {
             payload.append(UInt8(clamping: gop))
+            if 1 < temporalLayers {
+                payload.append(UInt8(clamping: temporalLayers))
+            }
         }
         
         appendUInt16BE(&out, UInt16(payload.count))
@@ -83,18 +88,26 @@ public struct VEVCFileHeader {
         }
         
         let gop: Int
+        let temporalLayers: Int
         if readProfile == 0x02 {
             guard offset < payloadEnd else {
                 throw DecodeError.insufficientDataContext("VEVC FileHeader GOP missing for Profile 0x02")
             }
             gop = Int(chunk[offset])
             offset += 1
+            if offset < payloadEnd {
+                temporalLayers = Int(chunk[offset])
+                offset += 1
+            } else {
+                temporalLayers = 1
+            }
         } else {
             gop = 0
+            temporalLayers = 1
         }
         
         offset = payloadEnd
-        return VEVCFileHeader(width: w, height: h, framerate: fps, profile: readProfile, gop: gop)
+        return VEVCFileHeader(width: w, height: h, framerate: fps, profile: readProfile, gop: gop, temporalLayers: temporalLayers)
     }
 }
 
@@ -364,31 +377,55 @@ public enum SplitterError: Error {
     case invalidMaxLayer(Int)
 }
 
-/// Splits a VEVC bitstream in-memory, dropping layers above `maxLayer`.
+/// Splits a VEVC bitstream in-memory, dropping layers above `maxLayer` and optionally dropping temporal layers above `maxTemporalLayer`.
 ///
 /// - Parameters:
 ///   - input: Full VEVC encoded data (all 3 layers).
 ///   - maxLayer: Maximum layer to retain (0 = layer0 only, 1 = layer0+1, 2 = all layers).
+///   - maxTemporalLayer: Maximum temporal layer to retain (0 = T0 only / 30fps, 1 = T0+T1 / all frames).
 /// - Returns: A `SplitterResult` containing the stripped bitstream and statistics.
 @inline(__always)
-public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterResult {
+public func splitVEVCStream(input: [UInt8], maxLayer: Int, maxTemporalLayer: Int = 1) throws -> SplitterResult {
     guard 0 <= maxLayer, maxLayer <= 2 else {
         throw SplitterError.invalidMaxLayer(maxLayer)
+    }
+    guard 0 <= maxTemporalLayer, maxTemporalLayer <= 1 else {
+        throw SplitterError.invalidMaxLayer(maxTemporalLayer)
+    }
+    let dropT1 = (maxTemporalLayer == 0)
+
+    guard 4 <= input.count else {
+        throw SplitterError.unexpectedEOF
+    }
+    guard input[0] == 0x56, input[1] == 0x45, input[2] == 0x56, input[3] == 0x43 else {
+        throw SplitterError.invalidMagic
     }
 
     var readOffset = 0
     let fileHeader = try VEVCFileHeader.deserialize(from: input, offset: &readOffset)
     let profile = fileHeader.profile
 
-    // Copy the whole FileHeader to output
-    let headerSlice = input[0..<readOffset]
-
     // Pre-allocate output buffer
     var output = [UInt8]()
     output.reserveCapacity(input.count)
 
     // Write FileHeader to output
-    output.append(contentsOf: headerSlice)
+    if dropT1 {
+        let newGop = max(1, fileHeader.gop / 2)
+        let newFps = max(1, fileHeader.framerate / 2)
+        let newFileHeader = VEVCFileHeader(
+            width: fileHeader.width,
+            height: fileHeader.height,
+            framerate: newFps,
+            profile: fileHeader.profile,
+            gop: newGop,
+            temporalLayers: 1
+        )
+        output.append(contentsOf: newFileHeader.serialize())
+    } else {
+        let headerSlice = input[0..<readOffset]
+        output.append(contentsOf: headerSlice)
+    }
 
     @inline(__always)
     func readFully(count: Int) throws -> ArraySlice<UInt8> {
@@ -404,14 +441,28 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
     var processedFrames = 0
     var droppedLayer1Bytes = 0
     var droppedLayer2Bytes = 0
+    var temporalFrameIndex = 0
 
     while readOffset < input.count {
         var frameOffset = readOffset
         let frameHeader = try VEVCFrameHeader.deserialize(from: input, offset: &frameOffset, profile: profile)
         readOffset = frameOffset
 
+        let isIFrame = frameHeader.isIFrame
+        if isIFrame {
+            temporalFrameIndex = 0
+        }
+        let isT0 = (fileHeader.temporalLayers <= 1) || (temporalFrameIndex % 2 == 0)
+        temporalFrameIndex += 1
+
+        let shouldDropFrame = dropT1 && (isT0 != true)
+
         // CopyFrame
         if frameHeader.isCopyFrame {
+            if shouldDropFrame {
+                // Drop this T1 frame entirely
+                continue
+            }
             output.append(contentsOf: frameHeader.serialize(profile: profile))
             processedFrames += 1
             continue
@@ -446,53 +497,73 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int) throws -> SplitterRes
             layer1Size: newLayer1Size,
             layer2Size: newLayer2Size
         )
-        output.append(contentsOf: newHeader.serialize(profile: profile))
+
+        if shouldDropFrame != true {
+            output.append(contentsOf: newHeader.serialize(profile: profile))
+        }
 
         // SkipMap payload
         if 0 < frameHeader.skipMapSize {
             let payload = try readFully(count: frameHeader.skipMapSize)
-            output.append(contentsOf: payload)
+            if shouldDropFrame != true {
+                output.append(contentsOf: payload)
+            }
         }
         // MVs payload
         if 0 < frameHeader.mvsSize {
             let payload = try readFully(count: frameHeader.mvsSize)
-            output.append(contentsOf: payload)
+            if shouldDropFrame != true {
+                output.append(contentsOf: payload)
+            }
         }
         // RefDir payload
         if 0 < frameHeader.refDirSize {
             let payload = try readFully(count: frameHeader.refDirSize)
-            output.append(contentsOf: payload)
+            if shouldDropFrame != true {
+                output.append(contentsOf: payload)
+            }
         }
         // TreeMap payload
         if 0 < frameHeader.treeMapSize {
             let payload = try readFully(count: frameHeader.treeMapSize)
-            output.append(contentsOf: payload)
+            if shouldDropFrame != true {
+                output.append(contentsOf: payload)
+            }
         }
         // Layer 0 payload (always retained)
         if 0 < frameHeader.layer0Size {
             let payload = try readFully(count: frameHeader.layer0Size)
-            output.append(contentsOf: payload)
+            if shouldDropFrame != true {
+                output.append(contentsOf: payload)
+            }
         }
 
         // Layer 1 payload
         if 0 < frameHeader.layer1Size {
             let payload = try readFully(count: frameHeader.layer1Size)
-            if 1 <= maxLayer {
-                output.append(contentsOf: payload)
-            } else {
-                droppedLayer1Bytes += frameHeader.layer1Size
+            if shouldDropFrame != true {
+                if 1 <= maxLayer {
+                    output.append(contentsOf: payload)
+                } else {
+                    droppedLayer1Bytes += frameHeader.layer1Size
+                }
             }
         }
         // Layer 2 payload
         if 0 < frameHeader.layer2Size {
             let payload = try readFully(count: frameHeader.layer2Size)
-            if 2 <= maxLayer {
-                output.append(contentsOf: payload)
-            } else {
-                droppedLayer2Bytes += frameHeader.layer2Size
+            if shouldDropFrame != true {
+                if 2 <= maxLayer {
+                    output.append(contentsOf: payload)
+                } else {
+                    droppedLayer2Bytes += frameHeader.layer2Size
+                }
             }
         }
-        processedFrames += 1
+
+        if shouldDropFrame != true {
+            processedFrames += 1
+        }
     }
 
     return SplitterResult(

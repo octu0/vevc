@@ -5,7 +5,7 @@ enum DecodeTask32 {
 }
 
 @inline(__always)
-func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws -> [BlockView] {
+func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -47,7 +47,7 @@ func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCo
             blocks.append(pool.get1024())
         }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         let half = 32 / 2
         var lastVal: Int16 = 0
         for i in 0..<blockCount {
@@ -102,7 +102,7 @@ func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCo
 }
 
 @inline(__always)
-func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws -> [BlockView] {
+func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -144,7 +144,7 @@ func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
             blocks.append(pool.get1024())
         }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         let half = 32 / 2
         var lastVal: Int16 = 0
         
@@ -243,7 +243,7 @@ func decodePlaneSubbands32WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
 }
 
 @inline(__always)
-func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
+func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -293,7 +293,7 @@ func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
             blocks.append(pool.get1024())
         }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         let half = 32 / 2
         var lastVal: Int16 = 0
         
@@ -331,13 +331,13 @@ func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
                     }
                     if bl {
                         try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hlBase.advanced(by: 8 * 32), stride: 32, parentPtr: UnsafePointer(parentHL.base.advanced(by: 4 * parentHL.stride)), parentStride: parentHL.stride)
-                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 8 * 32), stride: 32, parentPtr: UnsafePointer(parentHL.base.advanced(by: 4 * parentHL.stride)), parentStride: parentHL.stride)
-                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 8 * 32), stride: 32, parentPtr: UnsafePointer(parentHL.base.advanced(by: 4 * parentHL.stride)), parentStride: parentHH.stride)
+                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 8 * 32), stride: 32, parentPtr: UnsafePointer(parentLH.base.advanced(by: 4 * parentLH.stride)), parentStride: parentLH.stride)
+                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 8 * 32), stride: 32, parentPtr: UnsafePointer(parentHH.base.advanced(by: 4 * parentHH.stride)), parentStride: parentHH.stride)
                     }
                     if br {
                         try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hlBase.advanced(by: 8 * 32 + 8), stride: 32, parentPtr: UnsafePointer(parentHL.base.advanced(by: 4 * parentHL.stride + 4)), parentStride: parentHL.stride)
-                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 8 * 32 + 8), stride: 32, parentPtr: UnsafePointer(parentHL.base.advanced(by: 4 * parentHL.stride + 4)), parentStride: parentHL.stride)
-                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 8 * 32 + 8), stride: 32, parentPtr: UnsafePointer(parentHL.base.advanced(by: 4 * parentHL.stride + 4)), parentStride: parentHH.stride)
+                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 8 * 32 + 8), stride: 32, parentPtr: UnsafePointer(parentLH.base.advanced(by: 4 * parentLH.stride + 4)), parentStride: parentLH.stride)
+                        try blockDecode8HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 8 * 32 + 8), stride: 32, parentPtr: UnsafePointer(parentHH.base.advanced(by: 4 * parentHH.stride + 4)), parentStride: parentHH.stride)
                     }
                 }
             } else {
@@ -398,7 +398,7 @@ enum DecodeTask16 {
 }
 
 @inline(__always)
-func decodePlaneSubbands16(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws -> [BlockView] {
+func decodePlaneSubbands16(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -442,7 +442,7 @@ func decodePlaneSubbands16(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCo
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         let half = 16 / 2
         for i in 0..<blockCount {
             let task = tasks[i]
@@ -490,7 +490,7 @@ func decodePlaneSubbands16(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCo
 }
 
 @inline(__always)
-func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws -> [BlockView] {
+func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -534,7 +534,7 @@ func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         let half = 16 / 2
         for i in 0..<blockCount {
             let task = tasks[i]
@@ -625,7 +625,7 @@ func decodePlaneSubbands16WithParentBlocks(data: ArraySlice<UInt8>, pool: BlockV
 }
 
 @inline(__always)
-func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
+func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -677,7 +677,7 @@ func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         let half = 16 / 2
         for i in 0..<blockCount {
             let task = tasks[i]
@@ -708,18 +708,18 @@ func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
                     }
                     if tr {
                         try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hlBase.advanced(by: 4), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2)), parentStride: parentHL.stride)
-                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 4), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2)), parentStride: parentHL.stride)
-                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 4), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2)), parentStride: parentHL.stride)
+                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 4), stride: 16, parentPtr: UnsafePointer(parentLH.base.advanced(by: 2)), parentStride: parentLH.stride)
+                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 4), stride: 16, parentPtr: UnsafePointer(parentHH.base.advanced(by: 2)), parentStride: parentHH.stride)
                     }
                     if bl {
                         try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hlBase.advanced(by: 4 * 16), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride)), parentStride: parentHL.stride)
                         try blockDecode4HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 4 * 16), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride)), parentStride: parentHL.stride)
-                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 4 * 16), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride)), parentStride: parentHL.stride)
+                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 4 * 16), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride)), parentStride: parentHH.stride)
                     }
                     if br {
                         try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hlBase.advanced(by: 4 * 16 + 4), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride + 2)), parentStride: parentHL.stride)
-                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 4 * 16 + 4), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride + 2)), parentStride: parentHL.stride)
-                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 4 * 16 + 4), stride: 16, parentPtr: UnsafePointer(parentHL.base.advanced(by: 2 * parentHL.stride + 2)), parentStride: parentHL.stride)
+                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: lhBase.advanced(by: 4 * 16 + 4), stride: 16, parentPtr: UnsafePointer(parentLH.base.advanced(by: 2 * parentHL.stride + 2)), parentStride: parentLH.stride)
+                        try blockDecode4HWithParentBlock(decoder: &decoder, ptr: hhBase.advanced(by: 4 * 16 + 4), stride: 16, parentPtr: UnsafePointer(parentLH.base.advanced(by: 2 * parentHL.stride + 2)), parentStride: parentHH.stride)
                     }
                 }
             } else {
@@ -768,7 +768,7 @@ func decodePlaneSubbands16WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isIFrame: Bool, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false) throws -> [BlockView] {
+func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isIFrame: Bool, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -791,7 +791,7 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         
         let half = 8 / 2
 
@@ -823,7 +823,7 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool) throws -> [BlockView] {
+func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -852,7 +852,7 @@ func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockVie
         let consumed = brFlags.consumedBytes
         guard consumed <= count else { throw DecodeError.insufficientData }
         
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics)
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
         
         let half = 8 / 2
 
