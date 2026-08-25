@@ -48,7 +48,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -93,7 +93,7 @@ public actor VEVCEncoder {
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 3, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = 0

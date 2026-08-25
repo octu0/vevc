@@ -4,7 +4,7 @@ import vevc
 var inputPath = ""
 var outPath = ""
 var bitrate = 500
-var zeroThreshold = 3
+var zeroThreshold = 4
 var keyint = 30
 var sceneThreshold = 500
 var qstep: Int? = nil

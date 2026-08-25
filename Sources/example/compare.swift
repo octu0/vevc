@@ -9,7 +9,7 @@ struct Config {
     var bitrate: Int = 500
     var framerate: Int = 60
     var inFps: Int? = nil
-    var zeroThreshold: Int = 3
+    var zeroThreshold: Int = 4
     var keyint: Int = 30
     var sceneThreshold: Int = 500
     var maxLayer: Int = 2
