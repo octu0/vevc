@@ -306,7 +306,7 @@ $ swift run -c release vevc-enc -i input.y4m -o out.vevc
 - `-gop <frames>`: Sets the LTR refresh interval for Profile 0x02 in frames (default: 12; 0 disables periodic LTR refresh).
 - `-l2-cadence <n>`: Cadence interval for L2 detail residual in Profile 0x02 P-frames (default: 4; `0` disables L2 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
 - `-l1-cadence <n>`: Cadence interval for L1 detail residual in Profile 0x02 P-frames (default: 2; `0` disables L1 residual, `1` encodes every frame, `n >= 2` encodes when `framesSinceKeyframe % n == 0`).
-- `-mvt <px>`: px/フレーム単位の動体マスキング閾値 (既定: 2, 0 で無効)。Chebyshev ノルム ($\max(|dx|, |dy|) \ge \text{effectiveMvtQ}$, $\text{effectiveMvtQ} = \text{motionMaskingPx} \times 4 \times 60 / \text{framerate}$) かつ量子化が深い (`motionMaskingMinQStep <= adjustedStep`, 既定 2048 以上) 場合のみ、L2 の高周波残差を省略してビットレートを削減します (テキスト・ストローク等の高活性テクスチャブロックは保護)。詳細回復は次の cadence リフレッシュ(最大 l2-cadence フレーム、既定 4 = 67ms@60fps)。skip_prev への誤捕捉は recon 検査が防ぐ。
+- `-mvt <px>`: Motion masking threshold in px/frame (default: 2, 0 disables). Drops L2 high-frequency residual to reduce bitrate only when motion exceeds the Chebyshev norm ($\max(|dx|, |dy|) \ge \text{effectiveMvtQ}$, $\text{effectiveMvtQ} = \text{motionMaskingPx} \times 4 \times 60 / \text{framerate}$) and quantization is deep (`motionMaskingMinQStep <= adjustedStep`, default: 2048 or higher), while protecting high-activity texture blocks such as text and strokes. Details recover at the next cadence refresh (at most `l2-cadence` frames, default: 4 = 67ms @ 60fps). Recon validation prevents false capture into `skip_prev`.
 
 ### Decode (`vevc-dec`)
 

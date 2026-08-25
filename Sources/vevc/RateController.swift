@@ -1,4 +1,4 @@
-/// 静止シーンリフレッシュは skip 支配のフレームに限る。inter が多いフレームの cheap+distorted は飽和や cadence 間引きの通常状態であり、静止の証拠ではない(src_1 で I 60.6% に暴発した実測に基づく)。
+/// Restricts static scene refreshes to skip-dominated frames. Cheap+distorted frames with many inter blocks are typical under saturation or cadence thinning rather than evidence of a static scene (based on measurements where src_1 blew up to 60.6% I-frames).
 let staticInterRatioMaxQ8: Int = 26
 
 struct RateController {
@@ -53,7 +53,7 @@ struct RateController {
     private(set) var saturationAnchorStep: Int = 0
     private(set) var driftStreak: Int = 0
     
-    /// 単発の歪みスパイクはノイズや正常な変動であり、2 フレーム連続の持続 + GOP 内位置ガードで暴走時のみ I を強制する(src_1 で drift-I が 5,287 枚 = 61% に暴発した実測に基づく)。本物のシーン変化は入力ベースのカット検出が拾う
+    /// Single distortion spikes are noise or normal fluctuations; requires 2 consecutive frames of sustained distortion plus an in-GOP position guard to force an I-frame only during runaway drift (based on measurements where drift-I blew up to 5,287 frames = 61% on src_1). Real scene changes are caught by the input-based cut detector.
     @inline(__always)
     func isDriftAccelerating(framesSinceKeyframe: Int) -> Bool {
         let limit = min(8, self.keyint / 2)
@@ -304,7 +304,7 @@ struct RateController {
         } else {
             self.driftStreak = 0
         }
-        // TODO: 間引きフレーム(detailThinned == true)による recon 歪みの上昇が avgDistortionQ8 の EMA を汚染する問題への対処を検討
+        // TODO: Consider mitigating the issue where increased recon distortion from thinned frames (detailThinned == true) pollutes the avgDistortionQ8 EMA.
         if self.avgDistortionQ8 == 0 {
             self.avgDistortionQ8 = distortion
         } else {

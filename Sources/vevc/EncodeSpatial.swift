@@ -489,7 +489,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     return (out, reconstructed, mvs, sads, { releaseY(); releaseCb(); releaseCr() }, nextSub2Res, nextSub1Res)
 }
 
-/// 動体マスキング詳細省略は量子化が深い(レート逼迫)フレームに限る。余裕のあるレートでは詳細を維持し、追従視コンテンツの可読性を守る
+/// Restricts motion-masking detail omission to frames with deep quantization (rate pressure). At comfortable bitrates, details are preserved to maintain legibility for pursuit-eye-movement content.
 let motionMaskingMinQStep: Int = 2048
 
 /// P-frame encode, profile 0x02: the profile-1 pipeline plus the skip map

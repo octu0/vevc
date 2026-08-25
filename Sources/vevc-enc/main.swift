@@ -133,7 +133,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>]\n  -mvt <px>: px/フレーム単位。動きの大きいブロックのフル解像度詳細を省略(動体マスキング)。飽和時のみ発動 (既定: 2, 0で無効)\n  -smooth <0|1>: Pフレーム残差プレーン平滑化 (既定: 1, 0で無効)\n  -temporal-layers <1|2>: 時間レイヤ数 (既定: 1, 2でT0/T1)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>]\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n", stderr)
     exit(1)
 }
 

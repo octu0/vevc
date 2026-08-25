@@ -311,7 +311,7 @@ let sceneCutMinorityDenominator = 16
 /// the caller wants scene detection off entirely (e.g. deterministic
 /// tests) — the cut detector honors that too.
 let maxEstimateFastSAD = 765
-/// ノイズ床の 4 倍の跳ねをカットとみなす。実写ノイズは床を持ち上げるので誤反応しない。src_1 で 11 カット/秒の誤反応が出た実測に基づく
+/// Treats a 4x spike above the noise floor as a cut. Live-action noise elevates the floor, avoiding false triggers. Based on empirical measurements where src_1 produced 11 false cuts/sec.
 let sceneCutBaselineRatio = 4
 
 /// Scene-cut detector: one row-major stride-4 pass over the luma planes
