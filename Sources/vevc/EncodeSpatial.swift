@@ -587,17 +587,23 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
 
     let activityMap = await tAq
 
-    if smooth == 1 && motionMaskingMinQStep <= adjustedStep {
-        var tempY = pool.getInt16(count: resY.count)
-        var smoothedY = pool.getInt16(count: resY.count)
-        withUnsafePointers(resY, mut: &smoothedY) { srcPtr, dstPtr in
-            withUnsafePointers(mut: &tempY) { tmpPtr in
-                smoothResidualPlaneContinuous(src: srcPtr, dst: dstPtr, temp: tmpPtr, width: dx, height: dy, activityMap: activityMap, stride: dx)
+    if smooth == 1 {
+        if motionMaskingMinQStep <= adjustedStep {
+            var tempY = pool.getInt16(count: resY.count)
+            var smoothedY = pool.getInt16(count: resY.count)
+            withUnsafePointers(resY, mut: &smoothedY) { srcPtr, dstPtr in
+                withUnsafePointers(mut: &tempY) { tmpPtr in
+                    smoothResidualPlaneContinuous(
+                        src: srcPtr, dst: dstPtr, temp: tmpPtr,
+                        width: dx, height: dy, activityMap: activityMap, stride: dx,
+                        mvs: mvs, skipMap: skipMap, framerate: framerate
+                    )
+                }
             }
+            pool.putInt16(tempY)
+            pool.putInt16(resY)
+            resY = smoothedY
         }
-        pool.putInt16(tempY)
-        pool.putInt16(resY)
-        resY = smoothedY
     }
 
     let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
@@ -678,10 +684,34 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         base8Input = PlaneData420(img16: r0)
     }
 
+    var smoothL0Flags: [Bool]? = nil
+    if smooth == 1 {
+        let effective8PxQ = (8 * 4 * 60) / max(1, framerate)
+        let blockCount = min(skipMap.count, min(activityMap.count, min(mvs.dx.count, mvs.dy.count)))
+        var flags = [Bool](repeating: false, count: blockCount)
+        for i in 0..<blockCount {
+            switch skipMap[i] {
+            case .inter:
+                if activityMap[i] != .textured {
+                    let currDx = abs(Int(mvs.dx[i]))
+                    let currDy = abs(Int(mvs.dy[i]))
+                    let currMvMag = max(currDx, currDy)
+                    if effective8PxQ <= currMvMag {
+                        flags[i] = true
+                    }
+                }
+            default:
+                break
+            }
+        }
+        smoothL0Flags = flags
+    }
+
     var (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBaseBlocks) = await preparePlaneBase8WithSkipMap(
         pd: base8Input, pool: pool, sads: sads,
         qtY: qtY0, qtC: qtC0,
-        skipMap: skipMap, skipMapWidth: skipBw
+        skipMap: skipMap, skipMapWidth: skipBw,
+        smoothFlags: smoothL0Flags
     )
     defer { releaseBaseBlocks() }
 
