@@ -818,6 +818,85 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         }
     }
 
+    // Oracle Experiment: Incoherent Detailed Residual Pruning
+    if let oracleThresh = EncoderTuning.shared.oracleIncoherentTreez {
+        let colCount = (dx + 31) / 32
+        for i in 0..<l2yBlocks.count {
+            if l2ySkip[i] != true {
+                let act = activityMap[i]
+                var forceZero = false
+                switch act {
+                case .incoherentTextured:
+                    forceZero = true
+                case .flat, .normal:
+                    if 1 < oracleThresh {
+                        forceZero = true
+                    }
+                case .textured:
+                    break
+                }
+                if forceZero {
+                    forceZeroSubbands32(data: l2yBlocks[i].base)
+                    forceZeroSubbands16(data: l1yBlocks[i].base)
+                    forceZeroSubbandsBase8(data: base8YBlocks[i].base)
+                    isTreezY[i] = true
+                }
+            }
+        }
+        for i in 0..<l2cbBlocks.count {
+            if l2cSkip[i] != true {
+                let cCol = (cbDx + 31) / 32
+                let cr = i / cCol
+                let cc = i % cCol
+                let lumaIdx = min(activityMap.count - 1, (cr * colCount) + cc)
+                let act = activityMap[lumaIdx]
+                var forceZero = false
+                switch act {
+                case .incoherentTextured:
+                    forceZero = true
+                case .flat, .normal:
+                    if 1 < oracleThresh {
+                        forceZero = true
+                    }
+                case .textured:
+                    break
+                }
+                if forceZero {
+                    forceZeroSubbands32(data: l2cbBlocks[i].base)
+                    forceZeroSubbands16(data: l1cbBlocks[i].base)
+                    forceZeroSubbandsBase8(data: base8CbBlocks[i].base)
+                    isTreezCb[i] = true
+                }
+            }
+        }
+        for i in 0..<l2crBlocks.count {
+            if l2cSkip[i] != true {
+                let cCol = (cbDx + 31) / 32
+                let cr = i / cCol
+                let cc = i % cCol
+                let lumaIdx = min(activityMap.count - 1, (cr * colCount) + cc)
+                let act = activityMap[lumaIdx]
+                var forceZero = false
+                switch act {
+                case .incoherentTextured:
+                    forceZero = true
+                case .flat, .normal:
+                    if 1 < oracleThresh {
+                        forceZero = true
+                    }
+                case .textured:
+                    break
+                }
+                if forceZero {
+                    forceZeroSubbands32(data: l2crBlocks[i].base)
+                    forceZeroSubbands16(data: l1crBlocks[i].base)
+                    forceZeroSubbandsBase8(data: base8CrBlocks[i].base)
+                    isTreezCr[i] = true
+                }
+            }
+        }
+    }
+
     let treeMapBuf = encodeTreeMapProfile2(
         isTreezY: isTreezY, ySkip: l2ySkip,
         isTreezCb: isTreezCb, cbSkip: l2cSkip,

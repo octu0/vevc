@@ -376,10 +376,16 @@ func classifyBlockActivity(
                             let coherence = withUnsafePointers(src) { ptr in
                                 computeBlockCoherence(source: ptr, stride: width, width: width, height: height, bx: bx, by: by, bw: blockW, bh: blockH)
                             }
-                            if coherence < 0.85 {
+                            var thresh = 0.85
+                            if let custom = EncoderTuning.shared.oracleIncoherentTreez {
+                                if 1 < custom && custom <= 100 {
+                                    thresh = Double(custom) / 100.0
+                                }
+                            }
+                            if coherence < thresh {
                                 classes[i] = .incoherentTextured
                             }
-                            if 0.85 <= coherence {
+                            if thresh <= coherence {
                                 classes[i] = .textured
                             }
                         }

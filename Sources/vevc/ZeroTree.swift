@@ -18,6 +18,51 @@ import Foundation
 
 // MARK: - Zero Detection & Pruning Functions
 
+/// Unconditionally zeroes all high-frequency subbands in a 32x32 block (HL, LH, HH).
+@inline(__always)
+func forceZeroSubbands32(data base: UnsafeMutablePointer<Int16>) {
+    let lowerHalfBase = base + 16 * 32
+    let zeroVec = SIMD16<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 512, by: 16) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD16<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<16 {
+        let ptr = UnsafeMutableRawPointer(base + y * 32 + 16).assumingMemoryBound(to: SIMD16<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+}
+
+/// Unconditionally zeroes all high-frequency subbands in a 16x16 block (HL, LH, HH).
+@inline(__always)
+func forceZeroSubbands16(data base: UnsafeMutablePointer<Int16>) {
+    let lowerHalfBase = base + 8 * 16
+    let zeroVec = SIMD8<Int16>(repeating: 0)
+    for i in stride(from: 0, to: 128, by: 8) {
+        let ptr = UnsafeMutableRawPointer(lowerHalfBase + i).assumingMemoryBound(to: SIMD8<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+    for y in 0..<8 {
+        let ptr = UnsafeMutableRawPointer(base + y * 16 + 8).assumingMemoryBound(to: SIMD8<Int16>.self)
+        ptr.pointee = zeroVec
+    }
+}
+
+/// Unconditionally zeroes all high-frequency subbands in an 8x8 base block (HL, LH, HH).
+@inline(__always)
+func forceZeroSubbandsBase8(data base: UnsafeMutablePointer<Int16>) {
+    let zeroVec4 = SIMD4<Int16>(repeating: 0)
+    let zeroVec8 = SIMD8<Int16>(repeating: 0)
+    for y in 0..<4 {
+        let ptr = UnsafeMutableRawPointer(base.advanced(by: y * 8 + 4)).assumingMemoryBound(to: SIMD4<Int16>.self)
+        ptr.pointee = zeroVec4
+    }
+    for y in 4..<8 {
+        let ptr = UnsafeMutableRawPointer(base.advanced(by: y * 8)).assumingMemoryBound(to: SIMD8<Int16>.self)
+        ptr.pointee = zeroVec8
+    }
+}
+
 /// Checks if high-frequency subbands in a 32x32 block (HL, LH, HH) are effectively zero
 /// within the specified threshold. If zero, clears all subband high-frequency regions.
 @inline(__always)

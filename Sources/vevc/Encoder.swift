@@ -1047,6 +1047,10 @@ public struct EncoderTuning: @unchecked Sendable {
     public let aqFlatVarianceMax: Int
     public let aqTexturedVarianceMin: Int
     public let aqBiasDeltaQ16: Int
+    /// VEVC_ORACLE_INCOHERENT_TREEZ: Oracle experiment knob.
+    /// When set to 1 (or threshold 1..100 for coherence * 100, e.g. 85 for C < 0.85),
+    /// forces all incoherent textured blocks to become zero-trees (treeMap 1bit).
+    public let oracleIncoherentTreez: Int?
 
     public init(
         l0LumaThresholdPFrame: Int = 4,
@@ -1065,6 +1069,7 @@ public struct EncoderTuning: @unchecked Sendable {
         self.aqFlatVarianceMax = Self.envInt(key: "VEVC_AQ_FLAT", defaultValue: aqFlatVarianceMaxDefault)
         self.aqTexturedVarianceMin = Self.envInt(key: "VEVC_AQ_TEX", defaultValue: aqTexturedVarianceMinDefault)
         self.aqBiasDeltaQ16 = Self.envInt(key: "VEVC_AQ_BIAS", defaultValue: aqBiasDeltaQ16Default)
+        self.oracleIncoherentTreez = Self.envIntOptional(key: "VEVC_ORACLE_INCOHERENT_TREEZ")
     }
 
     @inline(__always)
