@@ -687,6 +687,27 @@ internal func readVLQSizeFromBytes(_ r: [UInt8], offset: inout Int) throws -> In
 }
 
 @inline(__always)
+internal func readVLQSizeFromBytes(_ r: ArraySlice<UInt8>, offset: inout Int) throws -> Int {
+    var val = 0
+    var bytesRead = 0
+    while true {
+        guard offset < r.endIndex else { throw DecodeError.insufficientData }
+        let b = r[offset]
+        offset += 1
+        
+        val = (val << 7) | Int(b & 0x7F)
+        bytesRead += 1
+        if (b & 0x80) == 0 {
+            break
+        }
+        if 5 < bytesRead {
+            throw DecodeError.invalidBlockData
+        }
+    }
+    return val
+}
+
+@inline(__always)
 internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     var bitmap: UInt64 = 0
     for i in 0..<64 {
@@ -1047,9 +1068,9 @@ private func shannonBits(counts: [UInt32], model: rANSModel) -> Double {
     for f in model.tokenFreqs { total += Int(f) }
     if total == 0 { return .infinity }
     var bits = 0.0
-    for t in 0..<64 where counts[t] > 0 {
+    for t in 0..<64 where 0 < counts[t] {
         let p = Double(Int(model.tokenFreqs[t])) / Double(total)
-        if p > 0 { bits -= Double(counts[t]) * log2(p) }
+        if 0 < p { bits -= Double(counts[t]) * log2(p) }
     }
     return bits
 }
@@ -1283,8 +1304,9 @@ func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, p
 }
 
 @inline(__always)
-private func decodeMVsProfile1(data: [UInt8], count: Int) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
+private func decodeMVsProfile1(data: ArraySlice<UInt8>, count: Int) throws -> MotionVectors {
+    return try data.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { throw DecodeError.insufficientData }
         var offset = 0
         let bufCount = data.count
         
@@ -1333,8 +1355,9 @@ private func decodeMVsProfile1(data: [UInt8], count: Int) throws -> MotionVector
 }
 
 @inline(__always)
-private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
+private func decodeMVsRaw(data: ArraySlice<UInt8>, count: Int, skipMap: [BlockMode]?, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
+    return try data.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { throw DecodeError.insufficientData }
         var offset = 1
         let bufCount = data.count
         
@@ -1361,15 +1384,13 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
         guard offset <= bufCount else { throw DecodeError.insufficientData }
         var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
         
-        var mvsDx = [Int16]()
-        var mvsDy = [Int16]()
-        mvsDx.reserveCapacity(count)
-        mvsDy.reserveCapacity(count)
+        var mvsDx = [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+        var mvsDy = [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
         
         for i in 0..<count {
             if let sm = skipMap, sm[i] != .inter {
-                mvsDx.append(0)
-                mvsDy.append(0)
+                mvsDx[i] = 0
+                mvsDy[i] = 0
                 continue
             }
             
@@ -1391,8 +1412,8 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
             
             dxCnts[Int(tx.token)] += 1
             dyCnts[Int(ty.token)] += 1
-            mvsDx.append(dx)
-            mvsDy.append(dy)
+            mvsDx[i] = dx
+            mvsDy[i] = dy
         }
         
         if updateHistory, let h = history, 0 < count {
@@ -1403,8 +1424,9 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
 }
 
 @inline(__always)
-private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
+private func decodeMVsSpatialPred(data: ArraySlice<UInt8>, count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
+    return try data.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { throw DecodeError.insufficientData }
         var offset = 1
         var dxCnts = [Int](repeating: 0, count: 64)
         var dyCnts = [Int](repeating: 0, count: 64)
@@ -1431,15 +1453,13 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
         guard offset <= bufCount else { throw DecodeError.insufficientData }
         var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
         
-        var mvsDx = [Int16]()
-        var mvsDy = [Int16]()
-        mvsDx.reserveCapacity(count)
-        mvsDy.reserveCapacity(count)
+        var mvsDx = [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+        var mvsDy = [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
         
         for i in 0..<count {
             if let sm = skipMap, sm[i] != .inter {
-                mvsDx.append(0)
-                mvsDy.append(0)
+                mvsDx[i] = 0
+                mvsDy[i] = 0
                 continue
             }
             
@@ -1487,8 +1507,8 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
 
             dxCnts[Int(tx.token)] += 1
             dyCnts[Int(ty.token)] += 1
-            mvsDx.append(recDx)
-            mvsDy.append(recDy)
+            mvsDx[i] = recDx
+            mvsDy[i] = recDy
         }
         
         if updateHistory, let h = history, 0 < count {
@@ -1498,8 +1518,9 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
     }
 }
 
-private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
+private func decodeMVsTemporalPred(data: ArraySlice<UInt8>, count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
+    return try data.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress else { throw DecodeError.insufficientData }
         var offset = 1
         var dxCnts = [Int](repeating: 0, count: 64)
         var dyCnts = [Int](repeating: 0, count: 64)
@@ -1526,15 +1547,13 @@ private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMod
         guard offset <= bufCount else { throw DecodeError.insufficientData }
         var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
         
-        var mvsDx = [Int16]()
-        var mvsDy = [Int16]()
-        mvsDx.reserveCapacity(count)
-        mvsDy.reserveCapacity(count)
+        var mvsDx = [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+        var mvsDy = [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
         
         for i in 0..<count {
             if let sm = skipMap, sm[i] != .inter {
-                mvsDx.append(0)
-                mvsDy.append(0)
+                mvsDx[i] = 0
+                mvsDy[i] = 0
                 continue
             }
             // Co-located predictor from the previous coded frame's MV array.
@@ -1559,8 +1578,8 @@ private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMod
             
             dxCnts[Int(tx.token)] += 1
             dyCnts[Int(ty.token)] += 1
-            mvsDx.append(Int16(predDx + Int(resDx)))
-            mvsDy.append(Int16(predDy + Int(resDy)))
+            mvsDx[i] = Int16(predDx + Int(resDx))
+            mvsDy[i] = Int16(predDy + Int(resDy))
         }
         
         if updateHistory, let h = history, 0 < count {
@@ -1571,12 +1590,12 @@ private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMod
 }
 
 @inline(__always)
-func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) throws -> MotionVectors {
+func decodeMVs(data: ArraySlice<UInt8>, count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) throws -> MotionVectors {
     if profile == 0x01 {
         return try decodeMVsProfile1(data: data, count: count)
     }
     guard 0 < data.count else { throw DecodeError.insufficientData }
-    let modeFlag = data[0]
+    let modeFlag = data[data.startIndex]
     let useHist = (modeFlag & 0x80) != 0
     switch modeFlag & 0x7F {
     case 0:
@@ -1589,6 +1608,11 @@ func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int
     default:
         throw DecodeError.invalidBlockData
     }
+}
+
+@inline(__always)
+func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) throws -> MotionVectors {
+    return try decodeMVs(data: data[...], count: count, skipMap: skipMap, cols: cols, profile: profile, prevMVs: prevMVs, history: history, updateHistory: updateHistory)
 }
 
 @inline(__always)
@@ -1778,17 +1802,89 @@ private func decodeSkipMapRansRLE(data: [UInt8], count: Int) throws -> [BlockMod
 }
 
 @inline(__always)
-public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
-    guard 0 < data.count else { throw DecodeError.insufficientData }
-    let modeFlag = data[0]
-    switch modeFlag {
-    case 0:
-        return try decodeSkipMapRawRLE(data: data, count: count)
-    case 1:
-        return try decodeSkipMapRansRLE(data: data, count: count)
-    default:
-        throw DecodeError.invalidBlockData
+public func decodeSkipMap(data: ArraySlice<UInt8>, count: Int) throws -> [BlockMode] {
+    return try data.withUnsafeBufferPointer { buf in
+        guard let base = buf.baseAddress, 0 < buf.count else { throw DecodeError.insufficientData }
+        let modeFlag = base[0]
+        let bufCount = buf.count
+        switch modeFlag {
+        case 0:
+            var offset = 1
+            let runCount = try readVLQSize(base, at: &offset, count: bufCount)
+            let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
+            guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
+
+            var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
+            var map = [BlockMode]()
+            map.reserveCapacity(count)
+
+            for _ in 0..<runCount {
+                let valBits = bypassReader.readBits(count: 2)
+                guard let mode = BlockMode(rawValue: UInt8(valBits)) else { throw DecodeError.invalidBlockData }
+                let token = bypassReader.readBits(count: 6)
+                let bypassLen = valueBypassLengthUnsigned(for: UInt8(token))
+                let bypassBits = bypassReader.readBits(count: bypassLen)
+                let run = valueDetokenizeUnsigned(token: UInt8(token), bypassBits: bypassBits)
+
+                for _ in 0..<run {
+                    map.append(mode)
+                }
+            }
+
+            guard map.count == count else { throw DecodeError.invalidBlockData }
+            return map
+        case 1:
+            var offset = 1
+            let runCount = try readVLQSize(base, at: &offset, count: bufCount)
+
+            let freqsVal = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            let modelVal = rANSModel(tokenFreqs: freqsVal)
+
+            let freqsCount = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
+            let modelCount = rANSModel(tokenFreqs: freqsCount)
+
+            let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
+            guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
+            var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
+            offset += bpLen
+
+            guard offset <= bufCount else { throw DecodeError.insufficientData }
+            var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
+
+            var map = [BlockMode]()
+            map.reserveCapacity(count)
+
+            for _ in 0..<runCount {
+                let tvCf = dec.getCumulativeFreq()
+                let tv = modelVal.findToken(cf: tvCf)
+                dec.advanceSymbol(cumFreq: tv.cumFreq, freq: tv.freq)
+
+                let tcCf = dec.getCumulativeFreq()
+                let tc = modelCount.findToken(cf: tcCf)
+                dec.advanceSymbol(cumFreq: tc.cumFreq, freq: tc.freq)
+
+                guard let mode = BlockMode(rawValue: tv.token) else { throw DecodeError.invalidBlockData }
+
+                let countBp = valueBypassLengthUnsigned(for: tc.token)
+                let countBv = bypassReader.readBits(count: countBp)
+                let run = valueDetokenizeUnsigned(token: tc.token, bypassBits: countBv)
+
+                for _ in 0..<run {
+                    map.append(mode)
+                }
+            }
+
+            guard map.count == count else { throw DecodeError.invalidBlockData }
+            return map
+        default:
+            throw DecodeError.invalidBlockData
+        }
     }
+}
+
+@inline(__always)
+public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
+    return try decodeSkipMap(data: data[...], count: count)
 }
 
 // MARK: - Parent-free entropy contexts (Profile 0x02, One-Pyramid §6)

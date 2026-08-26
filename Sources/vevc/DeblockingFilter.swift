@@ -341,20 +341,21 @@ func applyDeblockingFilter16(plane: inout [Int16], width: Int, height: Int, qSte
 /// In-place applies deblocking filter to the reconstructed image with a customizable block size boundary.
 @inline(__always)
 func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep: Int, blockSize: Int) {
+    let rawTc = (qStep / 2) + 3
+    let tc: Int16 = switch true {
+        case qStep <= 3: 0
+        case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+        default: Int16(min(15, rawTc))
+    }
+    let rawBeta = qStep + 6
+    let beta: Int32 = switch true {
+        case qStep <= 3: 0
+        case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+        default: Int32(min(50, rawBeta))
+    }
+    if tc == 0 && beta == 0 { return }
+    
     withUnsafePointers(mut: &plane) { base in
-        let rawTc = (qStep / 2) + 3
-        let tc: Int16 = switch true {
-            case qStep <= 3: 0
-            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
-            default: Int16(min(15, rawTc))
-        }
-        let rawBeta = qStep + 6
-        let beta: Int32 = switch true {
-            case qStep <= 3: 0
-            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
-            default: Int32(min(50, rawBeta))
-        }
-        
         // Vertical Edges
         for x in stride(from: blockSize, to: width, by: blockSize) {
             if 2 <= x && x + 1 < width {
@@ -373,7 +374,10 @@ func applyDeblockingFilterN(plane: inout [Int16], width: Int, height: Int, qStep
 
 @inline(__always)
 private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width: Int, x: Int, y: Int, count: Int, tc: Int16, beta: Int32) {
+    if tc == 0 && beta == 0 { return }
     let betah = beta >> 1
+    let t = Int32(tc)
+    let negT = -t
     var offset = y * width + x
     for _ in 0..<count {
         let p1 = base[offset - 2]
@@ -382,17 +386,31 @@ private func deblockFilterVerticalEdge(base: UnsafeMutablePointer<Int16>, width:
         let q1 = base[offset + 1]
         
         let delta = Int32(q0) - Int32(p0)
-        let absDelta = if delta < 0 { -delta } else { delta }
+        let absDelta: Int32
+        if delta < 0 {
+            absDelta = 0 - delta
+        } else {
+            absDelta = delta
+        }
         if absDelta < beta {
             let deltaP = Int32(p1) - Int32(p0)
             let deltaQ = Int32(q1) - Int32(q0)
-            let absP = if deltaP < 0 { -deltaP } else { deltaP }
-            let absQ = if deltaQ < 0 { -deltaQ } else { deltaQ }
+            let absP: Int32
+            if deltaP < 0 {
+                absP = 0 - deltaP
+            } else {
+                absP = deltaP
+            }
+            let absQ: Int32
+            if deltaQ < 0 {
+                absQ = 0 - deltaQ
+            } else {
+                absQ = deltaQ
+            }
             if absP < betah && absQ < betah {
                 var d = (delta + 1) >> 1
-                let t = Int32(tc)
                 if t < d { d = t }
-                if d < (-1 * t) { d = (-1 * t) }
+                if d < negT { d = negT }
                 
                 let d16 = Int16(d)
                 p0 = p0 &+ d16

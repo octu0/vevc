@@ -341,7 +341,7 @@ func encodeTreeMapProfile2(
 
 /// Unpacks zero-tree boolean flags for non-skip blocks of a single plane from the frame header buffer.
 @inline(__always)
-func unpackPlaneTreeMap(buf: [UInt8], offset: inout Int, count: Int, isSkip: [Bool]?) -> [Bool] {
+func unpackPlaneTreeMap(buf: ArraySlice<UInt8>, offset: inout Int, count: Int, isSkip: [Bool]?) -> [Bool] {
     var isTreez = [Bool](repeating: false, count: count)
     guard let isSkip = isSkip else {
         return isTreez
@@ -358,12 +358,13 @@ func unpackPlaneTreeMap(buf: [UInt8], offset: inout Int, count: Int, isSkip: [Bo
     let byteCount = (interCount + 7) / 8
     let endOffset = offset + byteCount
     var bitIndex = 0
+    let startIdx = buf.startIndex
     for i in 0..<count {
         if isSkip[i] != true {
             let byteIdx = offset + (bitIndex / 8)
             let bitIdx = bitIndex % 8
             if byteIdx < buf.count {
-                if (buf[byteIdx] & UInt8(1 << bitIdx)) != 0 {
+                if (buf[startIdx + byteIdx] & UInt8(1 << bitIdx)) != 0 {
                     isTreez[i] = true
                 }
             }
@@ -374,10 +375,15 @@ func unpackPlaneTreeMap(buf: [UInt8], offset: inout Int, count: Int, isSkip: [Bo
     return isTreez
 }
 
+@inline(__always)
+func unpackPlaneTreeMap(buf: [UInt8], offset: inout Int, count: Int, isSkip: [Bool]?) -> [Bool] {
+    return unpackPlaneTreeMap(buf: buf[...], offset: &offset, count: count, isSkip: isSkip)
+}
+
 /// Decodes treeMap data for Y, Cb, and Cr planes from the frame header buffer for Profile 0x02.
 @inline(__always)
 func decodeTreeMapProfile2(
-    buf: [UInt8],
+    buf: ArraySlice<UInt8>,
     yCount: Int, ySkip: [Bool]?,
     cbCount: Int, cbSkip: [Bool]?,
     crCount: Int, crSkip: [Bool]?
@@ -387,4 +393,14 @@ func decodeTreeMapProfile2(
     let tzCb = unpackPlaneTreeMap(buf: buf, offset: &offset, count: cbCount, isSkip: cbSkip)
     let tzCr = unpackPlaneTreeMap(buf: buf, offset: &offset, count: crCount, isSkip: crSkip)
     return (tzY, tzCb, tzCr)
+}
+
+@inline(__always)
+func decodeTreeMapProfile2(
+    buf: [UInt8],
+    yCount: Int, ySkip: [Bool]?,
+    cbCount: Int, cbSkip: [Bool]?,
+    crCount: Int, crSkip: [Bool]?
+) -> (isTreezY: [Bool], isTreezCb: [Bool], isTreezCr: [Bool]) {
+    return decodeTreeMapProfile2(buf: buf[...], yCount: yCount, ySkip: ySkip, cbCount: cbCount, cbSkip: cbSkip, crCount: crCount, crSkip: crSkip)
 }

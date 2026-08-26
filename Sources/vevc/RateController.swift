@@ -74,7 +74,7 @@ struct RateController {
     @inline(__always)
     private mutating func updateSaturationState() {
         if self.isQualitySaturated {
-            if (self.targetDistortionQ8 * 5) / 4 < self.avgDistortionQ8 {
+            if (self.targetDistortionQ8 * 5) / 4 < self.avgDistortionQ8 || self.pPaceRatioQ8 < 230 {
                 self.isQualitySaturated = false
                 self.saturationAnchorStep = 0
             }
@@ -315,6 +315,15 @@ struct RateController {
             self.avgPFrameBits = bits
         } else {
             self.avgPFrameBits = ((self.avgPFrameBits * 4) + bits) / 5
+        }
+
+        if 0 < self.pPlanFrames {
+            let plannedP = max(1, (self.pPlanBits * self.gopRemainingFrames) / self.pPlanFrames)
+            if self.gopRemainingBits < 0 {
+                self.pPaceRatioQ8 = 0
+            } else {
+                self.pPaceRatioQ8 = max(0, min(1024, (self.gopRemainingBits << 8) / plannedP))
+            }
         }
         
         updateSaturationState()

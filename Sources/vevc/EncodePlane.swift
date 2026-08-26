@@ -116,24 +116,54 @@ func evaluateQuantizeBase8(view: BlockView, qt: QuantizationTable) {
 /// 1:1 to one entry.
 @inline(__always)
 func lumaSkipFlags(skipMap: [BlockMode], mapWidth: Int, rowCount: Int, colCount: Int) -> [Bool] {
-    var flags = [Bool](repeating: false, count: rowCount * colCount)
-    for i in 0..<rowCount {
-        for j in 0..<colCount {
-            flags[i * colCount + j] = isBlockAllSkip(skipMap: skipMap, mapWidth: mapWidth, lxStart: j, lyStart: i, countX: 1, countY: 1)
+    let count = rowCount * colCount
+    var flags = [Bool](unsafeUninitializedCapacity: count) { _, initializedCount in
+        initializedCount = count
+    }
+    skipMap.withUnsafeBufferPointer { sBuf in
+        flags.withUnsafeMutableBufferPointer { dBuf in
+            let sPtr = sBuf.baseAddress!
+            let dPtr = dBuf.baseAddress!
+            let n = min(count, sBuf.count)
+            for i in 0..<n {
+                dPtr[i] = (sPtr[i] != .inter)
+            }
+            if n < count {
+                for i in n..<count {
+                    dPtr[i] = false
+                }
+            }
         }
     }
     return flags
 }
 
-/// Per-block skip flags for a layer's chroma extract: a chroma block on the
-/// half-resolution plane spans 2×2 skip-map entries — all four must be
-/// non-inter for the block to be skippable.
 @inline(__always)
 func chromaSkipFlags(skipMap: [BlockMode], mapWidth: Int, rowCount: Int, colCount: Int) -> [Bool] {
-    var flags = [Bool](repeating: false, count: rowCount * colCount)
-    for i in 0..<rowCount {
-        for j in 0..<colCount {
-            flags[i * colCount + j] = isBlockAllSkip(skipMap: skipMap, mapWidth: mapWidth, lxStart: j * 2, lyStart: i * 2, countX: 2, countY: 2)
+    let count = rowCount * colCount
+    var flags = [Bool](unsafeUninitializedCapacity: count) { _, initializedCount in
+        initializedCount = count
+    }
+    let bh = (skipMap.count + mapWidth - 1) / mapWidth
+    skipMap.withUnsafeBufferPointer { sBuf in
+        flags.withUnsafeMutableBufferPointer { dBuf in
+            let sPtr = sBuf.baseAddress!
+            let dPtr = dBuf.baseAddress!
+            var idx = 0
+            for i in 0..<rowCount {
+                let ly0 = min(i * 2, bh - 1) * mapWidth
+                let ly1 = min(i * 2 + 1, bh - 1) * mapWidth
+                for j in 0..<colCount {
+                    let lx0 = min(j * 2, mapWidth - 1)
+                    let lx1 = min(j * 2 + 1, mapWidth - 1)
+                    let s00 = (sPtr[ly0 + lx0] != .inter)
+                    let s01 = (sPtr[ly0 + lx1] != .inter)
+                    let s10 = (sPtr[ly1 + lx0] != .inter)
+                    let s11 = (sPtr[ly1 + lx1] != .inter)
+                    dPtr[idx] = (s00 && s01 && s10 && s11)
+                    idx &+= 1
+                }
+            }
         }
     }
     return flags

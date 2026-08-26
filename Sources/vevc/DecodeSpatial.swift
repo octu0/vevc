@@ -341,7 +341,7 @@ private struct Profile2Prelude {
     let isTreezY: [Bool]?
     let isTreezCb: [Bool]?
     let isTreezCr: [Bool]?
-    let layer0Data: [UInt8]
+    let layer0Data: ArraySlice<UInt8>
     /// Byte offset of the layer1 payload within the frame chunk.
     let layer1Offset: Int
 }
@@ -374,7 +374,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
     var skipMap: [BlockMode]? = nil
     if frameHeader.isIFrame != true && 0 < frameHeader.skipMapSize {
         guard (offset + frameHeader.skipMapSize) <= r.count else { throw DecodeError.insufficientData }
-        let smData = Array(r[offset..<(offset + frameHeader.skipMapSize)])
+        let smData = r[offset..<(offset + frameHeader.skipMapSize)]
         skipMap = try decodeSkipMap(data: smData, count: mvsCount)
         offset += frameHeader.skipMapSize
     }
@@ -382,12 +382,13 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
     if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
         guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
         let prev = mvState?.previous
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prev, history: mvState?.payloadHistory, updateHistory: updateHistory)
+        mvs = try decodeMVs(data: r[offset..<(offset + frameHeader.mvsSize)], count: mvsCount, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prev, history: mvState?.payloadHistory, updateHistory: updateHistory)
         offset += frameHeader.mvsSize
         if updateHistory {
             mvState?.previous = mvs
         }
-    } else if frameHeader.isIFrame == true {
+    }
+    if frameHeader.isIFrame {
         // GOP boundary: the temporal MV predictor and the payload history
         // reset with the keyframe.
         mvState?.resetForKeyframe()
@@ -396,7 +397,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
     if frameHeader.hasRefDir {
         let refDirByteCount = frameHeader.refDirSize
         guard (offset + refDirByteCount) <= r.count else { throw DecodeError.insufficientData }
-        let refDirBuf = Array(r[offset..<(offset + refDirByteCount)])
+        let refDirBuf = r[offset..<(offset + refDirByteCount)]
         offset += refDirByteCount
 
         if nextPd != nil {
@@ -409,7 +410,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
     var isTreezCr: [Bool]? = nil
     if frameHeader.isIFrame != true && 0 < frameHeader.treeMapSize {
         guard (offset + frameHeader.treeMapSize) <= r.count else { throw DecodeError.insufficientData }
-        let treeMapBuf = Array(r[offset..<(offset + frameHeader.treeMapSize)])
+        let treeMapBuf = r[offset..<(offset + frameHeader.treeMapSize)]
         offset += frameHeader.treeMapSize
 
         if let sm = skipMap {
@@ -431,7 +432,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
     }
 
     guard (offset + frameHeader.layer0Size) <= r.count else { throw DecodeError.insufficientData }
-    let layer0Data = Array(r[offset..<(offset + frameHeader.layer0Size)])
+    let layer0Data = r[offset..<(offset + frameHeader.layer0Size)]
     offset += frameHeader.layer0Size
 
     return Profile2Prelude(frameHeader: frameHeader, skipMap: skipMap, mvs: mvs, refDirs: refDirs, isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr, layer0Data: layer0Data, layer1Offset: offset)
@@ -442,10 +443,10 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 /// coefficients are all zero by construction, One-Pyramid §5), then the
 /// block views return to the pool.
 @inline(__always)
-private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int, yBlocks: [BlockView], cbBlocks: [BlockView], crBlocks: [BlockView], qtY0: QuantizationTable, qtC0: QuantizationTable, skipMap: [BlockMode]?, fullDx: Int, fullDy: Int) async -> Image16 {
+private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int, yBlocks: [BlockView], cbBlocks: [BlockView], crBlocks: [BlockView], qtY0: QuantizationTable, qtC0: QuantizationTable, skipMap: [BlockMode]?, fullDx: Int, fullDy: Int) -> Image16 {
     let l0cbDx = (l0dx + 1) / 2
     let l0cbDy = (l0dy + 1) / 2
-    var baseImg = Image16(width: l0dx, height: l0dy, pool: pool, zeroed: false)
+    var baseImg = Image16(width: l0dx, height: l0dy, pool: pool, zeroed: (skipMap != nil))
     let rc0Y = (l0dy + 7) / 8
     let cc0Y = (l0dx + 7) / 8
     let rc0C = (l0cbDy + 7) / 8
@@ -453,13 +454,13 @@ private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int,
     if let sMap = skipMap {
         let bw = (fullDx + 31) / 32
         let bh = (fullDy + 31) / 32
-        await decodeBase8ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: yBlocks, qt: qtY0, skipMap: sMap, sub: &baseImg)
-        await decodeBase8ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: cbBlocks, qt: qtC0, skipMap: sMap, skipBw: bw, skipBh: bh, sub: &baseImg)
-        await decodeBase8ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: crBlocks, qt: qtC0, skipMap: sMap, skipBw: bw, skipBh: bh, sub: &baseImg)
+        decodeBase8ProcessYWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: yBlocks, qt: qtY0, skipMap: sMap, sub: &baseImg)
+        decodeBase8ProcessCbWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: cbBlocks, qt: qtC0, skipMap: sMap, skipBw: bw, skipBh: bh, sub: &baseImg)
+        decodeBase8ProcessCrWithSkipMap(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: crBlocks, qt: qtC0, skipMap: sMap, skipBw: bw, skipBh: bh, sub: &baseImg)
     } else {
-        await decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: yBlocks, qt: qtY0, sub: &baseImg)
-        await decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: cbBlocks, qt: qtC0, sub: &baseImg)
-        await decodeBase8ProcessCr(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: crBlocks, qt: qtC0, sub: &baseImg)
+        decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rc0Y, rowCount: rc0Y, dx: l0dx, colCount: cc0Y, blocks: yBlocks, qt: qtY0, sub: &baseImg)
+        decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: cbBlocks, qt: qtC0, sub: &baseImg)
+        decodeBase8ProcessCr(pool: pool, taskIdx: 0, chunkSize: rc0C, rowCount: rc0C, dx: l0cbDx, colCount: cc0C, blocks: crBlocks, qt: qtC0, sub: &baseImg)
     }
     pool.putBlockViewArray64(yBlocks)
     pool.putBlockViewArray64(cbBlocks)
@@ -756,6 +757,11 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         applyDeblockingFilter16(plane: &l2Img.cb, width: l2cbDx, height: l2cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
         applyDeblockingFilter16(plane: &l2Img.cr, width: l2cbDx, height: l2cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
     }
+
+    let skipMaskBytes = skipMap?.map { $0.rawValue }
+    applySNNNeuralLoopFilter(plane: &l2Img.y, width: l2dx, height: l2dy, planeType: .y, skipMask: skipMaskBytes)
+    applySNNNeuralLoopFilter(plane: &l2Img.cb, width: l2cbDx, height: l2cbDy, planeType: .cb, skipMask: skipMaskBytes)
+    applySNNNeuralLoopFilter(plane: &l2Img.cr, width: l2cbDx, height: l2cbDy, planeType: .cr, skipMask: skipMaskBytes)
 
     current = l2Img
 
@@ -1076,7 +1082,7 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
 /// decode side (deq(r0) + MC_L0), so it needs no separate L0RefState and
 /// never reads the upper-layer payloads.
 @inline(__always)
-func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true) async throws -> Image16 {
+func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true) throws -> Image16 {
     let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd, mvState: mvState, updateHistory: updateL0Prev)
 
     let l1dx = (dx + 1) / 2
@@ -1109,113 +1115,35 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
         }
     }
 
-    var blocksBySlot = [[BlockView]?](repeating: nil, count: 3)
+    let (bY, bCb, bCr): ([BlockView], [BlockView], [BlockView])
     let h0 = histories?.streams[0]
-    if parallelEntropy {
-        try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
-            if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, isTreez: isTreezY, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, isTreez: isTreezCb, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, isTreez: isTreezCr, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-            } else {
-                group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (2, try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-            }
-            for try await (slot, blocks) in group {
-                blocksBySlot[slot] = blocks
-            }
-        }
+    if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
+        bY = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, isTreez: isTreezY, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
+        bCb = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, isTreez: isTreezCb, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
+        bCr = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, isTreez: isTreezCr, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
     } else {
-        if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, isSkip: ySkip0, isTreez: isTreezY, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, isSkip: cSkip0, isTreez: isTreezCb, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, isSkip: cSkip0, isTreez: isTreezCr, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
-        } else {
-            blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[2] = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
-        }
+        bY = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
+        bCb = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
+        bCr = try decodePlaneBaseSubbands8(data: b0Cr, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
     }
 
     // --- Stage 2: layer 0 reconstruction -------------------------------------
-    var current = await reconstructProfile2Base8(pool: pool, l0dx: l0dx, l0dy: l0dy, yBlocks: blocksBySlot[0]!, cbBlocks: blocksBySlot[1]!, crBlocks: blocksBySlot[2]!, qtY0: qtY0, qtC0: qtC0, skipMap: skipMap, fullDx: dx, fullDy: dy)
+    var current = reconstructProfile2Base8(pool: pool, l0dx: l0dx, l0dy: l0dy, yBlocks: bY, cbBlocks: bCb, crBlocks: bCr, qtY0: qtY0, qtC0: qtC0, skipMap: skipMap, fullDx: dx, fullDy: dy)
+    pool.putBlockViewArray64(bY)
+    pool.putBlockViewArray64(bCb)
+    pool.putBlockViewArray64(bCr)
     let qtYStep = Int(qtY0.step)
     let qtCStep = Int(qtC0.step)
 
-    // --- Stage 4: MC at layer0 resolution + clamp + deblock ------------------
+    // --- Stage 4: MC at layer0 resolution + clamp + deblock + skip copy -----
     if let tMVs = mvs, let tPrev = predictedPd {
-        let cbDx0 = (l0dx + 1) / 2
-        let cbDy0 = (l0dy + 1) / 2
-        if let tNext = nextPd, let dirs = refDirs {
-            await applyScaledBidirectionalMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-            await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-            await applyScaledBidirectionalMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: tMVs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-        } else {
-            await applyScaledMotionCompensationLuma(plane: &current.y, prevPlane: tPrev.y, mvs: tMVs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-            await applyScaledMotionCompensationChroma(plane: &current.cb, prevPlane: tPrev.cb, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-            await applyScaledMotionCompensationChroma(plane: &current.cr, prevPlane: tPrev.cr, mvs: tMVs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-        }
+        applyL0MotionCompensation(img: &current, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
         if let map = skipMap {
             applyPredictionOffsetsL0(img: &current, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
         }
-
-        clampPlane(plane: &current.y)
-        clampPlane(plane: &current.cb)
-        clampPlane(plane: &current.cr)
-
-        applyDeblockingFilterN(plane: &current.y, width: l0dx, height: l0dy, qStep: qtYStep, blockSize: 8)
-        let cStep = min(qtCStep * 2, 255)
-        applyDeblockingFilterN(plane: &current.cb, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
-        applyDeblockingFilterN(plane: &current.cr, width: cbDx0, height: cbDy0, qStep: cStep, blockSize: 4)
-    }
-
-    // --- Stage 5: skip-block copies at layer0 resolution ---------------------
-    if let map = skipMap {
-        let bw = (dx + 31) / 32
-        let targetCbDx = (l0dx + 1) / 2
-        let targetCbDy = (l0dy + 1) / 2
-        let pPd = predictedPd ?? PlaneData420(width: dx, height: dy, y: [], cb: [], cr: [])
-        let lPd = nextPd ?? pPd
-
-        withUnsafePointers(
-            lPd.y, lPd.cb, lPd.cr,
-            pPd.y, pPd.cb, pPd.cr,
-            mut: &current.y, mut: &current.cb, mut: &current.cr
-        ) { ltrYPtr, ltrCbPtr, ltrCrPtr, prevYPtr, prevCbPtr, prevCrPtr, currYPtr, currCbPtr, currCrPtr in
-            for i in 0..<map.count {
-                let mode = map[i]
-                if mode != .inter {
-                    let bx = ((i % bw) * 32) / 4
-                    let by = ((i / bw) * 32) / 4
-
-                    if bx + 8 <= l0dx && by + 8 <= l0dy {
-                        switch mode {
-                        case .skip_ltr where nextPd != nil:
-                            copyBlock8Pointer(from: ltrYPtr, to: currYPtr, bx: bx, by: by, stride: l0dx)
-                            copyBlock4Pointer(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx)
-                            copyBlock4Pointer(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx)
-                        case .skip_prev:
-                            copyBlock8Pointer(from: prevYPtr, to: currYPtr, bx: bx, by: by, stride: l0dx)
-                            copyBlock4Pointer(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, stride: targetCbDx)
-                            copyBlock4Pointer(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, stride: targetCbDx)
-                        default: break
-                        }
-                    } else {
-                        switch mode {
-                        case .skip_ltr where nextPd != nil:
-                            copyBlockSafe(from: ltrYPtr, to: currYPtr, bx: bx, by: by, width: l0dx, height: l0dy, blockSize: 8)
-                            copyBlockSafe(from: ltrCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: 4)
-                            copyBlockSafe(from: ltrCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: 4)
-                        case .skip_prev:
-                            copyBlockSafe(from: prevYPtr, to: currYPtr, bx: bx, by: by, width: l0dx, height: l0dy, blockSize: 8)
-                            copyBlockSafe(from: prevCbPtr, to: currCbPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: 4)
-                            copyBlockSafe(from: prevCrPtr, to: currCrPtr, bx: bx/2, by: by/2, width: targetCbDx, height: targetCbDy, blockSize: 4)
-                        default: break
-                        }
-                    }
-                }
-            }
+        finishL0Reconstruction(img: &current, qtYStepQ4: qtYStep, qtCStepQ4: qtCStep)
+        if let map = skipMap {
+            applyL0SkipCopy(img: &current, prevPd: tPrev, ltrPd: nextPd, skipMap: map, fullDx: dx)
         }
     }
 
@@ -1250,17 +1178,21 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
     let hasLayer1 = (1 <= maxLayer && 0 < frameHeader.layer1Size)
     let hasLayer2 = (2 <= maxLayer && 0 < frameHeader.layer2Size)
 
-    var layer1Data: [UInt8] = []
+    let layer1Data: ArraySlice<UInt8>
     if hasLayer1 {
         guard (offset + frameHeader.layer1Size) <= r.count else { throw DecodeError.insufficientData }
-        layer1Data = Array(r[offset..<(offset + frameHeader.layer1Size)])
+        layer1Data = r[offset..<(offset + frameHeader.layer1Size)]
+    } else {
+        layer1Data = []
     }
     offset += frameHeader.layer1Size
 
-    var layer2Data: [UInt8] = []
+    let layer2Data: ArraySlice<UInt8>
     if hasLayer2 {
         guard (offset + frameHeader.layer2Size) <= r.count else { throw DecodeError.insufficientData }
-        layer2Data = Array(r[offset..<(offset + frameHeader.layer2Size)])
+        layer2Data = r[offset..<(offset + frameHeader.layer2Size)]
+    } else {
+        layer2Data = []
     }
     offset += frameHeader.layer2Size
 
@@ -1403,7 +1335,7 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
     // --- Stage 2: layer 0 reconstruction + L0 reference chain ---------------
     // Skip blocks bypass dequant/IDWT (One-Pyramid §5, DecodeSkipBypass.swift)
     // — bit-exact, their coefficients are all zero by construction.
-    var baseImg = Image16(width: l0dx, height: l0dy, pool: pool, zeroed: false)
+    var baseImg = Image16(width: l0dx, height: l0dy, pool: pool, zeroed: (skipMap != nil))
     let rc0Y = (l0dy + 7) / 8
     let cc0Y = (l0dx + 7) / 8
     let rc0C = (l0cbDy + 7) / 8
@@ -1561,8 +1493,18 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
             applyDeblockingFilter16(plane: &l2Img.cr, width: l2cbDx, height: l2cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
         }
 
+        let skipMaskBytes = skipMap?.map { $0.rawValue }
+        applySNNNeuralLoopFilter(plane: &l2Img.y, width: l2dx, height: l2dy, planeType: .y, skipMask: skipMaskBytes)
+        applySNNNeuralLoopFilter(plane: &l2Img.cb, width: l2cbDx, height: l2cbDy, planeType: .cb, skipMask: skipMaskBytes)
+        applySNNNeuralLoopFilter(plane: &l2Img.cr, width: l2cbDx, height: l2cbDy, planeType: .cr, skipMask: skipMaskBytes)
+
         current = l2Img
-    } else if hasLayer1 {
+    }
+
+    switch true {
+    case hasLayer2:
+        break
+    case hasLayer1:
         // Layer2 absent (splitter-truncated): MC at layer1 resolution.
         if let tMVs = mvs, let tPrev = predictedPd {
             let cbDx1 = (l1dx + 1) / 2
@@ -1589,7 +1531,7 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
             applyDeblockingFilterN(plane: &current.cb, width: (l1dx + 1) / 2, height: (l1dy + 1) / 2, qStep: cStep, blockSize: 8)
             applyDeblockingFilterN(plane: &current.cr, width: (l1dx + 1) / 2, height: (l1dy + 1) / 2, qStep: cStep, blockSize: 8)
         }
-    } else {
+    default:
         // Layer0-only: MC at layer0 resolution (8x8 blocks, mvShift=2 luma,
         // mvShift=1 chroma).
         if let tMVs = mvs, let tPrev = predictedPd {
@@ -1693,7 +1635,7 @@ fileprivate func clampPlane(plane: inout [Int16]) {
             let p = base.advanced(by: x)
             let v = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
             let clampedMin = v.replacing(with: vMin, where: v .< vMin)
-            let clamped = clampedMin.replacing(with: vMax, where: clampedMin .> vMax)
+            let clamped = clampedMin.replacing(with: vMax, where: vMax .< clampedMin)
             UnsafeMutableRawPointer(p).storeBytes(of: clamped, as: SIMD16<Int16>.self)
             x &+= 16
         }
@@ -1710,48 +1652,6 @@ fileprivate func clampPlane(plane: inout [Int16]) {
 }
 
 
-// Full-block reference copies, one function per block size — every caller
-// knows its block size statically, so there is no size dispatch at runtime.
-
-@inline(__always)
-func copyBlock32Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
-    for y in 0..<32 {
-        let offset = (by + y) * stride + bx
-        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
-        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
-        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-        dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-    }
-}
-
-@inline(__always)
-func copyBlock16Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
-    for y in 0..<16 {
-        let offset = (by + y) * stride + bx
-        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
-        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
-        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-    }
-}
-
-@inline(__always)
-func copyBlock8Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
-    for y in 0..<8 {
-        let offset = (by + y) * stride + bx
-        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
-        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
-        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
-    }
-}
-
-@inline(__always)
-func copyBlock4Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
-    for y in 0..<4 {
-        let offset = (by + y) * stride + bx
-        dst.advanced(by: offset).update(from: src.advanced(by: offset), count: 4)
-    }
-}
-
 /// Size dispatch for the generic stripped-stream pipeline only, where the
 /// block size is not known until the frame header is read — the production
 /// pipelines call the sized copies directly.
@@ -1762,44 +1662,6 @@ private func copyBlockPointer(from src: UnsafePointer<Int16>, to dst: UnsafeMuta
     case 16: copyBlock16Pointer(from: src, to: dst, bx: bx, by: by, stride: stride)
     case 8: copyBlock8Pointer(from: src, to: dst, bx: bx, by: by, stride: stride)
     default: copyBlock4Pointer(from: src, to: dst, bx: bx, by: by, stride: stride)
-    }
-}
-
-@inline(__always)
-func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
-    let maxY = min(by + blockSize, height)
-    let maxX = min(bx + blockSize, width)
-    let copyCount = maxX - bx
-    if copyCount <= 0 { return }
-
-    switch copyCount {
-    case 32:
-        for y in by..<maxY {
-            let offset = y * width + bx
-            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
-            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
-            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-        }
-    case 16:
-        for y in by..<maxY {
-            let offset = y * width + bx
-            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
-            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
-            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-        }
-    case 8:
-        for y in by..<maxY {
-            let offset = y * width + bx
-            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
-            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
-            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
-        }
-    default:
-        for y in by..<maxY {
-            let offset = y * width + bx
-            dst.advanced(by: offset).update(from: src.advanced(by: offset), count: copyCount)
-        }
     }
 }
 
@@ -1822,18 +1684,19 @@ func decodeRefDirsProfile1(buf: [UInt8], count: Int) -> [Bool] {
 }
 
 @inline(__always)
-func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [Bool] {
+func decodeRefDirsProfile2(buf: ArraySlice<UInt8>, count: Int, skipMap: [BlockMode]?) -> [Bool] {
     var dirs = [Bool](repeating: false, count: count)
     guard let sm = skipMap else {
         return dirs
     }
     var bitIndex = 0
+    let startIdx = buf.startIndex
     for i in 0..<count {
         if sm[i] == .inter {
             let byteIdx = bitIndex / 8
             let bitIdx = bitIndex % 8
             if byteIdx < buf.count {
-                if (buf[byteIdx] & UInt8(1 << bitIdx)) != 0 {
+                if (buf[startIdx + byteIdx] & UInt8(1 << bitIdx)) != 0 {
                     dirs[i] = true
                 }
             }
@@ -1841,4 +1704,9 @@ func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [
         }
     }
     return dirs
+}
+
+@inline(__always)
+func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [Bool] {
+    return decodeRefDirsProfile2(buf: buf[...], count: count, skipMap: skipMap)
 }

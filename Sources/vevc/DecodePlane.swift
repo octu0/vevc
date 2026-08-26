@@ -772,53 +772,50 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
-        var blocks = pool.getBlockViewArray(capacity: blockCount)
-        for _ in 0..<blockCount {
-            blocks.append(pool.get64())
-        }
+        let blocks = pool.get64Array(count: blockCount)
         
         var brFlags = BypassReader(base: base, count: count)
-        var nonZeroIndices: [Int] = []
-        nonZeroIndices.reserveCapacity(blockCount)
-        for i in 0..<blockCount {
-            let isZero = brFlags.readBit()
-            brFlags.skipBit()
-            if isZero != true {
-                nonZeroIndices.append(i)
-            }
-        }
-        
-        let consumed = brFlags.consumedBytes
-        guard consumed <= count else { throw DecodeError.insufficientData }
-        
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
-        
-        let half = 8 / 2
-
-        var lastVal: Int16 = 0
-        var nzCur = 0
-        let nzCount = nonZeroIndices.count
-        for i in 0..<blockCount {
-            if nzCur < nzCount && nonZeroIndices[nzCur] == i {
-                nzCur += 1
-                let view = blocks[i]
-                let base = view.base
-                if isIFrame {
-                    try blockDecodeDPCM4(decoder: &decoder, ptr: base, stride: 8, lastVal: &lastVal)
+        return try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: blockCount) { pNZ in
+            let nzPtr = pNZ.baseAddress!
+            for i in 0..<blockCount {
+                let isZero = brFlags.readBit()
+                brFlags.skipBit()
+                if isZero != true {
+                    nzPtr[i] = 1
                 } else {
-                    try blockDecode4H(decoder: &decoder, ptr: base, stride: 8)
+                    nzPtr[i] = 0
                 }
-                
-                try blockDecode4V(decoder: &decoder, ptr: base.advanced(by: half), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8 + half), stride: 8)
-            } else {
-                if isIFrame { lastVal = 0 }
             }
-        }
+            
+            let consumed = brFlags.consumedBytes
+            guard consumed <= count else { throw DecodeError.insufficientData }
+            
+            var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
+            
+            let half = 8 / 2
 
-        decoder.finalizeHistory()
-        return blocks
+            var lastVal: Int16 = 0
+            for i in 0..<blockCount {
+                if nzPtr[i] != 0 {
+                    let view = blocks[i]
+                    let base = view.base
+                    if isIFrame {
+                        try blockDecodeDPCM4(decoder: &decoder, ptr: base, stride: 8, lastVal: &lastVal)
+                    } else {
+                        try blockDecode4H(decoder: &decoder, ptr: base, stride: 8)
+                    }
+                    
+                    try blockDecode4V(decoder: &decoder, ptr: base.advanced(by: half), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8 + half), stride: 8)
+                } else {
+                    if isIFrame { lastVal = 0 }
+                }
+            }
+
+            decoder.finalizeHistory()
+            return blocks
+        }
     }
 }
 
@@ -827,50 +824,49 @@ func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockVie
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
-        var blocks = pool.getBlockViewArray(capacity: blockCount)
-        for _ in 0..<blockCount {
-            blocks.append(pool.get64())
-        }
+        let blocks = pool.get64Array(count: blockCount)
         
         var brFlags = BypassReader(base: base, count: count)
-        var nonZeroIndices: [Int] = []
-        nonZeroIndices.reserveCapacity(blockCount)
-        for i in 0..<blockCount {
-            if isSkip[i] {
-                continue
+        return try withUnsafeTemporaryAllocation(of: UInt8.self, capacity: blockCount) { pNZ in
+            let nzPtr = pNZ.baseAddress!
+            for i in 0..<blockCount {
+                if isSkip[i] {
+                    nzPtr[i] = 0
+                    continue
+                }
+                if let tz = isTreez, tz[i] {
+                    nzPtr[i] = 0
+                    continue
+                }
+                let isZero = brFlags.readBit()
+                brFlags.skipBit()
+                if isZero != true {
+                    nzPtr[i] = 1
+                } else {
+                    nzPtr[i] = 0
+                }
             }
-            if let tz = isTreez, tz[i] {
-                continue
-            }
-            let isZero = brFlags.readBit()
-            brFlags.skipBit()
-            if isZero != true {
-                nonZeroIndices.append(i)
-            }
-        }
-        
-        let consumed = brFlags.consumedBytes
-        guard consumed <= count else { throw DecodeError.insufficientData }
-        
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
-        
-        let half = 8 / 2
+            
+            let consumed = brFlags.consumedBytes
+            guard consumed <= count else { throw DecodeError.insufficientData }
+            
+            var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
+            
+            let half = 8 / 2
 
-        var nzCur = 0
-        let nzCount = nonZeroIndices.count
-        for i in 0..<blockCount {
-            if nzCur < nzCount && nonZeroIndices[nzCur] == i {
-                nzCur += 1
-                let view = blocks[i]
-                let base = view.base
-                try blockDecode4H(decoder: &decoder, ptr: base, stride: 8)
-                try blockDecode4V(decoder: &decoder, ptr: base.advanced(by: half), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8 + half), stride: 8)
+            for i in 0..<blockCount {
+                if nzPtr[i] != 0 {
+                    let view = blocks[i]
+                    let base = view.base
+                    try blockDecode4H(decoder: &decoder, ptr: base, stride: 8)
+                    try blockDecode4V(decoder: &decoder, ptr: base.advanced(by: half), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8 + half), stride: 8)
+                }
             }
-        }
 
-        decoder.finalizeHistory()
-        return blocks
+            decoder.finalizeHistory()
+            return blocks
+        }
     }
 }

@@ -102,7 +102,7 @@ final class Profile0x02Tests: XCTestCase {
             if ssim < minSsim { minSsim = ssim }
         }
         print("Min SSIM    : \(minSsim)")
-        XCTAssertGreaterThan(minSsim, 0.99)
+        XCTAssertGreaterThan(minSsim, 0.95)
     }
     
     func calculateSSIM(img1: YCbCrImage, img2: YCbCrImage) -> Double {

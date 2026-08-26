@@ -308,40 +308,49 @@ public struct VEVCLayerData {
         return out
     }
     
-    /// Deserialize layer data from a byte array.
+    /// Deserialize layer data from a byte collection (ArraySlice or Array).
     /// Returns quantization tables and the raw byte slices for Y/Cb/Cr plane payloads.
     @inline(__always)
     static func deserialize(
-        from r: [UInt8],
+        from r: ArraySlice<UInt8>,
         layer: UInt8,
         layerLabel: String
     ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: ArraySlice<UInt8>, bufCb: ArraySlice<UInt8>, bufCr: ArraySlice<UInt8>) {
-        var offset = 0
+        var offset = r.startIndex
         let qtY = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: false, layerIndex: Int(layer))
         let qtC = QuantizationTable(baseStep: Int(try readUInt16BEFromBytes(r, offset: &offset)), isChroma: true, layerIndex: Int(layer))
         
         let bufYLen = try readVLQSizeFromBytes(r, offset: &offset)
-        guard (offset + bufYLen) <= r.count else {
+        guard (offset + bufYLen) <= r.endIndex else {
             throw DecodeError.invalidBlockDataContext("\(layerLabel) Y overflow: offset=\(offset) len=\(bufYLen) total=\(r.count)")
         }
         let bufY = r[offset..<(offset + bufYLen)]
         offset += bufYLen
         
         let bufCbLen = try readVLQSizeFromBytes(r, offset: &offset)
-        guard (offset + bufCbLen) <= r.count else {
+        guard (offset + bufCbLen) <= r.endIndex else {
             throw DecodeError.invalidBlockDataContext("\(layerLabel) Cb overflow: offset=\(offset) len=\(bufCbLen) total=\(r.count)")
         }
         let bufCb = r[offset..<(offset + bufCbLen)]
         offset += bufCbLen
         
         let bufCrLen = try readVLQSizeFromBytes(r, offset: &offset)
-        guard (offset + bufCrLen) <= r.count else {
+        guard (offset + bufCrLen) <= r.endIndex else {
             throw DecodeError.invalidBlockDataContext("\(layerLabel) Cr overflow: offset=\(offset) len=\(bufCrLen) total=\(r.count)")
         }
         let bufCr = r[offset..<(offset + bufCrLen)]
         offset += bufCrLen
         
         return (qtY, qtC, bufY, bufCb, bufCr)
+    }
+
+    @inline(__always)
+    static func deserialize(
+        from r: [UInt8],
+        layer: UInt8,
+        layerLabel: String
+    ) throws -> (qtY: QuantizationTable, qtC: QuantizationTable, bufY: ArraySlice<UInt8>, bufCb: ArraySlice<UInt8>, bufCr: ArraySlice<UInt8>) {
+        return try deserialize(from: r[...], layer: layer, layerLabel: layerLabel)
     }
 
 }

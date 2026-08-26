@@ -22,6 +22,9 @@
 // base8ChromaAllSkip) — that is exactly the region the encoder zeroed and
 // reconstructs symmetrically (reconstructPlaneLayer32Cb/Cr).
 
+import Foundation
+import Dispatch
+
 @inline(__always)
 func chromaAllSkip(_ map: UnsafeBufferPointer<BlockMode>, bw: Int, bh: Int, c: Int, r: Int) -> Bool {
     for dy in 0..<2 {
@@ -51,153 +54,90 @@ func base8ChromaAllSkip(skipMap: [BlockMode], bw: Int, bh: Int, c: Int, r: Int) 
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) async {
-    let concurrency = min(rowCount, 4)
-    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+func decodeBase8ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, skipMap: [BlockMode], sub: inout Image16) {
     let subConst = sub
     let sCount = skipMap.count
     let sSkip = skipMap.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let sDest = sub.withUnsafeY { UnsafeSendableMutablePointer(ptr: $0) }
-
-    // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
-    let work: @Sendable (Int) -> Void = { tIdx in
-        let startRow: Int = tIdx * chunkSizeSlice
-        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-        guard startRow < endRow else { return }
-        let destPtr = sDest.ptr
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                var blk: BlockView = sBlocks.ptr[blockIndex]
-                if blockIndex < sCount && sSkip.ptr[blockIndex] != .inter {
-                    // Skip block: coefficients are all zero — copy the
-                    // cleared view as-is.
-                    subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-                    continue
-                }
-                let base = blk.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+    let destPtr = sDest.ptr
+
+    for i in 0..<rowCount {
+        let h: Int = i * 8
+        let rowOffset = i * colCount
+        for xIdx in 0..<colCount {
+            let w = xIdx * 8
+            let blockIndex: Int = rowOffset &+ xIdx
+            var blk: BlockView = sBlocks.ptr[blockIndex]
+            if blockIndex < sCount && sSkip.ptr[blockIndex] != .inter {
+                continue
             }
+            let base = blk.base
+            dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+            dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+            inverseDWT2DBlock8(ptr: base, stride: 8)
+            subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
         }
-    }
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
     }
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, skipMap: [BlockMode], skipBw: Int, skipBh: Int, sub: inout Image16) async {
-    let concurrency = min(rowCount, 4)
-    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+func decodeBase8ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, skipMap: [BlockMode], skipBw: Int, skipBh: Int, sub: inout Image16) {
     let subConst = sub
-    let skipArr = skipMap
+    let sSkip = skipMap.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let sDest = sub.withUnsafeCb { UnsafeSendableMutablePointer(ptr: $0) }
-
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
-    let work: @Sendable (Int) -> Void = { tIdx in
-        let startRow: Int = tIdx * chunkSizeSlice
-        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-        guard startRow < endRow else { return }
-        let destPtr = sDest.ptr
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                var blk: BlockView = sBlocks.ptr[blockIndex]
-                if base8ChromaAllSkip(skipMap: skipArr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
-                    subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-                    continue
-                }
-                let base = blk.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+    let destPtr = sDest.ptr
+
+    for i in 0..<rowCount {
+        let h: Int = i * 8
+        let rowOffset = i * colCount
+        for xIdx in 0..<colCount {
+            let w = xIdx * 8
+            let blockIndex: Int = rowOffset &+ xIdx
+            var blk: BlockView = sBlocks.ptr[blockIndex]
+            if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
+                continue
             }
+            let base = blk.base
+            dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+            dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+            inverseDWT2DBlock8(ptr: base, stride: 8)
+            subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
         }
-    }
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
     }
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, skipMap: [BlockMode], skipBw: Int, skipBh: Int, sub: inout Image16) async {
-    let concurrency = min(rowCount, 4)
-    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+func decodeBase8ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, skipMap: [BlockMode], skipBw: Int, skipBh: Int, sub: inout Image16) {
     let subConst = sub
-    let skipArr = skipMap
+    let sSkip = skipMap.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
     let sDest = sub.withUnsafeCr { UnsafeSendableMutablePointer(ptr: $0) }
-
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
-    let work: @Sendable (Int) -> Void = { tIdx in
-        let startRow: Int = tIdx * chunkSizeSlice
-        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-        guard startRow < endRow else { return }
-        let destPtr = sDest.ptr
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                var blk: BlockView = sBlocks.ptr[blockIndex]
-                if base8ChromaAllSkip(skipMap: skipArr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
-                    subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-                    continue
-                }
-                let base = blk.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
+    let destPtr = sDest.ptr
+
+    for i in 0..<rowCount {
+        let h: Int = i * 8
+        let rowOffset = i * colCount
+        for xIdx in 0..<colCount {
+            let w = xIdx * 8
+            let blockIndex: Int = rowOffset &+ xIdx
+            var blk: BlockView = sBlocks.ptr[blockIndex]
+            if chromaAllSkip(sSkip.ptr, bw: skipBw, bh: skipBh, c: xIdx, r: i) {
+                continue
             }
+            let base = blk.base
+            dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+            dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+            inverseDWT2DBlock8(ptr: base, stride: 8)
+            subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
         }
-    }
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
     }
 }
 
@@ -239,17 +179,8 @@ func decodeLayer16ProcessYWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkSi
             }
         }
     }
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
+    DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+        work(tIdx)
     }
 }
 
@@ -291,17 +222,8 @@ func decodeLayer16ProcessCbWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkS
             }
         }
     }
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
+    DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+        work(tIdx)
     }
 }
 
@@ -343,16 +265,7 @@ func decodeLayer16ProcessCrWithSkipMap(pool: BlockViewPool, taskIdx: Int, chunkS
             }
         }
     }
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
+    DispatchQueue.concurrentPerform(iterations: concurrency) { tIdx in
+        work(tIdx)
     }
 }

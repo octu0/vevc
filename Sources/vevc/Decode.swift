@@ -589,7 +589,7 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
         applyDeblockingFilter16(plane: &sub.cb, width: cbDx, height: cbDy, qStep: (Int(qtC.step) + 8) >> 4)
         applyDeblockingFilter16(plane: &sub.cr, width: cbDx, height: cbDy, qStep: (Int(qtC.step) + 8) >> 4)
     }
-    
+
     return sub
 }
 
@@ -1208,151 +1208,79 @@ func decodeLayer16ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, r
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) async {
-    let concurrency = min(rowCount, 4)
-    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+func decodeBase8ProcessY(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) {
     let subConst = sub
     let sDest = sub.withUnsafeY { UnsafeSendableMutablePointer(ptr: $0) }
-
-    // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
-    let work: @Sendable (Int) -> Void = { tIdx in
-        let startRow: Int = tIdx * chunkSizeSlice
-        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-        guard startRow < endRow else { return }
-        let destPtr = sDest.ptr
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                let block: BlockView = sBlocks.ptr[blockIndex]
-                let base = block.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                var blk = block
-                subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-            }
+    let destPtr = sDest.ptr
+
+    for i in 0..<rowCount {
+        let h: Int = i * 8
+        let rowOffset = i * colCount
+        for xIdx in 0..<colCount {
+            let w = xIdx * 8
+            let blockIndex: Int = rowOffset &+ xIdx
+            let block: BlockView = sBlocks.ptr[blockIndex]
+            let base = block.base
+            dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+            dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+            inverseDWT2DBlock8(ptr: base, stride: 8)
+            var blk = block
+            subConst.updateY(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
         }
-    }
-    // Only the dominant full-res luma pass benefits from intra-plane fan-out;
-    // for everything smaller the task-spawn overhead outweighs the gain
-    // (and under GOP-parallel decode all cores are busy anyway). Large passes
-    // run chunk 0 inline and spawn only the remainder.
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
     }
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) async {
-    let concurrency = min(rowCount, 4)
-    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+func decodeBase8ProcessCb(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) {
     let subConst = sub
     let sDest = sub.withUnsafeCb { UnsafeSendableMutablePointer(ptr: $0) }
-
-    // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
-    let work: @Sendable (Int) -> Void = { tIdx in
-        let startRow: Int = tIdx * chunkSizeSlice
-        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-        guard startRow < endRow else { return }
-        let destPtr = sDest.ptr
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                let block: BlockView = sBlocks.ptr[blockIndex]
-                let base = block.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                var blk = block
-                subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-            }
+    let destPtr = sDest.ptr
+
+    for i in 0..<rowCount {
+        let h: Int = i * 8
+        let rowOffset = i * colCount
+        for xIdx in 0..<colCount {
+            let w = xIdx * 8
+            let blockIndex: Int = rowOffset &+ xIdx
+            let block: BlockView = sBlocks.ptr[blockIndex]
+            let base = block.base
+            dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+            dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+            inverseDWT2DBlock8(ptr: base, stride: 8)
+            var blk = block
+            subConst.updateCb(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
         }
-    }
-    // Only the dominant full-res luma pass benefits from intra-plane fan-out;
-    // for everything smaller the task-spawn overhead outweighs the gain
-    // (and under GOP-parallel decode all cores are busy anyway). Large passes
-    // run chunk 0 inline and spawn only the remainder.
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
     }
 }
 
 @Sendable @inline(__always)
-func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) async {
-    let concurrency = min(rowCount, 4)
-    let chunkSizeSlice = (rowCount + concurrency - 1) / concurrency
+func decodeBase8ProcessCr(pool: BlockViewPool, taskIdx: Int, chunkSize: Int, rowCount: Int, dx: Int, colCount: Int, blocks: [BlockView], qt: QuantizationTable, sub: inout Image16) {
     let subConst = sub
     let sDest = sub.withUnsafeCr { UnsafeSendableMutablePointer(ptr: $0) }
-
-    // Structured concurrency instead of DispatchQueue.concurrentPerform (see ProcessY note).
     let sBlocks = blocks.withUnsafeBufferPointer { UnsafeSendableBufferPointer(ptr: $0) }
-    let work: @Sendable (Int) -> Void = { tIdx in
-        let startRow: Int = tIdx * chunkSizeSlice
-        let endRow: Int = min(startRow + chunkSizeSlice, rowCount)
-        guard startRow < endRow else { return }
-        let destPtr = sDest.ptr
-        for i in startRow..<endRow {
-            let h: Int = i * 8
-            let rowOffset = i * colCount
-            for xIdx in 0..<colCount {
-                let w = xIdx * 8
-                let blockIndex: Int = rowOffset &+ xIdx
-                let block: BlockView = sBlocks.ptr[blockIndex]
-                let base = block.base
-                dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
-                dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
-                dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
-                inverseDWT2DBlock8(ptr: base, stride: 8)
-                var blk = block
-                subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
-            }
+    let destPtr = sDest.ptr
+
+    for i in 0..<rowCount {
+        let h: Int = i * 8
+        let rowOffset = i * colCount
+        for xIdx in 0..<colCount {
+            let w = xIdx * 8
+            let blockIndex: Int = rowOffset &+ xIdx
+            let block: BlockView = sBlocks.ptr[blockIndex]
+            let base = block.base
+            dequantizeDPCM(ptr: base, stride: 8, q: qt.qLow)
+            dequantize4(ptr: base.advanced(by: 4), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 32), stride: 8, q: qt.qMid)
+            dequantize4(ptr: base.advanced(by: 36), stride: 8, q: qt.qHigh)
+            inverseDWT2DBlock8(ptr: base, stride: 8)
+            var blk = block
+            subConst.updateCr(destBase: destPtr, data: &blk, startX: w, startY: h, size: 8)
         }
-    }
-    // Only the dominant full-res luma pass benefits from intra-plane fan-out;
-    // for everything smaller the task-spawn overhead outweighs the gain
-    // (and under GOP-parallel decode all cores are busy anyway). Large passes
-    // run chunk 0 inline and spawn only the remainder.
-    if rowCount * colCount < 1500 {
-        for tIdx in 0..<concurrency {
-            work(tIdx)
-        }
-        return
-    }
-    await withTaskGroup(of: Void.self) { group in
-        for tIdx in 1..<concurrency {
-            group.addTask { work(tIdx) }
-        }
-        work(0)
     }
 }

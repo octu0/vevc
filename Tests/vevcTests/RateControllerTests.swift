@@ -49,7 +49,7 @@ final class RateControllerTests: XCTestCase {
         let framerate = 30
         let keyint = 15
         let bitrateParam = 1000 * 1000 // 1Mbps
-        var controller = RateController(maxbitrate: bitrateParam, framerate: framerate, keyint: keyint, targetDistortion: 2)
+        var controller = RateController(maxbitrate: bitrateParam, framerate: framerate, keyint: keyint, targetDistortion: 2 * 256)
         
         let _ = controller.beginGOP()
         controller.consumeIFrame(bits: 100_000, qStep: 32)
@@ -59,54 +59,55 @@ final class RateControllerTests: XCTestCase {
         
         // P-Frame 1: Small size, low distortion.
         // Theoretical budget per P-frame is ~80% of 1Mbps/30 = ~26.6Kbits.
-        // Let's use 5000 bits. Ratio = 26666 * 256 / 5000 = ~1365.
-        // EMA will go up quickly.
+        // Let's use 5000 bits.
         let q1 = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
         // Calculate step again to update EMA
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
-        // Now budgetSurplusEMAQ8 should be > 320, and avgDistortion < targetDistortion (1 < 2)
+        // Now avgDistortion < targetDistortion (256 < 512) and pPaceRatioQ8 >= 230
         XCTAssertTrue(controller.isQualitySaturated)
         
-        // Now simulate high bitrate (budget tight). size = 50_000
+        // Now simulate high bitrate (budget tight). size = 100_000
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 50_000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 100_000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 50_000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 100_000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 50_000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 100_000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
-        // budgetSurplusEMAQ8 drops < 256
+        // pPaceRatioQ8 drops < 230
         XCTAssertFalse(controller.isQualitySaturated)
         
         // Now test hysteresis on distortion side.
         // Make budget high again
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 1, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 256, interRatioQ8: 0, detailThinned: false)
         
         XCTAssertTrue(controller.isQualitySaturated)
         
-        // Now make distortion high (e.g. 3). avgDistortion goes up
+        // Now make distortion high (e.g. 6 * 256). avgDistortion goes up
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 3, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 6 * 256, interRatioQ8: 0, detailThinned: false)
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 3, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 6 * 256, interRatioQ8: 0, detailThinned: false)
         _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
-        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 3, interRatioQ8: 0, detailThinned: false)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 6 * 256, interRatioQ8: 0, detailThinned: false)
+        _ = controller.calculatePFrameQStep(currentSAD: 1000, baseStep: 32)
+        controller.consumePFrame(bits: 5000, qStep: q1, sad: 1000, distortion: 6 * 256, interRatioQ8: 0, detailThinned: false)
         
-        // avgDistortion should now be > 2.5 (which is 2 * 1.25)
+        // avgDistortion should now be > 2.5 * 256 = 640
         XCTAssertFalse(controller.isQualitySaturated)
     }
 

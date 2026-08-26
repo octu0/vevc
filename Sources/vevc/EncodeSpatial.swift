@@ -97,7 +97,7 @@ func encodeSpatialLayersIntra(pd: PlaneData420, pool: BlockViewPool, qtY: Quanti
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, histories: nil, selectModel: unifiedSelectModel)
 
-    let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
+    let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2, applySNN: false)
 
     debugLog({
         return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
@@ -153,7 +153,7 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: parentFreeParents16(count: l1yBlocks.count), parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count), parentCrBlocks: parentFreeParents16(count: l1crBlocks.count), histories: nil, selectModel: unifiedSelectModelParentFree)
 
-    let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
+    let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2, applySNN: true)
 
     if let oracle = MultiRefOracle.shared {
         // Random-access boundary: the candidate pool never crosses an I-frame.
@@ -176,7 +176,7 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
 /// reaches the entropy contexts (LL2 slot couples P into the parent blocks)
 /// and desyncs backward-adaptive tables.
 @inline(__always)
-private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1Img: Image16, l2yBlocks: [BlockView], l2cbBlocks: [BlockView], l2crBlocks: [BlockView], qtY2: QuantizationTable, qtC2: QuantizationTable) -> (PlaneData420, @Sendable () -> Void) {
+private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1Img: Image16, l2yBlocks: [BlockView], l2cbBlocks: [BlockView], l2crBlocks: [BlockView], qtY2: QuantizationTable, qtC2: QuantizationTable, applySNN: Bool) -> (PlaneData420, @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -192,6 +192,12 @@ private func finishIntraReconstruction(pd: PlaneData420, pool: BlockViewPool, l1
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4)
     applyDeblockingFilter16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
     applyDeblockingFilter16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4)
+
+    if applySNN {
+        applySNNNeuralLoopFilter(plane: &mutReconL2Y, width: dx, height: dy, planeType: .y)
+        applySNNNeuralLoopFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, planeType: .cb)
+        applySNNNeuralLoopFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, planeType: .cr)
+    }
 
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
     return (reconstructed, { r2Y(); r2Cb(); r2Cr() })
@@ -942,6 +948,11 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     applyDeblockingFilter32(plane: &mutReconL2Y, width: dx, height: dy, qStep: (Int(qtY2.step) + 8) >> 4, mvs: mvs, skipMap: sMap)
     applyDeblockingFilterChroma16(plane: &mutReconL2Cb, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs, skipMap: sMap)
     applyDeblockingFilterChroma16(plane: &mutReconL2Cr, width: cbDx, height: cbDy, qStep: (Int(qtC2.step) + 8) >> 4, mvs: mvs, skipMap: sMap)
+
+    let skipMaskBytes = skipMap.map { $0.rawValue }
+    applySNNNeuralLoopFilter(plane: &mutReconL2Y, width: dx, height: dy, planeType: .y, skipMask: skipMaskBytes)
+    applySNNNeuralLoopFilter(plane: &mutReconL2Cb, width: cbDx, height: cbDy, planeType: .cb, skipMask: skipMaskBytes)
+    applySNNNeuralLoopFilter(plane: &mutReconL2Cr, width: cbDx, height: cbDy, planeType: .cr, skipMask: skipMaskBytes)
 
     applyProfile2SkipCopy(skipMap: skipMap, ltrPd: nPd, prevPd: pPd, y: &mutReconL2Y, cb: &mutReconL2Cb, cr: &mutReconL2Cr, dx: dx, dy: dy)
 

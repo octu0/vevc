@@ -38,6 +38,17 @@ public func readUInt16BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UIn
 }
 
 @inline(__always)
+public func readUInt16BEFromBytes(_ r: ArraySlice<UInt8>, offset: inout Int) throws -> UInt16 {
+    guard (offset + 2) <= r.endIndex else {
+        throw BinaryError.insufficientData(message: "readUInt16BEFromBytes offset(\(offset)) + 2 > r.endIndex(\(r.endIndex))")
+    }
+    let b0 = UInt16(r[offset])
+    let b1 = UInt16(r[offset + 1])
+    offset += 2
+    return (b0 << 8) | b1
+}
+
+@inline(__always)
 public func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UInt32 {
     guard (offset + 4) <= r.count else {
         throw BinaryError.insufficientData(message: "readUInt32BEFromBytes offset(\(offset)) + 4 > r.count(\(r.count))")

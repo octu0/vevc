@@ -77,7 +77,22 @@ struct BlockView: @unchecked Sendable {
 @inline(__always)
 func clearBlockRegion(base: UnsafeMutablePointer<Int16>, width: Int, height: Int, stride: Int) {
     if width == stride {
-        memset(base, 0, width * height * 2)
+        switch width * height {
+        case 64:
+            let p = UnsafeMutableRawPointer(base)
+            p.storeBytes(of: SIMD16<Int16>.zero, as: SIMD16<Int16>.self)
+            p.advanced(by: 32).storeBytes(of: SIMD16<Int16>.zero, as: SIMD16<Int16>.self)
+            p.advanced(by: 64).storeBytes(of: SIMD16<Int16>.zero, as: SIMD16<Int16>.self)
+            p.advanced(by: 96).storeBytes(of: SIMD16<Int16>.zero, as: SIMD16<Int16>.self)
+        case 256:
+            let p = UnsafeMutableRawPointer(base)
+            for i in 0..<8 {
+                p.advanced(by: i * 64).storeBytes(of: SIMD16<Int16>.zero, as: SIMD16<Int16>.self)
+                p.advanced(by: i * 64 + 32).storeBytes(of: SIMD16<Int16>.zero, as: SIMD16<Int16>.self)
+            }
+        default:
+            memset(base, 0, width * height * 2)
+        }
     } else {
         for y in 0..<height {
             memset(base.advanced(by: y * stride), 0, width * 2)
@@ -289,8 +304,66 @@ final class BaseBlockViewPool: @unchecked Sendable {
     }
 
     @inline(__always)
+    func get64Bulk(count: Int, into array: inout [BlockView]) {
+        #if arch(wasm32)
+        let take = min(count, pools64.count)
+        if 0 < take {
+            let startIdx = pools64.count - take
+            for i in startIdx..<pools64.count {
+                let blk = pools64[i]
+                clearBlockRegion(base: blk.base, width: 8, height: 8, stride: 8)
+                array.append(blk)
+            }
+            pools64.removeSubrange(startIdx...)
+        }
+        let remaining = count - take
+        for _ in 0..<remaining {
+            let fresh = BlockView.allocate(width: 8, height: 8)
+            clearBlockRegion(base: fresh.base, width: 8, height: 8, stride: 8)
+            array.append(fresh)
+        }
+        #else
+        _lock.lock()
+        let take = min(count, pools64.count)
+        if 0 < take {
+            let startIdx = pools64.count - take
+            for i in startIdx..<pools64.count {
+                let blk = pools64[i]
+                clearBlockRegion(base: blk.base, width: 8, height: 8, stride: 8)
+                array.append(blk)
+            }
+            pools64.removeSubrange(startIdx...)
+        }
+        _lock.unlock()
+        
+        let remaining = count - take
+        for _ in 0..<remaining {
+            let fresh = BlockView.allocate(width: 8, height: 8)
+            clearBlockRegion(base: fresh.base, width: 8, height: 8, stride: 8)
+            array.append(fresh)
+        }
+        #endif
+    }
+
+    @inline(__always)
     func putBlockViewArray1024(_ array: [BlockView]) {
-        for block in array { self.put1024(block) }
+        guard array.isEmpty != true else { return }
+        #if arch(wasm32)
+        if pools1024.count + array.count <= 8000 {
+            pools1024.append(contentsOf: array)
+        } else {
+            for block in array { self.put1024(block) }
+        }
+        #else
+        _lock.lock()
+        if pools1024.count + array.count <= 4096 {
+            pools1024.append(contentsOf: array)
+            _lock.unlock()
+        } else {
+            _lock.unlock()
+            for block in array { self.put1024(block) }
+        }
+        #endif
         let capacity = array.capacity
         var arr = array
         arr.removeAll(keepingCapacity: true)
@@ -310,7 +383,23 @@ final class BaseBlockViewPool: @unchecked Sendable {
 
     @inline(__always)
     func putBlockViewArray256(_ array: [BlockView]) {
-        for block in array { self.put256(block) }
+        guard array.isEmpty != true else { return }
+        #if arch(wasm32)
+        if pools256.count + array.count <= 30000 {
+            pools256.append(contentsOf: array)
+        } else {
+            for block in array { self.put256(block) }
+        }
+        #else
+        _lock.lock()
+        if pools256.count + array.count <= 16384 {
+            pools256.append(contentsOf: array)
+            _lock.unlock()
+        } else {
+            _lock.unlock()
+            for block in array { self.put256(block) }
+        }
+        #endif
         let capacity = array.capacity
         var arr = array
         arr.removeAll(keepingCapacity: true)
@@ -330,7 +419,23 @@ final class BaseBlockViewPool: @unchecked Sendable {
 
     @inline(__always)
     func putBlockViewArray64(_ array: [BlockView]) {
-        for block in array { self.put64(block) }
+        guard array.isEmpty != true else { return }
+        #if arch(wasm32)
+        if pools64.count + array.count <= 100000 {
+            pools64.append(contentsOf: array)
+        } else {
+            for block in array { self.put64(block) }
+        }
+        #else
+        _lock.lock()
+        if pools64.count + array.count <= 65536 {
+            pools64.append(contentsOf: array)
+            _lock.unlock()
+        } else {
+            _lock.unlock()
+            for block in array { self.put64(block) }
+        }
+        #endif
         let capacity = array.capacity
         var arr = array
         arr.removeAll(keepingCapacity: true)
@@ -499,29 +604,34 @@ final class BaseBlockViewPool: @unchecked Sendable {
 
     @inline(__always)
     func putBlockViewArray(_ array: [BlockView]) {
-        for block in array {
-            self.put(block)
+        guard let first = array.first else { return }
+        switch first.stride {
+        case 8:
+            putBlockViewArray64(array)
+        case 16:
+            putBlockViewArray256(array)
+        case 32:
+            putBlockViewArray1024(array)
+        default:
+            for block in array {
+                put(block)
+            }
+            let capacity = array.capacity
+            var arr = array
+            arr.removeAll(keepingCapacity: true)
+            #if arch(wasm32)
+            var bucket = arrayPools[capacity] ?? []
+            if bucket.count < 16 {
+                bucket.append(arr)
+                arrayPools[capacity] = bucket
+            }
+            #else
+            _lock.lock()
+            if arrayPools[capacity] == nil { arrayPools[capacity] = [] }
+            if arrayPools[capacity]!.count < 4096 { arrayPools[capacity]!.append(arr) }
+            _lock.unlock()
+            #endif
         }
-        let capacity = array.capacity
-        var arr = array
-        arr.removeAll(keepingCapacity: true)
-        
-        #if arch(wasm32)
-        var bucket = arrayPools[capacity] ?? []
-        if bucket.count < 16 {
-            bucket.append(arr)
-            arrayPools[capacity] = bucket
-        }
-        #else
-        _lock.lock()
-        if arrayPools[capacity] == nil {
-            arrayPools[capacity] = []
-        }
-        if arrayPools[capacity]!.count < 4096 {
-            arrayPools[capacity]!.append(arr)
-        }
-        _lock.unlock()
-        #endif
     }
 }
 
@@ -555,9 +665,19 @@ final class BlockViewPool: @unchecked Sendable {
         #endif
     }
 
-    
-
-
+    @inline(__always)
+    func get64Array(count: Int) -> [BlockView] {
+        var arr = getBlockViewArray(capacity: count)
+        #if arch(wasm32)
+        for _ in 0..<count {
+            arr.append(pool.get64())
+        }
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        shards[idx].get64Bulk(count: count, into: &arr)
+        #endif
+        return arr
+    }
 
     @inline(__always)
     func get1024() -> BlockView {
@@ -798,7 +918,7 @@ public struct FrameRateConverter {
     private var acc: Int = 0
 
     public init(inFps: Int, outFps: Int) {
-        precondition(inFps > 0 && outFps > 0, "inFps and outFps must be positive integers")
+        precondition(0 < inFps && 0 < outFps, "inFps and outFps must be positive integers")
         self.inFps = inFps
         self.outFps = outFps
     }

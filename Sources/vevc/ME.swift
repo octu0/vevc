@@ -1108,7 +1108,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let pS1BaseWrapper = UnsafePointerWrapper(base: pS1.withUnsafeBufferPointer { $0.baseAddress! })
     let nS1BaseWrapper = UnsafePointerWrapper(base: nS1.withUnsafeBufferPointer { $0.baseAddress! })
     
-    let hasSkipMap = skipMap.count > 0
+    let hasSkipMap = 0 < skipMap.count
     let skipMapConst = skipMap
     let prevMVsConst = prevMVs
     let currConst = curr

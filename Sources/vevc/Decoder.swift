@@ -75,16 +75,9 @@ public actor StreamingDecoderActor {
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
         let w = pd.width
         let h = pd.height
-        if var cached = cachedYCbCrImage, cached.width == w && cached.height == h {
-            pd.toYCbCr(into: &cached)
-            cachedYCbCrImage = cached
-            return cached
-        } else {
-            var newImg = YCbCrImage(width: w, height: h)
-            pd.toYCbCr(into: &newImg)
-            cachedYCbCrImage = newImg
-            return newImg
-        }
+        var newImg = YCbCrImage(width: w, height: h)
+        pd.toYCbCr(into: &newImg)
+        return newImg
     }
     
     @inline(__always)
@@ -197,7 +190,7 @@ public actor StreamingDecoderActor {
         if profile == 0x02 {
             switch maxLayer {
             case 0:
-                img16 = try await decodeSpatialLayersForProfile2Base8Only(
+                img16 = try decodeSpatialLayersForProfile2Base8Only(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
@@ -357,11 +350,215 @@ public actor StreamingDecoderActor {
         roundOffsetIndex += 1
         return renderToYCbCr(pd: pd)
     }
+
+    @inline(__always)
+    public func decodeNextFrameL0Sync(chunk: [UInt8]) throws -> YCbCrImage? {
+        guard chunk.isEmpty != true else { return nil }
+        
+        var offset = 0
+        let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset, profile: profile)
+        if frameHeader.isCopyFrame {
+            guard let prev = previousReconstructed else {
+                throw DecodeError.insufficientDataContext("Copy frame without previous frame")
+            }
+            let isT0 = (temporalFrameIndex % 2 == 0)
+            let shouldPromoteLTR: Bool
+            if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+                if temporalLayers == 2 {
+                    shouldPromoteLTR = isT0
+                } else {
+                    shouldPromoteLTR = true
+                }
+            } else {
+                shouldPromoteLTR = false
+            }
+
+            if shouldPromoteLTR {
+                if let old = firstReconstructed, let prevRecon = previousReconstructed {
+                    let oldY = old.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let prevY = prevRecon.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let t0Y = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    if oldY != prevY && oldY != t0Y {
+                        if seenY.contains(oldY) {
+                            seenY.remove(oldY)
+                            pool.putInt16(old.y)
+                            pool.putInt16(old.cb)
+                            pool.putInt16(old.cr)
+                        }
+                    }
+                }
+                firstReconstructed = previousReconstructed
+                if temporalLayers == 2 {
+                    previousT0Reconstructed = previousReconstructed
+                }
+            } else {
+                if temporalLayers == 2 {
+                    if isT0 {
+                        previousT0Reconstructed = previousReconstructed
+                    }
+                }
+            }
+            framesSinceKeyframe += 1
+            temporalFrameIndex += 1
+            roundOffsetIndex += 1
+            return renderToYCbCr(pd: prev)
+        }
+        
+        if frameHeader.isIFrame {
+            var oldPlanes = [PlaneData420]()
+            if let f = firstReconstructed { oldPlanes.append(f) }
+            if let p = previousReconstructed { oldPlanes.append(p) }
+            if let t0 = previousT0Reconstructed { oldPlanes.append(t0) }
+            
+            for p in oldPlanes {
+                p.y.withUnsafeBufferPointer { yPtr in
+                    if let yBase = yPtr.baseAddress {
+                        let ptr = UnsafeMutableRawPointer(mutating: yBase)
+                        if seenY.contains(ptr) {
+                            seenY.remove(ptr)
+                            pool.putInt16(p.y)
+                            pool.putInt16(p.cb)
+                            pool.putInt16(p.cr)
+                        }
+                    }
+                }
+            }
+            seenY.removeAll()
+            
+            firstReconstructed = nil
+            previousReconstructed = nil
+            previousT0Reconstructed = nil
+            framesSinceKeyframe = 0
+            temporalFrameIndex = 0
+
+            roundOffsetIndex = 0
+            entropyHistories?.reset()
+            mvPredictionState?.resetForKeyframe()
+        }
+
+        let isPFrame = (previousReconstructed != nil)
+        let useBidirectional = isPFrame && firstReconstructed != nil
+        let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
+        
+        let predictedPd: PlaneData420?
+        if temporalLayers == 2 {
+            if let t0 = previousT0Reconstructed {
+                predictedPd = t0
+            } else {
+                predictedPd = previousReconstructed
+            }
+        } else {
+            predictedPd = previousReconstructed
+        }
+        let isT0 = (temporalFrameIndex % 2 == 0)
+        let updateL0: Bool
+        if temporalLayers == 2 {
+            updateL0 = isT0
+        } else {
+            updateL0 = true
+        }
+        let img16 = try decodeSpatialLayersForProfile2Base8Only(
+            r: chunk, pool: pool, dx: width, dy: height,
+            predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
+            entropyHistories: entropyHistories, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
+            updateL0Prev: updateL0
+        )
+        
+        let pd = PlaneData420(img16: img16)
+        let yBase = pd.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+        seenY.insert(yBase)
+        
+        let shouldPromoteLTR: Bool
+        if profile == 0x02 && 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+            if temporalLayers == 2 {
+                shouldPromoteLTR = isT0
+            } else {
+                shouldPromoteLTR = true
+            }
+        } else {
+            shouldPromoteLTR = false
+        }
+
+        if shouldPromoteLTR {
+            if let old = firstReconstructed, let prevRecon = previousReconstructed {
+                let oldY = old.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                let prevY = prevRecon.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                let t0Y = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                if oldY != prevY && oldY != t0Y {
+                    if seenY.contains(oldY) {
+                        seenY.remove(oldY)
+                        pool.putInt16(old.y)
+                        pool.putInt16(old.cb)
+                        pool.putInt16(old.cr)
+                    }
+                }
+            }
+            firstReconstructed = previousReconstructed
+            if temporalLayers == 2 {
+                previousT0Reconstructed = previousReconstructed
+            }
+        } else {
+            if temporalLayers == 2 {
+                if isT0 {
+                    previousT0Reconstructed = previousReconstructed
+                }
+            }
+        }
+
+        if let prev = previousReconstructed {
+            let prevY = prev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+            let firstY = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+            let t0Y = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+            if prevY != firstY && prevY != t0Y {
+                if seenY.contains(prevY) {
+                    seenY.remove(prevY)
+                    pool.putInt16(prev.y)
+                    pool.putInt16(prev.cb)
+                    pool.putInt16(prev.cr)
+                }
+            }
+        }
+
+        previousReconstructed = pd
+        if temporalLayers == 2 && isT0 {
+            previousT0Reconstructed = pd
+        }
+        
+        framesSinceKeyframe += 1
+        temporalFrameIndex += 1
+        roundOffsetIndex += 1
+        return renderToYCbCr(pd: pd)
+    }
+
+    @inline(__always)
+    public func decodeAll(chunks: [[UInt8]], framerate: Int) async throws -> [YCbCrImage] {
+        var images: [YCbCrImage] = []
+        images.reserveCapacity(chunks.count)
+        if maxLayer == 0 && profile == 0x02 {
+            for chunk in chunks {
+                if let img = try self.decodeNextFrameL0Sync(chunk: chunk) {
+                    var mutableImg = img
+                    mutableImg.fps = framerate
+                    images.append(mutableImg)
+                }
+            }
+            return images
+        }
+        for chunk in chunks {
+            if let img = try await self.decodeNextFrame(chunk: chunk) {
+                var mutableImg = img
+                mutableImg.fps = framerate
+                images.append(mutableImg)
+            }
+        }
+        return images
+    }
 }
 
-public struct Decoder: Sendable {
+public final class Decoder: @unchecked Sendable {
     public let maxLayer: Int
     public let maxConcurrency: Int
+    private var cachedStreamingActor: StreamingDecoderActor?
 
     public init(
         maxLayer: Int = 2,
@@ -452,7 +649,7 @@ public struct Decoder: Sendable {
                         
                         if isIFrame {
                             currentGOPInput?.finish()
-                            currentGOPInput = createGOPTask(
+                            currentGOPInput = self.createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
                                 maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile, gop: effectiveGop, temporalLayers: effectiveTemporalLayers
@@ -462,7 +659,7 @@ public struct Decoder: Sendable {
                         if let currentInput = currentGOPInput {
                             currentInput.yield(chunk)
                         } else {
-                            let newInput = createGOPTask(
+                            let newInput = self.createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
                                 maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile, gop: effectiveGop, temporalLayers: effectiveTemporalLayers
@@ -490,8 +687,170 @@ public struct Decoder: Sendable {
     }
     
     @inline(__always)
+    private func decodeProfile2Base8Direct(data: [UInt8], fileHeader: VEVCFileHeader) throws -> [YCbCrImage] {
+        var offset = 0
+        let _ = try VEVCFileHeader.deserialize(from: data, offset: &offset)
+        
+        let width = fileHeader.width
+        let height = fileHeader.height
+        let framerate = fileHeader.framerate
+        let gop = fileHeader.gop
+        let temporalLayers = fileHeader.temporalLayers
+        
+        var images: [YCbCrImage] = []
+        let pool = BlockViewPool()
+        let entropyHistories = FrameEntropyHistories()
+        let mvPredictionState = MVPredictionState()
+        
+        var previousReconstructed: PlaneData420? = nil
+        var firstReconstructed: PlaneData420? = nil
+        var previousT0Reconstructed: PlaneData420? = nil
+        var framesSinceKeyframe: Int = 0
+        var temporalFrameIndex: Int = 0
+        var roundOffsetIndex: Int = 0
+        
+        while offset < data.count {
+            let chunkStart = offset
+            let frameHeader = try VEVCFrameHeader.deserialize(from: data, offset: &offset, profile: 0x02)
+            let payloadEnd = offset + frameHeader.payloadSize
+            guard payloadEnd <= data.count else { throw DecodeError.insufficientData }
+            let chunkSlice = Array(data[chunkStart..<payloadEnd])
+            offset = payloadEnd
+            
+            if frameHeader.isCopyFrame {
+                guard let prev = previousReconstructed else {
+                    throw DecodeError.insufficientDataContext("Copy frame without previous frame")
+                }
+                let isT0 = (temporalFrameIndex % 2 == 0)
+                let shouldPromoteLTR: Bool
+                if 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+                    switch temporalLayers {
+                    case 2:
+                        shouldPromoteLTR = isT0
+                    default:
+                        shouldPromoteLTR = true
+                    }
+                } else {
+                    shouldPromoteLTR = false
+                }
+                if shouldPromoteLTR {
+                    firstReconstructed = previousReconstructed
+                    if temporalLayers == 2 {
+                        previousT0Reconstructed = previousReconstructed
+                    }
+                } else {
+                    if temporalLayers == 2 && isT0 {
+                        previousT0Reconstructed = previousReconstructed
+                    }
+                }
+                framesSinceKeyframe += 1
+                temporalFrameIndex += 1
+                roundOffsetIndex += 1
+                
+                var img = YCbCrImage(width: prev.width, height: prev.height, fps: framerate)
+                prev.toYCbCr(into: &img)
+                images.append(img)
+                continue
+            }
+            
+            if frameHeader.isIFrame {
+                firstReconstructed = nil
+                previousReconstructed = nil
+                previousT0Reconstructed = nil
+                framesSinceKeyframe = 0
+                temporalFrameIndex = 0
+                roundOffsetIndex = 0
+                entropyHistories.reset()
+                mvPredictionState.resetForKeyframe()
+            }
+            
+            let isPFrame = (previousReconstructed != nil)
+            let useBidirectional = isPFrame && (firstReconstructed != nil)
+            let nextPd: PlaneData420? = if useBidirectional { firstReconstructed } else { nil }
+            
+            let predictedPd: PlaneData420?
+            if temporalLayers == 2 {
+                if let t0 = previousT0Reconstructed {
+                    predictedPd = t0
+                } else {
+                    predictedPd = previousReconstructed
+                }
+            } else {
+                predictedPd = previousReconstructed
+            }
+            let isT0 = (temporalFrameIndex % 2 == 0)
+            let updateL0: Bool
+            switch temporalLayers {
+            case 2:
+                updateL0 = isT0
+            default:
+                updateL0 = true
+            }
+            
+            let img16 = try decodeSpatialLayersForProfile2Base8Only(
+                r: chunkSlice, pool: pool, dx: width, dy: height,
+                predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
+                entropyHistories: entropyHistories, mvState: mvPredictionState, parallelEntropy: true,
+                updateL0Prev: updateL0
+            )
+            
+            let pd = PlaneData420(img16: img16)
+            let shouldPromoteLTR: Bool
+            if 0 < gop && 0 < framesSinceKeyframe && framesSinceKeyframe % gop == 0 {
+                switch temporalLayers {
+                case 2:
+                    shouldPromoteLTR = isT0
+                default:
+                    shouldPromoteLTR = true
+                }
+            } else {
+                shouldPromoteLTR = false
+            }
+            
+            if shouldPromoteLTR {
+                firstReconstructed = previousReconstructed
+                if temporalLayers == 2 {
+                    previousT0Reconstructed = previousReconstructed
+                }
+            } else {
+                if temporalLayers == 2 && isT0 {
+                    previousT0Reconstructed = previousReconstructed
+                }
+            }
+            
+            previousReconstructed = pd
+            if temporalLayers == 2 && isT0 {
+                previousT0Reconstructed = pd
+            }
+            if firstReconstructed == nil {
+                firstReconstructed = pd
+            }
+            if previousT0Reconstructed == nil {
+                previousT0Reconstructed = pd
+            }
+            
+            framesSinceKeyframe += 1
+            temporalFrameIndex += 1
+            roundOffsetIndex += 1
+            
+            var img = YCbCrImage(width: pd.width, height: pd.height, fps: framerate)
+            pd.toYCbCr(into: &img)
+            images.append(img)
+        }
+        return images
+    }
+
+    @inline(__always)
     public func decode(data: [UInt8]) async throws -> [YCbCrImage] {
         if data.isEmpty { return [] }
+        
+        if maxConcurrency <= 1 && 4 <= data.count && data[0] == 0x56 && data[1] == 0x45 && data[2] == 0x56 && data[3] == 0x43 {
+            var headerOffset = 0
+            let fileHeader = try VEVCFileHeader.deserialize(from: data, offset: &headerOffset)
+            if maxLayer == 0 && fileHeader.profile == 0x02 {
+                return try self.decodeProfile2Base8Direct(data: data, fileHeader: fileHeader)
+            }
+        }
         
         var offset = 0
         var chunks: [[UInt8]] = []
@@ -502,7 +861,7 @@ public struct Decoder: Sendable {
                 let headerStart = offset
                 offset += 4
                 let metadataSize = Int(try readUInt16BEFromBytes(data, offset: &offset))
-                if metadataSize > 0 {
+                if 0 < metadataSize {
                     currentProfile = data[offset]
                 }
                 offset += metadataSize
@@ -514,6 +873,33 @@ public struct Decoder: Sendable {
                 let chunkEnd = offset
                 chunks.append(Array(data[chunkStart..<chunkEnd]))
             }
+        }
+        
+        if maxConcurrency <= 1, let hChunk = headerChunk {
+            var headerOffset = 0
+            let fileHeader = try VEVCFileHeader.deserialize(from: hChunk, offset: &headerOffset)
+            let decoderActor: StreamingDecoderActor
+            if let cached = cachedStreamingActor,
+               cached.width == fileHeader.width &&
+               cached.height == fileHeader.height &&
+               cached.maxLayer == maxLayer &&
+               cached.profile == fileHeader.profile &&
+               cached.gop == fileHeader.gop &&
+               cached.temporalLayers == fileHeader.temporalLayers {
+                decoderActor = cached
+            } else {
+                decoderActor = StreamingDecoderActor(
+                    maxLayer: maxLayer,
+                    width: fileHeader.width,
+                    height: fileHeader.height,
+                    profile: fileHeader.profile,
+                    gop: fileHeader.gop,
+                    temporalLayers: fileHeader.temporalLayers,
+                    parallelEntropy: (maxConcurrency <= 1)
+                )
+                cachedStreamingActor = decoderActor
+            }
+            return try await decoderActor.decodeAll(chunks: chunks, framerate: fileHeader.framerate)
         }
         
         let stream = AsyncStream<[UInt8]> { continuation in
@@ -570,7 +956,7 @@ public struct Decoder: Sendable {
                                 let metaData = readFully(fileHandle: fileHandle, count: metadataSize)
                                 guard metaData.count == metadataSize else { continuation.finish(); return }
                                 
-                                if metadataSize > 0 {
+                                if 0 < metadataSize {
                                     currentProfile = metaData[0]
                                 }
                                 

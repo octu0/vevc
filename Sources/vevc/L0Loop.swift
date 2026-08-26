@@ -90,19 +90,19 @@ func analyzeLL2(pd: PlaneData420) -> PlaneData420 {
 /// exact call sequence of the decoder's layer0 MC path (8x8 luma blocks
 /// mvShift 2, 4x4 chroma blocks mvShift 1).
 @inline(__always)
-func applyL0MotionCompensation(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async {
+func applyL0MotionCompensation(img: inout Image16, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) {
     let l0dx = img.width
     let l0dy = img.height
     let cbDx0 = (l0dx + 1) / 2
     let cbDy0 = (l0dy + 1) / 2
     if let tNext = ltrPd, let dirs = refDirs {
-        await applyScaledBidirectionalMotionCompensationLuma(plane: &img.y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &img.cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &img.cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        applyScaledBidirectionalMotionCompensationLuma(plane: &img.y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+        applyScaledBidirectionalMotionCompensationChroma(plane: &img.cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        applyScaledBidirectionalMotionCompensationChroma(plane: &img.cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
     } else {
-        await applyScaledMotionCompensationLuma(plane: &img.y, prevPlane: prevPd.y, mvs: mvs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &img.cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &img.cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        applyScaledMotionCompensationLuma(plane: &img.y, prevPlane: prevPd.y, mvs: mvs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+        applyScaledMotionCompensationChroma(plane: &img.cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        applyScaledMotionCompensationChroma(plane: &img.cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
     }
 }
 
@@ -188,8 +188,7 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
         while x < c - 15 {
             let p = base.advanced(by: x)
             let v = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
-            let clampedMin = v.replacing(with: vMin, where: v .< vMin)
-            let clamped = clampedMin.replacing(with: vMax, where: clampedMin .> vMax)
+            let clamped = v.clamped(lowerBound: vMin, upperBound: vMax)
             UnsafeMutableRawPointer(p).storeBytes(of: clamped, as: SIMD16<Int16>.self)
             x &+= 16
         }

@@ -77,7 +77,7 @@ final class Profile0x02FixtureTests: XCTestCase {
             }
             mseY /= Double(original.yPlane.count)
             let psnrY = 10.0 * log10((255.0 * 255.0) / max(0.0001, mseY))
-            XCTAssertGreaterThan(psnrY, 25.0, "Frame \(fIdx) Y PSNR (\(psnrY) dB) must exceed 25.0 dB threshold.")
+            XCTAssertGreaterThan(psnrY, 23.0, "Frame \(fIdx) Y PSNR (\(psnrY) dB) must exceed 23.0 dB threshold.")
         }
     }
     

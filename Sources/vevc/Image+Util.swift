@@ -223,3 +223,82 @@ public func ycbcrToRGBA(img: YCbCrImage) -> [UInt8] {
     }
     return rawData
 }
+
+// MARK: - Block Copy Functions
+
+@inline(__always)
+func copyBlock32Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
+    for y in 0..<32 {
+        let offset = (by + y) * stride + bx
+        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+    }
+}
+
+@inline(__always)
+func copyBlock16Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
+    for y in 0..<16 {
+        let offset = (by + y) * stride + bx
+        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+    }
+}
+
+@inline(__always)
+func copyBlock8Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
+    for y in 0..<8 {
+        let offset = (by + y) * stride + bx
+        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+    }
+}
+
+@inline(__always)
+func copyBlock4Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
+    for y in 0..<4 {
+        let offset = (by + y) * stride + bx
+        dst.advanced(by: offset).update(from: src.advanced(by: offset), count: 4)
+    }
+}
+
+@inline(__always)
+func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, width: Int, height: Int, blockSize: Int) {
+    let maxY = min(by + blockSize, height)
+    let maxX = min(bx + blockSize, width)
+    let copyCount = maxX - bx
+    if copyCount <= 0 { return }
+
+    switch copyCount {
+    case 32:
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        }
+    case 16:
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+        }
+    case 8:
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+        }
+    default:
+        for y in by..<maxY {
+            let offset = y * width + bx
+            dst.advanced(by: offset).update(from: src.advanced(by: offset), count: copyCount)
+        }
+    }
+}

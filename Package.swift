@@ -82,6 +82,13 @@ var packageTargets: [Target] = [
             "vevc"
         ],
         path: "Sources/vevc-player"
+    ),
+    .executableTarget(
+        name: "vevc-snn-train",
+        dependencies: [
+            "vevc"
+        ],
+        path: "Sources/vevc-snn-train"
     )
 ]
 
