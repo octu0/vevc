@@ -127,7 +127,9 @@ while i < args.count {
             i += 1
         }
     default:
-        ()
+        if arg.hasPrefix("-") != true && inputPath.isEmpty {
+            inputPath = arg
+        }
     }
     i += 1
 }
@@ -234,19 +236,35 @@ do {
         }
         
         for _ in 0..<converterCount {
+            if DPCMDumpWriter.shared.isEnabled {
+                DPCMDumpWriter.shared.setFrameIndex(UInt32(frameCount))
+            }
             let encStart = Date()
             let chunk = try await encoder.encode(image: image)
             totalEncodeTime += Date().timeIntervalSince(encStart)
             
             outFileHandle.write(Data(chunk))
+            if DPCMStatsTracker.shared.isEnabled {
+                DPCMStatsTracker.shared.addFileBytes(chunk.count)
+            }
             frameCount += 1
         }
     }
 
     if outPath != "-" {
-        let msPerFrame = if 0 < frameCount { (totalEncodeTime * 1000 / Double(frameCount)) } else { 0.0 }
+        var msPerFrame = 0.0
+        if 0 < frameCount {
+            msPerFrame = (totalEncodeTime * 1000 / Double(frameCount))
+        }
         let logMsg = String(format: "Encoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, totalEncodeTime * 1000, msPerFrame)
         fputs(logMsg, stderr)
+    }
+
+    if DPCMStatsTracker.shared.isEnabled {
+        DPCMStatsTracker.shared.printSummary()
+    }
+    if DPCMDumpWriter.shared.isEnabled {
+        DPCMDumpWriter.shared.close()
     }
 
     inFileHandle.closeFile()

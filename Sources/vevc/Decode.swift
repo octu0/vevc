@@ -378,7 +378,45 @@ func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, ptr base: Unsaf
 }
 
 @inline(__always)
-func blockDecodeDPCM4(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
+func decodeTruncatedKSubblock(
+    decoder: inout EntropyDecoder,
+    transmittedK: inout [Int16],
+    k: Int,
+    scanOrder: DPCMScanOrder,
+    lastVal: Int16
+) throws {
+    let hasNonZero = try decoder.decodeBypass()
+    var lscpIdx = -1
+    if hasNonZero == 1 {
+        let lscpX = Int(decoder.readPair(context: 5).run)
+        let lscpY = Int(decoder.readPair(context: 5).run)
+        lscpIdx = scanOrder.toIndex(x: lscpX, y: lscpY)
+        guard lscpIdx < k else {
+            throw DecodeError.invalidBlockDataContext("Truncated DPCM lscp out of bounds: \(lscpIdx)")
+        }
+    }
+    
+    var errorsK = [Int16](repeating: 0, count: k)
+    var currentIdx = 0
+    while currentIdx <= lscpIdx {
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: dpcmContext)
+        currentIdx += run
+        if currentIdx <= lscpIdx {
+            errorsK[currentIdx] = val
+        }
+        currentIdx += 1
+    }
+    
+    var prevVal = lastVal
+    for i in 0..<k {
+        let val = prevVal &+ errorsK[i]
+        transmittedK[i] = val
+        prevVal = val
+    }
+}
+
+@inline(__always)
+func blockDecodeDPCM4Baseline(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, lastVal: inout Int16) throws {
     let hasNonZero = try decoder.decodeBypass()
     var lscpIdx = -1
     if hasNonZero == 1 {
@@ -426,6 +464,79 @@ func blockDecodeDPCM4(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePoin
     ptr3[3] = ptr3[3] &+ predictMED(ptr3[2], ptr2[3], ptr2[2])
 
     lastVal = ptr3[3]
+}
+
+@inline(__always)
+func blockDecodeDPCM4(
+    decoder: inout EntropyDecoder,
+    ptr base: UnsafeMutablePointer<Int16>,
+    stride: Int,
+    lastVal: inout Int16,
+    qLow: Int16 = 0,
+    topBoundary: (Int16, Int16, Int16, Int16) = (0, 0, 0, 0),
+    leftBoundary: (Int16, Int16, Int16, Int16) = (0, 0, 0, 0),
+    topLeftBoundary: Int16 = 0,
+    mcPred: (Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+) throws {
+    let cfg = DPCMTruncConfig.shared
+    guard cfg.isEnabled else {
+        try blockDecodeDPCM4Baseline(decoder: &decoder, ptr: base, stride: stride, lastVal: &lastVal)
+        return
+    }
+
+    let modeFlag = try decoder.decodeBypass()
+    if modeFlag == 0 {
+        // [Mode = 0: フォールバック復号]
+        try blockDecodeDPCM4Baseline(decoder: &decoder, ptr: base, stride: stride, lastVal: &lastVal)
+    } else {
+        // [Mode = 1: 後方省略復号]
+        let k = cfg.k
+        let scanOrder = cfg.scanOrder
+
+        var transmittedK = [Int16](repeating: 0, count: k)
+        try decodeTruncatedKSubblock(
+            decoder: &decoder,
+            transmittedK: &transmittedK,
+            k: k,
+            scanOrder: scanOrder,
+            lastVal: lastVal
+        )
+
+        let context = DPCMPredictContext(
+            k: k,
+            scanOrder: scanOrder,
+            qLow: qLow,
+            lastVal: lastVal,
+            topBoundary: topBoundary,
+            leftBoundary: leftBoundary,
+            topLeftBoundary: topLeftBoundary,
+            mcPred: mcPred
+        )
+
+        var snnRecon = [Int16](repeating: 0, count: 16)
+        transmittedK.withUnsafeBufferPointer { kPtr in
+            snnRecon.withUnsafeMutableBufferPointer { outPtr in
+                if let kBase = kPtr.baseAddress, let outBase = outPtr.baseAddress {
+                    cfg.predictor.predictBlock(
+                        transmittedK: kBase,
+                        context: context,
+                        output: outBase
+                    )
+                }
+            }
+        }
+
+        for y in 0..<4 {
+            let rowPtr = base + y * stride
+            for x in 0..<4 {
+                rowPtr[x] = snnRecon[y * 4 + x]
+            }
+        }
+        lastVal = snnRecon[15]
+    }
 }
 
 @inline(__always)

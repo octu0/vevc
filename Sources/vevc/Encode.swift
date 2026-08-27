@@ -820,7 +820,67 @@ func diffMED(_ x: SIMD4<Int16>, _ a: SIMD4<Int16>, _ b: SIMD4<Int16>, _ c: SIMD4
 }
 
 @inline(__always)
-func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: inout Int16) {
+func encodeTruncatedKSubblock(
+    encoder: inout EntropyEncoder,
+    transmittedK: [Int16],
+    k: Int,
+    scanOrder: DPCMScanOrder,
+    lastVal: Int16
+) {
+    var errorsK = [Int16](repeating: 0, count: k)
+    var prevVal = lastVal
+    for i in 0..<k {
+        let curVal = transmittedK[i]
+        errorsK[i] = curVal &- prevVal
+        prevVal = curVal
+    }
+    
+    var lscpIdxK = -1
+    for i in (0..<k).reversed() {
+        if errorsK[i] != 0 {
+            lscpIdxK = i
+            break
+        }
+    }
+    
+    if lscpIdxK == -1 {
+        encoder.encodeBypass(binVal: 0)
+    } else {
+        encoder.encodeBypass(binVal: 1)
+        let lscpPt = scanOrder.toXY(index: lscpIdxK)
+        encoder.addPair(run: UInt32(lscpPt.x), val: 0, context: 5)
+        encoder.addPair(run: UInt32(lscpPt.y), val: 0, context: 5)
+        
+        var run = 0
+        for i in 0...lscpIdxK {
+            let diff = errorsK[i]
+            if diff == 0 {
+                run += 1
+            } else {
+                encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: dpcmContext)
+                run = 0
+            }
+        }
+    }
+}
+
+@inline(__always)
+func blockEncodeDPCM4Baseline(
+    encoder: inout EntropyEncoder,
+    block: BlockView,
+    lastVal: inout Int16,
+    qLow: Int16 = 0,
+    plane: UInt8 = 0,
+    blockX: UInt16 = 0,
+    blockY: UInt16 = 0,
+    mcPred: (Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    topBoundary: (Int16, Int16, Int16, Int16) = (0, 0, 0, 0),
+    leftBoundary: (Int16, Int16, Int16, Int16) = (0, 0, 0, 0),
+    topLeftBoundary: Int16 = 0
+) {
     let ptr0 = block.rowPointer(y: 0)
     let ptr1 = block.rowPointer(y: 1)
     let ptr2 = block.rowPointer(y: 2)
@@ -878,6 +938,44 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
 
     if lscpIdx == -1 {
         encoder.encodeBypass(binVal: 0)
+        if DPCMStatsTracker.shared.isEnabled {
+            DPCMStatsTracker.shared.recordBlockHeader(isAllZero: true)
+        }
+        if DPCMDumpWriter.shared.isEnabled {
+            let quantTuple = (
+                ptr0[0], ptr0[1], ptr0[2], ptr0[3],
+                ptr1[0], ptr1[1], ptr1[2], ptr1[3],
+                ptr2[0], ptr2[1], ptr2[2], ptr2[3],
+                ptr3[0], ptr3[1], ptr3[2], ptr3[3]
+            )
+            let errTuple = (
+                errors[0], errors[1], errors[2], errors[3],
+                errors[4], errors[5], errors[6], errors[7],
+                errors[8], errors[9], errors[10], errors[11],
+                errors[12], errors[13], errors[14], errors[15]
+            )
+            let zeroCosts = (
+                UInt16(0), UInt16(0), UInt16(0), UInt16(0),
+                UInt16(0), UInt16(0), UInt16(0), UInt16(0),
+                UInt16(0), UInt16(0), UInt16(0), UInt16(0),
+                UInt16(0), UInt16(0), UInt16(0), UInt16(0)
+            )
+            DPCMDumpWriter.shared.recordBlock(
+                plane: plane,
+                blockX: blockX,
+                blockY: blockY,
+                isAllZero: true,
+                qLow: qLow,
+                lastVal: lastVal,
+                quantizedValues: quantTuple,
+                dpcmErrors: errTuple,
+                topBoundary: topBoundary,
+                leftBoundary: leftBoundary,
+                topLeftBoundary: topLeftBoundary,
+                mcPred: mcPred,
+                ransBitCostsQ8: zeroCosts
+            )
+        }
     } else {
         encoder.encodeBypass(binVal: 1)
         let lscpX = lscpIdx % 4
@@ -885,6 +983,11 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
         encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
         encoder.addPair(run: UInt32(lscpY), val: 0, context: 5)
 
+        if DPCMStatsTracker.shared.isEnabled {
+            DPCMStatsTracker.shared.recordBlockHeader(isAllZero: false, lscpX: lscpX, lscpY: lscpY)
+        }
+
+        var costsQ8 = [UInt16](repeating: 0, count: 16)
         var run = 0
         for i in 0...lscpIdx {
             let diff = errors[i]
@@ -892,14 +995,65 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
                 run += 1
             } else {
                 encodeCoeffRun(val: diff, encoder: &encoder, run: run, context: dpcmContext)
+                if DPCMStatsTracker.shared.isEnabled {
+                    DPCMStatsTracker.shared.recordCoeff(pos: i, run: run, val: diff)
+                }
+                if DPCMDumpWriter.shared.isEnabled {
+                    let runRes = valueTokenizeUnsigned(UInt32(run))
+                    let runFreq = Int(StaticRANSModels.shared.dpcmRunModel.tokenFreqs[Int(runRes.token)])
+                    let runBitsQ8 = log2Q8(Int(rANSScale)) - log2Q8(runFreq) + (runRes.bypassLen << 8)
+                    let valRes = valueTokenize(diff)
+                    let valFreq = Int(StaticRANSModels.shared.dpcmValModel.tokenFreqs[Int(valRes.token)])
+                    let valBitsQ8 = log2Q8(Int(rANSScale)) - log2Q8(valFreq) + (valRes.bypassLen << 8)
+                    costsQ8[i] = UInt16(clamping: runBitsQ8 + valBitsQ8)
+                }
                 run = 0
             }
+        }
+        
+        if DPCMDumpWriter.shared.isEnabled {
+            let quantTuple = (
+                ptr0[0], ptr0[1], ptr0[2], ptr0[3],
+                ptr1[0], ptr1[1], ptr1[2], ptr1[3],
+                ptr2[0], ptr2[1], ptr2[2], ptr2[3],
+                ptr3[0], ptr3[1], ptr3[2], ptr3[3]
+            )
+            let errTuple = (
+                errors[0], errors[1], errors[2], errors[3],
+                errors[4], errors[5], errors[6], errors[7],
+                errors[8], errors[9], errors[10], errors[11],
+                errors[12], errors[13], errors[14], errors[15]
+            )
+            let costTuple = (
+                costsQ8[0], costsQ8[1], costsQ8[2], costsQ8[3],
+                costsQ8[4], costsQ8[5], costsQ8[6], costsQ8[7],
+                costsQ8[8], costsQ8[9], costsQ8[10], costsQ8[11],
+                costsQ8[12], costsQ8[13], costsQ8[14], costsQ8[15]
+            )
+            DPCMDumpWriter.shared.recordBlock(
+                plane: plane,
+                blockX: blockX,
+                blockY: blockY,
+                isAllZero: false,
+                qLow: qLow,
+                lastVal: lastVal,
+                quantizedValues: quantTuple,
+                dpcmErrors: errTuple,
+                topBoundary: topBoundary,
+                leftBoundary: leftBoundary,
+                topLeftBoundary: topLeftBoundary,
+                mcPred: mcPred,
+                ransBitCostsQ8: costTuple
+            )
         }
         
         for i in 0..<16 {
             let y = i / 4
             let x = i % 4
-            let val: Int16 = if i <= lscpIdx { errors[i] } else { 0 }
+            var val: Int16 = 0
+            if i <= lscpIdx {
+                val = errors[i]
+            }
             block.rowPointer(y: y)[x] = val
         }
         
@@ -924,6 +1078,123 @@ func blockEncodeDPCM4(encoder: inout EntropyEncoder, block: BlockView, lastVal: 
     }
 
     lastVal = ptr3[3]
+}
+
+@inline(__always)
+func blockEncodeDPCM4(
+    encoder: inout EntropyEncoder,
+    block: BlockView,
+    lastVal: inout Int16,
+    qLow: Int16 = 0,
+    plane: UInt8 = 0,
+    blockX: UInt16 = 0,
+    blockY: UInt16 = 0,
+    mcPred: (Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16,
+             Int16, Int16, Int16, Int16) = (0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    topBoundary: (Int16, Int16, Int16, Int16) = (0, 0, 0, 0),
+    leftBoundary: (Int16, Int16, Int16, Int16) = (0, 0, 0, 0),
+    topLeftBoundary: Int16 = 0
+) {
+    let cfg = DPCMTruncConfig.shared
+    guard cfg.isEnabled else {
+        blockEncodeDPCM4Baseline(
+            encoder: &encoder,
+            block: block,
+            lastVal: &lastVal,
+            qLow: qLow,
+            plane: plane,
+            blockX: blockX,
+            blockY: blockY,
+            mcPred: mcPred,
+            topBoundary: topBoundary,
+            leftBoundary: leftBoundary,
+            topLeftBoundary: topLeftBoundary
+        )
+        return
+    }
+
+    let k = cfg.k
+    let scanOrder = cfg.scanOrder
+    var transmittedK = [Int16](repeating: 0, count: k)
+    for i in 0..<k {
+        let pt = scanOrder.toXY(index: i)
+        transmittedK[i] = block.rowPointer(y: pt.y)[pt.x]
+    }
+
+    let context = DPCMPredictContext(
+        k: k,
+        scanOrder: scanOrder,
+        qLow: qLow,
+        lastVal: lastVal,
+        topBoundary: topBoundary,
+        leftBoundary: leftBoundary,
+        topLeftBoundary: topLeftBoundary,
+        mcPred: mcPred
+    )
+
+    var snnRecon = [Int16](repeating: 0, count: 16)
+    transmittedK.withUnsafeBufferPointer { kPtr in
+        snnRecon.withUnsafeMutableBufferPointer { outPtr in
+            if let kBase = kPtr.baseAddress, let outBase = outPtr.baseAddress {
+                cfg.predictor.predictBlock(
+                    transmittedK: kBase,
+                    context: context,
+                    output: outBase
+                )
+            }
+        }
+    }
+
+    var maxErr: Int16 = 0
+    for i in k..<16 {
+        let pt = scanOrder.toXY(index: i)
+        let trueVal = block.rowPointer(y: pt.y)[pt.x]
+        let predVal = snnRecon[pt.y * 4 + pt.x]
+        let diff = abs(Int32(trueVal) - Int32(predVal))
+        let diff16 = Int16(clamping: diff)
+        if maxErr < diff16 {
+            maxErr = diff16
+        }
+    }
+
+    let isTruncEligible = maxErr <= cfg.epsilon
+    if isTruncEligible {
+        // [Mode = 1: 後方省略モード]
+        encoder.encodeBypass(binVal: 1)
+        encodeTruncatedKSubblock(
+            encoder: &encoder,
+            transmittedK: transmittedK,
+            k: k,
+            scanOrder: scanOrder,
+            lastVal: lastVal
+        )
+
+        for y in 0..<4 {
+            let rowPtr = block.rowPointer(y: y)
+            for x in 0..<4 {
+                rowPtr[x] = snnRecon[y * 4 + x]
+            }
+        }
+        lastVal = snnRecon[15]
+    } else {
+        // [Mode = 0: フォールバックモード (全量送信)]
+        encoder.encodeBypass(binVal: 0)
+        blockEncodeDPCM4Baseline(
+            encoder: &encoder,
+            block: block,
+            lastVal: &lastVal,
+            qLow: qLow,
+            plane: plane,
+            blockX: blockX,
+            blockY: blockY,
+            mcPred: mcPred,
+            topBoundary: topBoundary,
+            leftBoundary: leftBoundary,
+            topLeftBoundary: topLeftBoundary
+        )
+    }
 }
 
 @inline(__always)
