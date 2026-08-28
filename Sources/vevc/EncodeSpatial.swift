@@ -496,7 +496,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipModelDecider? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -512,11 +512,14 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
 
-    let skipMap = await computeProfile2SkipMap(pd: pd, prevInput: prevInput, ltrInput: ltrInput, predictedPd: predictedPd, gopPosition: gopPosition, ltrAge: ltrAge, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, staticCounters: &staticCounters)
+    var skipMap = await computeProfile2SkipMap(pd: pd, prevInput: prevInput, ltrInput: ltrInput, predictedPd: predictedPd, gopPosition: gopPosition, ltrAge: ltrAge, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, staticCounters: &staticCounters)
 
     MultiRefOracle.shared?.evaluate(pd: pd, skipMap: skipMap, skipThreshold: skipThreshold)
 
-    let (mvs_original, sads, refDirs_original, _, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: skipMap, cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1)
+    // The skip model prices both reference directions per block, which the
+    // coding path does not keep; ask the search to export them when it runs.
+    let dualSink: DualMVSink? = skipModel != nil ? DualMVSink() : nil
+    let (mvs_original, sads, refDirs_original, _, nextSub2Res, nextSub1Res) = await computeBidirectionalMotionVectors(curr: pd, prev: pPd, next: nPd, prevMVs: prevMVs ?? MotionVectors.empty, pool: pool, roundOffset: roundOffset, gopPosition: gopPosition, skipMap: skipMap, cachedNextSub2: cachedNextSub2, cachedNextSub1: cachedNextSub1, dualOut: dualSink)
     var mvs = mvs_original
     var refDirs = refDirs_original
     for i in 0..<skipMap.count {
@@ -531,6 +534,46 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             refDirs[i] = false
         default: break
         }
+    }
+
+    // Learned skip decision. It runs here, before any consumer reads the map,
+    // so coding (skip map / MVs / ref dirs / layer preparation / zero flags)
+    // and reconstruction (MC subtract, L0 loop, deblock, skip copy) all
+    // describe the same blocks. Its activity classes are the ones the AQ stage
+    // would compute anyway, so they are handed forward instead of recomputed.
+    var earlyActivity: [BlockActivityClass]? = nil
+    if let model = skipModel, let dual = dualSink {
+        let variances = computeBlockActivityMap(source: pd.y, width: dx, height: dy)
+        let classes = classifyBlockActivity(
+            varianceMap: variances,
+            flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
+            texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
+            source: pd.y,
+            width: dx,
+            height: dy,
+            coherenceEnabled: (smooth == 1)
+        )
+        earlyActivity = classes
+        model.apply(
+            skipMap: &skipMap,
+            mvs: &mvs,
+            refDirs: &refDirs,
+            inputs: SkipModelFrameInputs(
+                mvsPrev: dual.prevMVs,
+                mvsLtr: dual.ltrMVs,
+                meSadPrev: dual.prevSADs,
+                meSadLtr: dual.ltrSADs,
+                variance: variances,
+                activityClass: classes,
+                staticCounters: staticCounters,
+                adjustedStep: adjustedStep,
+                gopPosition: gopPosition,
+                ltrAge: ltrAge
+            ),
+            source: pd,
+            prevRef: pPd,
+            ltrRef: nPd
+        )
     }
 
     var mutPdY = pool.getInt16(count: pd.y.count)
@@ -554,7 +597,8 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // σ-normalized AQ: per-block source-luma activity classes select the
     // dead-zone variants during layer 2/1 luma quantization (SAD.swift,
     // Quant.swift). Computed concurrently with the MC-subtract tasks.
-    async let tAq = { [pdY = pd.y] () -> [BlockActivityClass] in
+    async let tAq = { [pdY = pd.y, earlyActivity] () -> [BlockActivityClass] in
+        if let a = earlyActivity { return a }
         let variances = computeBlockActivityMap(source: pdY, width: dx, height: dy)
         let isSmoothOn = (smooth == 1)
         return classifyBlockActivity(

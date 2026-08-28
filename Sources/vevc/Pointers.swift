@@ -34,6 +34,20 @@ internal func withUnsafePlanePointers<R>(
 
 @inline(__always)
 internal func withUnsafePlanePointers<R>(
+    _ a: PlaneData420, _ b: PlaneData420, _ c: PlaneData420,
+    _ body: (PlanePointers, PlanePointers, PlanePointers) throws -> R
+) rethrows -> R {
+    try withUnsafePlanePointers(a) { pA in
+        try withUnsafePlanePointers(b) { pB in
+            try withUnsafePlanePointers(c) { pC in
+                try body(pA, pB, pC)
+            }
+        }
+    }
+}
+
+@inline(__always)
+internal func withUnsafePlanePointers<R>(
     _ a: PlaneData420, _ b: PlaneData420, _ c: PlaneData420, _ d: PlaneData420,
     _ body: (PlanePointers, PlanePointers, PlanePointers, PlanePointers) throws -> R
 ) rethrows -> R {

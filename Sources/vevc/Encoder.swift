@@ -43,12 +43,15 @@ public actor VEVCEncoder {
     public nonisolated let motionMaskingPx: Int
     public nonisolated let smooth: Int
     public nonisolated let temporalLayers: Int
+    /// Learned skip-safety decider on profile 0x02 P-frames. 1 = on (default),
+    /// 0 = the pre-model encode path. No effect on profile 0x01.
+    public nonisolated let skipModel: Int
     
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -68,7 +71,8 @@ public actor VEVCEncoder {
         self.motionMaskingPx = motionMaskingPx
         self.smooth = smooth
         self.temporalLayers = temporalLayers
-        
+        self.skipModel = skipModel
+
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
             width: width,
@@ -89,11 +93,12 @@ public actor VEVCEncoder {
             l0Cadence: l0Cadence,
             motionMaskingPx: motionMaskingPx,
             smooth: smooth,
-            temporalLayers: temporalLayers
+            temporalLayers: temporalLayers,
+            skipModel: skipModel
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -113,7 +118,8 @@ public actor VEVCEncoder {
         self.motionMaskingPx = motionMaskingPx
         self.smooth = smooth
         self.temporalLayers = temporalLayers
-        
+        self.skipModel = skipModel
+
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
             width: width,
@@ -134,7 +140,8 @@ public actor VEVCEncoder {
             l0Cadence: l0Cadence,
             motionMaskingPx: motionMaskingPx,
             smooth: smooth,
-            temporalLayers: temporalLayers
+            temporalLayers: temporalLayers,
+            skipModel: skipModel
         )
     }
     
@@ -225,7 +232,11 @@ actor LayersEncodeActor {
     let motionMaskingPx: Int
     let smooth: Int
     let temporalLayers: Int
-    
+    let skipModel: Int
+    /// nil unless the learned skip decider is both enabled and applicable
+    /// (profile 0x02 only — profile 0x01 has no skip map to convert into).
+    private let skipModelDecider: SkipModelDecider?
+
     private var rateController: RateController
     private var framesSinceKeyframe = 0
     private var framesSinceLtrUpdate = 0
@@ -261,7 +272,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -281,15 +292,17 @@ actor LayersEncodeActor {
         self.motionMaskingPx = motionMaskingPx
         self.smooth = smooth
         self.temporalLayers = temporalLayers
+        self.skipModel = skipModel
+        self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
-        
+
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
-    
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1) {
+
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -309,14 +322,16 @@ actor LayersEncodeActor {
         self.motionMaskingPx = motionMaskingPx
         self.smooth = smooth
         self.temporalLayers = temporalLayers
+        self.skipModel = skipModel
+        self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
-        
+
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
-    
+
     deinit {
         releasePreviousInput?()
         releasePreviousT0Input?()
@@ -670,7 +685,8 @@ actor LayersEncodeActor {
                 motionMaskingPx: self.motionMaskingPx,
                 adjustedStep: adjustedStep,
                 smooth: effSmooth,
-                updateL0Prev: updateL0
+                updateL0Prev: updateL0,
+                skipModel: self.skipModelDecider
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)

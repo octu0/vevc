@@ -345,6 +345,90 @@ func computeBlockActivityMap(source: [Int16], width: Int, height: Int) -> [Int32
     return variances
 }
 
+/// Per-block gradient energy and local contrast, on the same 32px grid as
+/// `computeBlockActivityMap`. `maxGrad` is the largest centre-difference
+/// gradient magnitude |dI/dx| + |dI/dy| in the block (sampled every other
+/// pixel), `avgGrad` its mean over the same samples, and `localRange` the
+/// largest max-minus-min of any 8x8 sub-block. Together they separate a block
+/// that is genuinely featureless from one that is low-variance only because a
+/// single strong edge splits two flat halves.
+@inline(__always)
+func computeBlockGradientAndContrast(
+    source: UnsafePointer<Int16>,
+    stride: Int,
+    width: Int,
+    height: Int,
+    bx: Int,
+    by: Int,
+    bw: Int,
+    bh: Int
+) -> (maxGrad: Int32, avgGrad: Int32, localRange: Int32) {
+    var maxG: Int32 = 0
+    var sumG: Int32 = 0
+    var countG: Int32 = 0
+    var maxSubRange: Int32 = 0
+
+    let subBlocksY = (bh + 7) / 8
+    let subBlocksX = (bw + 7) / 8
+
+    for sby in 0..<subBlocksY {
+        let subY = by + sby * 8
+        let subH = min(8, height - subY)
+        for sbx in 0..<subBlocksX {
+            let subX = bx + sbx * 8
+            let subW = min(8, width - subX)
+
+            var minV: Int16 = 32767
+            var maxV: Int16 = -32768
+
+            for y in 0..<subH {
+                let row = source.advanced(by: (subY + y) * stride + subX)
+                for x in 0..<subW {
+                    let v = row[x]
+                    if v < minV { minV = v }
+                    if maxV < v { maxV = v }
+                }
+            }
+            let r = Int32(maxV - minV)
+            if maxSubRange < r {
+                maxSubRange = r
+            }
+        }
+    }
+
+    let startY = max(1, by)
+    let endY = min(height - 2, by + bh - 1)
+    let startX = max(1, bx)
+    let endX = min(width - 2, bx + bw - 1)
+
+    if startY <= endY {
+        if startX <= endX {
+            var y = startY
+            while y <= endY {
+                let prevRow = source.advanced(by: (y - 1) * stride)
+                let currRow = source.advanced(by: y * stride)
+                let nextRow = source.advanced(by: (y + 1) * stride)
+                var x = startX
+                while x <= endX {
+                    let g = abs(Int32(currRow[x + 1]) - Int32(currRow[x - 1])) + abs(Int32(nextRow[x]) - Int32(prevRow[x]))
+                    if maxG < g {
+                        maxG = g
+                    }
+                    sumG += g
+                    countG += 1
+                    x += 2
+                }
+                y += 2
+            }
+        }
+    }
+    var avgG: Int32 = 0
+    if 0 < countG {
+        avgG = sumG / countG
+    }
+    return (maxG, avgG, maxSubRange)
+}
+
 @inline(__always)
 func classifyBlockActivity(
     varianceMap: [Int32],

@@ -39,6 +39,22 @@ struct MotionVectors: Sendable {
     static let empty = MotionVectors(dx: [], dy: [])
 }
 
+/// Per-block motion search results of *both* reference directions. The coding
+/// path keeps a single vector per block — the direction the SAD comparison
+/// picked — so a consumer that has to weigh "copy from prev" against "copy from
+/// LTR" cannot reuse it: reading the chosen vector for both makes the two
+/// candidates the same block. `computeBidirectionalMotionVectors` fills this
+/// only when asked, and filling it does not change the vectors it returns.
+final class DualMVSink: @unchecked Sendable {
+    var prevMVs: MotionVectors = .empty
+    var ltrMVs: MotionVectors = .empty
+    /// The per-direction SADs the search already produced. `prev` includes the
+    /// chroma term the coding path adds; `ltr` is the luma search SAD plus the
+    /// same chroma term.
+    var prevSADs: [Int] = []
+    var ltrSADs: [Int] = []
+}
+
 private let meFineOffsets: [(Int, Int)] = [
     (-1, -1), (0, -1), (1, -1),
     (-1,  0),          (1,  0),
@@ -1029,7 +1045,7 @@ struct UnsafePointerWrapper<T>: @unchecked Sendable {
 }
 
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil, dualOut: DualMVSink? = nil) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1102,8 +1118,15 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
         let dy: [Int16]
         let sads: [Int]
         let refDirs: [Bool]
+        let pdx: [Int16]
+        let pdy: [Int16]
+        let ldx: [Int16]
+        let ldy: [Int16]
+        let psad: [Int]
+        let lsad: [Int]
     }
-    
+    let wantDual = (dualOut != nil)
+
     let cS1BaseWrapper = UnsafePointerWrapper(base: cS1.withUnsafeBufferPointer { $0.baseAddress! })
     let pS1BaseWrapper = UnsafePointerWrapper(base: pS1.withUnsafeBufferPointer { $0.baseAddress! })
     let nS1BaseWrapper = UnsafePointerWrapper(base: nS1.withUnsafeBufferPointer { $0.baseAddress! })
@@ -1148,22 +1171,35 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 var dy = [Int16](repeating: 0, count: sliceBlocksCount)
                 var sads = [Int](repeating: 0, count: sliceBlocksCount)
                 var refDirs = [Bool](repeating: false, count: sliceBlocksCount)
-                
+                var pdx = [Int16](repeating: 0, count: wantDual ? sliceBlocksCount : 0)
+                var pdy = [Int16](repeating: 0, count: wantDual ? sliceBlocksCount : 0)
+                var ldx = [Int16](repeating: 0, count: wantDual ? sliceBlocksCount : 0)
+                var ldy = [Int16](repeating: 0, count: wantDual ? sliceBlocksCount : 0)
+                var psad = [Int](repeating: 0, count: wantDual ? sliceBlocksCount : 0)
+                var lsad = [Int](repeating: 0, count: wantDual ? sliceBlocksCount : 0)
+
                 for i in 0..<sliceBlocksCount {
                     let idx = startIdx + i
                     let col = idx % colCount
                     let row = idx / colCount
                     let bx = col * 8
                     let by = row * 8
-                    
-                    if hasSkipMap && skipMapConst[idx] != .inter {
-                        dx[i] = 0
-                        dy[i] = 0
-                        sads[i] = 0
-                        refDirs[i] = false
-                        continue
+
+                    // A skip block needs no vector for coding, but the skip
+                    // model prices both reference directions on every block, so
+                    // with `wantDual` the search runs here too and the coded
+                    // entries are zeroed at the end of the iteration instead.
+                    let isSkipBlock = hasSkipMap && skipMapConst[idx] != .inter
+                    if isSkipBlock {
+                        if wantDual != true {
+                            dx[i] = 0
+                            dy[i] = 0
+                            sads[i] = 0
+                            refDirs[i] = false
+                            continue
+                        }
                     }
-                    
+
                     MotionEstimation.fetchPixelsBlock8(plane: cBase, width: targetWidth, height: targetHeight, x: bx, y: by, dest: cPtr)
                     
                     let mvADx = if 0 < col { dx[i - 1] } else { Int16(0) }
@@ -1291,8 +1327,54 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     }
                     sads[i] = finalSAD
                     refDirs[i] = dir
+
+                    if wantDual {
+                        // The same acceptance / refinement rule the coding path
+                        // applies to the winning direction, applied to each
+                        // direction on its own so the two candidates are
+                        // genuinely distinct.
+                        switch true {
+                        case dynamicThreshold < prevSAD:
+                            pdx[i] = 0
+                            pdy[i] = 0
+                        case prevSAD < 256:
+                            pdx[i] = mvPrev.dx * 4
+                            pdy[i] = mvPrev.dy * 4
+                        default:
+                            let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                                currPlane: currConst.y, prevPlane: prevConst.y,
+                                width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvPrev
+                            )
+                            pdx[i] = rmv.dx
+                            pdy[i] = rmv.dy
+                        }
+                        let ltrSAD = mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) / 4)
+                        psad[i] = prevSAD
+                        lsad[i] = ltrSAD
+                        switch true {
+                        case dynamicThreshold < ltrSAD:
+                            ldx[i] = 0
+                            ldy[i] = 0
+                        case ltrSAD < 256:
+                            ldx[i] = mvNext.dx * 4
+                            ldy[i] = mvNext.dy * 4
+                        default:
+                            let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                                currPlane: currConst.y, prevPlane: nextConst.y,
+                                width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvNext
+                            )
+                            ldx[i] = rmv.dx
+                            ldy[i] = rmv.dy
+                        }
+                        if isSkipBlock {
+                            dx[i] = 0
+                            dy[i] = 0
+                            sads[i] = 0
+                            refDirs[i] = false
+                        }
+                    }
                 }
-                return SliceResult(startIdx: startIdx, dx: dx, dy: dy, sads: sads, refDirs: refDirs)
+                return SliceResult(startIdx: startIdx, dx: dx, dy: dy, sads: sads, refDirs: refDirs, pdx: pdx, pdy: pdy, ldx: ldx, ldy: ldy, psad: psad, lsad: lsad)
             }
         }
         
@@ -1303,12 +1385,30 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
         return collected
     }
     
+    var dualPrev = MotionVectors(count: wantDual ? blocks8Count : 0)
+    var dualLtr = MotionVectors(count: wantDual ? blocks8Count : 0)
+    var dualPrevSAD = [Int](repeating: 0, count: wantDual ? blocks8Count : 0)
+    var dualLtrSAD = [Int](repeating: 0, count: wantDual ? blocks8Count : 0)
     for res in results {
         let endIdx = res.startIdx + res.dx.count
         mvs.dx.replaceSubrange(res.startIdx..<endIdx, with: res.dx)
         mvs.dy.replaceSubrange(res.startIdx..<endIdx, with: res.dy)
         sads.replaceSubrange(res.startIdx..<endIdx, with: res.sads)
         refDirs.replaceSubrange(res.startIdx..<endIdx, with: res.refDirs)
+        if wantDual {
+            dualPrev.dx.replaceSubrange(res.startIdx..<endIdx, with: res.pdx)
+            dualPrev.dy.replaceSubrange(res.startIdx..<endIdx, with: res.pdy)
+            dualLtr.dx.replaceSubrange(res.startIdx..<endIdx, with: res.ldx)
+            dualLtr.dy.replaceSubrange(res.startIdx..<endIdx, with: res.ldy)
+            dualPrevSAD.replaceSubrange(res.startIdx..<endIdx, with: res.psad)
+            dualLtrSAD.replaceSubrange(res.startIdx..<endIdx, with: res.lsad)
+        }
+    }
+    if let sink = dualOut {
+        sink.prevMVs = dualPrev
+        sink.ltrMVs = dualLtr
+        sink.prevSADs = dualPrevSAD
+        sink.ltrSADs = dualLtrSAD
     }
     
     let occlusionScores = MotionEstimation.computeOcclusionScores(currPlane: cS1, prevPlane: pS1, width: targetWidth, height: targetHeight, globalPrior: MotionVector(dx: 0, dy: 0))
