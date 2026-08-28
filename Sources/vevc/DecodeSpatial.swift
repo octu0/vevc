@@ -1851,7 +1851,8 @@ func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [
     }
     var bitIndex = 0
     for i in 0..<count {
-        if sm[i] == .inter {
+        switch sm[i] {
+        case .inter:
             let byteIdx = bitIndex / 8
             let bitIdx = bitIndex % 8
             if byteIdx < buf.count {
@@ -1860,6 +1861,10 @@ func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [
                 }
             }
             bitIndex += 1
+        case .skip_ltr:
+            dirs[i] = true
+        case .skip_prev:
+            dirs[i] = false
         }
     }
     return dirs
