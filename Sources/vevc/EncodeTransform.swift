@@ -687,11 +687,9 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroTh
         isZeroFlags[i] = isZero
         if isZero {
             bwFlags.writeBit(true)
-            bwFlags.writeBit(false)
             let b = blocks[i]
             clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
         } else {
-            bwFlags.writeBit(false)
             bwFlags.writeBit(false)
             nonZeroIndices.append(i)
         }

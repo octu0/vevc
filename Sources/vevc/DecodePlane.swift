@@ -843,7 +843,6 @@ func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockVie
                 continue
             }
             let isZero = brFlags.readBit()
-            brFlags.skipBit()
             if isZero != true {
                 nonZeroIndices.append(i)
             }
