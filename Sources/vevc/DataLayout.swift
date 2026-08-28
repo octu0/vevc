@@ -134,13 +134,15 @@ public struct VEVCFrameHeader {
     /// for symmetry; the current encoder always sends 0.
     public let lumaOffset: Int
     public let chromaOffset: Int
+    public let hasCtxRans: Bool
     public let layer0Size: Int
     public let layer1Size: Int
     public let layer2Size: Int
 
-    public init(frameType: FrameType, hasRefDir: Bool, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int = 0, lumaOffset: Int = 0, chromaOffset: Int = 0, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
+    public init(frameType: FrameType, hasRefDir: Bool, hasCtxRans: Bool = false, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int = 0, lumaOffset: Int = 0, chromaOffset: Int = 0, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
+        self.hasCtxRans = hasCtxRans
         self.skipMapSize = skipMapSize
         self.mvsSize = mvsSize
         self.refDirSize = refDirSize
@@ -179,7 +181,14 @@ public struct VEVCFrameHeader {
         case false:
             refDirFlag = 0x00
         }
-        let flag = frameType.rawValue | refDirFlag
+        let ctxRansFlag: UInt8
+        switch profile == 0x02 && hasCtxRans {
+        case true:
+            ctxRansFlag = 0x20
+        case false:
+            ctxRansFlag = 0x00
+        }
+        let flag = frameType.rawValue | refDirFlag | ctxRansFlag
         out.append(flag)
         if frameType != .copyFrame {
             if profile == 0x02 && frameType == .pFrame {
@@ -207,13 +216,20 @@ public struct VEVCFrameHeader {
         
         let frameTypeBits = flag & 0x0F
         let hasRefDir = (flag & 0x10) != 0
+        let hasCtxRans: Bool
+        switch profile == 0x02 {
+        case true:
+            hasCtxRans = (flag & 0x20) != 0
+        case false:
+            hasCtxRans = false
+        }
         
         guard let fType = FrameType(rawValue: frameTypeBits) else {
             throw BinaryError.insufficientData(message: "VEVCFrameHeader invalid frameType \(flag)")
         }
         
         if fType == .copyFrame {
-            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, treeMapSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
+            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, hasCtxRans: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, treeMapSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
         }
         
         let skipMapSize: Int
@@ -249,7 +265,7 @@ public struct VEVCFrameHeader {
             }
         }
         
-        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: treeMapSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, hasCtxRans: hasCtxRans, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: treeMapSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }
 

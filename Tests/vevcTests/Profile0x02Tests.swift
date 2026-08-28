@@ -253,4 +253,202 @@ final class Profile0x02Tests: XCTestCase {
         
         XCTAssertEqual(bitstream1, bitstream2)
     }
+
+    // 7. CtxRans の可逆性検証（有効時と無効時でデコード画素が 100% 完全一致すること）
+    func testCtxRansBitExactReconstruction() async throws {
+        let width = 320
+        let height = 240
+        var frames = [YCbCrImage]()
+        for f in 0..<5 {
+            var img = YCbCrImage(width: width, height: height, ratio: .ratio420)
+            for i in 0..<(width * height) {
+                img.yPlane[i] = UInt8(((i * 7) + (f * 13)) % 256)
+            }
+            for i in 0..<(width * height / 4) {
+                img.cbPlane[i] = UInt8(((i * 3) + (f * 5)) % 256)
+                img.crPlane[i] = UInt8(((i * 5) + (f * 7)) % 256)
+            }
+            frames.append(img)
+        }
+
+        // 1. CtxRans 無効時
+        isCtxRansEnabled = false
+        let encoderBase = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let bitstreamBase = try await encoderBase.encodeToData(images: frames)
+        let decoderBase = Decoder(maxLayer: 2)
+        let outBase = try await decoderBase.decode(data: bitstreamBase)
+
+        // 2. CtxRans 有効時
+        isCtxRansEnabled = true
+        let encoderModel = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let bitstreamModel = try await encoderModel.encodeToData(images: frames)
+        let decoderModel = Decoder(maxLayer: 2)
+        let outModel = try await decoderModel.decode(data: bitstreamModel)
+
+        // リセット
+        isCtxRansEnabled = false
+
+        XCTAssertEqual(outBase.count, outModel.count)
+        for f in 0..<outBase.count {
+            for i in 0..<outBase[f].yPlane.count {
+                if outBase[f].yPlane[i] != outModel[f].yPlane[i] {
+                    XCTFail("Frame \(f) yPlane mismatch at pixel \(i): base=\(outBase[f].yPlane[i]), model=\(outModel[f].yPlane[i])")
+                    return
+                }
+            }
+            for i in 0..<outBase[f].cbPlane.count {
+                if outBase[f].cbPlane[i] != outModel[f].cbPlane[i] {
+                    XCTFail("Frame \(f) cbPlane mismatch at pixel \(i): base=\(outBase[f].cbPlane[i]), model=\(outModel[f].cbPlane[i])")
+                    return
+                }
+            }
+            for i in 0..<outBase[f].crPlane.count {
+                if outBase[f].crPlane[i] != outModel[f].crPlane[i] {
+                    XCTFail("Frame \(f) crPlane mismatch at pixel \(i): base=\(outBase[f].crPlane[i]), model=\(outModel[f].crPlane[i])")
+                    return
+                }
+            }
+        }
+    }
+
+    func testRDDiagnostic() async throws {
+        let ws = CtxRansWorkspace()
+        var coeffs: [Int16] = [10, 0, 0, 0,  2, 1, 0, 0,  1, 0, 0, 0,  0, 0, 0, 0]
+        let c4h = coeffs.withUnsafeBufferPointer { estimate4HTailBits(blockCoeffs: $0.baseAddress!) }
+        let cModel = coeffs.withUnsafeBufferPointer {
+            ws.estimateModelTailBits(
+                blockCoeffs: $0.baseAddress!,
+                topCoeffs: nil,
+                leftCoeffs: nil,
+                tempCoeffs: nil,
+                isPFrame: true,
+                plane: 0,
+                qstep: 4096
+            )
+        }
+        print("=== Diagnostic: 4H=\(c4h) bits, Model=\(cModel) bits ===")
+        XCTAssertLessThan(0, c4h)
+        XCTAssertLessThan(0, cModel)
+    }
+
+    func testRealVideoLossless() async throws {
+        let sequences: [(String, String)] = [
+            ("tos", "/Users/yusuke.hata/Downloads/tos.y4m"),
+            ("miko700", "/Users/yusuke.hata/workspace/vevc/.tmp/miko_700.y4m"),
+            ("miko1", "/Users/yusuke.hata/Downloads/miko1.y4m"),
+            ("src_1", "/Users/yusuke.hata/Downloads/src_1.y4m")
+        ]
+
+        var testedAny = false
+        for (name, path) in sequences {
+            guard let handle = FileHandle(forReadingAtPath: path) else {
+                print("Skipping \(name), path not found: \(path)")
+                continue
+            }
+            defer { try? handle.close() }
+
+            let reader = try Y4MReader(fileHandle: handle)
+            var frames: [YCbCrImage] = []
+            for _ in 0..<10 {
+                if let img = try reader.readFrame() {
+                    frames.append(img)
+                }
+            }
+            if frames.isEmpty { continue }
+            testedAny = true
+
+            // 1. Base
+            isCtxRansEnabled = false
+            let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
+            let dataBase = try await encBase.encodeToData(images: frames)
+            let decBase = Decoder(maxLayer: 2)
+            let outBase = try await decBase.decode(data: dataBase)
+
+            // 2. CtxRans
+            isCtxRansEnabled = true
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
+            let dataModel = try await encModel.encodeToData(images: frames)
+            let decModel = Decoder(maxLayer: 2)
+            let outModel = try await decModel.decode(data: dataModel)
+
+            isCtxRansEnabled = false
+
+            print("[\(name)] Base: \(dataBase.count) B, Model: \(dataModel.count) B")
+            XCTAssertEqual(outBase.count, outModel.count)
+            for f in 0..<outBase.count {
+                for i in 0..<outBase[f].yPlane.count {
+                    if outBase[f].yPlane[i] != outModel[f].yPlane[i] {
+                        XCTFail("[\(name)] Frame \(f) Y mismatch at pixel \(i): base=\(outBase[f].yPlane[i]), model=\(outModel[f].yPlane[i])")
+                        return
+                    }
+                }
+                for i in 0..<outBase[f].cbPlane.count {
+                    if outBase[f].cbPlane[i] != outModel[f].cbPlane[i] {
+                        XCTFail("[\(name)] Frame \(f) Cb mismatch at pixel \(i): base=\(outBase[f].cbPlane[i]), model=\(outModel[f].cbPlane[i])")
+                        return
+                    }
+                }
+                for i in 0..<outBase[f].crPlane.count {
+                    if outBase[f].crPlane[i] != outModel[f].crPlane[i] {
+                        XCTFail("[\(name)] Frame \(f) Cr mismatch at pixel \(i): base=\(outBase[f].crPlane[i]), model=\(outModel[f].crPlane[i])")
+                        return
+                    }
+                }
+            }
+        }
+        if testedAny != true {
+            throw XCTSkip("No test video sequences found on disk")
+        }
+    }
+
+    func testBitrateAllSequences() async throws {
+        let sequences: [(String, String, Int)] = [
+            ("src_1", "/Users/yusuke.hata/Downloads/src_1.y4m", 100),
+            ("tos", "/Users/yusuke.hata/Downloads/tos.y4m", 100),
+            ("miko700", "/Users/yusuke.hata/workspace/vevc/.tmp/miko_700.y4m", 100),
+            ("miko1", "/Users/yusuke.hata/Downloads/miko1.y4m", 100)
+        ]
+
+        var testedAny = false
+        for (name, path, limit) in sequences {
+            guard let handle = FileHandle(forReadingAtPath: path) else {
+                print("Skipping \(name), path not found: \(path)")
+                continue
+            }
+            defer { try? handle.close() }
+
+            let reader = try Y4MReader(fileHandle: handle)
+            var frames: [YCbCrImage] = []
+            for _ in 0..<limit {
+                if let img = try reader.readFrame() {
+                    frames.append(img)
+                }
+            }
+            if frames.isEmpty { continue }
+            testedAny = true
+
+            // 1. Base
+            isCtxRansEnabled = false
+            let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
+            let dataBase = try await encBase.encodeToData(images: frames)
+
+            // 2. CtxRans
+            isCtxRansEnabled = true
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
+            let dataModel = try await encModel.encodeToData(images: frames)
+
+            isCtxRansEnabled = false
+
+            XCTAssertLessThan(0, dataBase.count)
+            XCTAssertLessThan(0, dataModel.count)
+
+            let diff = dataModel.count - dataBase.count
+            let pct = Double(diff) / Double(dataBase.count) * 100.0
+            print("=== [\(name)] \(limit) frames Base: \(dataBase.count) B, Model: \(dataModel.count) B (diff: \(diff) B, \(String(format: "%.3f", pct))%) ===")
+        }
+        if testedAny != true {
+            throw XCTSkip("No test video sequences found on disk")
+        }
+    }
 }
+

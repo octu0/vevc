@@ -269,6 +269,10 @@ actor LayersEncodeActor {
     // Quarter-resolution L0 reference chain (One-Pyramid §4, profile 0x02).
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
+    // CtxRans scratch (~1.1 MB). Allocated once per encoder and reused for
+    // every frame; only the profile-2 base8 luma plane touches it, and that
+    // code path is synchronous, so the actor's serialization is enough.
+    private let ctxRansWorkspace: CtxRansWorkspace?
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
@@ -296,6 +300,12 @@ actor LayersEncodeActor {
         self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+        switch profile == 0x02 {
+        case true:
+            self.ctxRansWorkspace = CtxRansWorkspace()
+        case false:
+            self.ctxRansWorkspace = nil
+        }
 
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
@@ -326,6 +336,12 @@ actor LayersEncodeActor {
         self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+        switch profile == 0x02 {
+        case true:
+            self.ctxRansWorkspace = CtxRansWorkspace()
+        case false:
+            self.ctxRansWorkspace = nil
+        }
 
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
@@ -686,7 +702,8 @@ actor LayersEncodeActor {
                 adjustedStep: adjustedStep,
                 smooth: effSmooth,
                 updateL0Prev: updateL0,
-                skipModel: self.skipModelDecider
+                skipModel: self.skipModelDecider,
+                ctxRansWorkspace: self.ctxRansWorkspace
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)

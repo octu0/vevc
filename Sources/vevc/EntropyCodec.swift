@@ -376,6 +376,13 @@ struct EntropyEncoder {
     var pairContexts: [UInt8]
     var trailingZeros: UInt32
     private(set) var coeffCount: Int
+    /// Token counts that a `getData(updateHistory: false)` call withheld from the
+    /// backward-adaptive history. The plane-level RD comparison serializes every
+    /// candidate before it knows which one it will emit, so the winner applies its
+    /// update afterwards via `commitDeferredHistory` instead of calling getData a
+    /// second time just for the side effect.
+    private var deferredRunTokenCounts: [[Int]]?
+    private var deferredValTokenCounts: [[Int]]?
 
     init() {
         self.bypassWriter = BypassWriter()
@@ -387,6 +394,21 @@ struct EntropyEncoder {
         self.pairContexts.reserveCapacity(512)
         self.trailingZeros = 0
         self.coeffCount = 0
+        self.deferredRunTokenCounts = nil
+        self.deferredValTokenCounts = nil
+    }
+
+    /// Applies the history update that the preceding `getData(updateHistory: false)`
+    /// call withheld. A no-op when that call had nothing to accumulate (raw and
+    /// empty streams return before the token counts exist, exactly as they skip
+    /// the update in the `updateHistory: true` path).
+    @inline(__always)
+    mutating func commitDeferredHistory(to history: EntropyHistoryState?) {
+        guard let runCounts = deferredRunTokenCounts else { return }
+        guard let valCounts = deferredValTokenCounts else { return }
+        history?.update(runTokenCounts: runCounts, valTokenCounts: valCounts)
+        deferredRunTokenCounts = nil
+        deferredValTokenCounts = nil
     }
     
     /// Computed property for test compatibility (not used in production)
@@ -575,10 +597,16 @@ struct EntropyEncoder {
 
         // The decoder mirrors this update with its decoded token counts after
         // every rANS-coded stream (raw/empty streams return before this point).
-        if updateHistory {
+        switch updateHistory {
+        case true:
             history?.update(runTokenCounts: runTokenCounts, valTokenCounts: valTokenCounts)
+        case false:
+            // The counts are not mutated past this point, so both stores are a
+            // retain rather than a copy.
+            deferredRunTokenCounts = runTokenCounts
+            deferredValTokenCounts = valTokenCounts
         }
-        
+
         // 4-way bypass data
         for lane in 0..<4 {
             let bpData = chunkBypassWriters[lane].bytes

@@ -697,6 +697,44 @@ func blockEncode4H(encoder: inout EntropyEncoder, block: BlockView) {
 }
 
 @inline(__always)
+func blockEncode4HHead(encoder: inout EntropyEncoder, block: BlockView) {
+    let ptr0 = block.rowPointer(y: 0)
+    var lscpX = -1
+    var x = 3
+    while 0 <= x {
+        if ptr0[x] != 0 {
+            lscpX = x
+            break
+        }
+        x -= 1
+    }
+
+    if lscpX == -1 {
+        encoder.encodeBypass(binVal: 0)
+        return
+    }
+
+    encoder.encodeBypass(binVal: 1)
+    encoder.addPair(run: UInt32(lscpX), val: 0, context: 5)
+
+    var run = 0
+    var prevVal: Int16 = 0
+    var curX = 0
+    while curX <= lscpX {
+        let val = ptr0[curX]
+        if val == 0 {
+            run += 1
+        }
+        if val != 0 {
+            encodeCoeffRun(val: val, encoder: &encoder, run: run, context: getContext(prevVal: prevVal, isParentZero: false))
+            prevVal = val
+            run = 0
+        }
+        curX += 1
+    }
+}
+
+@inline(__always)
 func blockEncode4HWithParent(encoder: inout EntropyEncoder, block: BlockView, parentBlock: BlockView) {
     var lscpX = -1
     var lscpY = -1

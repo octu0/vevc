@@ -571,3 +571,37 @@ internal func withUnsafePointers<T1, T2, T3, T4, T5, T6, R>(
         }
     }
 }
+
+/// Read-only pointers for the CtxRans context predictor: the block's own
+/// coefficients plus the top / left neighbour buffers, where either neighbour
+/// may be unavailable at a plane edge. All three pointers stay inside `body`,
+/// so the availability test happens here rather than at the call site — hoisting
+/// `baseAddress` out of the closure to build the optional would escape the
+/// pointer past its valid region.
+@inline(__always)
+internal func withUnsafeNeighborPointers<T, R>(
+    _ a: [T], top: [T], hasTop: Bool, left: [T], hasLeft: Bool,
+    _ body: (UnsafePointer<T>, UnsafePointer<T>?, UnsafePointer<T>?) throws -> R
+) rethrows -> R {
+    try a.withUnsafeBufferPointer { pA in
+        try top.withUnsafeBufferPointer { pTop in
+            try left.withUnsafeBufferPointer { pLeft in
+                let topPtr: UnsafePointer<T>?
+                switch hasTop {
+                case true:
+                    topPtr = pTop.baseAddress!
+                case false:
+                    topPtr = nil
+                }
+                let leftPtr: UnsafePointer<T>?
+                switch hasLeft {
+                case true:
+                    leftPtr = pLeft.baseAddress!
+                case false:
+                    leftPtr = nil
+                }
+                return try body(pA.baseAddress!, topPtr, leftPtr)
+            }
+        }
+    }
+}

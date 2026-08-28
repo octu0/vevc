@@ -564,7 +564,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, selectModel: ModelSelectorFn = unifiedSelectModel) -> [UInt8] {
+func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, selectModel: ModelSelectorFn = unifiedSelectModel, isProfile2: Bool = false) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -665,11 +665,47 @@ func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: In
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool]) {
-    var bwFlags = BypassWriter()
+func copyLLCoeffs(from view: BlockView, to dst: UnsafeMutablePointer<Int16>) {
+    let base = view.base
+    dst[0] = base[0]
+    dst[1] = base[1]
+    dst[2] = base[2]
+    dst[3] = base[3]
+    dst[4] = base[8]
+    dst[5] = base[9]
+    dst[6] = base[10]
+    dst[7] = base[11]
+    dst[8] = base[16]
+    dst[9] = base[17]
+    dst[10] = base[18]
+    dst[11] = base[19]
+    dst[12] = base[24]
+    dst[13] = base[25]
+    dst[14] = base[26]
+    dst[15] = base[27]
+}
+
+@inline(__always)
+func encodePlaneBaseSubbands8PFrameWithSkipMap(
+    blocks: inout [BlockView],
+    colCount: Int,
+    qstep: Int32,
+    zeroThreshold: Int,
+    isSkip: [Bool],
+    isTreez: [Bool]? = nil,
+    isLuma: Bool = true,
+    history: EntropyHistoryState?,
+    selectModel: ModelSelectorFn,
+    updateHistory: Bool = true,
+    // Owned by the encoder (one instance per LayersEncodeActor) and reused for
+    // every frame. nil for planes that can never take the model path (chroma),
+    // which is what keeps the non-model path allocation-free.
+    workspace ws: CtxRansWorkspace?
+) -> (data: [UInt8], isZeroFlags: [Bool], hasCtxRans: Bool) {
     var nonZeroIndices: [Int] = []
+    nonZeroIndices.reserveCapacity(blocks.count)
     var isZeroFlags = [Bool](repeating: true, count: blocks.count)
-    
+
     for i in blocks.indices {
         if isSkip[i] {
             let b = blocks[i]
@@ -677,53 +713,267 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: inout [BlockView], zeroTh
             isZeroFlags[i] = true
             continue
         }
-        if let tz = isTreez, tz[i] {
-            let b = blocks[i]
-            clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
-            isZeroFlags[i] = true
-            continue
+        if let tz = isTreez {
+            if i < tz.count {
+                if tz[i] {
+                    let b = blocks[i]
+                    clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
+                    isZeroFlags[i] = true
+                    continue
+                }
+            }
         }
         let isZero = isEffectivelyZeroBase4PFrame(data: blocks[i].base, threshold: zeroThreshold)
         isZeroFlags[i] = isZero
         if isZero {
-            bwFlags.writeBit(true)
             let b = blocks[i]
             clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
         } else {
-            bwFlags.writeBit(false)
             nonZeroIndices.append(i)
         }
     }
-    bwFlags.flush()
+
     let zeroCount = blocks.count - nonZeroIndices.count
     debugLog({
         let zeroPermyriad = (zeroCount * 10000) / max(1, blocks.count)
         let rateStr = "\(zeroPermyriad / 100).\(zeroPermyriad / 10 % 10)"
         return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
-    
-    var encoder = EntropyEncoder()
-    
-    var nzCur = 0
-    let nzCount = nonZeroIndices.count
-    for i in blocks.indices {
-        if nzCur < nzCount && nonZeroIndices[nzCur] == i {
-            nzCur += 1
 
+    let canUseModel: Bool
+    switch isCtxRansEnabled && isLuma && (nonZeroIndices.isEmpty != true) && (ws != nil) {
+    case true:
+        canUseModel = true
+    case false:
+        canUseModel = false
+    }
+
+    guard canUseModel, let ws = ws else {
+        var bwFlags = BypassWriter()
+        for i in blocks.indices {
+            if isSkip[i] { continue }
+            if let tz = isTreez {
+                if i < tz.count {
+                    if tz[i] { continue }
+                }
+            }
+            let isZ = isZeroFlags[i]
+            bwFlags.writeBit(isZ)
+        }
+        bwFlags.flush()
+
+        var encoder = EntropyEncoder()
+        var nzCur = 0
+        let nzCount = nonZeroIndices.count
+        for i in blocks.indices {
+            if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+                nzCur += 1
+                let view = blocks[i]
+                let subs = getSubbands8(view: view)
+                blockEncode4H(encoder: &encoder, block: subs.ll)
+                blockEncode4V(encoder: &encoder, block: subs.hl)
+                blockEncode4H(encoder: &encoder, block: subs.lh)
+                blockEncode4H(encoder: &encoder, block: subs.hh)
+            }
+        }
+        encoder.flush()
+
+        var out = bwFlags.bytes
+        out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
+        return (out, isZeroFlags, false)
+    }
+
+    // 1. Candidate A: Base Encoding
+    var encoderBase = EntropyEncoder()
+    var nzCurBase = 0
+    let nzCountBase = nonZeroIndices.count
+    for i in blocks.indices {
+        if nzCurBase < nzCountBase && nonZeroIndices[nzCurBase] == i {
+            nzCurBase += 1
             let view = blocks[i]
             let subs = getSubbands8(view: view)
-            blockEncode4H(encoder: &encoder, block: subs.ll)
-            blockEncode4V(encoder: &encoder, block: subs.hl)
-            blockEncode4H(encoder: &encoder, block: subs.lh)
-            blockEncode4H(encoder: &encoder, block: subs.hh)
+            blockEncode4H(encoder: &encoderBase, block: subs.ll)
+            blockEncode4V(encoder: &encoderBase, block: subs.hl)
+            blockEncode4H(encoder: &encoderBase, block: subs.lh)
+            blockEncode4H(encoder: &encoderBase, block: subs.hh)
         }
     }
-    
-    encoder.flush()
-    var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
-    return (out, isZeroFlags)
+    encoderBase.flush()
+
+    var bwFlagsBase = BypassWriter()
+    for i in blocks.indices {
+        if isSkip[i] { continue }
+        if let tz = isTreez {
+            if i < tz.count {
+                if tz[i] { continue }
+            }
+        }
+        let isZ = isZeroFlags[i]
+        bwFlagsBase.writeBit(isZ)
+    }
+    bwFlagsBase.flush()
+
+    let baseData = encoderBase.getData(selectModel: selectModel, history: history, updateHistory: false)
+    let baseTotalBytes = bwFlagsBase.bytes.count + baseData.count
+
+    // 2. Candidate B: CtxRans Plane Encoding
+    ws.resetPlaneEncoder()
+
+    // (a) Escapes in forward order
+    var fIdx = 0
+    let nzCount = nonZeroIndices.count
+    while fIdx < nzCount {
+        let bIdx = nonZeroIndices[fIdx]
+        ws.cArr.withUnsafeMutableBufferPointer { cPtr in
+            copyLLCoeffs(from: blocks[bIdx], to: cPtr.baseAddress!)
+        }
+        var pos = 4
+        while pos < 16 {
+            let val = ws.cArr[pos]
+            if val < -64 {
+                ws.planeEncEscape(val: val)
+            } else {
+                if 64 < val {
+                    ws.planeEncEscape(val: val)
+                }
+            }
+            pos += 1
+        }
+        fIdx += 1
+    }
+
+    // (b) rANS Symbols in backward order with spatial context wiring
+    var rBlockIdx = nzCount - 1
+    while 0 <= rBlockIdx {
+        let bIdx = nonZeroIndices[rBlockIdx]
+        let blockY = bIdx / colCount
+        let blockX = bIdx % colCount
+
+        ws.cArr.withUnsafeMutableBufferPointer { cPtr in
+            copyLLCoeffs(from: blocks[bIdx], to: cPtr.baseAddress!)
+        }
+
+        let hasTop: Bool
+        switch 0 < blockY {
+        case true:
+            ws.topBuf.withUnsafeMutableBufferPointer { topPtr in
+                copyLLCoeffs(from: blocks[bIdx - colCount], to: topPtr.baseAddress!)
+            }
+            hasTop = true
+        case false:
+            hasTop = false
+        }
+
+        let hasLeft: Bool
+        switch 0 < blockX {
+        case true:
+            ws.leftBuf.withUnsafeMutableBufferPointer { leftPtr in
+                copyLLCoeffs(from: blocks[bIdx - 1], to: leftPtr.baseAddress!)
+            }
+            hasLeft = true
+        case false:
+            hasLeft = false
+        }
+
+        var rPos = 15
+        while 4 <= rPos {
+            let val = ws.cArr[rPos]
+            let (mu, invScale) = withUnsafeNeighborPointers(
+                ws.cArr, top: ws.topBuf, hasTop: hasTop, left: ws.leftBuf, hasLeft: hasLeft
+            ) { cPtr, topPtr, leftPtr -> (Int32, Int32) in
+                ws.predict(
+                    pos: rPos,
+                    blockCoeffs: cPtr,
+                    topCoeffs: topPtr,
+                    leftCoeffs: leftPtr,
+                    tempCoeffs: nil,
+                    isPFrame: true,
+                    plane: 0,
+                    qstep: qstep
+                )
+            }
+            ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
+
+            let sym: Int
+            if val < -64 {
+                sym = 129
+            } else {
+                if 64 < val {
+                    sym = 129
+                } else {
+                    sym = Int(val + 64)
+                }
+            }
+
+            let freq = ws.freqs[sym]
+            let cumFreq = ws.cumFreqs[sym]
+            ws.planeEncSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+            rPos -= 1
+        }
+        rBlockIdx -= 1
+    }
+    let modelBytes = ws.finalizePlaneEncoder()
+
+    var bwFlagsModel = BypassWriter()
+    for i in blocks.indices {
+        if isSkip[i] { continue }
+        if let tz = isTreez {
+            if i < tz.count {
+                if tz[i] { continue }
+            }
+        }
+        let isZ = isZeroFlags[i]
+        bwFlagsModel.writeBit(isZ)
+    }
+    bwFlagsModel.flush()
+
+    var encoderModel = EntropyEncoder()
+    var nzCurModel = 0
+    for i in blocks.indices {
+        if nzCurModel < nzCount && nonZeroIndices[nzCurModel] == i {
+            nzCurModel += 1
+            let view = blocks[i]
+            let subs = getSubbands8(view: view)
+            blockEncode4HHead(encoder: &encoderModel, block: subs.ll)
+            blockEncode4V(encoder: &encoderModel, block: subs.hl)
+            blockEncode4H(encoder: &encoderModel, block: subs.lh)
+            blockEncode4H(encoder: &encoderModel, block: subs.hh)
+        }
+    }
+    encoderModel.flush()
+
+    let modelEntropyData = encoderModel.getData(selectModel: selectModel, history: history, updateHistory: false)
+    let modelTotalBytes = bwFlagsModel.bytes.count + 4 + modelBytes.count + modelEntropyData.count
+
+    // 3. Plane-level Rate-Distortion Comparison
+    //
+    // Both candidates are serialized exactly once, above, with the history
+    // update withheld. The winner emits the bytes it was measured with and then
+    // applies its own update, so the size decision and the emitted bytes can
+    // never diverge.
+    if modelTotalBytes < baseTotalBytes {
+        var bufModel = bwFlagsModel.bytes
+        let mByteCount = UInt32(modelBytes.count)
+        bufModel.append(UInt8(truncatingIfNeeded: (mByteCount >> 24) & 0xFF))
+        bufModel.append(UInt8(truncatingIfNeeded: (mByteCount >> 16) & 0xFF))
+        bufModel.append(UInt8(truncatingIfNeeded: (mByteCount >> 8) & 0xFF))
+        bufModel.append(UInt8(truncatingIfNeeded: mByteCount & 0xFF))
+        bufModel.append(contentsOf: modelBytes)
+        bufModel.append(contentsOf: modelEntropyData)
+        if updateHistory {
+            encoderModel.commitDeferredHistory(to: history)
+        }
+        return (bufModel, isZeroFlags, true)
+    } else {
+        var bufBase = bwFlagsBase.bytes
+        bufBase.append(contentsOf: baseData)
+        if updateHistory {
+            encoderBase.commitDeferredHistory(to: history)
+        }
+        return (bufBase, isZeroFlags, false)
+    }
 }
+
 
 // MARK: - Dedicated Subband Process Functions
 

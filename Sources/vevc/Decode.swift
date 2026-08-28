@@ -347,6 +347,38 @@ func blockDecode4H(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer
 }
 
 @inline(__always)
+func blockDecode4HHead(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int) throws {
+    base[0] = 0
+    base[1] = 0
+    base[2] = 0
+    base[3] = 0
+
+    let hasNonZero = try decoder.decodeBypass()
+    if hasNonZero == 0 {
+        return
+    }
+
+    let lscpX = Int(decoder.readPair(context: 5).run)
+    if 4 <= lscpX {
+        throw DecodeError.invalidBlockDataContext("blockDecode4HHead lscp out of range: \(lscpX)")
+    }
+
+    var currentIdx = 0
+    var prevVal: Int16 = 0
+    while currentIdx <= lscpX {
+        let isParentZero = false
+        let (run, val) = try decodeCoeffRun(decoder: &decoder, context: getContext(prevVal: prevVal, isParentZero: isParentZero))
+        prevVal = val
+
+        currentIdx += run
+        if currentIdx <= lscpX {
+            base[currentIdx] = val
+        }
+        currentIdx += 1
+    }
+}
+
+@inline(__always)
 func blockDecode4HWithParentBlock(decoder: inout EntropyDecoder, ptr base: UnsafeMutablePointer<Int16>, stride: Int, parentPtr: UnsafePointer<Int16>, parentStride: Int) throws {
     let hasNonZero = try decoder.decodeBypass()
     if hasNonZero == 0 {

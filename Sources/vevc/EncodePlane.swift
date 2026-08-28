@@ -1863,7 +1863,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
 /// encodePlaneBaseSubbands8 via blockEncodeDPCM4/MED), no SAD gating, no
 /// history state. selectModel picks the profile's static AC tables.
 @inline(__always)
-func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, selectModel: @escaping ModelSelectorFn) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, selectModel: @escaping ModelSelectorFn, isProfile2: Bool = false) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1876,7 +1876,7 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
         }
 
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: isProfile2)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
@@ -1890,7 +1890,7 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: isProfile2)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1904,7 +1904,7 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: isProfile2)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -2112,8 +2112,9 @@ func serializePlaneBase8PFrameWithSkipMap(
     skipMap: [BlockMode], skipMapWidth: Int,
     isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil,
     histories: [EntropyHistoryState]?,
-    updateHistory: Bool = true
-) -> ([UInt8], PlaneData420, @Sendable () -> Void, [Bool], [Bool], [Bool]) {
+    updateHistory: Bool = true,
+    ctxRansWorkspace: CtxRansWorkspace? = nil
+) -> ([UInt8], PlaneData420, @Sendable () -> Void, [Bool], [Bool], [Bool], Bool) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -2121,19 +2122,56 @@ func serializePlaneBase8PFrameWithSkipMap(
 
     let yColCount8 = (dx + 7) / 8
     let yRowCount8 = (dy + 7) / 8
+    let cbColCount8 = (cbDx + 7) / 8
 
     let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: yRowCount8, colCount: yColCount8)
-    let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 7) / 8, colCount: (cbDx + 7) / 8)
+    let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 7) / 8, colCount: cbColCount8)
 
     let safeThresholdY = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-    let (bufY, yZeros) = encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: &base8YBlocks, zeroThreshold: safeThresholdY, isSkip: ySkip, isTreez: isTreezY, history: histories?[0], selectModel: unifiedSelectModelParentFree, updateHistory: updateHistory)
+    let (bufY, yZeros, hasCtxRans) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+        blocks: &base8YBlocks,
+        colCount: yColCount8,
+        qstep: Int32(qtY.step),
+        zeroThreshold: safeThresholdY,
+        isSkip: ySkip,
+        isTreez: isTreezY,
+        isLuma: true,
+        history: histories?[0],
+        selectModel: unifiedSelectModelParentFree,
+        updateHistory: updateHistory,
+        workspace: ctxRansWorkspace
+    )
     let (reconY, r0Y) = reconstructPlaneBase8(blocks: base8YBlocks, width: dx, height: dy, qt: qtY, pool: pool)
 
     let safeThresholdC = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-    let (bufCb, cbZeros) = encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: &base8CbBlocks, zeroThreshold: safeThresholdC, isSkip: cSkip, isTreez: isTreezCb, history: histories?[1], selectModel: unifiedSelectModelParentFree, updateHistory: updateHistory)
+    let (bufCb, cbZeros, _) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+        blocks: &base8CbBlocks,
+        colCount: cbColCount8,
+        qstep: Int32(qtC.step),
+        zeroThreshold: safeThresholdC,
+        isSkip: cSkip,
+        isTreez: isTreezCb,
+        isLuma: false,
+        history: histories?[1],
+        selectModel: unifiedSelectModelParentFree,
+        updateHistory: updateHistory,
+        workspace: nil
+    )
     let (reconCb, r0Cb) = reconstructPlaneBase8(blocks: base8CbBlocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
 
-    let (bufCr, crZeros) = encodePlaneBaseSubbands8PFrameWithSkipMap(blocks: &base8CrBlocks, zeroThreshold: safeThresholdC, isSkip: cSkip, isTreez: isTreezCr, history: histories?[2], selectModel: unifiedSelectModelParentFree, updateHistory: updateHistory)
+    let (bufCr, crZeros, _) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+        blocks: &base8CrBlocks,
+        colCount: cbColCount8,
+        qstep: Int32(qtC.step),
+        zeroThreshold: safeThresholdC,
+        isSkip: cSkip,
+        isTreez: isTreezCr,
+        isLuma: false,
+        history: histories?[2],
+        selectModel: unifiedSelectModelParentFree,
+        updateHistory: updateHistory,
+        workspace: nil
+    )
     let (reconCr, r0Cr) = reconstructPlaneBase8(blocks: base8CrBlocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
 
     let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
@@ -2151,7 +2189,7 @@ func serializePlaneBase8PFrameWithSkipMap(
         r0Y()
         r0Cb()
         r0Cr()
-    }, yZeros, cbZeros, crZeros)
+    }, yZeros, cbZeros, crZeros, hasCtxRans)
 }
 
 /// Base8 encode, P-frame profile 0x02: skip-block bypass (One-Pyramid §5),
@@ -2168,7 +2206,7 @@ func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sa
     var mutCbBlocks = base8CbBlocks
     var mutCrBlocks = base8CrBlocks
 
-    let (out, reconstructed, releaseRecon, yZeros, cbZeros, crZeros) = serializePlaneBase8PFrameWithSkipMap(
+    let (out, reconstructed, releaseRecon, yZeros, cbZeros, crZeros, _) = serializePlaneBase8PFrameWithSkipMap(
         pd: pd, pool: pool,
         qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
         base8YBlocks: &mutYBlocks, base8CbBlocks: &mutCbBlocks, base8CrBlocks: &mutCrBlocks,

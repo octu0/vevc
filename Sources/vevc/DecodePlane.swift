@@ -823,7 +823,89 @@ func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, bloc
 }
 
 @inline(__always)
-func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool = true) throws -> [BlockView] {
+func decodePlaneBaseSubbands8WithSkipMap(
+    data: ArraySlice<UInt8>,
+    pool: BlockViewPool,
+    blockCount: Int,
+    colCount: Int = 0,
+    qstep: Int32 = 4096,
+    isSkip: [Bool],
+    isTreez: [Bool]? = nil,
+    isLuma: Bool = true,
+    hasCtxRans: Bool = false,
+    history: EntropyHistoryState?,
+    parentFreeStatics: Bool,
+    updateHistory: Bool = true,
+    // Owned by the decoder (one instance per StreamingDecoderActor) and reused
+    // for every frame. Only the base8 luma plane can carry CtxRans, so the
+    // chroma planes decoded in parallel with it pass nil and never share it.
+    workspace ws: CtxRansWorkspace? = nil
+) throws -> [BlockView] {
+    let useModelDecoder: Bool
+    switch hasCtxRans && isLuma {
+    case true:
+        useModelDecoder = true
+    case false:
+        useModelDecoder = false
+    }
+
+    if useModelDecoder != true {
+        return try data.withUnsafeBufferPointer { buf -> [BlockView] in
+            guard let base = buf.baseAddress else { return [] }
+            let count = buf.count
+            var blocks = pool.getBlockViewArray(capacity: blockCount)
+            for _ in 0..<blockCount {
+                blocks.append(pool.get64())
+            }
+
+            var brFlags = BypassReader(base: base, count: count)
+            var nonZeroIndices: [Int] = []
+            nonZeroIndices.reserveCapacity(blockCount)
+            for i in 0..<blockCount {
+                if isSkip[i] {
+                    continue
+                }
+                if let tz = isTreez {
+                    if i < tz.count {
+                        if tz[i] {
+                            continue
+                        }
+                    }
+                }
+                let isZero = brFlags.readBit()
+                if isZero != true {
+                    nonZeroIndices.append(i)
+                }
+            }
+
+            let consumed = brFlags.consumedBytes
+            guard consumed <= count else { throw DecodeError.insufficientData }
+
+            var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
+
+            let half = 8 / 2
+
+            var nzCur = 0
+            let nzCount = nonZeroIndices.count
+            for i in 0..<blockCount {
+                if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+                    nzCur += 1
+                    let view = blocks[i]
+                    let base = view.base
+                    try blockDecode4H(decoder: &decoder, ptr: base, stride: 8)
+                    try blockDecode4V(decoder: &decoder, ptr: base.advanced(by: half), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: (half * 8) + half), stride: 8)
+                }
+            }
+
+            decoder.finalizeHistory()
+            return blocks
+        }
+    }
+
+    // CtxRans-enabled frame (Profile 0x02 P-frame Luma with hasCtxRans flag)
+    guard let ws = ws else { throw DecodeError.invalidBlockData }
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
         let count = buf.count
@@ -831,41 +913,132 @@ func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockVie
         for _ in 0..<blockCount {
             blocks.append(pool.get64())
         }
-        
+
+        // The model form is driven purely by the frame-header flag (hasCtxRans) plus
+        // isLuma; there is no per-plane flag bit in the bitstream.
         var brFlags = BypassReader(base: base, count: count)
         var nonZeroIndices: [Int] = []
         nonZeroIndices.reserveCapacity(blockCount)
+
         for i in 0..<blockCount {
             if isSkip[i] {
                 continue
             }
-            if let tz = isTreez, tz[i] {
-                continue
+            if let tz = isTreez {
+                if i < tz.count {
+                    if tz[i] {
+                        continue
+                    }
+                }
             }
             let isZero = brFlags.readBit()
             if isZero != true {
                 nonZeroIndices.append(i)
             }
         }
-        
-        let consumed = brFlags.consumedBytes
-        guard consumed <= count else { throw DecodeError.insufficientData }
-        
-        var decoder = try EntropyDecoder(base: base, count: count, startOffset: consumed, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
-        
-        let half = 8 / 2
 
+        let consumed = brFlags.consumedBytes
+        if count < (consumed + 4) {
+            throw DecodeError.insufficientData
+        }
+
+        let m0 = UInt32(base[consumed])
+        let m1 = UInt32(base[consumed + 1])
+        let m2 = UInt32(base[consumed + 2])
+        let m3 = UInt32(base[consumed + 3])
+        let modelSize = Int((m0 << 24) | (m1 << 16) | (m2 << 8) | m3)
+        let modelStart = consumed + 4
+        let entropyStart = modelStart + modelSize
+
+        if count < entropyStart {
+            throw DecodeError.insufficientData
+        }
+
+        guard 0 < modelSize else { throw DecodeError.invalidBlockData }
+        try ws.initPlaneDecoder(inputPtr: base + modelStart, totalBytes: modelSize)
+
+        var decoder = try EntropyDecoder(base: base, count: count, startOffset: entropyStart, history: history, parentFreeStatics: parentFreeStatics, updateHistory: updateHistory)
+
+        let half = 8 / 2
         var nzCur = 0
         let nzCount = nonZeroIndices.count
+
         for i in 0..<blockCount {
             if nzCur < nzCount && nonZeroIndices[nzCur] == i {
                 nzCur += 1
                 let view = blocks[i]
-                let base = view.base
-                try blockDecode4H(decoder: &decoder, ptr: base, stride: 8)
-                try blockDecode4V(decoder: &decoder, ptr: base.advanced(by: half), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: base.advanced(by: half * 8 + half), stride: 8)
+                let basePtr = view.base
+                let blockY = i / colCount
+                let blockX = i % colCount
+
+                let hasTop: Bool
+                switch 0 < blockY {
+                case true:
+                    ws.topBuf.withUnsafeMutableBufferPointer { topPtr in
+                        copyLLCoeffs(from: blocks[i - colCount], to: topPtr.baseAddress!)
+                    }
+                    hasTop = true
+                case false:
+                    hasTop = false
+                }
+
+                let hasLeft: Bool
+                switch 0 < blockX {
+                case true:
+                    ws.leftBuf.withUnsafeMutableBufferPointer { leftPtr in
+                        copyLLCoeffs(from: blocks[i - 1], to: leftPtr.baseAddress!)
+                    }
+                    hasLeft = true
+                case false:
+                    hasLeft = false
+                }
+
+                try blockDecode4HHead(decoder: &decoder, ptr: basePtr, stride: 8)
+
+                ws.cArr[0] = basePtr[0]
+                ws.cArr[1] = basePtr[1]
+                ws.cArr[2] = basePtr[2]
+                ws.cArr[3] = basePtr[3]
+
+                var pos = 4
+                while pos < 16 {
+                    let (mu, invScale) = withUnsafeNeighborPointers(
+                        ws.cArr, top: ws.topBuf, hasTop: hasTop, left: ws.leftBuf, hasLeft: hasLeft
+                    ) { cPtr, topPtr, leftPtr -> (Int32, Int32) in
+                        ws.predict(
+                            pos: pos,
+                            blockCoeffs: cPtr,
+                            topCoeffs: topPtr,
+                            leftCoeffs: leftPtr,
+                            tempCoeffs: nil,
+                            isPFrame: true,
+                            plane: 0,
+                            qstep: qstep
+                        )
+                    }
+                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
+                    let sym = ws.planeDecSymbol()
+                    if sym == 129 {
+                        ws.cArr[pos] = ws.planeDecEscape()
+                    } else {
+                        ws.cArr[pos] = Int16(sym - 64)
+                    }
+                    pos += 1
+                }
+
+                var y2 = 0
+                while y2 < 4 {
+                    var x2 = 0
+                    while x2 < 4 {
+                        basePtr[(y2 * 8) + x2] = ws.cArr[(y2 * 4) + x2]
+                        x2 += 1
+                    }
+                    y2 += 1
+                }
+
+                try blockDecode4V(decoder: &decoder, ptr: basePtr.advanced(by: half), stride: 8)
+                try blockDecode4H(decoder: &decoder, ptr: basePtr.advanced(by: half * 8), stride: 8)
+                try blockDecode4H(decoder: &decoder, ptr: basePtr.advanced(by: (half * 8) + half), stride: 8)
             }
         }
 
@@ -873,3 +1046,4 @@ func decodePlaneBaseSubbands8WithSkipMap(data: ArraySlice<UInt8>, pool: BlockVie
         return blocks
     }
 }
+

@@ -54,6 +54,11 @@ public actor StreamingDecoderActor {
     // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
+    // CtxRans scratch (~1.1 MB). Allocated once per decoder instance and
+    // reused for every frame. Only the base8 luma plane can carry CtxRans,
+    // so the chroma planes decoded concurrently with it never touch it; each
+    // GOP-parallel decoder owns its own actor and therefore its own workspace.
+    let ctxRansWorkspace: CtxRansWorkspace?
     // Concurrent entropy decode of the 9 profile-2 streams. Wins per-frame
     // latency on a single stream; under GOP-parallel throughput decoding it
     // only adds overhead, so the GOP-parallel Decoder turns it off.
@@ -70,6 +75,9 @@ public actor StreamingDecoderActor {
         self.parallelEntropy = parallelEntropy
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
         self.mvPredictionState = (profile == 0x02) ? MVPredictionState() : nil
+        // Not gated on any environment variable: the decoder must be able to
+        // read a CtxRans stream regardless of how it was launched.
+        self.ctxRansWorkspace = (profile == 0x02) ? CtxRansWorkspace() : nil
     }
 
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
@@ -201,21 +209,21 @@ public actor StreamingDecoderActor {
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
-                    updateL0Prev: updateL0
+                    updateL0Prev: updateL0, ctxRansWorkspace: ctxRansWorkspace
                 )
             case 1:
                 img16 = try await decodeSpatialLayersForProfile2WithLayer1(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, l0State: l0State, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
-                    updateL0Prev: updateL0
+                    updateL0Prev: updateL0, ctxRansWorkspace: ctxRansWorkspace
                 )
             default:
                 img16 = try await decodeSpatialLayersForProfile2Full(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, l0State: l0State, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
-                    updateL0Prev: updateL0
+                    updateL0Prev: updateL0, ctxRansWorkspace: ctxRansWorkspace
                 )
             }
         } else {
