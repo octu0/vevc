@@ -1338,6 +1338,7 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
         var offset = 1
         let bufCount = data.count
         
+        var coded = 0
         var dxCnts = [Int](repeating: 0, count: 64)
         var dyCnts = [Int](repeating: 0, count: 64)
         var modelDx: rANSModel
@@ -1391,11 +1392,18 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
             
             dxCnts[Int(tx.token)] += 1
             dyCnts[Int(ty.token)] += 1
+            coded += 1
             mvsDx.append(dx)
             mvsDy.append(dy)
         }
-        
-        if updateHistory, let h = history, 0 < count {
+
+        // Lockstep with `encodeMVs`, which updates on `0 < rawDxs.count` — the
+        // number of MVs actually coded, not the block count. A P-frame whose
+        // blocks are all skips codes no MV, so the encoder leaves the history
+        // alone; guarding on `count` here made the decoder halve its histogram
+        // on such a frame and every later frame decoded against a different
+        // model than the one that encoded it.
+        if updateHistory, let h = history, 0 < coded {
             h.update(dxCnts: dxCnts, dyCnts: dyCnts)
         }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
@@ -1406,6 +1414,7 @@ private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, hist
 private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
+        var coded = 0
         var dxCnts = [Int](repeating: 0, count: 64)
         var dyCnts = [Int](repeating: 0, count: 64)
         let bufCount = data.count
@@ -1487,11 +1496,13 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
 
             dxCnts[Int(tx.token)] += 1
             dyCnts[Int(ty.token)] += 1
+            coded += 1
             mvsDx.append(recDx)
             mvsDy.append(recDy)
         }
-        
-        if updateHistory, let h = history, 0 < count {
+
+        // See decodeMVsRaw: the guard counts coded MVs, not blocks.
+        if updateHistory, let h = history, 0 < coded {
             h.update(dxCnts: dxCnts, dyCnts: dyCnts)
         }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
@@ -1501,6 +1512,7 @@ private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode
 private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 1
+        var coded = 0
         var dxCnts = [Int](repeating: 0, count: 64)
         var dyCnts = [Int](repeating: 0, count: 64)
         let bufCount = data.count
@@ -1559,11 +1571,13 @@ private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMod
             
             dxCnts[Int(tx.token)] += 1
             dyCnts[Int(ty.token)] += 1
+            coded += 1
             mvsDx.append(Int16(predDx + Int(resDx)))
             mvsDy.append(Int16(predDy + Int(resDy)))
         }
-        
-        if updateHistory, let h = history, 0 < count {
+
+        // See decodeMVsRaw: the guard counts coded MVs, not blocks.
+        if updateHistory, let h = history, 0 < coded {
             h.update(dxCnts: dxCnts, dyCnts: dyCnts)
         }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
