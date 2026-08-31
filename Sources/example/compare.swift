@@ -78,6 +78,12 @@ struct Config {
     var skipModel: Int = 1
     var skipRefresh: Int = 0
     var iqFloor: Int = 0
+    /// Whether the user named -keyint / -iq-floor. runVEVC fills in the
+    /// profile 0x02 defaults for the ones that were left out; it resolves them
+    /// rather than the parser because -output-graph clones this config and
+    /// flips `profile` afterwards.
+    var keyintExplicit: Bool = false
+    var iqFloorExplicit: Bool = false
     /// Measurement only: path for a per-frame "frame,psnr,ssim,ssimY" CSV of
     /// the VEVC layer-2 decode. nil disables the dump.
     var dumpFrameMetrics: String? = nil
@@ -224,7 +230,10 @@ struct CompareApp {
                 }
             case "-keyint":
                 if (i + 1) < args.count {
-                    if let v = Int(args[i + 1]) { config.keyint = v }
+                    if let v = Int(args[i + 1]) {
+                        config.keyint = v
+                        config.keyintExplicit = true
+                    }
                     i += 1
                 }
             case "-scene-threshold", "-sceneThreshold":
@@ -312,7 +321,10 @@ struct CompareApp {
                 }
             case "-iq-floor", "--iq-floor":
                 if (i + 1) < args.count {
-                    if let v = Int(args[i + 1]) { config.iqFloor = v }
+                    if let v = Int(args[i + 1]) {
+                        config.iqFloor = v
+                        config.iqFloorExplicit = true
+                    }
                     i += 1
                 }
             case "-dump-frame-metrics", "--dump-frame-metrics":

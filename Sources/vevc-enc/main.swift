@@ -6,6 +6,10 @@ var outPath = ""
 var bitrate = 500
 var zeroThreshold = 4
 var keyint = 30
+/// Whether the user named -keyint / -iq-floor on the command line. The
+/// profile 0x02 defaults below only fill in the ones that were left out.
+var keyintExplicit = false
+var iqFloorExplicit = false
 var sceneThreshold = 500
 var qstep: Int? = nil
 var profile: UInt8 = 0x01
@@ -52,7 +56,10 @@ while i < args.count {
         }
     case "-keyint":
         if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { keyint = v }
+            if let v = Int(args[i + 1]) {
+                keyint = v
+                keyintExplicit = true
+            }
             i += 1
         }
     case "-zero-threshold", "-zeroThreshold":
@@ -137,7 +144,10 @@ while i < args.count {
         }
     case "-iq-floor", "--iq-floor":
         if (i + 1) < args.count {
-            if let v = Int(args[i + 1]) { iqFloor = v }
+            if let v = Int(args[i + 1]) {
+                iqFloor = v
+                iqFloorExplicit = true
+            }
             i += 1
         }
     case "-framerate":
@@ -156,8 +166,18 @@ while i < args.count {
     i += 1
 }
 
+// Profile 0x02 defaults. The quality floor places the I frames and `keyint`
+// only caps the GOP, so the pair ships together: keyint 120 as the upper bound
+// and alpha 2.5 as the floor. Resolved after the whole argument list is read,
+// because -profile can appear anywhere in it. Profile 0x01 is untouched — it
+// has no floor and keeps its fixed keyint 30 period.
+if profile == 0x02 {
+    if keyintExplicit != true { keyint = 120 }
+    if iqFloorExplicit != true { iqFloor = 250 }
+}
+
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>] [-skip-refresh <frames>] [-iq-floor <alphax100>]\n  -iq-floor <alphax100>: Quality floor for early I frames; codes an I once a P frame's luma MSE exceeds alpha x the GOP's I-frame MSE, making -keyint an upper bound (default: 0 = off, profile 2 only)\n  -skip-refresh <frames>: Periodic skip refresh; a block skipped this many frames in a row is coded as inter again (default: 0 = off, profile 2 only)\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>] [-skip-refresh <frames>] [-iq-floor <alphax100>]\n  -iq-floor <alphax100>: Quality floor for early I frames; codes an I once a P frame's luma MSE exceeds alpha x the GOP's I-frame MSE, making -keyint an upper bound (default: 250 on profile 2, 0 = off on profile 1)\n  -keyint <keyint>: Maximum GOP size (default: 120 on profile 2, 30 on profile 1)\n  -skip-refresh <frames>: Periodic skip refresh; a block skipped this many frames in a row is coded as inter again (default: 0 = off, profile 2 only)\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n", stderr)
     exit(1)
 }
 

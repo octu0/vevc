@@ -117,11 +117,19 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
         return (0, [], (0,0,0), (0,0,0,0,0), (0,nil), (0,nil), (0,nil), 0, 0)
     }
     
+    // Profile 0x02 defaults: keyint 120 as an upper bound with the quality
+    // floor at alpha 2.5 placing the I frames. Resolved here rather than in the
+    // argument parser because -output-graph clones the config and flips
+    // `profile` afterwards, and the defaults have to follow the final profile.
+    // Profile 0x01 keeps keyint 30 and no floor.
+    let effKeyint = (config.profile == 0x02 && config.keyintExplicit != true) ? 120 : config.keyint
+    let effIqFloor = (config.profile == 0x02 && config.iqFloorExplicit != true) ? 250 : config.iqFloor
+
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh, iqFloor: config.iqFloor)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: effKeyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh, iqFloor: effIqFloor)
     } else {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh, iqFloor: config.iqFloor)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: effKeyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh, iqFloor: effIqFloor)
     }
     
     let encStart1 = Date()
