@@ -5,6 +5,53 @@ import AppKit
 import CryptoKit
 import vevc
 
+/// Measurement only: decode an existing bitstream and score it against the
+/// source, reporting the same statistics the benchmark path reports plus the
+/// optional per-frame CSV. Nothing is encoded here, so the numbers describe
+/// exactly the file that was handed in.
+func scoreExistingStream(streamPath: String, y4mPath: String, config: Config) async throws {
+    guard let streamHandle = FileHandle(forReadingAtPath: streamPath) else {
+        print("cannot open stream \(streamPath)")
+        exit(1)
+    }
+    defer { streamHandle.closeFile() }
+    let attrs = try? FileManager.default.attributesOfItem(atPath: streamPath)
+    let byteCount = (attrs?[.size] as? Int) ?? 0
+    let iter = try Y4MIterator(path: y4mPath, config: config)
+
+    // Same entry point vevc-dec uses, so the frame splitting matches the
+    // production decode path exactly.
+    let decoder = Decoder(maxLayer: config.maxLayer)
+
+    var mets = [QualityMetrics]()
+    var perFrameCSV = "frame,psnr,ssim,ssimY\n"
+    var frameIdx = 0
+    let decodeStart = Date()
+    for try await decodedImg in decoder.decode(fileHandle: streamHandle) {
+        guard let orig = try iter.next() else { break }
+        let psnr = calculatePSNR(img1: orig.vevcImage, img2: decodedImg)
+        let ssim = calculateSSIM(img1: orig.vevcImage, img2: decodedImg)
+        let ssimY = calculateSSIMLuma(img1: orig.vevcImage, img2: decodedImg)
+        mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+        perFrameCSV += "\(frameIdx),\(psnr),\(ssim),\(ssimY)\n"
+        frameIdx += 1
+    }
+    let decodeTime = Date().timeIntervalSince(decodeStart)
+
+    print("[SCORE] stream=\(streamPath)")
+    print("  Bytes  : \(byteCount)")
+    print("  Frames : \(frameIdx)")
+    print(String(format: "  Decode : %7.2f ms (%.4f ms/frame)", decodeTime * 1000, 0 < frameIdx ? decodeTime * 1000 / Double(frameIdx) : 0))
+    if let stats = calculateQualityStats(metrics: mets) {
+        print(String(format: "  PSNR   : Avg: %5.2f | Min: %5.2f | Max: %5.2f", stats.avgPSNR, stats.minPSNR, stats.maxPSNR))
+        print(String(format: "  SSIM   : Avg: %7.5f | Min: %7.5f | Max: %7.5f", stats.avgSSIM, stats.minSSIM, stats.maxSSIM))
+    }
+    if let dumpPath = config.dumpFrameMetrics {
+        try? perFrameCSV.write(toFile: dumpPath, atomically: true, encoding: .utf8)
+        print("  per-frame metrics written to \(dumpPath)")
+    }
+}
+
 struct Config {
     var bitrate: Int = 500
     var framerate: Int = 60
@@ -30,6 +77,13 @@ struct Config {
     var smooth: Int = 1
     var skipModel: Int = 1
     var skipRefresh: Int = 0
+    var iqFloor: Int = 0
+    /// Measurement only: path for a per-frame "frame,psnr,ssim,ssimY" CSV of
+    /// the VEVC layer-2 decode. nil disables the dump.
+    var dumpFrameMetrics: String? = nil
+    /// Measurement only: score this existing .vevc bitstream against -y4m
+    /// instead of encoding one. nil runs the normal benchmark.
+    var scoreStream: String? = nil
     var temporalLayers: Int = 1
     var maxFrames: Int? = nil
 }
@@ -256,6 +310,23 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.skipRefresh = v }
                     i += 1
                 }
+            case "-iq-floor", "--iq-floor":
+                if (i + 1) < args.count {
+                    if let v = Int(args[i + 1]) { config.iqFloor = v }
+                    i += 1
+                }
+            case "-dump-frame-metrics", "--dump-frame-metrics":
+                if (i + 1) < args.count {
+                    config.dumpFrameMetrics = args[i + 1]
+                    config.quality = true
+                    i += 1
+                }
+            case "-score", "--score":
+                if (i + 1) < args.count {
+                    config.scoreStream = args[i + 1]
+                    config.quality = true
+                    i += 1
+                }
             case "-temporal-layers", "--temporal-layers":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.temporalLayers = v }
@@ -280,6 +351,15 @@ struct CompareApp {
         if positionalArgs.isEmpty && y4mPath == nil {
             print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-smooth <0|1>] [-skip-model <0|1>] [-skip-refresh <frames>] [-temporal-layers <1|2>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
             exit(1)
+        }
+
+        // Measurement mode: score an existing bitstream against the source,
+        // instead of encoding one here. Reporting size and quality from the
+        // same bytes removes any chance of the two disagreeing about the
+        // encoder configuration.
+        if let streamPath = config.scoreStream {
+            try await scoreExistingStream(streamPath: streamPath, y4mPath: y4mPath!, config: config)
+            return
         }
 
         var finalY4mPath = y4mPath!

@@ -144,6 +144,15 @@ public func calculateSSIM(img1: YCbCrImage, img2: YCbCrImage) -> Double {
     return (4.0 * ssimY + ssimU + ssimV) / 6.0
 }
 
+/// Luma-only SSIM. Measurement helper: the drift studies stratify P-frame
+/// quality by GOP position on the Y plane, where the requantization noise
+/// accumulates.
+public func calculateSSIMLuma(img1: YCbCrImage, img2: YCbCrImage) -> Double {
+    let w = min(img1.width, img2.width)
+    let h = min(img1.height, img2.height)
+    return calcPlaneSSIM(p1: img1.yPlane, p2: img2.yPlane, w: w, h: h, stride1: img1.width, stride2: img2.width)
+}
+
 @inline(__always)
 private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: Int, stride2: Int) -> Double {
     var ssimSum: Double = 0

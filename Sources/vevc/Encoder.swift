@@ -54,12 +54,17 @@ public actor VEVCEncoder {
     /// `blockIndex % skipRefresh` at every I frame instead of 0, so the blocks
     /// do not all reach the period on the same frame. 0 = shipping behaviour.
     public nonisolated let skipRefreshPhase: Int
+    /// Quality floor for early I frames (#31), in units of alpha x 100: the
+    /// next frame is coded as I once a P frame's luma MSE exceeds alpha times
+    /// the MSE of the I frame that opened the GOP. 0 = off (default), and
+    /// `keyint` stays a hard upper bound either way. No effect on profile 0x01.
+    public nonisolated let iqFloor: Int
 
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -82,6 +87,7 @@ public actor VEVCEncoder {
         self.skipModel = skipModel
         self.skipRefresh = skipRefresh
         self.skipRefreshPhase = skipRefreshPhase
+        self.iqFloor = iqFloor
 
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -106,11 +112,12 @@ public actor VEVCEncoder {
             temporalLayers: temporalLayers,
             skipModel: skipModel,
             skipRefresh: skipRefresh,
-            skipRefreshPhase: skipRefreshPhase
+            skipRefreshPhase: skipRefreshPhase,
+            iqFloor: iqFloor
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -133,6 +140,7 @@ public actor VEVCEncoder {
         self.skipModel = skipModel
         self.skipRefresh = skipRefresh
         self.skipRefreshPhase = skipRefreshPhase
+        self.iqFloor = iqFloor
 
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -157,7 +165,8 @@ public actor VEVCEncoder {
             temporalLayers: temporalLayers,
             skipModel: skipModel,
             skipRefresh: skipRefresh,
-            skipRefreshPhase: skipRefreshPhase
+            skipRefreshPhase: skipRefreshPhase,
+            iqFloor: iqFloor
         )
     }
     
@@ -198,6 +207,11 @@ public actor VEVCEncoder {
     /// Both are 0 when the pass is disabled.
     public func skipRefreshStats() async -> (forced: Int, examined: Int) {
         await coreEncoder.skipRefreshStats()
+    }
+
+    /// Frame-type census and quality-floor firings (#31). Reporting only.
+    public func frameCensus() async -> (iForced: Int, iScene: Int, iFloor: Int, copy: Int, firings: [(frame: Int, k: Int, dist: Int, frameMSE: Int, iMSE: Int)]) {
+        await coreEncoder.frameCensus()
     }
 
     @inline(__always)
@@ -260,6 +274,20 @@ actor LayersEncodeActor {
     let skipRefresh: Int
     /// See VEVCEncoder.skipRefreshPhase.
     let skipRefreshPhase: Int
+    /// Quality floor in units of alpha x 100 (#31); 0 disables the pass.
+    let iqFloor: Int
+    /// Frames since the most recent coded I frame, counting every frame that
+    /// passes (coded or copied). Separate from framesSinceKeyframe, whose
+    /// periodic-grid semantics are unchanged.
+    private var framesSinceCodedI = 0
+    /// nil unless the floor is both enabled and applicable (profile 0x02).
+    let qualityFloorState: QualityFloorState?
+    /// I frames by cause, for reporting. "forced" covers the periodic grid and
+    /// the pre-existing forced paths (drift acceleration / static refresh).
+    private var iCountForced = 0
+    private var iCountScene = 0
+    private var iCountFloor = 0
+    private var copyFrameCount = 0
     /// Per-block consecutive-skip counters for the refresh pass. Allocated on
     /// first use, reset at every I frame. nil unless the pass is enabled and
     /// applicable (profile 0x02).
@@ -307,7 +335,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -334,6 +362,11 @@ actor LayersEncodeActor {
         let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
         refreshState?.phaseSpreadPeriod = (0 < skipRefreshPhase) ? skipRefresh : 0
         self.skipRefreshState = refreshState
+        self.iqFloor = iqFloor
+        // CLI carries alpha x 100; the comparison runs in Q8.
+        self.qualityFloorState = (profile == 0x02 && 0 < iqFloor)
+            ? QualityFloorState(alphaQ8: (iqFloor * 256) / 100)
+            : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         switch profile == 0x02 {
@@ -348,7 +381,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -375,6 +408,11 @@ actor LayersEncodeActor {
         let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
         refreshState?.phaseSpreadPeriod = (0 < skipRefreshPhase) ? skipRefresh : 0
         self.skipRefreshState = refreshState
+        self.iqFloor = iqFloor
+        // CLI carries alpha x 100; the comparison runs in Q8.
+        self.qualityFloorState = (profile == 0x02 && 0 < iqFloor)
+            ? QualityFloorState(alphaQ8: (iqFloor * 256) / 100)
+            : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         switch profile == 0x02 {
@@ -402,6 +440,11 @@ actor LayersEncodeActor {
     func skipRefreshStats() -> (forced: Int, examined: Int) {
         guard let state = skipRefreshState else { return (0, 0) }
         return (state.forcedBlocks, state.examinedBlocks)
+    }
+
+    /// Frame-type census and quality-floor firings (#31), for reporting only.
+    func frameCensus() -> (iForced: Int, iScene: Int, iFloor: Int, copy: Int, firings: [(frame: Int, k: Int, dist: Int, frameMSE: Int, iMSE: Int)]) {
+        (iCountForced, iCountScene, iCountFloor, copyFrameCount, qualityFloorState?.firings ?? [])
     }
 
     public func encodeFrame(image: YCbCrImage, forceKeyFrame: Bool = false) async throws -> [UInt8] {
@@ -446,6 +489,15 @@ actor LayersEncodeActor {
         }
         
         var forceIFrame = forceKeyFrame
+        // Quality floor (#31): the previous coded P frame measured its drift
+        // against the I frame that opened this GOP and asked for an early I.
+        // It rides the existing forced-I path, so `keyint` keeps acting as the
+        // upper bound and the GOP counter restarts here.
+        var floorFiredThisFrame = false
+        if let floor = qualityFloorState, floor.takePendingIFrame() {
+            forceIFrame = true
+            floorFiredThisFrame = true
+        }
         if forceIFrame != true && rateController.isDriftAccelerating(framesSinceKeyframe: framesSinceKeyframe) {
             forceIFrame = true
         }
@@ -495,6 +547,12 @@ actor LayersEncodeActor {
             // skip_ltr eligibility (staticCounters[i] == gopPosition) keeps
             // meaning "static since this I-frame".
             framesSinceKeyframe = isPeriodicIFrame ? 0 : (frameIndex % keyint)
+            // True distance from the most recent coded I frame (#31). Unlike
+            // framesSinceKeyframe, which a cut-driven I deliberately leaves on
+            // the periodic grid, this restarts at every coded I — periodic,
+            // scene-change and floor-fired alike — so the floor's "more than 8
+            // frames since the last I" guard means what it says.
+            framesSinceCodedI = 0
             framesSinceLtrUpdate = framesSinceKeyframe
             consecutiveCopyFrames = 0
             if temporalLayers == 2 {
@@ -525,6 +583,24 @@ actor LayersEncodeActor {
             
             if self.qstep == nil {
                 rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
+            }
+
+            // Frame-type census for reporting. Free of the floor, so the
+            // baselines report the same breakdown.
+            switch true {
+            case floorFiredThisFrame:
+                iCountFloor += 1
+            case isPeriodicIFrame:
+                iCountForced += 1
+            default:
+                iCountScene += 1
+            }
+
+            // Quality floor (#31): this I frame becomes the reference the rest
+            // of the GOP is measured against. The MSE pass runs only when the
+            // floor is on, so a disabled encoder pays nothing for it.
+            if let floor = qualityFloorState {
+                floor.noteIFrame(mse: lumaMSEInteger(reconstructed: reconstructed, source: plane))
             }
 
             // Clean up old state
@@ -567,6 +643,7 @@ actor LayersEncodeActor {
             previousMVs = mvs
             
             framesSinceKeyframe += 1
+            framesSinceCodedI += 1
             frameIndex += 1
             if temporalLayers == 2 {
                 temporalFrameIndex += 1
@@ -603,6 +680,7 @@ actor LayersEncodeActor {
             // for the rest of the GOP. The LTR pixel match itself is
             // re-verified on every coded frame, so this cannot fabricate a
             // false skip_ltr.
+            copyFrameCount += 1
             for i in staticCounters.indices {
                 staticCounters[i] += 1
             }
@@ -673,6 +751,7 @@ actor LayersEncodeActor {
             }
 
             framesSinceKeyframe += 1
+            framesSinceCodedI += 1
             frameIndex += 1
             if temporalLayers == 2 {
                 temporalFrameIndex += 1
@@ -780,6 +859,18 @@ actor LayersEncodeActor {
         let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = encoded
         self.cachedNextSub2 = nSub2
         self.cachedNextSub1 = nSub1
+
+        // Quality floor (#31): measure this P frame's drift against the I frame
+        // that opened the GOP. framesSinceKeyframe is still this frame's GOP
+        // position here; it is incremented at the end of the call.
+        if let floor = qualityFloorState {
+            _ = floor.notePFrame(
+                mse: lumaMSEInteger(reconstructed: reconstructed, source: plane),
+                frameIndex: frameIndex,
+                k: framesSinceKeyframe,
+                dist: framesSinceCodedI
+            )
+        }
 
         // Using masked recon distortion for quality metric
         let safeRecon = SafeReleaseAction(releaseRecon)
@@ -901,6 +992,7 @@ actor LayersEncodeActor {
         }
         
         framesSinceKeyframe += 1
+        framesSinceCodedI += 1
         frameIndex += 1
         if temporalLayers == 2 {
             temporalFrameIndex += 1

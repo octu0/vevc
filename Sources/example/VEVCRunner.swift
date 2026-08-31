@@ -119,9 +119,9 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     
     let vevcEncoder: VEVCEncoder
     if let qstep = config.qstep {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh, iqFloor: config.iqFloor)
     } else {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh)
+        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: config.keyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, skipRefresh: config.skipRefresh, iqFloor: config.iqFloor)
     }
     
     let encStart1 = Date()
@@ -175,13 +175,24 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
         }
         
         var mets = [QualityMetrics]()
+        var perFrameCSV = "frame,psnr,ssim,ssimY\n"
+        var frameIdx = 0
         for try await decodedImg in decoder.decode(stream: stream) {
             guard let orig = try qY4M.next() else { break }
             let psnr = calculatePSNR(img1: orig.vevcImage, img2: decodedImg)
             let ssim = calculateSSIM(img1: orig.vevcImage, img2: decodedImg)
             mets.append(QualityMetrics(psnr: psnr, ssim: ssim))
+            if config.dumpFrameMetrics != nil {
+                let ssimY = calculateSSIMLuma(img1: orig.vevcImage, img2: decodedImg)
+                perFrameCSV += "\(frameIdx),\(psnr),\(ssim),\(ssimY)\n"
+            }
+            frameIdx += 1
         }
         metrics = mets
+        if let dumpPath = config.dumpFrameMetrics {
+            try? perFrameCSV.write(toFile: dumpPath, atomically: true, encoding: .utf8)
+            print("  -> per-frame metrics written to \(dumpPath)")
+        }
     }
     
     if config.dumpHash {
