@@ -29,6 +29,7 @@ struct Config {
     var motionMaskingPx: Int = 2
     var smooth: Int = 1
     var skipModel: Int = 1
+    var skipRefresh: Int = 0
     var temporalLayers: Int = 1
     var maxFrames: Int? = nil
 }
@@ -250,6 +251,11 @@ struct CompareApp {
                     if let v = Int(args[i + 1]) { config.skipModel = v }
                     i += 1
                 }
+            case "-skip-refresh", "--skip-refresh":
+                if (i + 1) < args.count {
+                    if let v = Int(args[i + 1]) { config.skipRefresh = v }
+                    i += 1
+                }
             case "-temporal-layers", "--temporal-layers":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.temporalLayers = v }
@@ -272,7 +278,7 @@ struct CompareApp {
         }
 
         if positionalArgs.isEmpty && y4mPath == nil {
-            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-smooth <0|1>] [-skip-model <0|1>] [-temporal-layers <1|2>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
+            print("Usage: compare [-y4m <input.y4m>] [-b <kbits> | --bitrate <kbits>] [-qstep <val>] [-framerate <fps>] [-in-fps <in_fps>] [-zero-threshold <threshold>] [-keyint <frames>] [-scene-threshold <sad>] [-max-layer <0-2>] [-profile <0x01|0x02>] [-gop <frames>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-mvt <px>] [-smooth <0|1>] [-skip-model <0|1>] [-skip-refresh <frames>] [-temporal-layers <1|2>] [-quality] [-output-graph] [-output-versus] [-output-bitrates] [-vevc-only] [-dump-hash] [-frames <n>]")
             exit(1)
         }
 

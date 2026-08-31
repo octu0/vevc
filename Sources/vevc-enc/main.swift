@@ -21,6 +21,8 @@ var motionMaskingPx: Int = 2
 var smooth: Int = 1
 var temporalLayers: Int = 1
 var skipModel: Int = 1
+var skipRefresh: Int = 0
+var skipRefreshPhase: Int = 0
 
 let args = CommandLine.arguments
 var i = 1
@@ -122,6 +124,16 @@ while i < args.count {
             if let v = Int(args[i + 1]) { skipModel = v }
             i += 1
         }
+    case "-skip-refresh", "--skip-refresh":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { skipRefresh = v }
+            i += 1
+        }
+    case "-skip-refresh-phase", "--skip-refresh-phase":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { skipRefreshPhase = v }
+            i += 1
+        }
     case "-framerate":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { outFpsOpt = v }
@@ -139,7 +151,7 @@ while i < args.count {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>]\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>] [-skip-refresh <frames>]\n  -skip-refresh <frames>: Periodic skip refresh; a block skipped this many frames in a row is coded as inter again (default: 0 = off, profile 2 only)\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n", stderr)
     exit(1)
 }
 
@@ -205,7 +217,9 @@ do {
             motionMaskingPx: motionMaskingPx,
             smooth: smooth,
             temporalLayers: temporalLayers,
-            skipModel: skipModel
+            skipModel: skipModel,
+            skipRefresh: skipRefresh,
+            skipRefreshPhase: skipRefreshPhase
         )
     } else {
         encoder = vevc.VEVCEncoder(
@@ -226,7 +240,9 @@ do {
             motionMaskingPx: motionMaskingPx,
             smooth: smooth,
             temporalLayers: temporalLayers,
-            skipModel: skipModel
+            skipModel: skipModel,
+            skipRefresh: skipRefresh,
+            skipRefreshPhase: skipRefreshPhase
         )
     }
 
@@ -255,6 +271,13 @@ do {
         let msPerFrame = if 0 < frameCount { (totalEncodeTime * 1000 / Double(frameCount)) } else { 0.0 }
         let logMsg = String(format: "Encoded %d frames in %.4fms (%.4fms/frame)\n", frameCount, totalEncodeTime * 1000, msPerFrame)
         fputs(logMsg, stderr)
+    }
+
+    if 0 < skipRefresh {
+        let stats = await encoder.skipRefreshStats()
+        let permyriad = 0 < stats.examined ? (stats.forced * 10000) / stats.examined : 0
+        let ratioStr = "\(permyriad / 100).\(permyriad % 100 / 10)\(permyriad % 10)"
+        fputs("SkipRefresh r=\(skipRefresh): forced-inter blocks \(stats.forced) / P-frame blocks \(stats.examined) (\(ratioStr)%)\n", stderr)
     }
 
     inFileHandle.closeFile()

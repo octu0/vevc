@@ -496,7 +496,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipModelDecider? = nil, ctxRansWorkspace: CtxRansWorkspace? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipModelDecider? = nil, ctxRansWorkspace: CtxRansWorkspace? = nil, skipRefresh: Int = 0, skipRefreshState: SkipRefreshState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -573,6 +573,24 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             source: pd,
             prevRef: pPd,
             ltrRef: nPd
+        )
+    }
+
+    // Periodic skip refresh (#28). Runs at the same layer as the learned skip
+    // decision and after it, so it sees the final skip map: a block that has
+    // skipped for `skipRefresh` consecutive frames is coded as inter again and
+    // takes back its own motion search result. Every downstream consumer
+    // (skip map / MVs / ref dirs / layer preparation / MC subtract / L0 loop /
+    // deblock / skip copy) reads the map below this point, so coding and
+    // reconstruction stay in agreement. skipRefresh == 0 skips the pass.
+    if let refreshState = skipRefreshState, 0 < skipRefresh {
+        _ = refreshState.apply(
+            skipMap: &skipMap,
+            mvs: &mvs,
+            refDirs: &refDirs,
+            meMVs: mvs_original,
+            meRefDirs: refDirs_original,
+            period: skipRefresh
         )
     }
 

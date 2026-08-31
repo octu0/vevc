@@ -46,12 +46,20 @@ public actor VEVCEncoder {
     /// Learned skip-safety decider on profile 0x02 P-frames. 1 = on (default),
     /// 0 = the pre-model encode path. No effect on profile 0x01.
     public nonisolated let skipModel: Int
-    
+    /// Periodic skip refresh period in frames on profile 0x02 P-frames (#28):
+    /// a block skipped this many frames in a row is coded as inter again.
+    /// 0 = off (default). No effect on profile 0x01.
+    public nonisolated let skipRefresh: Int
+    /// Diagnostic (#28 follow-up): 1 seeds the per-block refresh counters with
+    /// `blockIndex % skipRefresh` at every I frame instead of 0, so the blocks
+    /// do not all reach the period on the same frame. 0 = shipping behaviour.
+    public nonisolated let skipRefreshPhase: Int
+
     private let coreEncoder: LayersEncodeActor
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -72,6 +80,8 @@ public actor VEVCEncoder {
         self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
+        self.skipRefresh = skipRefresh
+        self.skipRefreshPhase = skipRefreshPhase
 
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -94,11 +104,13 @@ public actor VEVCEncoder {
             motionMaskingPx: motionMaskingPx,
             smooth: smooth,
             temporalLayers: temporalLayers,
-            skipModel: skipModel
+            skipModel: skipModel,
+            skipRefresh: skipRefresh,
+            skipRefreshPhase: skipRefreshPhase
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -119,6 +131,8 @@ public actor VEVCEncoder {
         self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
+        self.skipRefresh = skipRefresh
+        self.skipRefreshPhase = skipRefreshPhase
 
         self.pool = BlockViewPool()
         self.coreEncoder = LayersEncodeActor(
@@ -141,7 +155,9 @@ public actor VEVCEncoder {
             motionMaskingPx: motionMaskingPx,
             smooth: smooth,
             temporalLayers: temporalLayers,
-            skipModel: skipModel
+            skipModel: skipModel,
+            skipRefresh: skipRefresh,
+            skipRefreshPhase: skipRefreshPhase
         )
     }
     
@@ -175,6 +191,13 @@ public actor VEVCEncoder {
         MEStats.printStats()
 #endif
         return out
+    }
+
+    /// Periodic skip refresh counts accumulated over the stream (#28):
+    /// blocks forced back to inter, and P-frame block slots examined.
+    /// Both are 0 when the pass is disabled.
+    public func skipRefreshStats() async -> (forced: Int, examined: Int) {
+        await coreEncoder.skipRefreshStats()
     }
 
     @inline(__always)
@@ -233,6 +256,14 @@ actor LayersEncodeActor {
     let smooth: Int
     let temporalLayers: Int
     let skipModel: Int
+    /// Periodic skip refresh period in frames (#28); 0 disables the pass.
+    let skipRefresh: Int
+    /// See VEVCEncoder.skipRefreshPhase.
+    let skipRefreshPhase: Int
+    /// Per-block consecutive-skip counters for the refresh pass. Allocated on
+    /// first use, reset at every I frame. nil unless the pass is enabled and
+    /// applicable (profile 0x02).
+    let skipRefreshState: SkipRefreshState?
     /// nil unless the learned skip decider is both enabled and applicable
     /// (profile 0x02 only — profile 0x01 has no skip map to convert into).
     private let skipModelDecider: SkipModelDecider?
@@ -276,7 +307,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -298,6 +329,11 @@ actor LayersEncodeActor {
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
         self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
+        self.skipRefresh = skipRefresh
+        self.skipRefreshPhase = skipRefreshPhase
+        let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
+        refreshState?.phaseSpreadPeriod = (0 < skipRefreshPhase) ? skipRefresh : 0
+        self.skipRefreshState = refreshState
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         switch profile == 0x02 {
@@ -312,7 +348,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -334,6 +370,11 @@ actor LayersEncodeActor {
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
         self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
+        self.skipRefresh = skipRefresh
+        self.skipRefreshPhase = skipRefreshPhase
+        let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
+        refreshState?.phaseSpreadPeriod = (0 < skipRefreshPhase) ? skipRefresh : 0
+        self.skipRefreshState = refreshState
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
         switch profile == 0x02 {
@@ -358,6 +399,11 @@ actor LayersEncodeActor {
     }
     
     @inline(__always)
+    func skipRefreshStats() -> (forced: Int, examined: Int) {
+        guard let state = skipRefreshState else { return (0, 0) }
+        return (state.forcedBlocks, state.examinedBlocks)
+    }
+
     public func encodeFrame(image: YCbCrImage, forceKeyFrame: Bool = false) async throws -> [UInt8] {
         let (plane, releasePlane) = toPlaneData420(image: image, pool: pool)
         
@@ -480,7 +526,7 @@ actor LayersEncodeActor {
             if self.qstep == nil {
                 rateController.consumeIFrame(bits: bytes.count * 8, qStep: Int(qtY.step))
             }
-            
+
             // Clean up old state
             releasePreviousInput?()
             releasePreviousT0Input?()
@@ -514,7 +560,10 @@ actor LayersEncodeActor {
             for i in 0..<self.staticCounters.count {
                 self.staticCounters[i] = framesSinceKeyframe
             }
-            
+            // An I frame recodes every block, so no block carries an unrefreshed
+            // skip history across it. Periodic and scene-change I frames alike.
+            self.skipRefreshState?.resetCounters()
+
             previousMVs = mvs
             
             framesSinceKeyframe += 1
@@ -703,7 +752,9 @@ actor LayersEncodeActor {
                 smooth: effSmooth,
                 updateL0Prev: updateL0,
                 skipModel: self.skipModelDecider,
-                ctxRansWorkspace: self.ctxRansWorkspace
+                ctxRansWorkspace: self.ctxRansWorkspace,
+                skipRefresh: self.skipRefresh,
+                skipRefreshState: self.skipRefreshState
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
@@ -729,7 +780,7 @@ actor LayersEncodeActor {
         let (bytes, reconstructed, mvs, sads, releaseRecon, nSub2, nSub1) = encoded
         self.cachedNextSub2 = nSub2
         self.cachedNextSub1 = nSub1
-        
+
         // Using masked recon distortion for quality metric
         let safeRecon = SafeReleaseAction(releaseRecon)
         let safePlane = SafeReleaseAction(releasePlane)
