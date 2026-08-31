@@ -70,8 +70,8 @@ struct Config {
     var skipThreshold: Int = 2
     var profile: UInt8 = 0x01
     var gop: Int = 12
-    var l2Cadence: Int = 4
-    var l1Cadence: Int = 2
+    var l2Cadence: Int = 0
+    var l1Cadence: Int = 0
     var l0Cadence: Int = 1
     var motionMaskingPx: Int = 2
     var smooth: Int = 1

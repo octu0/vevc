@@ -235,11 +235,11 @@ This section records hard-won performance facts: where the compute cost actually
 
 ### 9.6. P-frame Residual Temporal Decimation (Cadence) (2026-08-20, encoder-only)
 
-- L2/L1 detail residuals in Profile 0x02 P-frames are decimated according to `-l2cadence` (default: 4) and `-l1cadence` (default: 2), zeroing subbands when `framesSinceKeyframe % cadence != 0`. This is purely an encoder policy that relies on the legality of all-zero transform coefficients; there is no change to the bitstream specification or decoder.
+- L2/L1 detail residuals in Profile 0x02 P-frames are decimated according to `-l2cadence` and `-l1cadence`, zeroing subbands when `framesSinceKeyframe % cadence != 0`, or unconditionally when the cadence is `0`. **Both default to `0`, so P-frames carry no L1/L2 detail residual at all and detail is refreshed only by I-frames** (changed from 4 / 2; measured −6.83% size on miko1 at SSIM avg −0.0020 / min −0.0078, −0.77% on frame-duplicated ToS). This is purely an encoder policy that relies on the legality of all-zero transform coefficients; there is no change to the bitstream specification or decoder.
 
 ### 9.7. Motion Masking Detail Zeroing (2026-08-21, encoder-only)
 
-- In Profile 0x02 P-frames, `-mvt <px>` (default: 2, 0 disables) zeros L2 high-frequency detail residuals for moving blocks (`max(|dx|, |dy|) >= effectiveMvtQ`, with `effectiveMvtQ = motionMaskingPx * 4 * 60 / framerate`) only when quantization is deep (`motionMaskingMinQStep <= adjustedStep`, with `motionMaskingMinQStep = 2048`). L1 is never zeroed by motion masking, and textured blocks (HUD/text strokes) are guarded via activity classification. 詳細回復は次の cadence リフレッシュ(最大 l2cadence フレーム、既定 4 = 67ms@60fps)。skip_prev への誤捕捉は recon 検査が防ぐ。
+- In Profile 0x02 P-frames, `-mvt <px>` (default: 2, 0 disables) zeros L2 high-frequency detail residuals for moving blocks (`max(|dx|, |dy|) >= effectiveMvtQ`, with `effectiveMvtQ = motionMaskingPx * 4 * 60 / framerate`) only when quantization is deep (`motionMaskingMinQStep <= adjustedStep`, with `motionMaskingMinQStep = 2048`). L1 is never zeroed by motion masking, and textured blocks (HUD/text strokes) are guarded via activity classification. 詳細回復は次の L2 リフレッシュ。既定 `-l2cadence 0` では次の I フレームまで、`-l2cadence n >= 2` では最大 n フレーム。skip_prev への誤捕捉は recon 検査が防ぐ。
 
 ### 9.8. Chroma Residual Culling (2026-08-22, encoder-only)
 

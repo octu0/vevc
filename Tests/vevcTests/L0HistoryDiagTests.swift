@@ -123,8 +123,12 @@ final class L0HistoryDiagTests: XCTestCase {
             skipThreshold: 2,
             reconThresholdScale: 1,
             gop: 12,
-            l2Cadence: 4,
-            l1Cadence: 2,
+            // Production defaults: L1/L2 detail residuals are off on P-frames,
+            // so this lockstep covers the shipping configuration. The other two
+            // lockstep tests keep (2, 4) to retain coverage of the periodic
+            // cadence path.
+            l2Cadence: 0,
+            l1Cadence: 0,
             l0Cadence: 1,
             motionMaskingPx: 2,
             smooth: 1,
