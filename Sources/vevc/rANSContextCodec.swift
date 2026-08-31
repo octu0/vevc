@@ -1,39 +1,22 @@
-// CtxRans.swift - Context-conditioned rANS with 12-bit per-symbol precision
+// rANSContextCodec.swift - Context-conditioned rANS with 12-bit per-symbol precision
 // Target: Profile 2 L0 LL tail coefficients (pos 4..15)
 // Zero-heap-allocation per block design
 
 import Foundation
 
-// MARK: - Global Gate Flag
-
-/// Profile 2 + VEVC_CTXRANS=1 gate
-nonisolated(unsafe) public var isCtxRansEnabled: Bool = {
-    if let val = ProcessInfo.processInfo.environment["VEVC_CTXRANS"] {
-        if val == "1" {
-            return true
-        }
-    }
-    if let val2 = ProcessInfo.processInfo.environment["VEVC_CTX_RANS"] {
-        if val2 == "1" {
-            return true
-        }
-    }
-    return false
-}()
-
 // MARK: - 12-bit rANS Constants
 
-public let ctxRansScaleBits: UInt32 = 12
-public let ctxRansScale: UInt32 = 1 << 12 // 4096
-public let ctxRansLBound: UInt32 = 1 << 15 // 32768
+let rANSContextScaleBits: UInt32 = 12
+let rANSContextScale: UInt32 = 1 << 12 // 4096
+let rANSContextLBound: UInt32 = 1 << 15 // 32768
 
 // MARK: - Lookup Tables
 
-public final class CtxRansTables: @unchecked Sendable {
-    public static let shared = CtxRansTables()
+final class rANSContextTables: @unchecked Sendable {
+    static let shared = rANSContextTables()
 
-    public let sigmoidLUT: [Int32]
-    public let geluLUT: [Int32]
+    let sigmoidLUT: [Int32]
+    let geluLUT: [Int32]
 
     private init() {
         var sig = [Int32](repeating: 0, count: 8193)
@@ -58,7 +41,7 @@ public final class CtxRansTables: @unchecked Sendable {
     }
 
     @inline(__always)
-    public func fastSigmoidQ12(_ xQ12: Int32) -> Int32 {
+    func fastSigmoidQ12(_ xQ12: Int32) -> Int32 {
         let scaled = (xQ12 >> 3) + 4096
         if scaled <= 0 {
             return 0
@@ -70,7 +53,7 @@ public final class CtxRansTables: @unchecked Sendable {
     }
 
     @inline(__always)
-    public func fastGELUQ12(_ xQ12: Int32) -> Int32 {
+    func fastGELUQ12(_ xQ12: Int32) -> Int32 {
         let scaled = (xQ12 >> 2) + 8192
         if scaled <= 0 {
             return 0
@@ -82,64 +65,64 @@ public final class CtxRansTables: @unchecked Sendable {
     }
 }
 
-// MARK: - CtxRans Workspace (Zero-Allocation per-block Buffer)
+// MARK: - rANSContext Workspace (Zero-Allocation per-block Buffer)
 
-public final class CtxRansWorkspace: @unchecked Sendable {
-    public let weights = CtxRansWeights.shared
-    public let tables = CtxRansTables.shared
+final class rANSContextWorkspace: @unchecked Sendable {
+    let weights = rANSContextWeights.shared
+    let tables = rANSContextTables.shared
 
     // Buffers for rANS encoding/decoding
-    public var encWords = [UInt16](repeating: 0, count: 128)
-    public var encWordCount: Int = 0
+    var encodeWords = [UInt16](repeating: 0, count: 128)
+    var encodeWordCount: Int = 0
 
     // Buffers for CDF
-    public var rawCum = [Int32](repeating: 0, count: 132)
-    public var freqs = [UInt32](repeating: 0, count: 130)
-    public var cumFreqs = [UInt32](repeating: 0, count: 131)
+    var rawCum = [Int32](repeating: 0, count: 132)
+    var freqs = [UInt32](repeating: 0, count: 130)
+    var cumFreqs = [UInt32](repeating: 0, count: 131)
 
     // Buffers for Neural Predictor
-    public var feat = [Int32](repeating: 0, count: 96)
-    public var hidden = [Int32](repeating: 0, count: 32)
+    var feat = [Int32](repeating: 0, count: 96)
+    var hidden = [Int32](repeating: 0, count: 32)
 
     // Byte output buffer for block encoding
-    public var outputBytes = [UInt8](repeating: 0, count: 256)
-    public var outputByteCount: Int = 0
+    var outputBytes = [UInt8](repeating: 0, count: 256)
+    var outputByteCount: Int = 0
 
     // Reusable 16-coeff buffers
-    public var blockCoeffs = [Int16](repeating: 0, count: 16)
-    public var cArr = [Int16](repeating: 0, count: 16)
-    public var topBuf = [Int16](repeating: 0, count: 16)
-    public var leftBuf = [Int16](repeating: 0, count: 16)
-    public var syms = [Int](repeating: 0, count: 16)
-    public var escapes = [Int16](repeating: 0, count: 16)
-    public var hasEscapes = [Bool](repeating: false, count: 16)
+    var blockCoeffs = [Int16](repeating: 0, count: 16)
+    var cArr = [Int16](repeating: 0, count: 16)
+    var topBuf = [Int16](repeating: 0, count: 16)
+    var leftBuf = [Int16](repeating: 0, count: 16)
+    var syms = [Int](repeating: 0, count: 16)
+    var escapes = [Int16](repeating: 0, count: 16)
+    var hasEscapes = [Bool](repeating: false, count: 16)
 
     // Plane-level rANS stream buffers
-    public var planeWords = [UInt16](repeating: 0, count: 524288)
-    public var planeWordCount: Int = 0
-    public var planeEscapes = [UInt8](repeating: 0, count: 65536)
-    public var planeEscapeCount: Int = 0
-    public var planeState: UInt32 = ctxRansLBound
+    var planeWords = [UInt16](repeating: 0, count: 524288)
+    var planeWordCount: Int = 0
+    var planeEscapes = [UInt8](repeating: 0, count: 65536)
+    var planeEscapeCount: Int = 0
+    var planeState: UInt32 = rANSContextLBound
 
     // Plane-level rANS decoder state
-    public var decPlaneState: UInt32 = 0
-    public var decWordPtr: UnsafePointer<UInt8>!
-    public var decWordEndPtr: UnsafePointer<UInt8>!
-    public var decEscapePtr: UnsafePointer<UInt8>!
-    public var decEscapeEndPtr: UnsafePointer<UInt8>!
+    var decodePlaneState: UInt32 = 0
+    var decodeWordPtr: UnsafePointer<UInt8>!
+    var decodeWordEndPtr: UnsafePointer<UInt8>!
+    var decodeEscapePtr: UnsafePointer<UInt8>!
+    var decodeEscapeEndPtr: UnsafePointer<UInt8>!
 
-    public init() {}
+    init() {}
 
     @inline(__always)
-    public func resetPlaneEncoder() {
+    func resetPlaneEncoder() {
         planeWordCount = 0
         planeEscapeCount = 0
-        planeState = ctxRansLBound
+        planeState = rANSContextLBound
     }
 
     @inline(__always)
-    public func planeEncSymbol(sym: Int, freq: UInt32, cumFreq: UInt32) {
-        let maxState = ((ctxRansLBound >> ctxRansScaleBits) << 16) * freq
+    func planeEncodeSymbol(sym: Int, freq: UInt32, cumFreq: UInt32) {
+        let maxState = ((rANSContextLBound >> rANSContextScaleBits) << 16) * freq
         while maxState <= planeState {
             if planeWords.count <= planeWordCount {
                 planeWords.append(contentsOf: [UInt16](repeating: 0, count: planeWords.count))
@@ -148,11 +131,11 @@ public final class CtxRansWorkspace: @unchecked Sendable {
             planeWordCount += 1
             planeState = planeState >> 16
         }
-        planeState = ((planeState / freq) << ctxRansScaleBits) + (planeState % freq) + cumFreq
+        planeState = ((planeState / freq) << rANSContextScaleBits) + (planeState % freq) + cumFreq
     }
 
     @inline(__always)
-    public func planeEncEscape(val: Int16) {
+    func planeEncodeEscape(val: Int16) {
         if planeEscapes.count <= (planeEscapeCount + 2) {
             planeEscapes.append(contentsOf: [UInt8](repeating: 0, count: max(1024, planeEscapes.count)))
         }
@@ -169,7 +152,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
     /// [4 bytes BigEndian: planeState]
     /// [planeWordCount * 2 bytes: planeWords emitted in reverse order]
     /// [planeEscapeCount bytes: planeEscapes in forward order]
-    public func finalizePlaneEncoder() -> [UInt8] {
+    func finalizePlaneEncoder() -> [UInt8] {
         var out = [UInt8]()
         let totalBytes = 4 + 4 + (planeWordCount * 2) + planeEscapeCount
         out.reserveCapacity(totalBytes)
@@ -204,7 +187,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
     }
 
     @inline(__always)
-    public func initPlaneDecoder(inputPtr: UnsafePointer<UInt8>, totalBytes: Int) throws {
+    func initPlaneDecoder(inputPtr: UnsafePointer<UInt8>, totalBytes: Int) throws {
         if totalBytes < 8 {
             throw DecodeError.insufficientData
         }
@@ -218,22 +201,22 @@ public final class CtxRansWorkspace: @unchecked Sendable {
         let s1 = UInt32(inputPtr[5])
         let s2 = UInt32(inputPtr[6])
         let s3 = UInt32(inputPtr[7])
-        decPlaneState = (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
+        decodePlaneState = (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
 
         let wordsStart = inputPtr + 8
         let wordsBytes = totalBytes - 8 - escCount
         if wordsBytes < 0 {
             throw DecodeError.insufficientData
         }
-        decWordPtr = wordsStart
-        decWordEndPtr = wordsStart + wordsBytes
-        decEscapePtr = decWordEndPtr
-        decEscapeEndPtr = inputPtr + totalBytes
+        decodeWordPtr = wordsStart
+        decodeWordEndPtr = wordsStart + wordsBytes
+        decodeEscapePtr = decodeWordEndPtr
+        decodeEscapeEndPtr = inputPtr + totalBytes
     }
 
     @inline(__always)
-    public func planeDecSymbol() -> Int {
-        let cum = decPlaneState & (ctxRansScale - 1)
+    func planeDecodeSymbol() -> Int {
+        let cum = decodePlaneState & (rANSContextScale - 1)
         var low = 0
         var high = 130
         while low + 1 < high {
@@ -248,26 +231,26 @@ public final class CtxRansWorkspace: @unchecked Sendable {
         let freq = freqs[sym]
         let cumFreq = cumFreqs[sym]
 
-        let mask = ctxRansScale - 1
-        decPlaneState = (freq * (decPlaneState >> ctxRansScaleBits)) + (decPlaneState & mask) - cumFreq
-        while decPlaneState < ctxRansLBound {
-            if decWordPtr + 1 < decWordEndPtr {
-                let w = (UInt32(decWordPtr[0]) << 8) | UInt32(decWordPtr[1])
-                decWordPtr = decWordPtr + 2
-                decPlaneState = (decPlaneState << 16) | w
+        let mask = rANSContextScale - 1
+        decodePlaneState = (freq * (decodePlaneState >> rANSContextScaleBits)) + (decodePlaneState & mask) - cumFreq
+        while decodePlaneState < rANSContextLBound {
+            if decodeWordPtr + 1 < decodeWordEndPtr {
+                let w = (UInt32(decodeWordPtr[0]) << 8) | UInt32(decodeWordPtr[1])
+                decodeWordPtr = decodeWordPtr + 2
+                decodePlaneState = (decodePlaneState << 16) | w
             } else {
-                decPlaneState = decPlaneState << 16
-                decWordPtr = decWordPtr + 2
+                decodePlaneState = decodePlaneState << 16
+                decodeWordPtr = decodeWordPtr + 2
             }
         }
         return sym
     }
 
     @inline(__always)
-    public func planeDecEscape() -> Int16 {
-        if decEscapePtr + 1 < decEscapeEndPtr {
-            let w = (UInt16(decEscapePtr[0]) << 8) | UInt16(decEscapePtr[1])
-            decEscapePtr = decEscapePtr + 2
+    func planeDecodeEscape() -> Int16 {
+        if decodeEscapePtr + 1 < decodeEscapeEndPtr {
+            let w = (UInt16(decodeEscapePtr[0]) << 8) | UInt16(decodeEscapePtr[1])
+            decodeEscapePtr = decodeEscapePtr + 2
             return Int16(bitPattern: w)
         }
         return 0
@@ -275,7 +258,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
 
     /// Estimate model bits for tail coefficients of a block (pos 4..15)
     @inline(__always)
-    public func estimateModelTailBits(
+    func estimateModelTailBits(
         blockCoeffs: UnsafePointer<Int16>,
         topCoeffs: UnsafePointer<Int16>?,
         leftCoeffs: UnsafePointer<Int16>?,
@@ -329,19 +312,19 @@ public final class CtxRansWorkspace: @unchecked Sendable {
     }
 
     @inline(__always)
-    public func resetEncoder() {
-        encWordCount = 0
+    func resetEncoder() {
+        encodeWordCount = 0
     }
 
     @inline(__always)
-    public func encPutWord(_ word: UInt16) {
-        encWords[encWordCount] = word
-        encWordCount += 1
+    func encPutWord(_ word: UInt16) {
+        encodeWords[encodeWordCount] = word
+        encodeWordCount += 1
     }
 
     /// Build cumulative frequency table for logistic distribution with Q12 mu and invScale.
     @inline(__always)
-    public func buildCDF(muQ12: Int32, invScaleQ12: Int32) {
+    func buildCDF(muQ12: Int32, invScaleQ12: Int32) {
         let totalSyms = 130
         let M: Int32 = 64
         rawCum[0] = 0
@@ -369,13 +352,13 @@ public final class CtxRansWorkspace: @unchecked Sendable {
         }
 
         // Normalize sum of frequencies to exactly 4096
-        if totalFreq != ctxRansScale {
-            if totalFreq < ctxRansScale {
-                let diff = ctxRansScale - totalFreq
+        if totalFreq != rANSContextScale {
+            if totalFreq < rANSContextScale {
+                let diff = rANSContextScale - totalFreq
                 let centerSym = Int(max(0, min(128, (muQ12 >> 12) + M)))
                 freqs[centerSym] += diff
             } else {
-                var diff = totalFreq - ctxRansScale
+                var diff = totalFreq - rANSContextScale
                 while 0 < diff {
                     var maxIdx = 0
                     var maxVal: UInt32 = 0
@@ -409,7 +392,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
 
     /// Neural Predictor: extracts features and runs MLP in Q12 fixed-point.
     @inline(__always)
-    public func predict(
+    func predict(
         pos: Int,
         blockCoeffs: UnsafePointer<Int16>,
         topCoeffs: UnsafePointer<Int16>?,
@@ -567,7 +550,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
 
     /// Encode tail coefficients of a 4x4 block (pos 4..15) using 12-bit rANS.
     /// Returns byte count written to outputBytes.
-    public func encodeBlockTail(
+    func encodeBlockTail(
         blockCoeffs: UnsafePointer<Int16>,
         topCoeffs: UnsafePointer<Int16>?,
         leftCoeffs: UnsafePointer<Int16>?,
@@ -599,7 +582,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
         }
 
         // rANS State initialization
-        var state: UInt32 = ctxRansLBound
+        var state: UInt32 = rANSContextLBound
 
         // Encode symbols in reverse order: pos 15 down to 4
         var rPos = 15
@@ -621,14 +604,14 @@ public final class CtxRansWorkspace: @unchecked Sendable {
             let cumFreq = cumFreqs[sym]
 
             // Renormalize
-            let maxState = ((ctxRansLBound >> ctxRansScaleBits) << 16) * freq
+            let maxState = ((rANSContextLBound >> rANSContextScaleBits) << 16) * freq
             while maxState <= state {
                 encPutWord(UInt16(truncatingIfNeeded: state & 0xFFFF))
                 state = state >> 16
             }
 
             // Encode symbol
-            state = ((state / freq) << ctxRansScaleBits) + (state % freq) + cumFreq
+            state = ((state / freq) << rANSContextScaleBits) + (state % freq) + cumFreq
 
             rPos -= 1
         }
@@ -645,9 +628,9 @@ public final class CtxRansWorkspace: @unchecked Sendable {
         outputByteCount += 1
 
         // Emit emitted words in reverse order
-        var wIdx = encWordCount - 1
+        var wIdx = encodeWordCount - 1
         while 0 <= wIdx {
-            let w = encWords[wIdx]
+            let w = encodeWords[wIdx]
             outputBytes[outputByteCount] = UInt8(truncatingIfNeeded: (w >> 8) & 0xFF)
             outputByteCount += 1
             outputBytes[outputByteCount] = UInt8(truncatingIfNeeded: w & 0xFF)
@@ -673,7 +656,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
 
     /// Decode tail coefficients of a 4x4 block using 12-bit rANS.
     /// Returns number of input bytes consumed.
-    public func decodeBlockTail(
+    func decodeBlockTail(
         inputPtr: UnsafePointer<UInt8>,
         inputCount: Int,
         blockCoeffs: UnsafeMutablePointer<Int16>,
@@ -715,7 +698,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
             )
             buildCDF(muQ12: mu, invScaleQ12: invScale)
 
-            let cum = state & (ctxRansScale - 1)
+            let cum = state & (rANSContextScale - 1)
 
             // Binary search symbol
             var low = 0
@@ -733,9 +716,9 @@ public final class CtxRansWorkspace: @unchecked Sendable {
             let cumFreq = cumFreqs[sym]
 
             // Advance state
-            let mask = ctxRansScale - 1
-            state = (freq * (state >> ctxRansScaleBits)) + (state & mask) - cumFreq
-            while state < ctxRansLBound {
+            let mask = rANSContextScale - 1
+            state = (freq * (state >> rANSContextScaleBits)) + (state & mask) - cumFreq
+            while state < rANSContextLBound {
                 if curPtr + 1 < endPtr {
                     let w = (UInt32(curPtr[0]) << 8) | UInt32(curPtr[1])
                     curPtr = curPtr + 2
@@ -776,7 +759,7 @@ public final class CtxRansWorkspace: @unchecked Sendable {
 // MARK: - Rate-Distortion Selection Helper
 
 @inline(__always)
-public func estimate4HTailBits(blockCoeffs: UnsafePointer<Int16>) -> Int {
+func estimate4HTailBits(blockCoeffs: UnsafePointer<Int16>) -> Int {
     var nzCount = 0
     var bitCost = 0
     var pos = 4
@@ -807,7 +790,7 @@ public func estimate4HTailBits(blockCoeffs: UnsafePointer<Int16>) -> Int {
 }
 
 @inline(__always)
-public func shouldUseCtxRans(tailBytes: Int, estimated4HBits: Int) -> Bool {
+func shouldUserANSContext(tailBytes: Int, estimated4HBits: Int) -> Bool {
     if estimated4HBits <= 0 {
         return false
     }

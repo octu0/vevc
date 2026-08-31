@@ -54,7 +54,11 @@ final class Profile0x02Tests: XCTestCase {
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         let blockCount = bw * bh
-        
+        // #36: the skipMap is context-coded with per-GOP adaptive models, so a
+        // standalone bitstream walker has to carry the same state and reset it
+        // at every I frame, exactly as the decoder does.
+        let walkerContext = SyntaxContextModels()
+
         while offset < bitstream.count {
             if offset + 4 <= bitstream.count && bitstream[offset] == 0x56 && bitstream[offset+1] == 0x45 && bitstream[offset+2] == 0x56 && bitstream[offset+3] == 0x43 {
                 let _ = try VEVCFileHeader.deserialize(from: bitstream, offset: &offset)
@@ -64,9 +68,17 @@ final class Profile0x02Tests: XCTestCase {
             let start = offset
             let fh = try VEVCFrameHeader.deserialize(from: bitstream, offset: &offset, profile: 0x02)
             if !fh.isCopyFrame {
+                if fh.isIFrame {
+                    walkerContext.reset()
+                }
                 if fh.skipMapSize > 0 {
                     let smData = Array(bitstream[offset..<(offset + fh.skipMapSize)])
-                    let map = try decodeSkipMap(data: smData, count: blockCount)
+                    let map: [BlockMode]
+                    if smData.first == skipMapModeContext {
+                        map = try decodeSkipMapContext(data: smData, count: blockCount, cols: bw, state: walkerContext)
+                    } else {
+                        map = try decodeSkipMap(data: smData, count: blockCount)
+                    }
                     for m in map {
                         if m == .skip_prev { skipPrev += 1 }
                         else if m == .skip_ltr { skipLtr += 1 }
@@ -254,8 +266,8 @@ final class Profile0x02Tests: XCTestCase {
         XCTAssertEqual(bitstream1, bitstream2)
     }
 
-    // 7. CtxRans の可逆性検証（有効時と無効時でデコード画素が 100% 完全一致すること）
-    func testCtxRansBitExactReconstruction() async throws {
+    // 7. rANSContext の可逆性検証（有効時と無効時でデコード画素が 100% 完全一致すること）
+    func testRANSContextBitExactReconstruction() async throws {
         let width = 320
         let height = 240
         var frames = [YCbCrImage]()
@@ -271,22 +283,19 @@ final class Profile0x02Tests: XCTestCase {
             frames.append(img)
         }
 
-        // 1. CtxRans 無効時
-        isCtxRansEnabled = false
+        // 1. rANSContext 無効時
         let encoderBase = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
         let bitstreamBase = try await encoderBase.encodeToData(images: frames)
         let decoderBase = Decoder(maxLayer: 2)
         let outBase = try await decoderBase.decode(data: bitstreamBase)
 
-        // 2. CtxRans 有効時
-        isCtxRansEnabled = true
-        let encoderModel = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        // 2. rANSContext 有効時
+        let encoderModel = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02, ransContext: 1)
         let bitstreamModel = try await encoderModel.encodeToData(images: frames)
         let decoderModel = Decoder(maxLayer: 2)
         let outModel = try await decoderModel.decode(data: bitstreamModel)
 
         // リセット
-        isCtxRansEnabled = false
 
         XCTAssertEqual(outBase.count, outModel.count)
         for f in 0..<outBase.count {
@@ -312,7 +321,7 @@ final class Profile0x02Tests: XCTestCase {
     }
 
     func testRDDiagnostic() async throws {
-        let ws = CtxRansWorkspace()
+        let ws = rANSContextWorkspace()
         var coeffs: [Int16] = [10, 0, 0, 0,  2, 1, 0, 0,  1, 0, 0, 0,  0, 0, 0, 0]
         let c4h = coeffs.withUnsafeBufferPointer { estimate4HTailBits(blockCoeffs: $0.baseAddress!) }
         let cModel = coeffs.withUnsafeBufferPointer {
@@ -358,20 +367,17 @@ final class Profile0x02Tests: XCTestCase {
             testedAny = true
 
             // 1. Base
-            isCtxRansEnabled = false
             let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
             let dataBase = try await encBase.encodeToData(images: frames)
             let decBase = Decoder(maxLayer: 2)
             let outBase = try await decBase.decode(data: dataBase)
 
-            // 2. CtxRans
-            isCtxRansEnabled = true
-            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
+            // 2. rANSContext
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02, ransContext: 1)
             let dataModel = try await encModel.encodeToData(images: frames)
             let decModel = Decoder(maxLayer: 2)
             let outModel = try await decModel.decode(data: dataModel)
 
-            isCtxRansEnabled = false
 
             print("[\(name)] Base: \(dataBase.count) B, Model: \(dataModel.count) B")
             XCTAssertEqual(outBase.count, outModel.count)
@@ -428,16 +434,13 @@ final class Profile0x02Tests: XCTestCase {
             testedAny = true
 
             // 1. Base
-            isCtxRansEnabled = false
             let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
             let dataBase = try await encBase.encodeToData(images: frames)
 
-            // 2. CtxRans
-            isCtxRansEnabled = true
-            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
+            // 2. rANSContext
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02, ransContext: 1)
             let dataModel = try await encModel.encodeToData(images: frames)
 
-            isCtxRansEnabled = false
 
             XCTAssertLessThan(0, dataBase.count)
             XCTAssertLessThan(0, dataModel.count)

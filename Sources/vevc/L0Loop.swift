@@ -491,17 +491,15 @@ private func subtractInt16(_ a: inout [Int16], _ b: [Int16]) {
     }
 }
 
-/// Deep copy into fresh (non-pool) storage, safe to retain across frames.
-/// Pool-backed buffers may be recycled by their release closures, so the L0
-/// reference chain always owns plain arrays.
+/// Deep copy of an Image16 into fresh (non-pool) PlaneData420 storage, safe to
+/// retain across frames. Pool-backed buffers may be recycled by their release
+/// closures, so the L0 reference chain always owns plain arrays.
 @inline(__always)
-func freshCopy(_ img: Image16) -> PlaneData420 {
+func copyImageToPlaneData420(_ img: Image16) -> PlaneData420 {
     var y = [Int16](repeating: 0, count: img.y.count)
     var cb = [Int16](repeating: 0, count: img.cb.count)
     var cr = [Int16](repeating: 0, count: img.cr.count)
-    withUnsafePointers(img.y, mut: &y) { src, dst in dst.update(from: src, count: img.y.count) }
-    withUnsafePointers(img.cb, mut: &cb) { src, dst in dst.update(from: src, count: img.cb.count) }
-    withUnsafePointers(img.cr, mut: &cr) { src, dst in dst.update(from: src, count: img.cr.count) }
+    copyPlaneBuffers(y: img.y, cb: img.cb, cr: img.cr, intoY: &y, cb: &cb, cr: &cr)
     return PlaneData420(width: img.width, height: img.height, y: y, cb: cb, cr: cr)
 }
 

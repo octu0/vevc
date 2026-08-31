@@ -1394,6 +1394,7 @@ func applyScaledBidirectionalMotionCompensationChroma(plane: inout [Int16], prev
         }
     }
 }
+
 @inline(__always)
 func subtractScaledBidirectionalMotionCompensationLuma(plane: inout [Int16], prevPlane: [Int16], nextPlane: [Int16], mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]?, width: Int, height: Int, lumaBlockSize: Int, mvShift: Int, roundOffset: Int) {
     let colCount = (width + lumaBlockSize - 1) / lumaBlockSize

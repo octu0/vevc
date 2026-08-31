@@ -441,30 +441,30 @@ struct MotionEstimation {
         
         // Early exit: skip fine search when coarse SAD is already good enough
         if 128 <= bestCoarseSAD {
-        let fineOffsets = meFineOffsets
-        
-        for offset in fineOffsets {
-            let fx: Int = offset.0
-            let fy: Int = offset.1
-            let fineDx: Int = bestCoarseDx + fx
-            let fineDy: Int = bestCoarseDy + fy
+            let fineOffsets = meFineOffsets
             
-            if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
-            
-            let penalty = getMVDPenalty(dx: fineDx, dy: fineDy, pmvDx: pmvDx4, pmvDy: pmvDy4)
-            let maxSAD = bestFineSAD - penalty
-            if maxSAD < 0 { continue }
-            
-            fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
-            let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
-            
-            let totalSAD = sad + penalty
-            if totalSAD < bestFineSAD {
-                bestFineSAD = totalSAD
-                bestFineDx = fineDx
-                bestFineDy = fineDy
+            for offset in fineOffsets {
+                let fx: Int = offset.0
+                let fy: Int = offset.1
+                let fineDx: Int = bestCoarseDx + fx
+                let fineDy: Int = bestCoarseDy + fy
+                
+                if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
+                
+                let penalty = getMVDPenalty(dx: fineDx, dy: fineDy, pmvDx: pmvDx4, pmvDy: pmvDy4)
+                let maxSAD = bestFineSAD - penalty
+                if maxSAD < 0 { continue }
+                
+                fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
+                let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+                
+                let totalSAD = sad + penalty
+                if totalSAD < bestFineSAD {
+                    bestFineSAD = totalSAD
+                    bestFineDx = fineDx
+                    bestFineDy = fineDy
+                }
             }
-        }
         } // end early exit guard
         
         var bestHpDx: Int = bestFineDx * 2
@@ -858,14 +858,13 @@ struct MotionEstimation {
         
         if safe {
             if useFIR {
-                switch true {
-                case fractY == 0:
+                if fractY == 0 {
                     return computeQuarterPixelSADSubsampled32_Safe_FIR_Y0(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3)
-                case fractX == 0:
-                    return computeQuarterPixelSADSubsampled32_Safe_FIR_X0(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
-                default:
-                    return computeQuarterPixelSADSubsampled32_Safe_FIR_XY(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
                 }
+                if fractX == 0 {
+                    return computeQuarterPixelSADSubsampled32_Safe_FIR_X0(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
+                }
+                return computeQuarterPixelSADSubsampled32_Safe_FIR_XY(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy, cX0: cX0, cX1: cX1, cX2: cX2, cX3: cX3, cY0: cY0, cY1: cY1, cY2: cY2, cY3: cY3)
             }
             return computeQuarterPixelSADSubsampled32_Safe_NoFIR(curr: curr, prev: prev, width: width, bx: bx, by: by, intDx: intDx, intDy: intDy)
         }

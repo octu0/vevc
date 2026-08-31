@@ -249,10 +249,9 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            switch zeroThreshold == 0 {
-            case true:
+            if zeroThreshold == 0 {
                 blockThreshold = 0
-            case false:
+            } else {
                 blockThreshold = (zeroThreshold * weight) / 1024
             }
         } else {
@@ -477,10 +476,9 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            switch zeroThreshold == 0 {
-            case true:
+            if zeroThreshold == 0 {
                 blockThreshold = 0
-            case false:
+            } else {
                 blockThreshold = (zeroThreshold * weight) / 1024
             }
         } else {
@@ -700,8 +698,8 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
     // Owned by the encoder (one instance per LayersEncodeActor) and reused for
     // every frame. nil for planes that can never take the model path (chroma),
     // which is what keeps the non-model path allocation-free.
-    workspace ws: CtxRansWorkspace?
-) -> (data: [UInt8], isZeroFlags: [Bool], hasCtxRans: Bool) {
+    workspace ws: rANSContextWorkspace?
+) -> (data: [UInt8], isZeroFlags: [Bool], hasRANSContext: Bool) {
     var nonZeroIndices: [Int] = []
     nonZeroIndices.reserveCapacity(blocks.count)
     var isZeroFlags = [Bool](repeating: true, count: blocks.count)
@@ -740,13 +738,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
         return "    [BaseSubbands] blocks=\(blocks.count) zeroBlocks=\(zeroCount) zeroRate=\(rateStr)%"
     }())
 
-    let canUseModel: Bool
-    switch isCtxRansEnabled && isLuma && (nonZeroIndices.isEmpty != true) && (ws != nil) {
-    case true:
-        canUseModel = true
-    case false:
-        canUseModel = false
-    }
+    let canUseModel = isLuma && (nonZeroIndices.isEmpty != true) && (ws != nil)
 
     guard canUseModel, let ws = ws else {
         var bwFlags = BypassWriter()
@@ -816,7 +808,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
     let baseData = encoderBase.getData(selectModel: selectModel, history: history, updateHistory: false)
     let baseTotalBytes = bwFlagsBase.bytes.count + baseData.count
 
-    // 2. Candidate B: CtxRans Plane Encoding
+    // 2. Candidate B: rANSContext Plane Encoding
     ws.resetPlaneEncoder()
 
     // (a) Escapes in forward order
@@ -831,10 +823,10 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
         while pos < 16 {
             let val = ws.cArr[pos]
             if val < -64 {
-                ws.planeEncEscape(val: val)
+                ws.planeEncodeEscape(val: val)
             } else {
                 if 64 < val {
-                    ws.planeEncEscape(val: val)
+                    ws.planeEncodeEscape(val: val)
                 }
             }
             pos += 1
@@ -853,44 +845,43 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
             copyLLCoeffs(from: blocks[bIdx], to: cPtr.baseAddress!)
         }
 
-        let hasTop: Bool
-        switch 0 < blockY {
-        case true:
+        var hasTop = false
+        if 0 < blockY {
             ws.topBuf.withUnsafeMutableBufferPointer { topPtr in
                 copyLLCoeffs(from: blocks[bIdx - colCount], to: topPtr.baseAddress!)
             }
             hasTop = true
-        case false:
-            hasTop = false
         }
 
-        let hasLeft: Bool
-        switch 0 < blockX {
-        case true:
+        var hasLeft = false
+        if 0 < blockX {
             ws.leftBuf.withUnsafeMutableBufferPointer { leftPtr in
                 copyLLCoeffs(from: blocks[bIdx - 1], to: leftPtr.baseAddress!)
             }
             hasLeft = true
-        case false:
-            hasLeft = false
         }
 
         var rPos = 15
         while 4 <= rPos {
             let val = ws.cArr[rPos]
-            let (mu, invScale) = withUnsafeNeighborPointers(
-                ws.cArr, top: ws.topBuf, hasTop: hasTop, left: ws.leftBuf, hasLeft: hasLeft
-            ) { cPtr, topPtr, leftPtr -> (Int32, Int32) in
-                ws.predict(
-                    pos: rPos,
-                    blockCoeffs: cPtr,
-                    topCoeffs: topPtr,
-                    leftCoeffs: leftPtr,
-                    tempCoeffs: nil,
-                    isPFrame: true,
-                    plane: 0,
-                    qstep: qstep
-                )
+            let (mu, invScale): (Int32, Int32)
+            switch true {
+            case hasTop && hasLeft:
+                (mu, invScale) = withUnsafePointers(ws.cArr, ws.topBuf, ws.leftBuf) { cPtr, topPtr, leftPtr in
+                    ws.predict(pos: rPos, blockCoeffs: cPtr, topCoeffs: topPtr, leftCoeffs: leftPtr, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                }
+            case hasTop:
+                (mu, invScale) = withUnsafePointers(ws.cArr, ws.topBuf) { cPtr, topPtr in
+                    ws.predict(pos: rPos, blockCoeffs: cPtr, topCoeffs: topPtr, leftCoeffs: nil, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                }
+            case hasLeft:
+                (mu, invScale) = withUnsafePointers(ws.cArr, ws.leftBuf) { cPtr, leftPtr in
+                    ws.predict(pos: rPos, blockCoeffs: cPtr, topCoeffs: nil, leftCoeffs: leftPtr, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                }
+            default:
+                (mu, invScale) = withUnsafePointers(ws.cArr) { cPtr in
+                    ws.predict(pos: rPos, blockCoeffs: cPtr, topCoeffs: nil, leftCoeffs: nil, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                }
             }
             ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
 
@@ -907,7 +898,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
 
             let freq = ws.freqs[sym]
             let cumFreq = ws.cumFreqs[sym]
-            ws.planeEncSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+            ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
             rPos -= 1
         }
         rBlockIdx -= 1

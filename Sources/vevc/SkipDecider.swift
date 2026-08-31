@@ -17,7 +17,7 @@
 // across runs and machines. The decoder is untouched: the model only chooses
 // among modes the existing bitstream syntax already carries.
 //
-// Weights are compiled in (`SkipModelTables`). `-skip-model 0` disables the
+// Weights are compiled in (`SkipDeciderWeightsData`). `-skip-model 0` disables the
 // whole path, and the encoder then takes exactly the same route it took before
 // the model existed.
 
@@ -46,69 +46,16 @@
 ///   17 prevFrameSad0     column 0 of this block one frame ago (-1 if none)
 ///   18 maxGrad           max centre-difference gradient in the block
 ///   19 localRange        max 8x8 sub-block (max - min)
-enum SkipModelFeature {
+enum SkipDeciderFeature {
     /// Columns the model consumes. Also the row stride of the feature buffer.
     static let count = 20
-}
-
-/// Trained coefficients of the decider. The stored layout mirrors the trainer's
-/// serialization so the compiled-in table is the training artefact verbatim.
-struct SkipModelWeights: Sendable {
-    let f: Int          // feature count
-    let h: Int          // hidden width
-    let mu: [Int32]     // per-feature offset
-    let scale: [Int32]  // per-feature multiplier, applied as (x-mu)*scale >> normShift
-    let normShift: Int32
-    let w1: [Int32]
-    let b1: [Int32]
-    let w2: [Int32]
-    let b2: [Int32]
-    let shift1: Int32
-
-    /// Flat Int32 array: magic, kind, f, h, t, mu[f], scale[f], normShift,
-    /// w1[h*f], b1[h], w2[2*h], b2[2], shift1, shift2.
-    static func parse(_ a: [Int32]) -> SkipModelWeights? {
-        if a.count < 8 { return nil }
-        if a[0] != 0x504C4D31 { return nil }
-        if a[1] != 1 { return nil }        // int8 MLP is the only kind adopted
-        let f = Int(a[2])
-        let h = Int(a[3])
-        if f < 1 { return nil }
-        if h < 1 { return nil }
-        var p = 5
-        func take(_ n: Int) -> [Int32] {
-            if a.count < p + n { return [] }
-            let s = Array(a[p..<(p + n)])
-            p += n
-            return s
-        }
-        let mu = take(f)
-        let scale = take(f)
-        let normShift = take(1).first ?? 8
-        let w1 = take(h * f)
-        let b1 = take(h)
-        let w2 = take(2 * h)
-        let b2 = take(2)
-        let shift1 = take(1).first ?? 8
-        switch true {
-        case mu.count != f, scale.count != f:
-            return nil
-        case w1.count != h * f, b1.count != h:
-            return nil
-        case w2.count != 2 * h, b2.count != 2:
-            return nil
-        default:
-            break
-        }
-        return SkipModelWeights(f: f, h: h, mu: mu, scale: scale, normShift: normShift, w1: w1, b1: b1, w2: w2, b2: b2, shift1: shift1)
-    }
 }
 
 /// Integer feature normalization. Int64 intermediate: SAD features reach ~10^6
 /// and the scale can be large, so the product does not fit in Int32 before the
 /// shift.
 @inline(__always)
-func skipModelNormalize(_ x: UnsafePointer<Int32>, _ w: SkipModelWeights, into out: UnsafeMutablePointer<Int32>) {
+func skipDeciderNormalize(_ x: UnsafePointer<Int32>, _ w: SkipDeciderWeights, into out: UnsafeMutablePointer<Int32>) {
     let n = w.f
     let sh = Int64(w.normShift)
     for j in 0..<n {
@@ -122,39 +69,44 @@ func skipModelNormalize(_ x: UnsafePointer<Int32>, _ w: SkipModelWeights, into o
 /// One forward pass. int8-range weights, Int32 accumulation, ReLU, arithmetic
 /// shift requantization. Returns 1 for "skip is safe here", 0 for "code it".
 @inline(__always)
-func skipModelRunMLP(_ q: UnsafePointer<Int32>, _ w: SkipModelWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
+func skipDeciderClassify(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
     let f = w.f
     let h = w.h
-    w.w1.withUnsafeBufferPointer { w1 in
-        w.b1.withUnsafeBufferPointer { b1 in
-            for i in 0..<h {
-                var acc = b1[i]
-                let row = w1.baseAddress! + i * f
-                for j in 0..<f {
-                    acc &+= row[j] &* q[j]
-                }
-                acc >>= w.shift1
-                hbuf[i] = 0 < acc ? acc : 0
+    withUnsafePointers(w.w1, w.b1) { w1, b1 in
+        for i in 0..<h {
+            var acc = b1[i]
+            let row = w1 + (i * f)
+            for j in 0..<f {
+                acc &+= row[j] &* q[j]
             }
+            acc >>= w.shift1
+            var relu: Int32 = 0
+            if 0 < acc {
+                relu = acc
+            }
+            hbuf[i] = relu
         }
     }
     var o0: Int32 = w.b2[0]
     var o1: Int32 = w.b2[1]
-    w.w2.withUnsafeBufferPointer { w2 in
-        let r0 = w2.baseAddress!
-        let r1 = w2.baseAddress! + h
+    withUnsafePointers(w.w2) { w2 in
+        let r0 = w2
+        let r1 = w2 + h
         for i in 0..<h {
             o0 &+= r0[i] &* hbuf[i]
             o1 &+= r1[i] &* hbuf[i]
         }
     }
-    return o1 > o0 ? 1 : 0
+    if o0 < o1 {
+        return 1
+    }
+    return 0
 }
 
 /// Zero-motion SAD of one 32x32 luma block plus its two 16x16 chroma blocks
 /// against a reference plane: the "would a straight copy do?" measure, uncapped.
 @inline(__always)
-func skipModelZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: Int, width: Int, height: Int) -> Int {
+func skipDeciderZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: Int, width: Int, height: Int) -> Int {
     var sad = 0
     let maxY = min(by + 32, height)
     let maxX = min(bx + 32, width)
@@ -185,7 +137,7 @@ func skipModelZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: Int
 }
 
 /// Everything the feature rows need from the frame that is not a plane pointer.
-struct SkipModelFrameInputs {
+struct SkipDeciderFrameInputs {
     let mvsPrev: MotionVectors
     let mvsLtr: MotionVectors
     let meSadPrev: [Int]
@@ -200,11 +152,12 @@ struct SkipModelFrameInputs {
 
 /// Per-encoder decider state. Owns every buffer inference touches, sized once
 /// per resolution, so a steady-state frame allocates nothing here.
-final class SkipModelDecider: @unchecked Sendable {
-    let weights: SkipModelWeights
+final class SkipDecider: @unchecked Sendable {
+    let weights: SkipDeciderWeights
 
     private var blockCount = -1
-    private var feat: [Int32] = []       // blockCount * SkipModelFeature.count
+    // blockCount * SkipDeciderFeature.count
+    private var feat: [Int32] = []
     private var q: [Int32]
     private var hbuf: [Int32]
     /// Column 16/17 carriers: this decider's own answer and column 0 for each
@@ -216,36 +169,39 @@ final class SkipModelDecider: @unchecked Sendable {
 
     /// nil when the compiled-in table fails to parse, which leaves the encoder
     /// on its pre-model path rather than guessing.
-    static func make() -> SkipModelDecider? {
-        guard let w = SkipModelWeights.parse(SkipModelTables.blob) else { return nil }
-        if w.f != SkipModelFeature.count { return nil }
-        return SkipModelDecider(weights: w)
+    @inline(__always)
+    static func make() -> SkipDecider? {
+        guard let w = SkipDeciderWeights.parse(SkipDeciderWeightsData.blob) else { return nil }
+        if w.f != SkipDeciderFeature.count { return nil }
+        return SkipDecider(weights: w)
     }
 
-    private init(weights: SkipModelWeights) {
+    private init(weights: SkipDeciderWeights) {
         self.weights = weights
         self.q = [Int32](repeating: 0, count: weights.f)
         self.hbuf = [Int32](repeating: 0, count: weights.h)
     }
 
+    @inline(__always)
     private func ensure(_ n: Int) {
         if blockCount == n { return }
         blockCount = n
-        feat = [Int32](repeating: 0, count: n * SkipModelFeature.count)
+        feat = [Int32](repeating: 0, count: n * SkipDeciderFeature.count)
         prevLabel = [Int32](repeating: -1, count: n)
         prevSad0 = [Int32](repeating: -1, count: n)
         curLabel = [Int32](repeating: -1, count: n)
         curSad0 = [Int32](repeating: -1, count: n)
     }
 
-    /// Runs the decider over one P-frame and converts the blocks it calls
-    /// skip-safe. `skipMap`, `mvs` and `refDirs` are the rule-based decision on
-    /// entry and the final decision on exit.
+    /// Converts the blocks the decider calls skip-safe over one P-frame.
+    /// `skipMap`, `mvs` and `refDirs` are the rule-based decision on entry and
+    /// the final decision on exit.
+    @inline(__always)
     func apply(
         skipMap: inout [BlockMode],
         mvs: inout MotionVectors,
         refDirs: inout [Bool],
-        inputs: SkipModelFrameInputs,
+        inputs: SkipDeciderFrameInputs,
         source: PlaneData420,
         prevRef: PlaneData420,
         ltrRef: PlaneData420
@@ -265,34 +221,27 @@ final class SkipModelDecider: @unchecked Sendable {
             }
         }
 
-        feat.withUnsafeBufferPointer { rows in
-            q.withUnsafeMutableBufferPointer { qb in
-                hbuf.withUnsafeMutableBufferPointer { hb in
-                    for i in 0..<n {
-                        let row = rows.baseAddress! + i * SkipModelFeature.count
-                        skipModelNormalize(row, weights, into: qb.baseAddress!)
-                        let decision = skipModelRunMLP(qb.baseAddress!, weights, hbuf: hb.baseAddress!)
-                        curSad0[i] = row[0]
-                        curLabel[i] = Int32(decision)
-                        switch true {
-                        case skipMap[i] != .inter, decision != 1:
-                            continue
-                        default:
-                            break
-                        }
-                        // Reference choice: whichever straight copy is closer
-                        // to the source.
-                        if row[0] <= row[1] {
-                            skipMap[i] = .skip_prev
-                            refDirs[i] = false
-                        } else {
-                            skipMap[i] = .skip_ltr
-                            refDirs[i] = true
-                        }
-                        mvs.dx[i] = 0
-                        mvs.dy[i] = 0
-                    }
+        withUnsafePointers(feat, mut: &q, mut: &hbuf) { rows, qb, hb in
+            for i in 0..<n {
+                let row = rows + (i * SkipDeciderFeature.count)
+                skipDeciderNormalize(row, weights, into: qb)
+                let decision = skipDeciderClassify(qb, weights, hbuf: hb)
+                curSad0[i] = row[0]
+                curLabel[i] = Int32(decision)
+                if skipMap[i] != .inter || decision != 1 {
+                    continue
                 }
+                // Reference choice: whichever straight copy is closer
+                // to the source.
+                if row[0] <= row[1] {
+                    skipMap[i] = .skip_prev
+                    refDirs[i] = false
+                } else {
+                    skipMap[i] = .skip_ltr
+                    refDirs[i] = true
+                }
+                mvs.dx[i] = 0
+                mvs.dy[i] = 0
             }
         }
 
@@ -300,11 +249,11 @@ final class SkipModelDecider: @unchecked Sendable {
         swap(&prevSad0, &curSad0)
     }
 
-    /// Fills one feature row. See `SkipModelFeature.names` for the columns.
+    /// Fills one feature row. See `SkipDeciderFeature.names` for the columns.
     @inline(__always)
     private func extract(
         into i: Int,
-        inputs: SkipModelFrameInputs,
+        inputs: SkipDeciderFrameInputs,
         bw: Int,
         bx: Int,
         by: Int,
@@ -325,9 +274,9 @@ final class SkipModelDecider: @unchecked Sendable {
         let col = i % bw
         let leftDec: Int32 = 0 < col ? Int32(skipMap[i - 1].rawValue) : -1
         let upDec: Int32 = bw <= i ? Int32(skipMap[i - bw].rawValue) : -1
-        let base = i * SkipModelFeature.count
-        feat[base + 0] = Int32(clamping: skipModelZeroSAD32(cur: src, ref: pRef, bx: bx, by: by, width: width, height: height))
-        feat[base + 1] = Int32(clamping: skipModelZeroSAD32(cur: src, ref: lRef, bx: bx, by: by, width: width, height: height))
+        let base = i * SkipDeciderFeature.count
+        feat[base + 0] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: pRef, bx: bx, by: by, width: width, height: height))
+        feat[base + 1] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: lRef, bx: bx, by: by, width: width, height: height))
         feat[base + 2] = Int32(clamping: i < inputs.meSadPrev.count ? inputs.meSadPrev[i] : 0)
         feat[base + 3] = Int32(clamping: i < inputs.meSadLtr.count ? inputs.meSadLtr[i] : 0)
         feat[base + 4] = Int32(abs(Int(inputs.mvsPrev.dx[i])) + abs(Int(inputs.mvsPrev.dy[i])))
@@ -346,5 +295,109 @@ final class SkipModelDecider: @unchecked Sendable {
         feat[base + 17] = prevSad0[i]
         feat[base + 18] = maxG
         feat[base + 19] = localR
+    }
+}
+
+// MARK: - Periodic skip refresh
+
+/// Periodic refresh of long-running skip blocks (#28).
+///
+/// A block coded as skip carries its reference pixels forward unchanged, so the
+/// requantization noise already present in that reference is never corrected
+/// while the block keeps skipping. Forcing such a block back to inter after `r`
+/// consecutive skip frames codes a residual against the source again and clears
+/// the accumulated error.
+///
+/// The counters are per 32x32 block — the same grid as the skip map — and the
+/// encoder resets them at every I frame, because an I frame recodes every block.
+/// Nothing here changes the bitstream syntax: a forced block is an ordinary
+/// inter block, so the decoder needs no knowledge of the mechanism.
+final class SkipRefreshState: @unchecked Sendable {
+    /// Consecutive skip frames per block, reset to 0 whenever the block is
+    /// coded as inter (including the frame it is forced back to inter).
+    private(set) var counters: [Int] = []
+    /// Diagnostics only: blocks forced back to inter, summed over the stream.
+    private(set) var forcedBlocks: Int = 0
+    /// Diagnostics only: block slots examined on P frames, summed over the
+    /// stream. The denominator for the forced-inter ratio.
+    private(set) var examinedBlocks: Int = 0
+
+    /// Diagnostic for the #28 follow-up. 0 keeps the shipping behaviour: every
+    /// counter restarts at 0 on an I frame, so blocks that then skip together
+    /// reach the period on the same frame and refresh in one burst. A positive
+    /// value seeds counter i with `i % phaseSpreadPeriod` instead, spreading the
+    /// same average refresh rate over the period rather than concentrating it.
+    var phaseSpreadPeriod: Int = 0
+
+    init() {}
+
+    @inline(__always)
+    func resetCounters() {
+        if 0 < phaseSpreadPeriod {
+            for i in counters.indices {
+                counters[i] = i % phaseSpreadPeriod
+            }
+        } else {
+            for i in counters.indices {
+                counters[i] = 0
+            }
+        }
+    }
+
+    @inline(__always)
+    private func ensure(_ n: Int) {
+        if counters.count != n {
+            counters = [Int](repeating: 0, count: n)
+            // Seeds the phase on the first allocation too, so the first GOP is
+            // not the one case that still refreshes as a single burst.
+            resetCounters()
+        }
+    }
+
+    /// Applies the refresh rule to a final skip map. Returns the number of
+    /// blocks forced back to inter in this frame.
+    ///
+    /// `meMVs` / `meRefDirs` are the motion search results for the frame, which
+    /// exist for every block regardless of the skip decision; a forced block
+    /// takes its own search result back, so it codes as a normal inter block
+    /// with a real motion vector rather than a zero one.
+    @inline(__always)
+    func apply(
+        skipMap: inout [BlockMode],
+        mvs: inout MotionVectors,
+        refDirs: inout [Bool],
+        meMVs: MotionVectors,
+        meRefDirs: [Bool],
+        period r: Int
+    ) -> Int {
+        guard 0 < r else { return 0 }
+        let n = skipMap.count
+        guard 0 < n else { return 0 }
+        ensure(n)
+
+        var forced = 0
+        for i in 0..<n {
+            switch skipMap[i] {
+            case .inter:
+                counters[i] = 0
+            default:
+                counters[i] += 1
+                if r <= counters[i] {
+                    skipMap[i] = .inter
+                    if i < meMVs.dx.count {
+                        mvs.dx[i] = meMVs.dx[i]
+                        mvs.dy[i] = meMVs.dy[i]
+                    }
+                    if i < meRefDirs.count {
+                        refDirs[i] = meRefDirs[i]
+                    }
+                    counters[i] = 0
+                    forced += 1
+                }
+            }
+        }
+        forcedBlocks += forced
+        examinedBlocks += n
+        return forced
     }
 }

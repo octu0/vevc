@@ -555,10 +555,6 @@ final class BlockViewPool: @unchecked Sendable {
         #endif
     }
 
-    
-
-
-
     @inline(__always)
     func get1024() -> BlockView {
         #if arch(wasm32)
@@ -731,6 +727,9 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
     var height = 0
     var profile: UInt8 = 0x01
     var frameIdx = 0
+    // #36: the context-coded skipMap needs the same per-GOP adaptive state the
+    // decoder carries, reset at every I frame.
+    let inspectContext = SyntaxContextModels()
     var csv = "frame,type,qy0,qy1,qy2,l0,l1,l2,total,skipPrev,skipLtr,inter,wpLuma,wpChroma,skipMapSize,mvsSize,refDirSize,treeMapSize\n"
     while offset < data.count {
         if offset + 4 <= data.count && Array(data[offset..<(offset + 4)]) == VEVCFileHeader.magic {
@@ -752,11 +751,19 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
         var skipPrev = 0
         var skipLtr = 0
         var inter = 0
+        if fh.isIFrame {
+            inspectContext.reset()
+        }
         if 0 < fh.skipMapSize {
             let bw = (width + 31) / 32
             let bh = (height + 31) / 32
             let smData = Array(data[offset..<(offset + fh.skipMapSize)])
-            let map = try decodeSkipMap(data: smData, count: bw * bh)
+            let map: [BlockMode]
+            if smData.first == skipMapModeContext {
+                map = try decodeSkipMapContext(data: smData, count: bw * bh, cols: bw, state: inspectContext)
+            } else {
+                map = try decodeSkipMap(data: smData, count: bw * bh)
+            }
             for m in map {
                 switch m {
                 case .skip_prev: skipPrev += 1
@@ -811,7 +818,3 @@ public struct FrameRateConverter {
         return count
     }
 }
-
-
-
-

@@ -165,23 +165,20 @@ func estimateLumaOffset(source: [Int16], reference: [Int16], width: Int, height:
     // Per-block sums of 64 samples each (8×8 at stride 4); block mean =
     // sum / 64. Row-major over the plane so the reads stay sequential.
     var sums = [Int](repeating: 0, count: blockCount)
-    sums.withUnsafeMutableBufferPointer { sumsBuf in
-        let sumsBase = sumsBuf.baseAddress!
-        withUnsafePointers(source, reference) { s, r in
-            let xEnd = bw * 32
-            var y = 0
-            let yEnd = bh * 32
-            while y < yEnd {
-                let rowBase = y * width
-                let blockRowBase = (y / 32) * bw
-                var x = 0
-                while x < xEnd {
-                    let i = rowBase + x
-                    sumsBase[blockRowBase + (x >> 5)] += Int(s[i]) - Int(r[i])
-                    x += 4
-                }
-                y += 4
+    withUnsafePointers(source, reference, mut: &sums) { s, r, sumsBase in
+        let xEnd = bw * 32
+        var y = 0
+        let yEnd = bh * 32
+        while y < yEnd {
+            let rowBase = y * width
+            let blockRowBase = (y / 32) * bw
+            var x = 0
+            while x < xEnd {
+                let i = rowBase + x
+                sumsBase[blockRowBase + (x >> 5)] += Int(s[i]) - Int(r[i])
+                x += 4
             }
+            y += 4
         }
     }
     var total = 0
@@ -309,30 +306,21 @@ func computeBlockActivityMap(source: [Int16], width: Int, height: Int) -> [Int32
     var sums = [Int](repeating: 0, count: blockCount)
     var sumSqs = [Int](repeating: 0, count: blockCount)
     var counts = [Int](repeating: 0, count: blockCount)
-    sums.withUnsafeMutableBufferPointer { sumsBuf in
-        sumSqs.withUnsafeMutableBufferPointer { sumSqsBuf in
-            counts.withUnsafeMutableBufferPointer { countsBuf in
-                let sumsBase = sumsBuf.baseAddress!
-                let sumSqsBase = sumSqsBuf.baseAddress!
-                let countsBase = countsBuf.baseAddress!
-                withUnsafePointers(source) { s in
-                    var y = 0
-                    while y < height {
-                        let rowBase = y * width
-                        let blockRowBase = (y / 32) * bw
-                        var x = 0
-                        while x < width {
-                            let v = Int(s[rowBase + x])
-                            let idx = blockRowBase + (x >> 5)
-                            sumsBase[idx] += v
-                            sumSqsBase[idx] += v * v
-                            countsBase[idx] += 1
-                            x += 4
-                        }
-                        y += 4
-                    }
-                }
+    withUnsafePointers(source, mut: &sums, mut: &sumSqs, mut: &counts) { s, sumsBase, sumSqsBase, countsBase in
+        var y = 0
+        while y < height {
+            let rowBase = y * width
+            let blockRowBase = (y / 32) * bw
+            var x = 0
+            while x < width {
+                let v = Int(s[rowBase + x])
+                let idx = blockRowBase + (x >> 5)
+                sumsBase[idx] += v
+                sumSqsBase[idx] += v * v
+                countsBase[idx] += 1
+                x += 4
             }
+            y += 4
         }
     }
     var variances = [Int32](repeating: 0, count: blockCount)
@@ -429,49 +417,59 @@ func computeBlockGradientAndContrast(
     return (maxG, avgG, maxSubRange)
 }
 
+/// Activity classes without the coherence test: every block past the textured
+/// threshold is .textured. Used when residual smoothing is off, where the
+/// strokes-vs-noise distinction has no consumer.
 @inline(__always)
 func classifyBlockActivity(
     varianceMap: [Int32],
     flatVarianceMax: Int,
-    texturedVarianceMin: Int,
-    source: [Int16]? = nil,
-    width: Int = 0,
-    height: Int = 0,
-    coherenceEnabled: Bool = true
+    texturedVarianceMin: Int
 ) -> [BlockActivityClass] {
     var classes = [BlockActivityClass](repeating: .normal, count: varianceMap.count)
-    let bw = (width + 31) / 32
-    let colCount = bw
     for i in 0..<varianceMap.count {
         if varianceMap[i] < Int32(flatVarianceMax) {
             classes[i] = .flat
         }
         if Int32(texturedVarianceMin) <= varianceMap[i] {
-            if coherenceEnabled {
-                if let src = source {
-                    if 0 < width {
-                        if 0 < height {
-                            let r = i / colCount
-                            let c = i % colCount
-                            let bx = c * 32
-                            let by = r * 32
-                            let blockW = min(32, width - bx)
-                            let blockH = min(32, height - by)
-                            let coherence = withUnsafePointers(src) { ptr in
-                                computeBlockCoherence(source: ptr, stride: width, width: width, height: height, bx: bx, by: by, bw: blockW, bh: blockH)
-                            }
-                            if coherence < 0.85 {
-                                classes[i] = .incoherentTextured
-                            }
-                            if 0.85 <= coherence {
-                                classes[i] = .textured
-                            }
-                        }
-                    }
-                }
+            classes[i] = .textured
+        }
+    }
+    return classes
+}
+
+/// Activity classes with the coherence test: textured blocks are split into
+/// .textured / .incoherentTextured (strokes vs noise), which the dead-zone
+/// selection quantizes differently.
+@inline(__always)
+func classifyBlockActivityWithCoherence(
+    varianceMap: [Int32],
+    flatVarianceMax: Int,
+    texturedVarianceMin: Int,
+    source: [Int16],
+    width: Int,
+    height: Int
+) -> [BlockActivityClass] {
+    var classes = [BlockActivityClass](repeating: .normal, count: varianceMap.count)
+    let colCount = (width + 31) / 32
+    withUnsafePointers(source) { ptr in
+        for i in 0..<varianceMap.count {
+            if varianceMap[i] < Int32(flatVarianceMax) {
+                classes[i] = .flat
             }
-            if coherenceEnabled != true || source == nil {
-                classes[i] = .textured
+            guard Int32(texturedVarianceMin) <= varianceMap[i] else {
+                continue
+            }
+            let r = i / colCount
+            let c = i % colCount
+            let bx = c * 32
+            let by = r * 32
+            let blockW = min(32, width - bx)
+            let blockH = min(32, height - by)
+            let coherence = computeBlockCoherence(source: ptr, stride: width, width: width, height: height, bx: bx, by: by, bw: blockW, bh: blockH)
+            classes[i] = .textured
+            if coherence < 0.85 {
+                classes[i] = .incoherentTextured
             }
         }
     }
@@ -513,25 +511,22 @@ func detectSceneCut(source: [Int16], reference: [Int16], width: Int, height: Int
     var sums = [Int](repeating: 0, count: blockCount)
     var sumAbs = 0
     var sampleCount = 0
-    sums.withUnsafeMutableBufferPointer { sumsBuf in
-        let sumsBase = sumsBuf.baseAddress!
-        withUnsafePointers(source, reference) { s, r in
-            let xEnd = bw * 32
-            var y = 0
-            let yEnd = bh * 32
-            while y < yEnd {
-                let rowBase = y * width
-                let blockRowBase = (y / 32) * bw
-                var x = 0
-                while x < xEnd {
-                    let i = rowBase + x
-                    let d = Int(s[i]) - Int(r[i])
-                    sumsBase[blockRowBase + (x >> 5)] += d
-                    sumAbs += abs(d)
-                    x += 4
-                }
-                y += 4
+    withUnsafePointers(source, reference, mut: &sums) { s, r, sumsBase in
+        let xEnd = bw * 32
+        var y = 0
+        let yEnd = bh * 32
+        while y < yEnd {
+            let rowBase = y * width
+            let blockRowBase = (y / 32) * bw
+            var x = 0
+            while x < xEnd {
+                let i = rowBase + x
+                let d = Int(s[i]) - Int(r[i])
+                sumsBase[blockRowBase + (x >> 5)] += d
+                sumAbs += abs(d)
+                x += 4
             }
+            y += 4
         }
     }
     sampleCount = (bw * 8) * (bh * 8)
@@ -541,7 +536,8 @@ func detectSceneCut(source: [Int16], reference: [Int16], width: Int, height: Int
     for sum in sums {
         if sceneCutSideBlockSum < sum {
             pos += 1
-        } else if sum < -sceneCutSideBlockSum {
+        }
+        if sum < -1 * sceneCutSideBlockSum {
             neg += 1
         }
     }

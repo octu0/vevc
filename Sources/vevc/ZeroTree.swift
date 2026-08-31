@@ -234,10 +234,9 @@ func computeZeroFlags32(blocks: inout [BlockView], zeroThreshold: Int, colCount:
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            switch zeroThreshold == 0 {
-            case true:
+            if zeroThreshold == 0 {
                 blockThreshold = 0
-            case false:
+            } else {
                 blockThreshold = (zeroThreshold * weight) / 1024
             }
         } else {
@@ -263,10 +262,9 @@ func computeZeroFlags16(blocks: inout [BlockView], zeroThreshold: Int, colCount:
             let col = i % colCount
             let row = i / colCount
             let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
-            switch zeroThreshold == 0 {
-            case true:
+            if zeroThreshold == 0 {
                 blockThreshold = 0
-            case false:
+            } else {
                 blockThreshold = (zeroThreshold * weight) / 1024
             }
         } else {

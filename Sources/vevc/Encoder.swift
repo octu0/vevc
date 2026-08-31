@@ -64,7 +64,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -111,13 +111,14 @@ public actor VEVCEncoder {
             smooth: smooth,
             temporalLayers: temporalLayers,
             skipModel: skipModel,
+            ransContext: ransContext,
             skipRefresh: skipRefresh,
             skipRefreshPhase: skipRefreshPhase,
             iqFloor: iqFloor
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -164,6 +165,7 @@ public actor VEVCEncoder {
             smooth: smooth,
             temporalLayers: temporalLayers,
             skipModel: skipModel,
+            ransContext: ransContext,
             skipRefresh: skipRefresh,
             skipRefreshPhase: skipRefreshPhase,
             iqFloor: iqFloor
@@ -294,7 +296,7 @@ actor LayersEncodeActor {
     let skipRefreshState: SkipRefreshState?
     /// nil unless the learned skip decider is both enabled and applicable
     /// (profile 0x02 only — profile 0x01 has no skip map to convert into).
-    private let skipModelDecider: SkipModelDecider?
+    private let skipDecider: SkipDecider?
 
     private var rateController: RateController
     private var framesSinceKeyframe = 0
@@ -325,17 +327,21 @@ actor LayersEncodeActor {
     private var cachedNextSub1: [Int16]?
     var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
     var mvPayloadHistory: MVPayloadHistory?
+    /// Context-adaptive syntax coding state (#36): skipMap models and the
+    /// previous frame's skipMap for the temporal context. Reset at every coded
+    /// I frame so GOP-parallel decoding reproduces it.
+    var syntaxContext: SyntaxContextModels?
     // Quarter-resolution L0 reference chain (One-Pyramid §4, profile 0x02).
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
-    // CtxRans scratch (~1.1 MB). Allocated once per encoder and reused for
+    // rANSContext scratch (~1.1 MB). Allocated once per encoder and reused for
     // every frame; only the profile-2 base8 luma plane touches it, and that
     // code path is synchronous, so the actor's serialization is enough.
-    private let ctxRansWorkspace: CtxRansWorkspace?
+    private let ransContextWorkspace: rANSContextWorkspace?
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -356,7 +362,7 @@ actor LayersEncodeActor {
         self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
-        self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
+        self.skipDecider = (profile == 0x02 && skipModel == 1) ? SkipDecider.make() : nil
         self.skipRefresh = skipRefresh
         self.skipRefreshPhase = skipRefreshPhase
         let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
@@ -369,11 +375,10 @@ actor LayersEncodeActor {
             : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
-        switch profile == 0x02 {
-        case true:
-            self.ctxRansWorkspace = CtxRansWorkspace()
-        case false:
-            self.ctxRansWorkspace = nil
+        if profile == 0x02 && ransContext == 1 {
+            self.ransContextWorkspace = rANSContextWorkspace()
+        } else {
+            self.ransContextWorkspace = nil
         }
 
         let bw = (width + 31) / 32
@@ -381,7 +386,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -402,7 +407,7 @@ actor LayersEncodeActor {
         self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
-        self.skipModelDecider = (profile == 0x02 && skipModel == 1) ? SkipModelDecider.make() : nil
+        self.skipDecider = (profile == 0x02 && skipModel == 1) ? SkipDecider.make() : nil
         self.skipRefresh = skipRefresh
         self.skipRefreshPhase = skipRefreshPhase
         let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
@@ -415,11 +420,10 @@ actor LayersEncodeActor {
             : nil
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
-        switch profile == 0x02 {
-        case true:
-            self.ctxRansWorkspace = CtxRansWorkspace()
-        case false:
-            self.ctxRansWorkspace = nil
+        if profile == 0x02 && ransContext == 1 {
+            self.ransContextWorkspace = rANSContextWorkspace()
+        } else {
+            self.ransContextWorkspace = nil
         }
 
         let bw = (width + 31) / 32
@@ -565,6 +569,8 @@ actor LayersEncodeActor {
                 entropyHistories?.reset()
                 if mvPayloadHistory == nil { mvPayloadHistory = MVPayloadHistory() }
                 mvPayloadHistory?.reset()
+                if syntaxContext == nil { syntaxContext = SyntaxContextModels() }
+                syntaxContext?.reset()
             }
 
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
@@ -821,6 +827,7 @@ actor LayersEncodeActor {
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
                 entropyHistories: self.entropyHistories,
                 mvPayloadHistory: self.mvPayloadHistory,
+                syntaxContext: self.syntaxContext,
                 l0State: l0State,
                 l2Cadence: self.l2Cadence,
                 l1Cadence: self.l1Cadence,
@@ -830,8 +837,8 @@ actor LayersEncodeActor {
                 adjustedStep: adjustedStep,
                 smooth: effSmooth,
                 updateL0Prev: updateL0,
-                skipModel: self.skipModelDecider,
-                ctxRansWorkspace: self.ctxRansWorkspace,
+                skipModel: self.skipDecider,
+                ransContextWorkspace: self.ransContextWorkspace,
                 skipRefresh: self.skipRefresh,
                 skipRefreshState: self.skipRefreshState
             )

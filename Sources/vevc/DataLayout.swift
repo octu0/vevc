@@ -134,15 +134,15 @@ public struct VEVCFrameHeader {
     /// for symmetry; the current encoder always sends 0.
     public let lumaOffset: Int
     public let chromaOffset: Int
-    public let hasCtxRans: Bool
+    public let hasRANSContext: Bool
     public let layer0Size: Int
     public let layer1Size: Int
     public let layer2Size: Int
 
-    public init(frameType: FrameType, hasRefDir: Bool, hasCtxRans: Bool = false, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int = 0, lumaOffset: Int = 0, chromaOffset: Int = 0, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
+    public init(frameType: FrameType, hasRefDir: Bool, hasRANSContext: Bool = false, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int = 0, lumaOffset: Int = 0, chromaOffset: Int = 0, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
-        self.hasCtxRans = hasCtxRans
+        self.hasRANSContext = hasRANSContext
         self.skipMapSize = skipMapSize
         self.mvsSize = mvsSize
         self.refDirSize = refDirSize
@@ -174,21 +174,15 @@ public struct VEVCFrameHeader {
     @inline(__always)
     public func serialize(profile: UInt8 = 0x01) -> [UInt8] {
         var out = [UInt8]()
-        let refDirFlag: UInt8
-        switch hasRefDir {
-        case true:
+        var refDirFlag: UInt8 = 0x00
+        if hasRefDir {
             refDirFlag = 0x10
-        case false:
-            refDirFlag = 0x00
         }
-        let ctxRansFlag: UInt8
-        switch profile == 0x02 && hasCtxRans {
-        case true:
-            ctxRansFlag = 0x20
-        case false:
-            ctxRansFlag = 0x00
+        var rANSContextFlag: UInt8 = 0x00
+        if profile == 0x02 && hasRANSContext {
+            rANSContextFlag = 0x20
         }
-        let flag = frameType.rawValue | refDirFlag | ctxRansFlag
+        let flag = frameType.rawValue | refDirFlag | rANSContextFlag
         out.append(flag)
         if frameType != .copyFrame {
             if profile == 0x02 && frameType == .pFrame {
@@ -216,12 +210,9 @@ public struct VEVCFrameHeader {
         
         let frameTypeBits = flag & 0x0F
         let hasRefDir = (flag & 0x10) != 0
-        let hasCtxRans: Bool
-        switch profile == 0x02 {
-        case true:
-            hasCtxRans = (flag & 0x20) != 0
-        case false:
-            hasCtxRans = false
+        var hasRANSContext = false
+        if profile == 0x02 {
+            hasRANSContext = (flag & 0x20) != 0
         }
         
         guard let fType = FrameType(rawValue: frameTypeBits) else {
@@ -229,15 +220,12 @@ public struct VEVCFrameHeader {
         }
         
         if fType == .copyFrame {
-            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, hasCtxRans: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, treeMapSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
+            return VEVCFrameHeader(frameType: .copyFrame, hasRefDir: false, hasRANSContext: false, skipMapSize: 0, mvsSize: 0, refDirSize: 0, treeMapSize: 0, lumaOffset: 0, chromaOffset: 0, layer0Size: 0, layer1Size: 0, layer2Size: 0)
         }
         
-        let skipMapSize: Int
-        switch profile == 0x02 && fType == .pFrame {
-        case true:
+        var skipMapSize = 0
+        if profile == 0x02 && fType == .pFrame {
             skipMapSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
-        case false:
-            skipMapSize = 0
         }
         let mvsSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
         let refDirSize = Int(try readUInt32BEFromBytes(r, offset: &offset))
@@ -265,7 +253,7 @@ public struct VEVCFrameHeader {
             }
         }
         
-        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, hasCtxRans: hasCtxRans, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: treeMapSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
+        return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, hasRANSContext: hasRANSContext, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: treeMapSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
 }
 
@@ -485,19 +473,13 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int, maxTemporalLayer: Int
         }
 
         // Rebuild header with trimmed layer sizes
-        let newLayer1Size: Int
-        switch 1 <= maxLayer {
-        case true:
+        var newLayer1Size = 0
+        if 1 <= maxLayer {
             newLayer1Size = frameHeader.layer1Size
-        case false:
-            newLayer1Size = 0
         }
-        let newLayer2Size: Int
-        switch 2 <= maxLayer {
-        case true:
+        var newLayer2Size = 0
+        if 2 <= maxLayer {
             newLayer2Size = frameHeader.layer2Size
-        case false:
-            newLayer2Size = 0
         }
 
         let newHeader = VEVCFrameHeader(

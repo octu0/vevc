@@ -352,10 +352,15 @@ private struct Profile2Prelude {
 final class MVPredictionState: @unchecked Sendable {
     var previous: MotionVectors? = nil
     let payloadHistory = MVPayloadHistory()
+    /// Context-adaptive syntax models (#36). Carried in this per-decoder object
+    /// because it is already reset at every keyframe and already threaded to
+    /// every profile-2 decode variant.
+    let syntax = SyntaxContextModels()
 
     func resetForKeyframe() {
         previous = nil
         payloadHistory.reset()
+        syntax.reset()
     }
 }
 
@@ -372,10 +377,20 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
     let mvsCount = deriveMVCount(width: dx, height: dy)
 
     var skipMap: [BlockMode]? = nil
+    // Set when this frame's skipMap announced the #36 context-coded form; the
+    // refDir and treeMap sections of the same frame then use it as well.
+    var ctxSyntax = false
     if frameHeader.isIFrame != true && 0 < frameHeader.skipMapSize {
         guard (offset + frameHeader.skipMapSize) <= r.count else { throw DecodeError.insufficientData }
         let smData = Array(r[offset..<(offset + frameHeader.skipMapSize)])
-        skipMap = try decodeSkipMap(data: smData, count: mvsCount)
+        // #36: mode byte 2 is the context-coded form; 0/1 are the legacy RLE
+        // variants, still decodable so older streams keep playing.
+        if let sctx = mvState?.syntax, 0 < smData.count, smData[0] == skipMapModeContext {
+            skipMap = try decodeSkipMapContext(data: smData, count: mvsCount, cols: (dx + 31) / 32, state: sctx)
+            ctxSyntax = true
+        } else {
+            skipMap = try decodeSkipMap(data: smData, count: mvsCount)
+        }
         offset += frameHeader.skipMapSize
     }
 
@@ -400,7 +415,9 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
         offset += refDirByteCount
 
         if nextPd != nil {
-            refDirs = decodeRefDirsProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
+            refDirs = ctxSyntax
+                ? decodeRefDirsContextProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
+                : decodeRefDirsProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
         }
     }
 
@@ -418,12 +435,18 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
             let cbDx = (dx + 1) / 2
             let cbDy = (dy + 1) / 2
             let cSkip = chromaSkipFlags(skipMap: sm, mapWidth: skipBw, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
-            let decoded = decodeTreeMapProfile2(
-                buf: treeMapBuf,
-                yCount: ySkip.count, ySkip: ySkip,
-                cbCount: cSkip.count, cbSkip: cSkip,
-                crCount: cSkip.count, crSkip: cSkip
-            )
+            let decoded = ctxSyntax
+                ? try decodeTreeMapContextProfile2(
+                    buf: treeMapBuf,
+                    ySkip: ySkip, colsY: (dx + 31) / 32,
+                    cbSkip: cSkip, crSkip: cSkip, colsC: (cbDx + 31) / 32
+                )
+                : decodeTreeMapProfile2(
+                    buf: treeMapBuf,
+                    yCount: ySkip.count, ySkip: ySkip,
+                    cbCount: cSkip.count, cbSkip: cSkip,
+                    crCount: cSkip.count, crSkip: cSkip
+                )
             isTreezY = decoded.isTreezY
             isTreezCb = decoded.isTreezCb
             isTreezCr = decoded.isTreezCr
@@ -479,7 +502,7 @@ private func reconstructProfile2Base8(pool: BlockViewPool, l0dx: Int, l0dy: Int,
 /// Streams whose upper layers were stripped by the splitter (layer sizes 0)
 /// delegate to the generic decodeSpatialLayersForProfile2.
 @inline(__always)
-func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ctxRansWorkspace: CtxRansWorkspace? = nil) async throws -> Image16 {
+func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ransContextWorkspace: rANSContextWorkspace? = nil) async throws -> Image16 {
     // Peek the layer sizes without mutating the MV state: stripped-stream
     // frames delegate below and must not parse (and double-update) twice.
     do {
@@ -570,16 +593,16 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         }
     }
 
-    let hasCtxRans = p.frameHeader.hasCtxRans
+    let hasRANSContext = p.frameHeader.hasRANSContext
     let qtY0Step = Int32(qtY0.step)
     let qtC0Step = Int32(qtC0.step)
 
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
             if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)) }
-                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
             } else {
                 group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)) }
                 group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
@@ -609,9 +632,9 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         }
     } else {
         if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)
-            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
         } else {
             blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
             blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
@@ -649,11 +672,11 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
     // reference chain and substitute the LL2 coefficient slot
     // (L0_recon − LL2(P)) before the detail layers reconstruct.
     if isIFrame {
-        let ref = freshCopy(baseImg)
+        let ref = copyImageToPlaneData420(baseImg)
         l0State.prev = ref
         l0State.ltr = ref
     } else if let tMVs = mvs, let l0Prev = l0State.prev {
-        let baseCopy = freshCopy(baseImg)
+        let baseCopy = copyImageToPlaneData420(baseImg)
         var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
         await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
         if let map = skipMap {
@@ -822,7 +845,7 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
 /// (no skip bypass). A stripped layer1 (size 0) delegates to the generic
 /// decodeSpatialLayersForProfile2.
 @inline(__always)
-func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ctxRansWorkspace: CtxRansWorkspace? = nil) async throws -> Image16 {
+func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ransContextWorkspace: rANSContextWorkspace? = nil) async throws -> Image16 {
     // Peek before mutating MV state (stripped streams delegate below).
     do {
         var peek = 0
@@ -894,16 +917,16 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
         }
     }
 
-    let hasCtxRans = p.frameHeader.hasCtxRans
+    let hasRANSContext = p.frameHeader.hasRANSContext
     let qtY0Step = Int32(qtY0.step)
     let qtC0Step = Int32(qtC0.step)
 
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
             if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)) }
-                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
             } else {
                 group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)) }
                 group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
@@ -924,9 +947,9 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
         }
     } else {
         if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)
-            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
         } else {
             blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
             blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
@@ -953,13 +976,13 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
     // the prediction analyzed at layer1 resolution (T = LL of the L1
     // prediction) because no full-resolution plane exists at this maxLayer.
     if isIFrame {
-        let ref = freshCopy(baseImg)
+        let ref = copyImageToPlaneData420(baseImg)
         if updateL0Prev {
             l0State.prev = ref
             l0State.ltr = ref
         }
     } else if let tMVs = mvs, let l0Prev = l0State.prev {
-        let baseCopy = freshCopy(baseImg)
+        let baseCopy = copyImageToPlaneData420(baseImg)
         var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
         await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
         if let map = skipMap {
@@ -1088,7 +1111,7 @@ func decodeSpatialLayersForProfile2WithLayer1(r: [UInt8], pool: BlockViewPool, d
 /// decode side (deq(r0) + MC_L0), so it needs no separate L0RefState and
 /// never reads the upper-layer payloads.
 @inline(__always)
-func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ctxRansWorkspace: CtxRansWorkspace? = nil) async throws -> Image16 {
+func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ransContextWorkspace: rANSContextWorkspace? = nil) async throws -> Image16 {
     let p = try parseProfile2Frame(r: r, dx: dx, dy: dy, nextPd: nextPd, mvState: mvState, updateHistory: updateL0Prev)
 
     let l1dx = (dx + 1) / 2
@@ -1123,7 +1146,7 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
         }
     }
 
-    let hasCtxRans = p.frameHeader.hasCtxRans
+    let hasRANSContext = p.frameHeader.hasRANSContext
     let qtY0Step = Int32(qtY0.step)
     let qtC0Step = Int32(qtC0.step)
 
@@ -1132,9 +1155,9 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
             if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)) }
-                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
             } else {
                 group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)) }
                 group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
@@ -1146,9 +1169,9 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
         }
     } else {
         if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)
-            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
         } else {
             blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
             blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
@@ -1246,7 +1269,7 @@ func decodeSpatialLayersForProfile2Base8Only(r: [UInt8], pool: BlockViewPool, dx
 /// decoding uses the straight-line variants above, which delegate here
 /// only in those stripped cases.
 @inline(__always)
-func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState?, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ctxRansWorkspace: CtxRansWorkspace? = nil) async throws -> Image16 {
+func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: Int, dx: Int, dy: Int, predictedPd: PlaneData420?, nextPd: PlaneData420?, roundOffset: Int, entropyHistories: FrameEntropyHistories?, l0State: L0RefState?, mvState: MVPredictionState? = nil, parallelEntropy: Bool, updateL0Prev: Bool = true, ransContextWorkspace: rANSContextWorkspace? = nil) async throws -> Image16 {
     let l2dx = dx
     let l2dy = dy
     let l1dx = (dx + 1) / 2
@@ -1346,16 +1369,16 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
         }
     }
 
-    let hasCtxRans = frameHeader.hasCtxRans
+    let hasRANSContext = frameHeader.hasRANSContext
     let qtY0Step = Int32(qtY0.step)
     let qtC0Step = Int32(qtC0.step)
 
     if parallelEntropy {
         try await withThrowingTaskGroup(of: (Int, [BlockView]).self) { group in
             if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)) }
-                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
-                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (0, try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)) }
+                group.addTask { (1, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
+                group.addTask { (2, try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)) }
             } else {
                 group.addTask { (0, try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)) }
                 group.addTask { (1, try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)) }
@@ -1389,9 +1412,9 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
         }
     } else {
         if let ySkip0 = ySkip0, let cSkip0 = cSkip0 {
-            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasCtxRans: hasCtxRans, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ctxRansWorkspace)
-            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasCtxRans: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
-            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasCtxRans: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[0] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Y, pool: pool, blockCount: n0Y, colCount: cc0Y, qstep: qtY0Step, isSkip: ySkip0, isTreez: isTreezY, isLuma: true, hasRANSContext: hasRANSContext, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev, workspace: ransContextWorkspace)
+            blocksBySlot[1] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cb, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCb, isLuma: false, hasRANSContext: false, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
+            blocksBySlot[2] = try decodePlaneBaseSubbands8WithSkipMap(data: b0Cr, pool: pool, blockCount: n0C, colCount: cc0C, qstep: qtC0Step, isSkip: cSkip0, isTreez: isTreezCr, isLuma: false, hasRANSContext: false, history: h0?[2], parentFreeStatics: true, updateHistory: updateL0Prev)
         } else {
             blocksBySlot[0] = try decodePlaneBaseSubbands8(data: b0Y, pool: pool, blockCount: n0Y, isIFrame: isIFrame, history: h0?[0], parentFreeStatics: true, updateHistory: updateL0Prev)
             blocksBySlot[1] = try decodePlaneBaseSubbands8(data: b0Cb, pool: pool, blockCount: n0C, isIFrame: isIFrame, history: h0?[1], parentFreeStatics: true, updateHistory: updateL0Prev)
@@ -1458,14 +1481,14 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
     if let l0s = l0State {
         switch true {
         case frameHeader.isIFrame:
-            let ref = freshCopy(baseImg)
+            let ref = copyImageToPlaneData420(baseImg)
             if updateL0Prev {
                 l0s.prev = ref
                 l0s.ltr = ref
             }
         case (hasLayer1 || hasLayer2):
             guard let tMVs = mvs, let l0Prev = l0s.prev else { break }
-            let baseCopy = freshCopy(baseImg)
+            let baseCopy = copyImageToPlaneData420(baseImg)
             var l0Cur = Image16(width: baseImg.width, height: baseImg.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
             await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0s.ltr, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
             if let map = skipMap {

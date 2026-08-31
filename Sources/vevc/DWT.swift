@@ -513,7 +513,6 @@ func inverseDWT2DBlock8(ptr base: UnsafeMutablePointer<Int16>, stride width: Int
     inverseLift53Block8(base: base + (7 * width))
 }
 
-
 @inline(__always)
 func inverseDWT2DBlock16(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     // Inverse vertical lifting directly
@@ -525,7 +524,6 @@ func inverseDWT2DBlock16(ptr base: UnsafeMutablePointer<Int16>, stride width: In
     }
 }
 
-
 @inline(__always)
 func inverseDWT2DBlock32(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     // Inverse vertical lifting directly
@@ -536,4 +534,3 @@ func inverseDWT2DBlock32(ptr base: UnsafeMutablePointer<Int16>, stride width: In
         inverseLift53Block32(base: base + (y * width))
     }
 }
-

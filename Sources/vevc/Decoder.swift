@@ -43,7 +43,7 @@ public actor StreamingDecoderActor {
     var previousReconstructed: PlaneData420? // internal for drift diagnostics
     private var previousT0Reconstructed: PlaneData420?
     private var firstReconstructed: PlaneData420?
-    private var seenY = Set<UnsafeMutableRawPointer>()
+    private var seenY = Set<Int>()
     private var framesSinceKeyframe = 0
     private var temporalFrameIndex = 0
     private var roundOffsetIndex = 0
@@ -54,11 +54,11 @@ public actor StreamingDecoderActor {
     // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
     // Internal so the L0 bit-exactness gate tests can compare chains.
     let l0State = L0RefState()
-    // CtxRans scratch (~1.1 MB). Allocated once per decoder instance and
-    // reused for every frame. Only the base8 luma plane can carry CtxRans,
+    // rANSContext scratch (~1.1 MB). Allocated once per decoder instance and
+    // reused for every frame. Only the base8 luma plane can carry rANSContext,
     // so the chroma planes decoded concurrently with it never touch it; each
     // GOP-parallel decoder owns its own actor and therefore its own workspace.
-    let ctxRansWorkspace: CtxRansWorkspace?
+    let ransContextWorkspace: rANSContextWorkspace?
     // Concurrent entropy decode of the 9 profile-2 streams. Wins per-frame
     // latency on a single stream; under GOP-parallel throughput decoding it
     // only adds overhead, so the GOP-parallel Decoder turns it off.
@@ -76,8 +76,8 @@ public actor StreamingDecoderActor {
         self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
         self.mvPredictionState = (profile == 0x02) ? MVPredictionState() : nil
         // Not gated on any environment variable: the decoder must be able to
-        // read a CtxRans stream regardless of how it was launched.
-        self.ctxRansWorkspace = (profile == 0x02) ? CtxRansWorkspace() : nil
+        // read a rANSContext stream regardless of how it was launched.
+        self.ransContextWorkspace = (profile == 0x02) ? rANSContextWorkspace() : nil
     }
 
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
@@ -119,9 +119,9 @@ public actor StreamingDecoderActor {
 
             if shouldPromoteLTR {
                 if let old = firstReconstructed, let prevRecon = previousReconstructed {
-                    let oldY = old.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let prevY = prevRecon.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let t0Y = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let oldY = storageToken(old.y)
+                    let prevY = storageToken(prevRecon.y)
+                    let t0Y = previousT0Reconstructed.map { storageToken($0.y) }
                     if oldY != prevY && oldY != t0Y {
                         if seenY.contains(oldY) {
                             seenY.remove(oldY)
@@ -155,16 +155,12 @@ public actor StreamingDecoderActor {
             if let t0 = previousT0Reconstructed { oldPlanes.append(t0) }
             
             for p in oldPlanes {
-                p.y.withUnsafeBufferPointer { yPtr in
-                    if let yBase = yPtr.baseAddress {
-                        let ptr = UnsafeMutableRawPointer(mutating: yBase)
-                        if seenY.contains(ptr) {
-                            seenY.remove(ptr)
-                            pool.putInt16(p.y)
-                            pool.putInt16(p.cb)
-                            pool.putInt16(p.cr)
-                        }
-                    }
+                let token = storageToken(p.y)
+                if seenY.contains(token) {
+                    seenY.remove(token)
+                    pool.putInt16(p.y)
+                    pool.putInt16(p.cb)
+                    pool.putInt16(p.cr)
                 }
             }
             seenY.removeAll()
@@ -209,21 +205,21 @@ public actor StreamingDecoderActor {
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
-                    updateL0Prev: updateL0, ctxRansWorkspace: ctxRansWorkspace
+                    updateL0Prev: updateL0, ransContextWorkspace: ransContextWorkspace
                 )
             case 1:
                 img16 = try await decodeSpatialLayersForProfile2WithLayer1(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, l0State: l0State, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
-                    updateL0Prev: updateL0, ctxRansWorkspace: ctxRansWorkspace
+                    updateL0Prev: updateL0, ransContextWorkspace: ransContextWorkspace
                 )
             default:
                 img16 = try await decodeSpatialLayersForProfile2Full(
                     r: chunk, pool: pool, dx: width, dy: height,
                     predictedPd: predictedPd, nextPd: nextPd, roundOffset: roundOffsetIndex % 2,
                     entropyHistories: entropyHistories, l0State: l0State, mvState: mvPredictionState, parallelEntropy: parallelEntropy,
-                    updateL0Prev: updateL0, ctxRansWorkspace: ctxRansWorkspace
+                    updateL0Prev: updateL0, ransContextWorkspace: ransContextWorkspace
                 )
             }
         } else {
@@ -247,7 +243,7 @@ public actor StreamingDecoderActor {
         }
         
         let pd = PlaneData420(img16: img16)
-        let yBase = pd.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+        let yBase = storageToken(pd.y)
         seenY.insert(yBase)
         
         let shouldPromoteLTR: Bool
@@ -263,9 +259,9 @@ public actor StreamingDecoderActor {
 
         if shouldPromoteLTR {
             if let old = firstReconstructed {
-                let oldYBase = old.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                let prevYBase = previousReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                let t0YBase = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                let oldYBase = storageToken(old.y)
+                let prevYBase = previousReconstructed.map { storageToken($0.y) }
+                let t0YBase = previousT0Reconstructed.map { storageToken($0.y) }
                 if oldYBase != prevYBase && oldYBase != t0YBase {
                     if seenY.contains(oldYBase) {
                         seenY.remove(oldYBase)
@@ -278,7 +274,7 @@ public actor StreamingDecoderActor {
             firstReconstructed = pd
             if temporalLayers != 2 {
                 if let oldPrev = previousReconstructed {
-                    let oldPrevYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let oldPrevYBase = storageToken(oldPrev.y)
                     if seenY.contains(oldPrevYBase) {
                         seenY.remove(oldPrevYBase)
                         pool.putInt16(oldPrev.y)
@@ -290,8 +286,8 @@ public actor StreamingDecoderActor {
         } else {
             if temporalLayers != 2 {
                 if let oldPrev = previousReconstructed {
-                    let oldYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let oldYBase = storageToken(oldPrev.y)
+                    let firstYBase = firstReconstructed.map { storageToken($0.y) }
                     if oldYBase != firstYBase {
                         if seenY.contains(oldYBase) {
                             seenY.remove(oldYBase)
@@ -307,8 +303,8 @@ public actor StreamingDecoderActor {
         if temporalLayers == 2 {
             if isT0 {
                 if let oldT0 = previousT0Reconstructed {
-                    let oldT0YBase = oldT0.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let oldT0YBase = storageToken(oldT0.y)
+                    let firstYBase = firstReconstructed.map { storageToken($0.y) }
                     if oldT0YBase != firstYBase {
                         if seenY.contains(oldT0YBase) {
                             seenY.remove(oldT0YBase)
@@ -319,9 +315,9 @@ public actor StreamingDecoderActor {
                     }
                 }
                 if let oldPrev = previousReconstructed {
-                    let oldPrevYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let oldT0YBase = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let oldPrevYBase = storageToken(oldPrev.y)
+                    let firstYBase = firstReconstructed.map { storageToken($0.y) }
+                    let oldT0YBase = previousT0Reconstructed.map { storageToken($0.y) }
                     if oldPrevYBase != firstYBase && oldPrevYBase != oldT0YBase && oldPrevYBase != yBase {
                         if seenY.contains(oldPrevYBase) {
                             seenY.remove(oldPrevYBase)
@@ -335,9 +331,9 @@ public actor StreamingDecoderActor {
                 previousReconstructed = pd
             } else {
                 if let oldPrev = previousReconstructed {
-                    let oldPrevYBase = oldPrev.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let firstYBase = firstReconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
-                    let t0YBase = previousT0Reconstructed?.y.withUnsafeBufferPointer { UnsafeMutableRawPointer(mutating: $0.baseAddress!) }
+                    let oldPrevYBase = storageToken(oldPrev.y)
+                    let firstYBase = firstReconstructed.map { storageToken($0.y) }
+                    let t0YBase = previousT0Reconstructed.map { storageToken($0.y) }
                     if oldPrevYBase != firstYBase && oldPrevYBase != t0YBase && oldPrevYBase != yBase {
                         if seenY.contains(oldPrevYBase) {
                             seenY.remove(oldPrevYBase)

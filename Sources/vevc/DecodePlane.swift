@@ -832,22 +832,16 @@ func decodePlaneBaseSubbands8WithSkipMap(
     isSkip: [Bool],
     isTreez: [Bool]? = nil,
     isLuma: Bool = true,
-    hasCtxRans: Bool = false,
+    hasRANSContext: Bool = false,
     history: EntropyHistoryState?,
     parentFreeStatics: Bool,
     updateHistory: Bool = true,
     // Owned by the decoder (one instance per StreamingDecoderActor) and reused
-    // for every frame. Only the base8 luma plane can carry CtxRans, so the
+    // for every frame. Only the base8 luma plane can carry rANSContext, so the
     // chroma planes decoded in parallel with it pass nil and never share it.
-    workspace ws: CtxRansWorkspace? = nil
+    workspace ws: rANSContextWorkspace? = nil
 ) throws -> [BlockView] {
-    let useModelDecoder: Bool
-    switch hasCtxRans && isLuma {
-    case true:
-        useModelDecoder = true
-    case false:
-        useModelDecoder = false
-    }
+    let useModelDecoder = hasRANSContext && isLuma
 
     if useModelDecoder != true {
         return try data.withUnsafeBufferPointer { buf -> [BlockView] in
@@ -904,7 +898,7 @@ func decodePlaneBaseSubbands8WithSkipMap(
         }
     }
 
-    // CtxRans-enabled frame (Profile 0x02 P-frame Luma with hasCtxRans flag)
+    // rANSContext-enabled frame (Profile 0x02 P-frame Luma with hasRANSContext flag)
     guard let ws = ws else { throw DecodeError.invalidBlockData }
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
@@ -914,7 +908,7 @@ func decodePlaneBaseSubbands8WithSkipMap(
             blocks.append(pool.get64())
         }
 
-        // The model form is driven purely by the frame-header flag (hasCtxRans) plus
+        // The model form is driven purely by the frame-header flag (hasRANSContext) plus
         // isLuma; there is no per-plane flag bit in the bitstream.
         var brFlags = BypassReader(base: base, count: count)
         var nonZeroIndices: [Int] = []
@@ -971,26 +965,20 @@ func decodePlaneBaseSubbands8WithSkipMap(
                 let blockY = i / colCount
                 let blockX = i % colCount
 
-                let hasTop: Bool
-                switch 0 < blockY {
-                case true:
+                var hasTop = false
+                if 0 < blockY {
                     ws.topBuf.withUnsafeMutableBufferPointer { topPtr in
                         copyLLCoeffs(from: blocks[i - colCount], to: topPtr.baseAddress!)
                     }
                     hasTop = true
-                case false:
-                    hasTop = false
                 }
 
-                let hasLeft: Bool
-                switch 0 < blockX {
-                case true:
+                var hasLeft = false
+                if 0 < blockX {
                     ws.leftBuf.withUnsafeMutableBufferPointer { leftPtr in
                         copyLLCoeffs(from: blocks[i - 1], to: leftPtr.baseAddress!)
                     }
                     hasLeft = true
-                case false:
-                    hasLeft = false
                 }
 
                 try blockDecode4HHead(decoder: &decoder, ptr: basePtr, stride: 8)
@@ -1002,24 +990,29 @@ func decodePlaneBaseSubbands8WithSkipMap(
 
                 var pos = 4
                 while pos < 16 {
-                    let (mu, invScale) = withUnsafeNeighborPointers(
-                        ws.cArr, top: ws.topBuf, hasTop: hasTop, left: ws.leftBuf, hasLeft: hasLeft
-                    ) { cPtr, topPtr, leftPtr -> (Int32, Int32) in
-                        ws.predict(
-                            pos: pos,
-                            blockCoeffs: cPtr,
-                            topCoeffs: topPtr,
-                            leftCoeffs: leftPtr,
-                            tempCoeffs: nil,
-                            isPFrame: true,
-                            plane: 0,
-                            qstep: qstep
-                        )
+                    let (mu, invScale): (Int32, Int32)
+                    switch true {
+                    case hasTop && hasLeft:
+                        (mu, invScale) = withUnsafePointers(ws.cArr, ws.topBuf, ws.leftBuf) { cPtr, topPtr, leftPtr in
+                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: topPtr, leftCoeffs: leftPtr, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                        }
+                    case hasTop:
+                        (mu, invScale) = withUnsafePointers(ws.cArr, ws.topBuf) { cPtr, topPtr in
+                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: topPtr, leftCoeffs: nil, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                        }
+                    case hasLeft:
+                        (mu, invScale) = withUnsafePointers(ws.cArr, ws.leftBuf) { cPtr, leftPtr in
+                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: nil, leftCoeffs: leftPtr, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                        }
+                    default:
+                        (mu, invScale) = withUnsafePointers(ws.cArr) { cPtr in
+                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: nil, leftCoeffs: nil, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
+                        }
                     }
                     ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                    let sym = ws.planeDecSymbol()
+                    let sym = ws.planeDecodeSymbol()
                     if sym == 129 {
-                        ws.cArr[pos] = ws.planeDecEscape()
+                        ws.cArr[pos] = ws.planeDecodeEscape()
                     } else {
                         ws.cArr[pos] = Int16(sym - 64)
                     }

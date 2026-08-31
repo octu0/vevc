@@ -62,10 +62,11 @@ internal func buildStaticModel(rawFreqs: [UInt32]) -> rANSModel {
 final class StaticRANSModels: @unchecked Sendable {
     static let shared = StaticRANSModels()
 
-    // AC/LSCP tables retrained 2026-08-13 from miko1+ToS dumps at 800k/2500k
-    // (`vevc-training train-tables`, cross-validated across contents/rates).
-    // dpcmRunModel/dpcmValModel are NOT retrained: ctx4 only occurs in
-    // I-frames, which the P-frame dumps do not cover.
+    // Static fallback models: used until the backward-adaptive history is
+    // primed. Trained offline from quantized-coefficient dumps
+    // (vevc-training train-tables). dpcmRunModel/dpcmValModel are the
+    // original hand-tuned tables: ctx4 only occurs in I-frames, which the
+    // P-frame dumps do not cover.
     var runModel0 = buildStaticModel(rawFreqs: [
         4796, 1845, 1296, 979, 1002, 577, 527, 504, 714, 407, 356, 344, 561, 327, 296, 296,
         81, 45, 39, 41, 35, 34, 31, 48, 61, 36, 32, 31, 27, 27, 24, 39,
@@ -153,9 +154,8 @@ final class StaticRANSModels: @unchecked Sendable {
 
     // Parent-free AC tables (profile 0x02, EntropyCodec.swift): all AC
     // traffic lands in contexts 0-1, so these are trained on the merged
-    // parent-free assignment (`vevc-training train-tables-pf`, corpus:
-    // miko1+ToS 121f dumps at 500k+2500k, 2026-08-14). Contexts 2-3 reuse
-    // the shipped models above but carry no data in profile 0x02.
+    // parent-free assignment. Contexts 2-3 reuse the shipped models above
+    // but carry no data in profile 0x02.
     var pfRunModel0 = buildStaticModel(rawFreqs: [
         3804, 1660, 1260, 1042, 945, 619, 581, 610, 700, 452, 417, 423, 550, 365, 345, 400,
         98, 56, 50, 54, 47, 49, 48, 78, 76, 48, 44, 45, 40, 37, 39, 69,
@@ -264,7 +264,7 @@ struct rANSModel {
                 }
             }
             
-            // why: absorb deficit into the largest frequency to preserve distribution shape
+            // absorb deficit into the largest frequency to preserve distribution shape
             if sum < rANSScale {
                 self.tokenFreqs[maxIdx] += (rANSScale - sum)
             }
@@ -279,7 +279,7 @@ struct rANSModel {
                             currentMaxIdx = i
                         }
                     }
-                    // why: freq <= 1 cannot be reduced further without causing division by zero during decode
+                    // freq <= 1 cannot be reduced further without causing division by zero during decode
                     if currentMaxVal <= 1 { break }
                     self.tokenFreqs[currentMaxIdx] -= 1
                     diff -= 1

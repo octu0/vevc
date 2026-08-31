@@ -1,9 +1,9 @@
 import XCTest
 @testable import vevc
 
-final class CtxRansTests: XCTestCase {
-    func testCtxRansCodecRoundtrip() throws {
-        let ws = CtxRansWorkspace()
+final class rANSContextTests: XCTestCase {
+    func testRANSContextCodecRoundtrip() throws {
+        let ws = rANSContextWorkspace()
         let blockCount = 100
         var blocks: [[Int16]] = []
         var rand = 1234567
@@ -27,10 +27,10 @@ final class CtxRansTests: XCTestCase {
             for pos in 4..<16 {
                 let val = b[pos]
                 if val < -64 {
-                    ws.planeEncEscape(val: val)
+                    ws.planeEncodeEscape(val: val)
                 } else {
                     if 64 < val {
-                        ws.planeEncEscape(val: val)
+                        ws.planeEncodeEscape(val: val)
                     }
                 }
             }
@@ -68,7 +68,7 @@ final class CtxRansTests: XCTestCase {
                 }
                 let freq = ws.freqs[sym]
                 let cumFreq = ws.cumFreqs[sym]
-                ws.planeEncSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+                ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
                 rPos -= 1
             }
             rBlock -= 1
@@ -101,9 +101,9 @@ final class CtxRansTests: XCTestCase {
                         )
                     }
                     ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                    let sym = ws.planeDecSymbol()
+                    let sym = ws.planeDecodeSymbol()
                     if sym == 129 {
-                        decB[pos] = ws.planeDecEscape()
+                        decB[pos] = ws.planeDecodeEscape()
                     } else {
                         decB[pos] = Int16(sym - 64)
                     }
@@ -120,8 +120,8 @@ final class CtxRansTests: XCTestCase {
         }
     }
 
-    func testCtxRansCodecEscapeRoundtrip() throws {
-        let ws = CtxRansWorkspace()
+    func testRANSContextCodecEscapeRoundtrip() throws {
+        let ws = rANSContextWorkspace()
         let blockCount = 100
         var blocks: [[Int16]] = []
         var rand = 987654321
@@ -147,11 +147,11 @@ final class CtxRansTests: XCTestCase {
             for pos in 4..<16 {
                 let val = b[pos]
                 if val < -64 {
-                    ws.planeEncEscape(val: val)
+                    ws.planeEncodeEscape(val: val)
                     escapeCount += 1
                 } else {
                     if 64 < val {
-                        ws.planeEncEscape(val: val)
+                        ws.planeEncodeEscape(val: val)
                         escapeCount += 1
                     }
                 }
@@ -191,7 +191,7 @@ final class CtxRansTests: XCTestCase {
                 }
                 let freq = ws.freqs[sym]
                 let cumFreq = ws.cumFreqs[sym]
-                ws.planeEncSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+                ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
                 rPos -= 1
             }
             rBlock -= 1
@@ -224,9 +224,9 @@ final class CtxRansTests: XCTestCase {
                         )
                     }
                     ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                    let sym = ws.planeDecSymbol()
+                    let sym = ws.planeDecodeSymbol()
                     if sym == 129 {
-                        decB[pos] = ws.planeDecEscape()
+                        decB[pos] = ws.planeDecodeEscape()
                     } else {
                         decB[pos] = Int16(sym - 64)
                     }

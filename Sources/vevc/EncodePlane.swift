@@ -2113,7 +2113,7 @@ func serializePlaneBase8PFrameWithSkipMap(
     isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil,
     histories: [EntropyHistoryState]?,
     updateHistory: Bool = true,
-    ctxRansWorkspace: CtxRansWorkspace? = nil
+    ransContextWorkspace: rANSContextWorkspace? = nil
 ) -> ([UInt8], PlaneData420, @Sendable () -> Void, [Bool], [Bool], [Bool], Bool) {
     let dx = pd.width
     let dy = pd.height
@@ -2128,7 +2128,7 @@ func serializePlaneBase8PFrameWithSkipMap(
     let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 7) / 8, colCount: cbColCount8)
 
     let safeThresholdY = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-    let (bufY, yZeros, hasCtxRans) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+    let (bufY, yZeros, hasRANSContext) = encodePlaneBaseSubbands8PFrameWithSkipMap(
         blocks: &base8YBlocks,
         colCount: yColCount8,
         qstep: Int32(qtY.step),
@@ -2139,7 +2139,7 @@ func serializePlaneBase8PFrameWithSkipMap(
         history: histories?[0],
         selectModel: unifiedSelectModelParentFree,
         updateHistory: updateHistory,
-        workspace: ctxRansWorkspace
+        workspace: ransContextWorkspace
     )
     let (reconY, r0Y) = reconstructPlaneBase8(blocks: base8YBlocks, width: dx, height: dy, qt: qtY, pool: pool)
 
@@ -2189,7 +2189,7 @@ func serializePlaneBase8PFrameWithSkipMap(
         r0Y()
         r0Cb()
         r0Cr()
-    }, yZeros, cbZeros, crZeros, hasCtxRans)
+    }, yZeros, cbZeros, crZeros, hasRANSContext)
 }
 
 /// Base8 encode, P-frame profile 0x02: skip-block bypass (One-Pyramid §5),

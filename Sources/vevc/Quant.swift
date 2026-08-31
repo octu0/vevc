@@ -40,9 +40,9 @@ struct Quantizer: Sendable {
 struct QuantizationTable: Sendable {
     let step: Int16
     let isChroma: Bool
-    public let qLow: Quantizer
-    public let qMid: Quantizer
-    public let qHigh: Quantizer
+    let qLow: Quantizer
+    let qMid: Quantizer
+    let qHigh: Quantizer
     /// Block-adaptive dead-zone variants (σ-normalized AQ, encoder-only).
     ///
     /// Derivation — SSIM's local form divides error energy by local variance:
@@ -73,12 +73,12 @@ struct QuantizationTable: Sendable {
     /// cannot separate strokes from noise (both live in HL/LH; saturated
     /// HH is already dead). A stroke-vs-noise discriminator would recover
     /// that headroom.
-    public let qMidFlat: Quantizer
-    public let qHighFlat: Quantizer
-    public let qMidTextured: Quantizer
-    public let qHighTextured: Quantizer
-    public let qMidIncoherent: Quantizer
-    public let qHighIncoherent: Quantizer
+    let qMidFlat: Quantizer
+    let qHighFlat: Quantizer
+    let qMidTextured: Quantizer
+    let qHighTextured: Quantizer
+    let qMidIncoherent: Quantizer
+    let qHighIncoherent: Quantizer
 
     init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
         let s = max(16, min(baseStep, 4096))
@@ -469,5 +469,3 @@ internal func dequantize32(_ block: BlockView, q: Quantizer) {
         UnsafeMutableRawPointer(ptr.advanced(by: 16)).storeBytes(of: res16_1, as: SIMD16<Int16>.self)
     }
 }
-
-

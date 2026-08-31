@@ -111,6 +111,36 @@ internal func withUnsafePointers<T1, T2, R>(
 }
 
 @inline(__always)
+internal func withUnsafePointers<T1, T2, T3, R>(
+    _ a: [T1], mut b: inout [T2], mut c: inout [T3],
+    _ body: (UnsafePointer<T1>, UnsafeMutablePointer<T2>, UnsafeMutablePointer<T3>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeBufferPointer { pA in
+        try b.withUnsafeMutableBufferPointer { pB in
+            try c.withUnsafeMutableBufferPointer { pC in
+                try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!)
+            }
+        }
+    }
+}
+
+@inline(__always)
+internal func withUnsafePointers<T1, T2, T3, T4, R>(
+    _ a: [T1], mut b: inout [T2], mut c: inout [T3], mut d: inout [T4],
+    _ body: (UnsafePointer<T1>, UnsafeMutablePointer<T2>, UnsafeMutablePointer<T3>, UnsafeMutablePointer<T4>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeBufferPointer { pA in
+        try b.withUnsafeMutableBufferPointer { pB in
+            try c.withUnsafeMutableBufferPointer { pC in
+                try d.withUnsafeMutableBufferPointer { pD in
+                    try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!)
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
 internal func withUnsafePointers<T, R>(
     mut a: inout [T], mut b: inout [T], mut c: inout [T],
     _ body: (UnsafeMutablePointer<T>, UnsafeMutablePointer<T>, UnsafeMutablePointer<T>) throws -> R
@@ -572,36 +602,24 @@ internal func withUnsafePointers<T1, T2, T3, T4, T5, T6, R>(
     }
 }
 
-/// Read-only pointers for the CtxRans context predictor: the block's own
-/// coefficients plus the top / left neighbour buffers, where either neighbour
-/// may be unavailable at a plane edge. All three pointers stay inside `body`,
-/// so the availability test happens here rather than at the call site — hoisting
-/// `baseAddress` out of the closure to build the optional would escape the
-/// pointer past its valid region.
+/// Copies the three Y/Cb/Cr plane buffers in a single borrow.
 @inline(__always)
-internal func withUnsafeNeighborPointers<T, R>(
-    _ a: [T], top: [T], hasTop: Bool, left: [T], hasLeft: Bool,
-    _ body: (UnsafePointer<T>, UnsafePointer<T>?, UnsafePointer<T>?) throws -> R
-) rethrows -> R {
-    try a.withUnsafeBufferPointer { pA in
-        try top.withUnsafeBufferPointer { pTop in
-            try left.withUnsafeBufferPointer { pLeft in
-                let topPtr: UnsafePointer<T>?
-                switch hasTop {
-                case true:
-                    topPtr = pTop.baseAddress!
-                case false:
-                    topPtr = nil
-                }
-                let leftPtr: UnsafePointer<T>?
-                switch hasLeft {
-                case true:
-                    leftPtr = pLeft.baseAddress!
-                case false:
-                    leftPtr = nil
-                }
-                return try body(pA.baseAddress!, topPtr, leftPtr)
-            }
-        }
+internal func copyPlaneBuffers<T>(
+    y srcY: [T], cb srcCb: [T], cr srcCr: [T],
+    intoY dstY: inout [T], cb dstCb: inout [T], cr dstCr: inout [T]
+) {
+    withUnsafePointers(srcY, srcCb, srcCr, mut: &dstY, mut: &dstCb, mut: &dstCr) { sy, scb, scr, dy, dcb, dcr in
+        dy.update(from: sy, count: srcY.count)
+        dcb.update(from: scb, count: srcCb.count)
+        dcr.update(from: scr, count: srcCr.count)
     }
+}
+
+/// Identity token for a buffer's storage, used for pool bookkeeping (set
+/// membership and aliasing checks between reference planes). The address is
+/// reduced to an opaque integer inside the closure and never used as a
+/// dereferenceable pointer.
+@inline(__always)
+internal func storageToken<T>(_ a: [T]) -> Int {
+    return a.withUnsafeBufferPointer { Int(bitPattern: $0.baseAddress) }
 }

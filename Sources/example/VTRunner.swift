@@ -10,7 +10,6 @@ public struct VTFrameData: @unchecked Sendable {
     public let data: [UInt8]
 }
 
-
 class QualityBox: @unchecked Sendable {
     var metrics: [Int: QualityMetrics] = [:]
     var y4mFrames: [Int: YCbCrImage] = [:]

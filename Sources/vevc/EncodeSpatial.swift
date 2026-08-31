@@ -135,7 +135,7 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
     let baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
 
     // The I-frame L0 reference: dequantized Base8 output.
-    let ref = freshCopy(baseImg)
+    let ref = copyImageToPlaneData420(baseImg)
     l0State.prev = ref
     l0State.ltr = ref
 
@@ -395,9 +395,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutPdCb = pool.getInt16(count: pd.cb.count)
     var mutPdCr = pool.getInt16(count: pd.cr.count)
 
-    withUnsafePointers(pd.y, mut: &mutPdY) { src, dst in dst.update(from: src, count: pd.y.count) }
-    withUnsafePointers(pd.cb, mut: &mutPdCb) { src, dst in dst.update(from: src, count: pd.cb.count) }
-    withUnsafePointers(pd.cr, mut: &mutPdCr) { src, dst in dst.update(from: src, count: pd.cr.count) }
+    copyPlaneBuffers(y: pd.y, cb: pd.cb, cr: pd.cr, intoY: &mutPdY, cb: &mutPdCb, cr: &mutPdCr)
 
     let mvsConst = mvs
     let refDirsConst = refDirs
@@ -496,7 +494,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipModelDecider? = nil, ctxRansWorkspace: CtxRansWorkspace? = nil, skipRefresh: Int = 0, skipRefreshState: SkipRefreshState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, syntaxContext: SyntaxContextModels? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil, skipRefresh: Int = 0, skipRefreshState: SkipRefreshState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -544,21 +542,29 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     var earlyActivity: [BlockActivityClass]? = nil
     if let model = skipModel, let dual = dualSink {
         let variances = computeBlockActivityMap(source: pd.y, width: dx, height: dy)
-        let classes = classifyBlockActivity(
-            varianceMap: variances,
-            flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
-            texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
-            source: pd.y,
-            width: dx,
-            height: dy,
-            coherenceEnabled: (smooth == 1)
-        )
+        let classes: [BlockActivityClass]
+        if smooth == 1 {
+            classes = classifyBlockActivityWithCoherence(
+                varianceMap: variances,
+                flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
+                texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
+                source: pd.y,
+                width: dx,
+                height: dy
+            )
+        } else {
+            classes = classifyBlockActivity(
+                varianceMap: variances,
+                flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
+                texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin
+            )
+        }
         earlyActivity = classes
         model.apply(
             skipMap: &skipMap,
             mvs: &mvs,
             refDirs: &refDirs,
-            inputs: SkipModelFrameInputs(
+            inputs: SkipDeciderFrameInputs(
                 mvsPrev: dual.prevMVs,
                 mvsLtr: dual.ltrMVs,
                 meSadPrev: dual.prevSADs,
@@ -598,9 +604,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     var mutPdCb = pool.getInt16(count: pd.cb.count)
     var mutPdCr = pool.getInt16(count: pd.cr.count)
 
-    withUnsafePointers(pd.y, mut: &mutPdY) { src, dst in dst.update(from: src, count: pd.y.count) }
-    withUnsafePointers(pd.cb, mut: &mutPdCb) { src, dst in dst.update(from: src, count: pd.cb.count) }
-    withUnsafePointers(pd.cr, mut: &mutPdCr) { src, dst in dst.update(from: src, count: pd.cr.count) }
+    copyPlaneBuffers(y: pd.y, cb: pd.cb, cr: pd.cr, intoY: &mutPdY, cb: &mutPdCb, cr: &mutPdCr)
 
     let sMap = skipMap
     // Weighted prediction (#21): global luma offset of this frame against
@@ -618,15 +622,20 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     async let tAq = { [pdY = pd.y, earlyActivity] () -> [BlockActivityClass] in
         if let a = earlyActivity { return a }
         let variances = computeBlockActivityMap(source: pdY, width: dx, height: dy)
-        let isSmoothOn = (smooth == 1)
+        if smooth == 1 {
+            return classifyBlockActivityWithCoherence(
+                varianceMap: variances,
+                flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
+                texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
+                source: pdY,
+                width: dx,
+                height: dy
+            )
+        }
         return classifyBlockActivity(
             varianceMap: variances,
             flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
-            texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
-            source: pdY,
-            width: dx,
-            height: dy,
-            coherenceEnabled: isSmoothOn
+            texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin
         )
     }()
     let mvsConst = mvs
@@ -874,13 +883,22 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         }
     }
 
-    let treeMapBuf = encodeTreeMapProfile2(
-        isTreezY: isTreezY, ySkip: l2ySkip,
-        isTreezCb: isTreezCb, cbSkip: l2cSkip,
-        isTreezCr: isTreezCr, crSkip: l2cSkip
-    )
+    let treeMapBuf: [UInt8]
+    if syntaxContext != nil {
+        treeMapBuf = encodeTreeMapContextProfile2(
+            isTreezY: isTreezY, ySkip: l2ySkip, colsY: (dx + 31) / 32,
+            isTreezCb: isTreezCb, cbSkip: l2cSkip,
+            isTreezCr: isTreezCr, crSkip: l2cSkip, colsC: (cbDx + 31) / 32
+        )
+    } else {
+        treeMapBuf = encodeTreeMapProfile2(
+            isTreezY: isTreezY, ySkip: l2ySkip,
+            isTreezCb: isTreezCb, cbSkip: l2cSkip,
+            isTreezCr: isTreezCr, crSkip: l2cSkip
+        )
+    }
 
-    let (layer0, baseRecon, releaseBaseRecon, _, _, _, hasCtxRans) = serializePlaneBase8PFrameWithSkipMap(
+    let (layer0, baseRecon, releaseBaseRecon, _, _, _, hasRANSContext) = serializePlaneBase8PFrameWithSkipMap(
         pd: base8Input, pool: pool,
         qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold,
         base8YBlocks: &base8YBlocks, base8CbBlocks: &base8CbBlocks, base8CrBlocks: &base8CrBlocks,
@@ -888,7 +906,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
         histories: entropyHistories?.streams[0],
         updateHistory: updateL0Prev,
-        ctxRansWorkspace: ctxRansWorkspace
+        ransContextWorkspace: ransContextWorkspace
     )
     defer { releaseBaseRecon() }
 
@@ -897,7 +915,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     if let l0Prev = l0State.prev {
         // L0 reconstruction — the decoder's exact layer0 pipeline:
         // deq(r0) + MC_L0, clamp, deblock, skip copy.
-        let baseCopy = freshCopy(baseImg)
+        let baseCopy = copyImageToPlaneData420(baseImg)
         var l0Cur = Image16(width: baseRecon.width, height: baseRecon.height, y: baseCopy.y, cb: baseCopy.cb, cr: baseCopy.cr)
         await applyL0MotionCompensation(img: &l0Cur, prevPd: l0Prev, ltrPd: l0State.ltr, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
         if wpLuma != 0 {
@@ -991,10 +1009,19 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         }
     }
 
-    let skipMapData = encodeSkipMap(map: skipMap)
+    // #36: context-conditioned adaptive rANS replaces the RLE + per-frame
+    // tables. The state is per-GOP and reset at every coded I frame.
+    let skipMapData: [UInt8]
+    if let sctx = syntaxContext {
+        skipMapData = encodeSkipMapContext(map: skipMap, cols: skipBw, state: sctx)
+    } else {
+        skipMapData = encodeSkipMap(map: skipMap)
+    }
     let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prevMVs, history: mvPayloadHistory, updateHistory: updateL0Prev)
 
-    let refDirBuf = encodeRefDirsProfile2(refDirs: refDirs, skipMap: skipMap)
+    let refDirBuf = (syntaxContext != nil)
+        ? encodeRefDirsContextProfile2(refDirs: refDirs, skipMap: skipMap)
+        : encodeRefDirsProfile2(refDirs: refDirs, skipMap: skipMap)
 
     // Must match the decoder's deblock invocation exactly (mvs + skipMap
     // variants): the encoder previously filtered its reconstruction with the
@@ -1021,7 +1048,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     }())
 
     var out: [UInt8] = []
-    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, hasCtxRans: hasCtxRans, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, treeMapSize: treeMapBuf.count, lumaOffset: wpLuma, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
+    let frameHeader = VEVCFrameHeader(frameType: .pFrame, hasRefDir: true, hasRANSContext: hasRANSContext, skipMapSize: skipMapData.count, mvsSize: mvData.count, refDirSize: refDirBuf.count, treeMapSize: treeMapBuf.count, lumaOffset: wpLuma, chromaOffset: 0, layer0Size: layer0.count, layer1Size: layer1.count, layer2Size: layer2.count)
     out.append(contentsOf: frameHeader.serialize(profile: 0x02))
     out.append(contentsOf: skipMapData)
     out.append(contentsOf: mvData)

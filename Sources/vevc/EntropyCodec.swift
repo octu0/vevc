@@ -597,10 +597,9 @@ struct EntropyEncoder {
 
         // The decoder mirrors this update with its decoded token counts after
         // every rANS-coded stream (raw/empty streams return before this point).
-        switch updateHistory {
-        case true:
+        if updateHistory {
             history?.update(runTokenCounts: runTokenCounts, valTokenCounts: valTokenCounts)
-        case false:
+        } else {
             // The counts are not mutated past this point, so both stores are a
             // retain rather than a copy.
             deferredRunTokenCounts = runTokenCounts
@@ -1093,7 +1092,7 @@ private func encodeMVPayload(dxList: [Int16], dyList: [Int16], history: MVPayloa
     var bypass = BypassWriter()
     var freqsDx = [UInt32](repeating: 0, count: 64)
     var freqsDy = [UInt32](repeating: 0, count: 64)
-    
+
     for i in 0..<count {
         let tx = valueTokenize(dxList[i])
         tokensDx.append(tx.token)
@@ -1147,7 +1146,6 @@ private func encodeMVPayload(dxList: [Int16], dyList: [Int16], history: MVPayloa
         writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
         writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
     }
-
     let bpData = bypass.bytes
     writeVLQSize(&out, bpData.count)
     out.append(contentsOf: bpData)

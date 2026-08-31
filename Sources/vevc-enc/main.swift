@@ -25,6 +25,7 @@ var motionMaskingPx: Int = 2
 var smooth: Int = 1
 var temporalLayers: Int = 1
 var skipModel: Int = 1
+var ransContext: Int = 0
 var skipRefresh: Int = 0
 var skipRefreshPhase: Int = 0
 var iqFloor: Int = 0
@@ -132,6 +133,11 @@ while i < args.count {
             if let v = Int(args[i + 1]) { skipModel = v }
             i += 1
         }
+    case "-rans-context", "--rans-context":
+        if (i + 1) < args.count {
+            if let v = Int(args[i + 1]) { ransContext = v }
+            i += 1
+        }
     case "-skip-refresh", "--skip-refresh":
         if (i + 1) < args.count {
             if let v = Int(args[i + 1]) { skipRefresh = v }
@@ -177,7 +183,7 @@ if profile == 0x02 {
 }
 
 if inputPath.isEmpty || outPath.isEmpty {
-    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>] [-skip-refresh <frames>] [-iq-floor <alphax100>]\n  -iq-floor <alphax100>: Quality floor for early I frames; codes an I once a P frame's luma MSE exceeds alpha x the GOP's I-frame MSE, making -keyint an upper bound (default: 250 on profile 2, 0 = off on profile 1)\n  -keyint <keyint>: Maximum GOP size (default: 120 on profile 2, 30 on profile 1)\n  -skip-refresh <frames>: Periodic skip refresh; a block skipped this many frames in a row is coded as inter again (default: 0 = off, profile 2 only)\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n", stderr)
+    fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>] [-rans-context <0|1>] [-skip-refresh <frames>] [-iq-floor <alphax100>]\n  -iq-floor <alphax100>: Quality floor for early I frames; codes an I once a P frame's luma MSE exceeds alpha x the GOP's I-frame MSE, making -keyint an upper bound (default: 250 on profile 2, 0 = off on profile 1)\n  -keyint <keyint>: Maximum GOP size (default: 120 on profile 2, 30 on profile 1)\n  -skip-refresh <frames>: Periodic skip refresh; a block skipped this many frames in a row is coded as inter again (default: 0 = off, profile 2 only)\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n  -rans-context <0|1>: Context-conditioned rANS for base8 luma coefficients on profile 0x02 (default: 0 = off; streams stay decodable by any profile-2 decoder)\n", stderr)
     exit(1)
 }
 
@@ -244,6 +250,7 @@ do {
             smooth: smooth,
             temporalLayers: temporalLayers,
             skipModel: skipModel,
+            ransContext: ransContext,
             skipRefresh: skipRefresh,
             skipRefreshPhase: skipRefreshPhase,
             iqFloor: iqFloor
@@ -268,6 +275,7 @@ do {
             smooth: smooth,
             temporalLayers: temporalLayers,
             skipModel: skipModel,
+            ransContext: ransContext,
             skipRefresh: skipRefresh,
             skipRefreshPhase: skipRefreshPhase,
             iqFloor: iqFloor
