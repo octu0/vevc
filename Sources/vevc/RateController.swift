@@ -3,9 +3,15 @@ let staticInterRatioMaxQ8: Int = 26
 
 struct RateController {
     let baseMaxBitrate: Int
-    /// Planned bitrate incorporating a 1.3x layer allowance.
-    /// The stream contains 3 spatial layers; the specified bitrate is priced
-    /// for the full-resolution layer, with the 1.3x allowance covering lower layers.
+    /// Bitrate the controller actually plans against.
+    /// On profile 0x02 the requested bitrate prices the whole stream, every
+    /// spatial layer included, so the plan is the request unscaled. The older
+    /// 1.3x layer allowance priced `-b` for the full-resolution layer alone and
+    /// reserved 30% for the layers below it, but L1+L2 measure 7.0%-10.1% of a
+    /// profile-2 stream, so the allowance overshot the request by ~1.3x with no
+    /// layer cost to account for it. Profile 0x01 keeps the historical
+    /// allowance: its streams and the quality baselines drawn from them are
+    /// frozen.
     let plannedBitrate: Int
     let framerate: Int
     let keyint: Int
@@ -63,9 +69,12 @@ struct RateController {
         return false
     }
 
-    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int = 600) {
+    /// `profile` selects how the requested bitrate is priced; it defaults to
+    /// 0x01 to match `VEVCEncoder`'s own default, so a caller that does not
+    /// name a profile keeps the historical allowance.
+    init(maxbitrate: Int, framerate: Int, keyint: Int, profile: UInt8 = 0x01, targetDistortion: Int = 600) {
         self.baseMaxBitrate = maxbitrate
-        self.plannedBitrate = (maxbitrate * 13) / 10
+        self.plannedBitrate = (profile == 0x02) ? maxbitrate : (maxbitrate * 13) / 10
         self.framerate = framerate
         self.keyint = keyint
         self.targetDistortionQ8 = targetDistortion

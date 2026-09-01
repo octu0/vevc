@@ -340,7 +340,7 @@ actor LayersEncodeActor {
             ? QualityFloorState(alphaQ8: (iqFloor * 256) / 100)
             : nil
         self.framesSinceLtrUpdate = 0
-        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: profile)
         if profile == 0x02 && ransContext == 1 {
             self.ransContextWorkspace = rANSContextWorkspace()
         } else {
@@ -381,7 +381,7 @@ actor LayersEncodeActor {
             ? QualityFloorState(alphaQ8: (iqFloor * 256) / 100)
             : nil
         self.framesSinceLtrUpdate = 0
-        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint)
+        self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: profile)
         if profile == 0x02 && ransContext == 1 {
             self.ransContextWorkspace = rANSContextWorkspace()
         } else {
