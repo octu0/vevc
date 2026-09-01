@@ -451,6 +451,9 @@ struct Image16: Sendable {
                 case 8:
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                case 4:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 default:
                     dstPtr.update(from: srcPtr, count: size)
                 }
@@ -493,6 +496,9 @@ struct Image16: Sendable {
                 case 8:
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                case 4:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 default:
                     dstPtr.update(from: srcPtr, count: size)
                 }
@@ -535,6 +541,9 @@ struct Image16: Sendable {
                 case 8:
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                case 4:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
+                    UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 default:
                     dstPtr.update(from: srcPtr, count: size)
                 }
@@ -577,6 +586,9 @@ struct Image16: Sendable {
                 case 8:
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                case 4:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 default:
                     destPtr.update(from: srcPtr, count: size)
                 }
@@ -613,6 +625,9 @@ struct Image16: Sendable {
             case 8:
                 let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
                 UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+            case 4:
+                let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD4<Int16>.self)
+                UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
             default:
                 destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
@@ -642,6 +657,9 @@ struct Image16: Sendable {
                 case 8:
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                case 4:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 default:
                     destPtr.update(from: srcPtr, count: size)
                 }
@@ -678,6 +696,9 @@ struct Image16: Sendable {
             case 8:
                 let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
                 UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+            case 4:
+                let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD4<Int16>.self)
+                UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
             default:
                 destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }
@@ -707,6 +728,9 @@ struct Image16: Sendable {
                 case 8:
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+                case 4:
+                    let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
+                    UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 default:
                     destPtr.update(from: srcPtr, count: size)
                 }
@@ -743,6 +767,9 @@ struct Image16: Sendable {
             case 8:
                 let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD8<Int16>.self)
                 UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
+            case 4:
+                let s0 = UnsafeRawPointer(srcPtr.advanced(by: dataOffsetX)).loadUnaligned(as: SIMD4<Int16>.self)
+                UnsafeMutableRawPointer(destPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
             default:
                 destPtr.update(from: srcPtr.advanced(by: dataOffsetX), count: loopW)
             }

@@ -37,11 +37,11 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
     var ll = [Int16](repeating: 0, count: llW * llH)
     var scratch = [Int16](repeating: 0, count: blockSize * blockSize)
     let reader = Int16Reader(data: plane, width: w, height: h)
-    withUnsafePointers(mut: &scratch, mut: &ll) { sBase, dBase in
+    withUnsafePointers(plane, mut: &scratch, mut: &ll) { pBase, sBase, dBase in
         let view = BlockView(base: sBase, width: blockSize, height: blockSize, stride: blockSize)
         for r in 0..<rowCount {
             for c in 0..<colCount {
-                reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view)
+                reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view, srcBase: pBase)
                 // LL-only forward lifting: bit-identical LL bytes, the other
                 // quadrants (never gathered here) stay unspecified.
                 switch blockSize {
@@ -53,11 +53,38 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
                 let dy0 = r * q
                 let copyW = min(q, llW - dx0)
                 if copyW <= 0 { continue }
-                for y in 0..<q {
-                    let dy = dy0 + y
-                    if dy < llH {
-                        let src = sBase.advanced(by: y * blockSize)
-                        dBase.advanced(by: dy * llW + dx0).update(from: src, count: copyW)
+                switch copyW {
+                case 16:
+                    for y in 0..<q {
+                        let dy = dy0 + y
+                        if dy < llH {
+                            let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD16<Int16>.self)
+                            UnsafeMutableRawPointer(dBase.advanced(by: dy * llW + dx0)).storeBytes(of: src, as: SIMD16<Int16>.self)
+                        }
+                    }
+                case 8:
+                    for y in 0..<q {
+                        let dy = dy0 + y
+                        if dy < llH {
+                            let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD8<Int16>.self)
+                            UnsafeMutableRawPointer(dBase.advanced(by: dy * llW + dx0)).storeBytes(of: src, as: SIMD8<Int16>.self)
+                        }
+                    }
+                case 4:
+                    for y in 0..<q {
+                        let dy = dy0 + y
+                        if dy < llH {
+                            let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD4<Int16>.self)
+                            UnsafeMutableRawPointer(dBase.advanced(by: dy * llW + dx0)).storeBytes(of: src, as: SIMD4<Int16>.self)
+                        }
+                    }
+                default:
+                    for y in 0..<q {
+                        let dy = dy0 + y
+                        if dy < llH {
+                            let src = sBase.advanced(by: y * blockSize)
+                            dBase.advanced(by: dy * llW + dx0).update(from: src, count: copyW)
+                        }
                     }
                 }
             }
@@ -189,7 +216,7 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
             let p = base.advanced(by: x)
             let v = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
             let clampedMin = v.replacing(with: vMin, where: v .< vMin)
-            let clamped = clampedMin.replacing(with: vMax, where: clampedMin .> vMax)
+            let clamped = clampedMin.replacing(with: vMax, where: vMax .< clampedMin)
             UnsafeMutableRawPointer(p).storeBytes(of: clamped, as: SIMD16<Int16>.self)
             x &+= 16
         }

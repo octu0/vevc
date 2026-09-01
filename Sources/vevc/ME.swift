@@ -110,34 +110,42 @@ struct MotionEstimation {
         
         if 0 <= intX && 0 <= intY && ((intX + 8) + fractX) <= width && ((intY + 8) + fractY) <= height {
             if fractY == 0 {
+                let vRound = SIMD8<Int16>(repeating: Int16(roundOffset))
                 for ry in 0..<8 {
                     let row = plane.advanced(by: (intY + ry) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 {
-                        dst[rx] = Int16((Int(row[rx]) + Int(row[rx + 1]) + roundOffset) >> 1)
-                    }
+                    let r0 = UnsafeRawPointer(row).loadUnaligned(as: SIMD8<Int16>.self)
+                    let r1 = UnsafeRawPointer(row.advanced(by: 1)).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = (r0 &+ r1 &+ vRound) &>> 1
+                    UnsafeMutableRawPointer(dst).storeBytes(of: res, as: SIMD8<Int16>.self)
                 }
                 return
             }
             if fractX == 0 {
+                let vRound = SIMD8<Int16>(repeating: Int16(roundOffset))
                 for ry in 0..<8 {
                     let row0 = plane.advanced(by: (intY + ry) * width + intX)
                     let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 {
-                        dst[rx] = Int16((Int(row0[rx]) + Int(row1[rx]) + roundOffset) >> 1)
-                    }
+                    let r0 = UnsafeRawPointer(row0).loadUnaligned(as: SIMD8<Int16>.self)
+                    let r1 = UnsafeRawPointer(row1).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = (r0 &+ r1 &+ vRound) &>> 1
+                    UnsafeMutableRawPointer(dst).storeBytes(of: res, as: SIMD8<Int16>.self)
                 }
                 return
             }
             
+            let vRound = SIMD8<Int16>(repeating: Int16(1 + roundOffset))
             for ry in 0..<8 {
                 let row0 = plane.advanced(by: (intY + ry) * width + intX)
                 let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
                 let dst = dest.advanced(by: ry * 8)
-                for rx in 0..<8 {
-                    dst[rx] = Int16((Int(row0[rx]) + Int(row0[rx+1]) + Int(row1[rx]) + Int(row1[rx+1]) + 1 + roundOffset) >> 2)
-                }
+                let r00 = UnsafeRawPointer(row0).loadUnaligned(as: SIMD8<Int16>.self)
+                let r01 = UnsafeRawPointer(row0.advanced(by: 1)).loadUnaligned(as: SIMD8<Int16>.self)
+                let r10 = UnsafeRawPointer(row1).loadUnaligned(as: SIMD8<Int16>.self)
+                let r11 = UnsafeRawPointer(row1.advanced(by: 1)).loadUnaligned(as: SIMD8<Int16>.self)
+                let res = (r00 &+ r01 &+ r10 &+ r11 &+ vRound) &>> 2
+                UnsafeMutableRawPointer(dst).storeBytes(of: res, as: SIMD8<Int16>.self)
             }
             return
         }
@@ -691,9 +699,12 @@ struct MotionEstimation {
             let rowC = curr.advanced(by: cy * width + bx)
             let py = by + intDy + ry
             let r = prev.advanced(by: py * width + bx + intDx)
-            for rx in stride(from: 0, to: 32, by: 2) {
-                sad &+= Int32((Int32(rowC[rx]) - Int32(r[rx])).magnitude)
-            }
+            let c32 = UnsafeRawPointer(rowC).loadUnaligned(as: SIMD32<Int16>.self)
+            let p32 = UnsafeRawPointer(r).loadUnaligned(as: SIMD32<Int16>.self)
+            let cEven = c32.evenHalf
+            let pEven = p32.evenHalf
+            let d = pointwiseMax(cEven, pEven) &- pointwiseMin(cEven, pEven)
+            sad &+= Int32(d.wrappedSum())
         }
         return Int(sad)
     }
@@ -882,72 +893,81 @@ struct MotionEstimation {
 
     @inline(__always)
     static func searchPixelsSubpixelRefinement32(
+        curr: UnsafePointer<Int16>,
+        prev: UnsafePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
+    ) -> (MotionVector, Int) {
+        // pmv is in full units of Luma dx
+        // We convert it to 1/4 units of Luma dx by multiplying by 4
+        let baseQx = Int(pmv.dx) * 4
+        let baseQy = Int(pmv.dy) * 4
+        
+        var bestSAD = computeQuarterPixelSADSubsampled32(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
+        if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
+        
+        // 1. Half-pixel search (step = 2 quarter pixels)
+        var hpBestQx = baseQx
+        var hpBestQy = baseQy
+        for (ox, oy) in searchOffsets {
+            let qx = baseQx + ox * 2
+            let qy = baseQy + oy * 2
+            
+            let intDx = qx >> 2
+            let intDy = qy >> 2
+            if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
+            if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
+            
+            let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 6
+            let maxSAD = bestSAD - penalty
+            if maxSAD <= 0 { continue }
+            
+            let sad = computeQuarterPixelSADSubsampled32(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+            let totalSAD = sad + penalty
+            if totalSAD < bestSAD {
+                bestSAD = totalSAD
+                hpBestQx = qx
+                hpBestQy = qy
+            }
+        }
+        
+        if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
+        
+        // 2. Quarter-pixel search (step = 1 quarter pixel)
+        var qpBestQx = hpBestQx
+        var qpBestQy = hpBestQy
+        for (ox, oy) in searchOffsets {
+            let qx = hpBestQx + ox
+            let qy = hpBestQy + oy
+            
+            let intDx = qx >> 2
+            let intDy = qy >> 2
+            if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
+            if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
+            
+            let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 4
+            let maxSAD = bestSAD - penalty
+            if maxSAD <= 0 { continue }
+            
+            let sad = computeQuarterPixelSADSubsampled32(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+            let totalSAD = sad + penalty
+            if totalSAD < bestSAD {
+                bestSAD = totalSAD
+                qpBestQx = qx
+                qpBestQy = qy
+            }
+        }
+        
+        return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
+    }
+
+    @inline(__always)
+    static func searchPixelsSubpixelRefinement32(
         currPlane: [Int16],
         prevPlane: [Int16],
         width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
     ) -> (MotionVector, Int) {
         return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
-            // pmv is in full units of Luma dx
-            // We convert it to 1/4 units of Luma dx by multiplying by 4
-            let baseQx = Int(pmv.dx) * 4
-            let baseQy = Int(pmv.dy) * 4
-            
-            var bestSAD = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
-            if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
-            
-            // 1. Half-pixel search (step = 2 quarter pixels)
-            var hpBestQx = baseQx
-            var hpBestQy = baseQy
-            for (ox, oy) in searchOffsets {
-                let qx = baseQx + ox * 2
-                let qy = baseQy + oy * 2
-                
-                let intDx = qx >> 2
-                let intDy = qy >> 2
-                if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
-                if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
-                
-                let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 6
-                let maxSAD = bestSAD - penalty
-                if maxSAD <= 0 { continue }
-                
-                let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
-                let totalSAD = sad + penalty
-                if totalSAD < bestSAD {
-                    bestSAD = totalSAD
-                    hpBestQx = qx
-                    hpBestQy = qy
-                }
-            }
-            
-            if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
-            
-            // 2. Quarter-pixel search (step = 1 quarter pixel)
-            var qpBestQx = hpBestQx
-            var qpBestQy = hpBestQy
-            for (ox, oy) in searchOffsets {
-                let qx = hpBestQx + ox
-                let qy = hpBestQy + oy
-                
-                let intDx = qx >> 2
-                let intDy = qy >> 2
-                if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
-                if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
-                
-                let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 4
-                let maxSAD = bestSAD - penalty
-                if maxSAD <= 0 { continue }
-                
-                let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
-                let totalSAD = sad + penalty
-                if totalSAD < bestSAD {
-                    bestSAD = totalSAD
-                    qpBestQx = qx
-                    qpBestQy = qy
-                }
-            }
-            
-            return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
+            searchPixelsSubpixelRefinement32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, pmv: pmv)
         }
     }
 
@@ -1130,12 +1150,21 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let pS1BaseWrapper = UnsafePointerWrapper(base: pS1.withUnsafeBufferPointer { $0.baseAddress! })
     let nS1BaseWrapper = UnsafePointerWrapper(base: nS1.withUnsafeBufferPointer { $0.baseAddress! })
     
-    let hasSkipMap = skipMap.count > 0
+    let cYWrapper = UnsafePointerWrapper(base: curr.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let pYWrapper = UnsafePointerWrapper(base: prev.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let nYWrapper = UnsafePointerWrapper(base: next.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCbWrapper = UnsafePointerWrapper(base: curr.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCrWrapper = UnsafePointerWrapper(base: curr.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCbWrapper = UnsafePointerWrapper(base: prev.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCrWrapper = UnsafePointerWrapper(base: prev.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCbWrapper = UnsafePointerWrapper(base: next.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCrWrapper = UnsafePointerWrapper(base: next.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let cbw = (curr.width + 1) / 2
+    let cbh = (curr.height + 1) / 2
+    
+    let hasSkipMap = 0 < skipMap.count
     let skipMapConst = skipMap
     let prevMVsConst = prevMVs
-    let currConst = curr
-    let prevConst = prev
-    let nextConst = next
     
     let numSlices = 4
     let rowsPerSlice = (rowCount + numSlices - 1) / numSlices
@@ -1165,6 +1194,16 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 let cBase = cS1BaseWrapper.base
                 let pBase = pS1BaseWrapper.base
                 let nBase = nS1BaseWrapper.base
+                
+                let cY = cYWrapper.base
+                let pY = pYWrapper.base
+                let nY = nYWrapper.base
+                let cCb = cCbWrapper.base
+                let cCr = cCrWrapper.base
+                let pCb = pCbWrapper.base
+                let pCr = pCrWrapper.base
+                let nCb = nCbWrapper.base
+                let nCr = nCrWrapper.base
                 
                 var dx = [Int16](repeating: 0, count: sliceBlocksCount)
                 var dy = [Int16](repeating: 0, count: sliceBlocksCount)
@@ -1263,7 +1302,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
                     )
                     
-                    let prevChromaSad = MotionEstimation.computeChromaSAD(curr: currConst, ref: prevConst, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
+                    let prevChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
                     mutSADPrev += prevChromaSad / 4
                     let prevSAD = mutSADPrev
                     
@@ -1287,7 +1326,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             
                             let contrastDiff = Int((currContrast - nextContrast).magnitude)
                             let structurePenalty = (contrastDiff * contrastDiff) / 4
-                            let chromaSAD = MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+                            let chromaSAD = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
                             let chromaPenalty = chromaSAD / 4
                             
                             let totalNextPenalty = ((mutSADNext + baselinePenalty) + (structurePenalty + chromaPenalty))
@@ -1307,7 +1346,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         }
                     }
                     dynamicThreshold = max(1024, currContrast * 48)
-                    let finalSAD = dir ? (mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) / 4)) : prevSAD
+                    let nextChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+                    let finalSAD = if dir { mutSADNext + (nextChromaSad / 4) } else { prevSAD }
                     switch true {
                     case dynamicThreshold < finalSAD:
                         dx[i] = 0
@@ -1316,9 +1356,9 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         dx[i] = bestMV.dx * 4
                         dy[i] = bestMV.dy * 4
                     default:
-                        let refPlane = if dir { nextConst.y } else { prevConst.y }
+                        let refPlaneY = if dir { nY } else { pY }
                         let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                            currPlane: currConst.y, prevPlane: refPlane,
+                            curr: cY, prev: refPlaneY,
                             width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: bestMV
                         )
                         dx[i] = refinedMV.dx
@@ -1341,13 +1381,13 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             pdy[i] = mvPrev.dy * 4
                         default:
                             let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                currPlane: currConst.y, prevPlane: prevConst.y,
+                                curr: cY, prev: pY,
                                 width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvPrev
                             )
                             pdx[i] = rmv.dx
                             pdy[i] = rmv.dy
                         }
-                        let ltrSAD = mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) / 4)
+                        let ltrSAD = mutSADNext + (nextChromaSad / 4)
                         psad[i] = prevSAD
                         lsad[i] = ltrSAD
                         switch true {
@@ -1359,7 +1399,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             ldy[i] = mvNext.dy * 4
                         default:
                             let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                currPlane: currConst.y, prevPlane: nextConst.y,
+                                curr: cY, prev: nY,
                                 width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvNext
                             )
                             ldx[i] = rmv.dx

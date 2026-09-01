@@ -1790,7 +1790,9 @@ func copyBlock8Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePoin
 func copyBlock4Pointer(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<Int16>, bx: Int, by: Int, stride: Int) {
     for y in 0..<4 {
         let offset = (by + y) * stride + bx
-        dst.advanced(by: offset).update(from: src.advanced(by: offset), count: 4)
+        let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+        let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+        dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD4<Int16>.self), as: SIMD4<Int16>.self)
     }
 }
 

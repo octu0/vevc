@@ -55,47 +55,64 @@ enum SkipDeciderFeature {
 /// and the scale can be large, so the product does not fit in Int32 before the
 /// shift.
 @inline(__always)
-func skipDeciderNormalize(_ x: UnsafePointer<Int32>, _ w: SkipDeciderWeights, into out: UnsafeMutablePointer<Int32>) {
-    let n = w.f
-    let sh = Int64(w.normShift)
+func skipDeciderNormalize(
+    _ x: UnsafePointer<Int32>,
+    mu: UnsafePointer<Int32>,
+    scale: UnsafePointer<Int32>,
+    normShift: Int32,
+    n: Int,
+    into out: UnsafeMutablePointer<Int32>
+) {
+    let sh = Int64(normShift)
     for j in 0..<n {
-        var v = ((Int64(x[j]) - Int64(w.mu[j])) &* Int64(w.scale[j])) >> sh
+        var v = ((Int64(x[j]) - Int64(mu[j])) &* Int64(scale[j])) >> sh
         if v < -127 { v = -127 }
         if 127 < v { v = 127 }
         out[j] = Int32(v)
     }
 }
 
+@inline(__always)
+func skipDeciderNormalize(_ x: UnsafePointer<Int32>, _ w: SkipDeciderWeights, into out: UnsafeMutablePointer<Int32>) {
+    withUnsafePointers(w.mu, w.scale) { mu, scale in
+        skipDeciderNormalize(x, mu: mu, scale: scale, normShift: w.normShift, n: w.f, into: out)
+    }
+}
+
 /// One forward pass. int8-range weights, Int32 accumulation, ReLU, arithmetic
 /// shift requantization. Returns 1 for "skip is safe here", 0 for "code it".
 @inline(__always)
-func skipDeciderClassify(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
-    let f = w.f
-    let h = w.h
-    withUnsafePointers(w.w1, w.b1) { w1, b1 in
-        for i in 0..<h {
-            var acc = b1[i]
-            let row = w1 + (i * f)
-            for j in 0..<f {
-                acc &+= row[j] &* q[j]
-            }
-            acc >>= w.shift1
-            var relu: Int32 = 0
-            if 0 < acc {
-                relu = acc
-            }
-            hbuf[i] = relu
+func skipDeciderClassify(
+    _ q: UnsafePointer<Int32>,
+    w1: UnsafePointer<Int32>,
+    b1: UnsafePointer<Int32>,
+    w2: UnsafePointer<Int32>,
+    b2: [Int32],
+    f: Int,
+    h: Int,
+    shift1: Int32,
+    hbuf: UnsafeMutablePointer<Int32>
+) -> Int {
+    for i in 0..<h {
+        var acc = b1[i]
+        let row = w1 + (i * f)
+        for j in 0..<f {
+            acc &+= row[j] &* q[j]
         }
+        acc >>= shift1
+        var relu: Int32 = 0
+        if 0 < acc {
+            relu = acc
+        }
+        hbuf[i] = relu
     }
-    var o0: Int32 = w.b2[0]
-    var o1: Int32 = w.b2[1]
-    withUnsafePointers(w.w2) { w2 in
-        let r0 = w2
-        let r1 = w2 + h
-        for i in 0..<h {
-            o0 &+= r0[i] &* hbuf[i]
-            o1 &+= r1[i] &* hbuf[i]
-        }
+    var o0: Int32 = b2[0]
+    var o1: Int32 = b2[1]
+    let r0 = w2
+    let r1 = w2 + h
+    for i in 0..<h {
+        o0 &+= r0[i] &* hbuf[i]
+        o1 &+= r1[i] &* hbuf[i]
     }
     if o0 < o1 {
         return 1
@@ -103,13 +120,60 @@ func skipDeciderClassify(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbu
     return 0
 }
 
+@inline(__always)
+func skipDeciderClassify(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
+    return withUnsafePointers(w.w1, w.b1, w.w2) { w1, b1, w2 in
+        skipDeciderClassify(q, w1: w1, b1: b1, w2: w2, b2: w.b2, f: w.f, h: w.h, shift1: w.shift1, hbuf: hbuf)
+    }
+}
+
 /// Zero-motion SAD of one 32x32 luma block plus its two 16x16 chroma blocks
 /// against a reference plane: the "would a straight copy do?" measure, uncapped.
 @inline(__always)
 func skipDeciderZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: Int, width: Int, height: Int) -> Int {
-    var sad = 0
     let maxY = min(by + 32, height)
     let maxX = min(bx + 32, width)
+    let cw = (width + 1) / 2
+    let chh = (height + 1) / 2
+    let cbx = bx / 2
+    let cby = by / 2
+    let cMaxY = min(cby + 16, chh)
+    let cMaxX = min(cbx + 16, cw)
+    
+    // Fast path for inner blocks (width/height multiple of 32, or inside image boundaries)
+    if bx + 32 <= width && by + 32 <= height && cbx + 16 <= cw && cby + 16 <= chh {
+        var sad: Int = 0
+        for y in 0..<32 {
+            let rc = cur.y.advanced(by: (by + y) * width + bx)
+            let rr = ref.y.advanced(by: (by + y) * width + bx)
+            let c0 = UnsafeRawPointer(rc).loadUnaligned(as: SIMD16<Int16>.self)
+            let r0 = UnsafeRawPointer(rr).loadUnaligned(as: SIMD16<Int16>.self)
+            let d0 = pointwiseMax(c0, r0) &- pointwiseMin(c0, r0)
+            let c1 = UnsafeRawPointer(rc.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+            let r1 = UnsafeRawPointer(rr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+            let d1 = pointwiseMax(c1, r1) &- pointwiseMin(c1, r1)
+            sad &+= Int(d0.wrappedSum()) &+ Int(d1.wrappedSum())
+        }
+        for y in 0..<16 {
+            let rcb = cur.cb.advanced(by: (cby + y) * cw + cbx)
+            let rrb = ref.cb.advanced(by: (cby + y) * cw + cbx)
+            let cb0 = UnsafeRawPointer(rcb).loadUnaligned(as: SIMD16<Int16>.self)
+            let rb0 = UnsafeRawPointer(rrb).loadUnaligned(as: SIMD16<Int16>.self)
+            let db0 = pointwiseMax(cb0, rb0) &- pointwiseMin(cb0, rb0)
+            
+            let rcr = cur.cr.advanced(by: (cby + y) * cw + cbx)
+            let rrr = ref.cr.advanced(by: (cby + y) * cw + cbx)
+            let cr0 = UnsafeRawPointer(rcr).loadUnaligned(as: SIMD16<Int16>.self)
+            let rr0 = UnsafeRawPointer(rrr).loadUnaligned(as: SIMD16<Int16>.self)
+            let dr0 = pointwiseMax(cr0, rr0) &- pointwiseMin(cr0, rr0)
+            
+            sad &+= Int(db0.wrappedSum()) &+ Int(dr0.wrappedSum())
+        }
+        return sad
+    }
+    
+    // Boundary blocks fallback
+    var sad = 0
     for y in by..<maxY {
         let rc = cur.y + y * width
         let rr = ref.y + y * width
@@ -117,12 +181,6 @@ func skipDeciderZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: I
             sad += abs(Int(rc[x]) - Int(rr[x]))
         }
     }
-    let cw = (width + 1) / 2
-    let chh = (height + 1) / 2
-    let cbx = bx / 2
-    let cby = by / 2
-    let cMaxY = min(cby + 16, chh)
-    let cMaxX = min(cbx + 16, cw)
     for y in cby..<cMaxY {
         let rcb = cur.cb + y * cw
         let rrb = ref.cb + y * cw
@@ -222,26 +280,35 @@ final class SkipDecider: @unchecked Sendable {
         }
 
         withUnsafePointers(feat, mut: &q, mut: &hbuf) { rows, qb, hb in
-            for i in 0..<n {
-                let row = rows + (i * SkipDeciderFeature.count)
-                skipDeciderNormalize(row, weights, into: qb)
-                let decision = skipDeciderClassify(qb, weights, hbuf: hb)
-                curSad0[i] = row[0]
-                curLabel[i] = Int32(decision)
-                if skipMap[i] != .inter || decision != 1 {
-                    continue
+            withUnsafePointers(weights.w1, weights.b1, weights.w2) { w1, b1, w2 in
+                withUnsafePointers(weights.mu, weights.scale) { mu, scale in
+                    let b2 = weights.b2
+                    let f = weights.f
+                    let h = weights.h
+                    let shift1 = weights.shift1
+                    let normShift = weights.normShift
+                    for i in 0..<n {
+                        let row = rows + (i * SkipDeciderFeature.count)
+                        skipDeciderNormalize(row, mu: mu, scale: scale, normShift: normShift, n: f, into: qb)
+                        let decision = skipDeciderClassify(qb, w1: w1, b1: b1, w2: w2, b2: b2, f: f, h: h, shift1: shift1, hbuf: hb)
+                        curSad0[i] = row[0]
+                        curLabel[i] = Int32(decision)
+                        if skipMap[i] != .inter || decision != 1 {
+                            continue
+                        }
+                        // Reference choice: whichever straight copy is closer
+                        // to the source.
+                        if row[0] <= row[1] {
+                            skipMap[i] = .skip_prev
+                            refDirs[i] = false
+                        } else {
+                            skipMap[i] = .skip_ltr
+                            refDirs[i] = true
+                        }
+                        mvs.dx[i] = 0
+                        mvs.dy[i] = 0
+                    }
                 }
-                // Reference choice: whichever straight copy is closer
-                // to the source.
-                if row[0] <= row[1] {
-                    skipMap[i] = .skip_prev
-                    refDirs[i] = false
-                } else {
-                    skipMap[i] = .skip_ltr
-                    refDirs[i] = true
-                }
-                mvs.dx[i] = 0
-                mvs.dy[i] = 0
             }
         }
 

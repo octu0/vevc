@@ -87,18 +87,24 @@ func computeZeroSAD16x16(
 
     for y in 0..<16 {
         let offset = (by + y) * strideY + bx
-        for x in 0..<16 {
-            sad &+= Int((Int32(cY[offset + x]) - Int32(rY[offset + x])).magnitude)
-        }
+        let c16 = UnsafeRawPointer(cY.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+        let r16 = UnsafeRawPointer(rY.advanced(by: offset)).loadUnaligned(as: SIMD16<Int16>.self)
+        let d = pointwiseMax(c16, r16) &- pointwiseMin(c16, r16)
+        sad &+= Int(d.wrappedSum())
         if limit < sad { return sad }
     }
 
     for y in 0..<8 {
         let offset = (byC + y) * strideC + bxC
-        for x in 0..<8 {
-            sad &+= Int((Int32(cCb[offset + x]) - Int32(rCb[offset + x])).magnitude)
-            sad &+= Int((Int32(cCr[offset + x]) - Int32(rCr[offset + x])).magnitude)
-        }
+        let cCb8 = UnsafeRawPointer(cCb.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let rCb8 = UnsafeRawPointer(rCb.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let dCb = pointwiseMax(cCb8, rCb8) &- pointwiseMin(cCb8, rCb8)
+        
+        let cCr8 = UnsafeRawPointer(cCr.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let rCr8 = UnsafeRawPointer(rCr.advanced(by: offset)).loadUnaligned(as: SIMD8<Int16>.self)
+        let dCr = pointwiseMax(cCr8, rCr8) &- pointwiseMin(cCr8, rCr8)
+        
+        sad &+= Int(dCb.wrappedSum()) &+ Int(dCr.wrappedSum())
         if limit < sad { return sad }
     }
     return sad
