@@ -326,7 +326,6 @@ actor LayersEncodeActor {
     private var cachedNextSub2: [Int16]?
     private var cachedNextSub1: [Int16]?
     var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
-    var mvPayloadHistory: MVPayloadHistory?
     /// Context-adaptive syntax coding state (#36): skipMap models and the
     /// previous frame's skipMap for the temporal context. Reset at every coded
     /// I frame so GOP-parallel decoding reproduces it.
@@ -567,8 +566,6 @@ actor LayersEncodeActor {
             if profile == 0x02 {
                 if entropyHistories == nil { entropyHistories = FrameEntropyHistories() }
                 entropyHistories?.reset()
-                if mvPayloadHistory == nil { mvPayloadHistory = MVPayloadHistory() }
-                mvPayloadHistory?.reset()
                 if syntaxContext == nil { syntaxContext = SyntaxContextModels() }
                 syntaxContext?.reset()
             }
@@ -826,8 +823,7 @@ actor LayersEncodeActor {
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe, ltrAge: ltrAge, skipThreshold: self.skipThreshold, reconThresholdScale: self.reconThresholdScale, staticCounters: &localCounters,
                 cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
                 entropyHistories: self.entropyHistories,
-                mvPayloadHistory: self.mvPayloadHistory,
-                syntaxContext: self.syntaxContext,
+                syntaxContext: self.syntaxContext ?? SyntaxContextModels(),
                 l0State: l0State,
                 l2Cadence: self.l2Cadence,
                 l1Cadence: self.l1Cadence,

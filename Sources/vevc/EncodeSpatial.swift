@@ -455,7 +455,7 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: nil, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
     await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: nil, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
 
-    let mvData = encodeMVs(mvs: mvs, skipMap: [], profile: 0x01)
+    let mvData = encodeMVsProfile1(mvs: mvs)
 
     let refDirBuf = encodeRefDirsProfile1(refDirs: refDirs)
 
@@ -494,7 +494,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, mvPayloadHistory: MVPayloadHistory? = nil, syntaxContext: SyntaxContextModels? = nil, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil, skipRefresh: Int = 0, skipRefreshState: SkipRefreshState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, syntaxContext: SyntaxContextModels, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil, skipRefresh: Int = 0, skipRefreshState: SkipRefreshState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -883,20 +883,11 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         }
     }
 
-    let treeMapBuf: [UInt8]
-    if syntaxContext != nil {
-        treeMapBuf = encodeTreeMapContextProfile2(
-            isTreezY: isTreezY, ySkip: l2ySkip, colsY: (dx + 31) / 32,
-            isTreezCb: isTreezCb, cbSkip: l2cSkip,
-            isTreezCr: isTreezCr, crSkip: l2cSkip, colsC: (cbDx + 31) / 32
-        )
-    } else {
-        treeMapBuf = encodeTreeMapProfile2(
-            isTreezY: isTreezY, ySkip: l2ySkip,
-            isTreezCb: isTreezCb, cbSkip: l2cSkip,
-            isTreezCr: isTreezCr, crSkip: l2cSkip
-        )
-    }
+    let treeMapBuf = encodeTreeMapContextProfile2(
+        isTreezY: isTreezY, ySkip: l2ySkip, colsY: (dx + 31) / 32,
+        isTreezCb: isTreezCb, cbSkip: l2cSkip,
+        isTreezCr: isTreezCr, crSkip: l2cSkip, colsC: (cbDx + 31) / 32
+    )
 
     let (layer0, baseRecon, releaseBaseRecon, _, _, _, hasRANSContext) = serializePlaneBase8PFrameWithSkipMap(
         pd: base8Input, pool: pool,
@@ -1011,17 +1002,18 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
 
     // #36: context-conditioned adaptive rANS replaces the RLE + per-frame
     // tables. The state is per-GOP and reset at every coded I frame.
-    let skipMapData: [UInt8]
-    if let sctx = syntaxContext {
-        skipMapData = encodeSkipMapContext(map: skipMap, cols: skipBw, state: sctx)
-    } else {
-        skipMapData = encodeSkipMap(map: skipMap)
-    }
-    let mvData = encodeMVs(mvs: mvs, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prevMVs, history: mvPayloadHistory, updateHistory: updateL0Prev)
+    let skipMapData = encodeSkipMapContext(map: skipMap, cols: skipBw, state: syntaxContext)
+    let mvData = encodeMVs(
+        mvs: mvs,
+        skipMap: skipMap,
+        cols: deriveMVColumns(width: dx),
+        profile: 0x02,
+        prevMVs: prevMVs,
+        syntax: syntaxContext,
+        updateHistory: updateL0Prev
+    )
 
-    let refDirBuf = (syntaxContext != nil)
-        ? encodeRefDirsContextProfile2(refDirs: refDirs, skipMap: skipMap)
-        : encodeRefDirsProfile2(refDirs: refDirs, skipMap: skipMap)
+    let refDirBuf = encodeRefDirsContextProfile2(refDirs: refDirs, skipMap: skipMap)
 
     // Must match the decoder's deblock invocation exactly (mvs + skipMap
     // variants): the encoder previously filtered its reconstruction with the
@@ -1193,31 +1185,6 @@ func encodeRefDirsProfile1(refDirs: [Bool]) -> [UInt8] {
     for i in refDirs.indices {
         if refDirs[i] {
             refDirBuf[i / 8] |= UInt8(1 << (i % 8))
-        }
-    }
-    return refDirBuf
-}
-
-@inline(__always)
-func encodeRefDirsProfile2(refDirs: [Bool], skipMap: [BlockMode]) -> [UInt8] {
-    var interCount = 0
-    for i in 0..<skipMap.count {
-        if skipMap[i] == .inter {
-            interCount += 1
-        }
-    }
-    if interCount == 0 {
-        return []
-    }
-    let refDirByteCount = (interCount + 7) / 8
-    var refDirBuf = [UInt8](repeating: 0, count: refDirByteCount)
-    var bitIndex = 0
-    for i in 0..<skipMap.count {
-        if skipMap[i] == .inter {
-            if refDirs[i] {
-                refDirBuf[bitIndex / 8] |= UInt8(1 << (bitIndex % 8))
-            }
-            bitIndex += 1
         }
     }
     return refDirBuf

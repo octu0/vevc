@@ -18,6 +18,7 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height:
     let bw = (width + 31) / 32
     let bh = (height + 31) / 32
     let blockCount = bw * bh
+    let syntaxModels = SyntaxContextModels()
     
     while offset < bitstream.count {
         if offset + 4 <= bitstream.count && bitstream[offset] == 0x56 && bitstream[offset+1] == 0x45 && bitstream[offset+2] == 0x56 && bitstream[offset+3] == 0x43 {
@@ -32,21 +33,29 @@ func parseVEVCLayerSizes(bitstream: [UInt8], profile: UInt8, width: Int, height:
             if let fh = try? VEVCFrameHeader.deserialize(from: bitstream, offset: &offset, profile: profile) {
                 let headerSize = offset - start
                 headerAndBase += headerSize
-                if !fh.isCopyFrame {
-                    if profile == 0x02 && fh.skipMapSize > 0 {
-                        let smData = Array(bitstream[offset..<(offset + fh.skipMapSize)])
-                        if let map = try? decodeSkipMap(data: smData, count: blockCount) {
-                            for m in map {
-                                if m == .skip_prev { skipPrev += 1 }
-                                else if m == .skip_ltr { skipLtr += 1 }
-                                else { inter += 1 }
-                                totalBlocks += 1
-                            }
-                        }
-                    } else if profile == 0x01 && !fh.isIFrame {
+                if fh.isCopyFrame != true {
+                    if fh.isIFrame {
+                        syntaxModels.reset()
                         inter += blockCount
                         totalBlocks += blockCount
-                    } else if fh.isIFrame {
+                    } else if profile == 0x02 {
+                        if 0 < fh.skipMapSize {
+                            let skipMapData = Array(bitstream[offset..<(offset + fh.skipMapSize)])
+                            if let map = try? decodeSkipMapContext(data: skipMapData, count: blockCount, cols: bw, state: syntaxModels) {
+                                for m in map {
+                                    switch m {
+                                    case .skip_prev:
+                                        skipPrev += 1
+                                    case .skip_ltr:
+                                        skipLtr += 1
+                                    case .inter:
+                                        inter += 1
+                                    }
+                                    totalBlocks += 1
+                                }
+                            }
+                        }
+                    } else if profile == 0x01 {
                         inter += blockCount
                         totalBlocks += blockCount
                     }

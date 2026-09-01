@@ -758,12 +758,7 @@ public func inspectBitstreamCSV(data: [UInt8]) throws -> String {
             let bw = (width + 31) / 32
             let bh = (height + 31) / 32
             let smData = Array(data[offset..<(offset + fh.skipMapSize)])
-            let map: [BlockMode]
-            if smData.first == skipMapModeContext {
-                map = try decodeSkipMapContext(data: smData, count: bw * bh, cols: bw, state: inspectContext)
-            } else {
-                map = try decodeSkipMap(data: smData, count: bw * bh)
-            }
+            let map = try decodeSkipMapContext(data: smData, count: bw * bh, cols: bw, state: inspectContext)
             for m in map {
                 switch m {
                 case .skip_prev: skipPrev += 1

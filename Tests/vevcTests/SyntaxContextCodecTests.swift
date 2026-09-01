@@ -31,7 +31,6 @@ final class SyntaxContextCodecTests: XCTestCase {
             for f in 0..<3 {
                 let map = randomSkipMap(count: count, seed: UInt64(1000 + f * 7 + bias), interBias: bias)
                 let data = encodeSkipMapContext(map: map, cols: cols, state: encState)
-                XCTAssertEqual(data.first, skipMapModeContext, "mode byte must tag the ctx form")
                 let back = try decodeSkipMapContext(data: data, count: count, cols: cols, state: decState)
                 XCTAssertEqual(back, map, "skipMap round-trip failed at bias=\(bias) frame=\(f)")
             }
@@ -55,12 +54,6 @@ final class SyntaxContextCodecTests: XCTestCase {
         let one: [BlockMode] = [.skip_ltr]
         let d = encodeSkipMapContext(map: one, cols: 1, state: encState)
         XCTAssertEqual(try decodeSkipMapContext(data: d, count: 1, cols: 1, state: decState), one)
-    }
-
-    func testSkipMapContextRejectsLegacyTag() {
-        let legacy: [UInt8] = [0, 1, 2, 3, 4, 5]
-        let st = SyntaxContextModels()
-        XCTAssertThrowsError(try decodeSkipMapContext(data: legacy, count: 4, cols: 2, state: st))
     }
 
     func testRefDirContextRoundTrip() throws {
@@ -163,6 +156,72 @@ final class SyntaxContextCodecTests: XCTestCase {
             XCTAssertGreaterThan(t.freq(1), 0)
             XCTAssertGreaterThan(t.freq(2), 0)
         }
+        var m16 = AdaptiveModel16()
+        for i in 0..<10_000 {
+            m16.update(i % 16)
+            var s: UInt32 = 0
+            for sym in 0..<16 {
+                let iv = m16.interval(sym)
+                s += iv.freq
+                XCTAssertGreaterThan(iv.freq, 0)
+            }
+            XCTAssertEqual(s, rANSScale)
+        }
+    }
+
+    func testMVClassifyDeclassifyRoundTrip() {
+        for v in -2048...2048 {
+            let val = Int16(v)
+            let (classIndex, sign, offset, bits) = mvClassify(val)
+            let reconstructed = mvDeclassify(classIndex: classIndex, sign: sign, offset: offset)
+            XCTAssertEqual(reconstructed, val, "MV classification mismatch for value \(val)")
+            if 0 < bits {
+                XCTAssertLessThan(offset, UInt32(1 << bits))
+            }
+        }
+    }
+
+    func testMVsContextRoundTripRandom() throws {
+        let cols = 60
+        let rows = 34
+        let count = cols * rows
+        var s: UInt64 = 42
+        let encState = SyntaxContextModels()
+        let decState = SyntaxContextModels()
+
+        var prevMVs: MotionVectors? = nil
+        for f in 0..<5 {
+            var dxs = [Int16](repeating: 0, count: count)
+            var dys = [Int16](repeating: 0, count: count)
+            var skipMap = [BlockMode](repeating: .inter, count: count)
+            for i in 0..<count {
+                s ^= s << 13; s ^= s >> 7; s ^= s << 17
+                if (s % 10) < 3 {
+                    skipMap[i] = .skip_ltr
+                } else {
+                    s ^= s << 13; s ^= s >> 7; s ^= s << 17
+                    let rx = Int16(Int(s % 200) - 100)
+                    s ^= s << 13; s ^= s >> 7; s ^= s << 17
+                    let ry = Int16(Int(s % 200) - 100)
+                    dxs[i] = rx
+                    dys[i] = ry
+                }
+            }
+            let mvs = MotionVectors(dx: dxs, dy: dys)
+            let data = encodeMVsContextProfile2(mvs: mvs, skipMap: skipMap, cols: cols, prevMVs: prevMVs, state: encState, updateHistory: true)
+            let back = try decodeMVsContextProfile2(data: data, count: count, skipMap: skipMap, cols: cols, prevMVs: prevMVs, state: decState, updateHistory: true)
+
+            for i in 0..<count {
+                if skipMap[i] == .inter {
+                    XCTAssertEqual(back.dx[i], dxs[i], "dx mismatch at f=\(f) i=\(i)")
+                    XCTAssertEqual(back.dy[i], dys[i], "dy mismatch at f=\(f) i=\(i)")
+                } else {
+                    XCTAssertEqual(back.dx[i], 0)
+                    XCTAssertEqual(back.dy[i], 0)
+                }
+            }
+            prevMVs = mvs
+        }
     }
 
     /// Real-data-shaped sequence: long runs of skip_ltr with sparse inter
@@ -179,11 +238,101 @@ final class SyntaxContextCodecTests: XCTestCase {
             let band = (f * 3) % rows
             for c in 0..<cols {
                 map[band * cols + c] = .inter
-                if band + 1 < rows { map[(band + 1) * cols + c] = .skip_prev }
+                if (band + 1) < rows { map[(band + 1) * cols + c] = .skip_prev }
             }
             let data = encodeSkipMapContext(map: map, cols: cols, state: encState)
             let back = try decodeSkipMapContext(data: data, count: count, cols: cols, state: decState)
             XCTAssertEqual(back, map, "realistic skipMap round-trip failed at frame \(f)")
         }
+    }
+
+    /// Random-access GOP decode equality: decoding from an interior GOP keyframe
+    /// must produce bit-identical reconstructions compared to full-sequence decode.
+    func testRandomAccessGOPDecodeMatchesFullDecode() async throws {
+        let width = 64
+        let height = 64
+        let gop = 8
+        let totalFrames = 20
+
+        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 500, framerate: 30, zeroThreshold: 0, keyint: gop, sceneChangeThreshold: 100, maxConcurrency: 1, profile: 0x02, gop: gop)
+        var encodedChunks = [[UInt8]]()
+        var s: UInt64 = 12345
+        for _ in 0..<totalFrames {
+            var img = YCbCrImage(width: width, height: height)
+            for y in 0..<height {
+                for x in 0..<width {
+                    s ^= s << 13; s ^= s >> 7; s ^= s << 17
+                    img.yPlane[y * width + x] = UInt8(s % 256)
+                }
+            }
+            for y in 0..<(height / 2) {
+                for x in 0..<(width / 2) {
+                    s ^= s << 13; s ^= s >> 7; s ^= s << 17
+                    img.cbPlane[y * (width / 2) + x] = UInt8(s % 256)
+                    s ^= s << 13; s ^= s >> 7; s ^= s << 17
+                    img.crPlane[y * (width / 2) + x] = UInt8(s % 256)
+                }
+            }
+            let chunk = try await encoder.encode(image: img)
+            encodedChunks.append(chunk)
+        }
+
+        // Full decode of all frames using Decoder (serial)
+        let fullDecoder = Decoder(maxLayer: 2, maxConcurrency: 1)
+        var fullRecons = [YCbCrImage]()
+        for try await img in fullDecoder.decode(stream: AsyncChunks(chunks: encodedChunks)) {
+            fullRecons.append(img)
+        }
+        XCTAssertEqual(fullRecons.count, totalFrames)
+
+        // Random-access decode starting from GOP 1 (frame index 8)
+        let gop1Start = gop
+        var headerOffset = 0
+        _ = try VEVCFileHeader.deserialize(from: encodedChunks[0], offset: &headerOffset)
+        let fileHeaderBytes = Array(encodedChunks[0][0..<headerOffset])
+
+        var raChunks = [[UInt8]]()
+        // Combine file header with GOP 1 keyframe chunk
+        var gop1FirstChunk = fileHeaderBytes
+        gop1FirstChunk.append(contentsOf: encodedChunks[gop1Start])
+        raChunks.append(gop1FirstChunk)
+        for f in (gop1Start + 1)..<totalFrames {
+            raChunks.append(encodedChunks[f])
+        }
+
+        let raDecoder = Decoder(maxLayer: 2, maxConcurrency: 1)
+        var raRecons = [YCbCrImage]()
+        for try await img in raDecoder.decode(stream: AsyncChunks(chunks: raChunks)) {
+            raRecons.append(img)
+        }
+        XCTAssertEqual(raRecons.count, totalFrames - gop1Start)
+
+        for i in 0..<raRecons.count {
+            let fullImg = fullRecons[gop1Start + i]
+            let raImg = raRecons[i]
+            XCTAssertEqual(fullImg.yPlane, raImg.yPlane, "Y plane mismatch at GOP frame \(i)")
+            XCTAssertEqual(fullImg.cbPlane, raImg.cbPlane, "Cb plane mismatch at GOP frame \(i)")
+            XCTAssertEqual(fullImg.crPlane, raImg.crPlane, "Cr plane mismatch at GOP frame \(i)")
+        }
+    }
+}
+
+private struct AsyncChunks: AsyncSequence, Sendable {
+    typealias Element = [UInt8]
+    let chunks: [[UInt8]]
+
+    struct AsyncIterator: AsyncIteratorProtocol {
+        var index = 0
+        let chunks: [[UInt8]]
+        mutating func next() async throws -> [UInt8]? {
+            if chunks.count <= index { return nil }
+            let item = chunks[index]
+            index += 1
+            return item
+        }
+    }
+
+    func makeAsyncIterator() -> AsyncIterator {
+        return AsyncIterator(index: 0, chunks: chunks)
     }
 }

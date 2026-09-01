@@ -27,7 +27,7 @@ private func parseProfile1Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 
     if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
         guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: nil, profile: 0x01)
+        mvs = try decodeMVsProfile1(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount)
         offset += frameHeader.mvsSize
     }
 
@@ -351,7 +351,6 @@ private struct Profile2Prelude {
 /// MV array so the next frame can code co-located prediction residuals.
 final class MVPredictionState: @unchecked Sendable {
     var previous: MotionVectors? = nil
-    let payloadHistory = MVPayloadHistory()
     /// Context-adaptive syntax models (#36). Carried in this per-decoder object
     /// because it is already reset at every keyframe and already threaded to
     /// every profile-2 decode variant.
@@ -359,12 +358,11 @@ final class MVPredictionState: @unchecked Sendable {
 
     func resetForKeyframe() {
         previous = nil
-        payloadHistory.reset()
         syntax.reset()
     }
 }
 
-private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?, mvState: MVPredictionState?, updateHistory: Bool = true) throws -> Profile2Prelude {
+private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData420?, mvState: MVPredictionState?, updateHistory: Bool) throws -> Profile2Prelude {
     var offset = 0
     let frameHeader = try VEVCFrameHeader.deserialize(from: r, offset: &offset, profile: 0x02)
     if frameHeader.isCopyFrame {
@@ -376,36 +374,44 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
 
     let mvsCount = deriveMVCount(width: dx, height: dy)
 
+    let state = mvState ?? MVPredictionState()
     var skipMap: [BlockMode]? = nil
-    // Set when this frame's skipMap announced the #36 context-coded form; the
-    // refDir and treeMap sections of the same frame then use it as well.
-    var ctxSyntax = false
     if frameHeader.isIFrame != true && 0 < frameHeader.skipMapSize {
         guard (offset + frameHeader.skipMapSize) <= r.count else { throw DecodeError.insufficientData }
-        let smData = Array(r[offset..<(offset + frameHeader.skipMapSize)])
-        // #36: mode byte 2 is the context-coded form; 0/1 are the legacy RLE
-        // variants, still decodable so older streams keep playing.
-        if let sctx = mvState?.syntax, 0 < smData.count, smData[0] == skipMapModeContext {
-            skipMap = try decodeSkipMapContext(data: smData, count: mvsCount, cols: (dx + 31) / 32, state: sctx)
-            ctxSyntax = true
-        } else {
-            skipMap = try decodeSkipMap(data: smData, count: mvsCount)
-        }
+        let skipMapData = Array(r[offset..<(offset + frameHeader.skipMapSize)])
+        skipMap = try decodeSkipMapContext(data: skipMapData, count: mvsCount, cols: (dx + 31) / 32, state: state.syntax)
         offset += frameHeader.skipMapSize
     }
 
-    if frameHeader.isIFrame != true && 0 < frameHeader.mvsSize {
-        guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
-        let prev = mvState?.previous
-        mvs = try decodeMVs(data: Array(r[offset..<(offset + frameHeader.mvsSize)]), count: mvsCount, skipMap: skipMap, cols: deriveMVColumns(width: dx), profile: 0x02, prevMVs: prev, history: mvState?.payloadHistory, updateHistory: updateHistory)
-        offset += frameHeader.mvsSize
-        if updateHistory {
-            mvState?.previous = mvs
+    if frameHeader.isIFrame != true {
+        let mvData: [UInt8]
+        if 0 < frameHeader.mvsSize {
+            guard (offset + frameHeader.mvsSize) <= r.count else { throw DecodeError.insufficientData }
+            mvData = Array(r[offset..<(offset + frameHeader.mvsSize)])
+            offset += frameHeader.mvsSize
+        } else {
+            mvData = []
         }
-    } else if frameHeader.isIFrame == true {
-        // GOP boundary: the temporal MV predictor and the payload history
+        let prev = state.previous
+        let decodedMVs = try decodeMVs(
+            data: mvData,
+            count: mvsCount,
+            skipMap: skipMap ?? [],
+            cols: deriveMVColumns(width: dx),
+            profile: 0x02,
+            prevMVs: prev,
+            syntax: state.syntax,
+            updateHistory: updateHistory
+        )
+        mvs = decodedMVs
+        if updateHistory {
+            state.previous = decodedMVs
+        }
+    }
+    if frameHeader.isIFrame {
+        // GOP boundary: the temporal MV predictor and syntax models
         // reset with the keyframe.
-        mvState?.resetForKeyframe()
+        state.resetForKeyframe()
     }
 
     if frameHeader.hasRefDir {
@@ -415,9 +421,7 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
         offset += refDirByteCount
 
         if nextPd != nil {
-            refDirs = ctxSyntax
-                ? decodeRefDirsContextProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
-                : decodeRefDirsProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
+            refDirs = decodeRefDirsContextProfile2(buf: refDirBuf, count: mvsCount, skipMap: skipMap)
         }
     }
 
@@ -435,18 +439,11 @@ private func parseProfile2Frame(r: [UInt8], dx: Int, dy: Int, nextPd: PlaneData4
             let cbDx = (dx + 1) / 2
             let cbDy = (dy + 1) / 2
             let cSkip = chromaSkipFlags(skipMap: sm, mapWidth: skipBw, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
-            let decoded = ctxSyntax
-                ? try decodeTreeMapContextProfile2(
-                    buf: treeMapBuf,
-                    ySkip: ySkip, colsY: (dx + 31) / 32,
-                    cbSkip: cSkip, crSkip: cSkip, colsC: (cbDx + 31) / 32
-                )
-                : decodeTreeMapProfile2(
-                    buf: treeMapBuf,
-                    yCount: ySkip.count, ySkip: ySkip,
-                    cbCount: cSkip.count, cbSkip: cSkip,
-                    crCount: cSkip.count, crSkip: cSkip
-                )
+            let decoded = try decodeTreeMapContextProfile2(
+                buf: treeMapBuf,
+                ySkip: ySkip, colsY: (dx + 31) / 32,
+                cbSkip: cSkip, crSkip: cSkip, colsC: (cbDx + 31) / 32
+            )
             isTreezY = decoded.isTreezY
             isTreezCb = decoded.isTreezCb
             isTreezCr = decoded.isTreezCr
@@ -1862,33 +1859,6 @@ func decodeRefDirsProfile1(buf: [UInt8], count: Int) -> [Bool] {
             }
         }
         dirs.append(isBackward)
-    }
-    return dirs
-}
-
-@inline(__always)
-func decodeRefDirsProfile2(buf: [UInt8], count: Int, skipMap: [BlockMode]?) -> [Bool] {
-    var dirs = [Bool](repeating: false, count: count)
-    guard let sm = skipMap else {
-        return dirs
-    }
-    var bitIndex = 0
-    for i in 0..<count {
-        switch sm[i] {
-        case .inter:
-            let byteIdx = bitIndex / 8
-            let bitIdx = bitIndex % 8
-            if byteIdx < buf.count {
-                if (buf[byteIdx] & UInt8(1 << bitIdx)) != 0 {
-                    dirs[i] = true
-                }
-            }
-            bitIndex += 1
-        case .skip_ltr:
-            dirs[i] = true
-        case .skip_prev:
-            dirs[i] = false
-        }
     }
     return dirs
 }

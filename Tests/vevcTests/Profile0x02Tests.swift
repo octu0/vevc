@@ -73,12 +73,7 @@ final class Profile0x02Tests: XCTestCase {
                 }
                 if fh.skipMapSize > 0 {
                     let smData = Array(bitstream[offset..<(offset + fh.skipMapSize)])
-                    let map: [BlockMode]
-                    if smData.first == skipMapModeContext {
-                        map = try decodeSkipMapContext(data: smData, count: blockCount, cols: bw, state: walkerContext)
-                    } else {
-                        map = try decodeSkipMap(data: smData, count: blockCount)
-                    }
+                    let map = try decodeSkipMapContext(data: smData, count: blockCount, cols: bw, state: walkerContext)
                     for m in map {
                         if m == .skip_prev { skipPrev += 1 }
                         else if m == .skip_ltr { skipLtr += 1 }
@@ -200,8 +195,9 @@ final class Profile0x02Tests: XCTestCase {
         let bh = (height + 31) / 32
         
         var counters = [Int](repeating: 0, count: bw * bh)
+        let syntaxContext = SyntaxContextModels()
         let (bytesP, encReconP, _, _, relEncP, _, _, _) = try await encodeSpatialLayersForProfile2(
-            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, gopPosition: 2, ltrAge: 1, skipThreshold: 2, reconThresholdScale: 1, staticCounters: &counters, cachedNextSub2: nil, cachedNextSub1: nil, entropyHistories: nil, l0State: l0StateEnc)
+            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, gopPosition: 2, ltrAge: 1, skipThreshold: 2, reconThresholdScale: 1, staticCounters: &counters, cachedNextSub2: nil, cachedNextSub1: nil, entropyHistories: nil, syntaxContext: syntaxContext, l0State: l0StateEnc)
         defer { relEncP() }
         
         let decImg16P = try await decodeSpatialLayersForProfile2(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: l0StateDec, parallelEntropy: true)
@@ -452,71 +448,6 @@ final class Profile0x02Tests: XCTestCase {
         if testedAny != true {
             throw XCTSkip("No test video sequences found on disk")
         }
-    }
-
-    func testProfile0x02RefDirsSkipExpansion() throws {
-        // Mixed sequence of block modes: inter, skip_prev, skip_ltr
-        let skipMap: [BlockMode] = [
-            .inter,      // 0: bit 0 in byte 0 -> true (1)
-            .skip_prev,  // 1: not packed in bitstream -> false
-            .skip_ltr,   // 2: not packed in bitstream -> true
-            .inter,      // 3: bit 1 in byte 0 -> false (0)
-            .skip_ltr,   // 4: not packed in bitstream -> true
-            .inter,      // 5: bit 2 in byte 0 -> true (1)
-            .skip_prev,  // 6: not packed in bitstream -> false
-            .inter,      // 7: bit 3 in byte 0 -> true (1)
-            .inter,      // 8: bit 4 in byte 0 -> false (0)
-            .skip_ltr,   // 9: not packed in bitstream -> true
-        ]
-
-        var encoderRefDirs = [Bool](repeating: false, count: skipMap.count)
-        // Inter ref directions
-        encoderRefDirs[0] = true
-        encoderRefDirs[3] = false
-        encoderRefDirs[5] = true
-        encoderRefDirs[7] = true
-        encoderRefDirs[8] = false
-
-        // Encoder skip assignment rules
-        for i in 0..<skipMap.count {
-            switch skipMap[i] {
-            case .skip_ltr:
-                encoderRefDirs[i] = true
-            case .skip_prev:
-                encoderRefDirs[i] = false
-            case .inter:
-                break
-            }
-        }
-
-        // Encode refDirs into packed byte buffer (inter blocks only)
-        let packedBuf = encodeRefDirsProfile2(refDirs: encoderRefDirs, skipMap: skipMap)
-
-        // Inter bits: idx 0(1), 3(0), 5(1), 7(1), 8(0) => 5 bits: 1, 0, 1, 1, 0 = 0b01101 = 0x0D
-        XCTAssertEqual(packedBuf.count, 1)
-        XCTAssertEqual(packedBuf[0], 0x0D)
-
-        // Decode refDirs with decoder
-        let decodedRefDirs = decodeRefDirsProfile2(buf: packedBuf, count: skipMap.count, skipMap: skipMap)
-
-        XCTAssertEqual(decodedRefDirs.count, encoderRefDirs.count)
-        for i in 0..<skipMap.count {
-            XCTAssertEqual(decodedRefDirs[i], encoderRefDirs[i], "Mismatch at block \(i) with mode \(skipMap[i])")
-        }
-
-        // Test all skip_ltr edge case
-        let allSkipLtr: [BlockMode] = [.skip_ltr, .skip_ltr, .skip_ltr, .skip_ltr]
-        let allLtrBuf = encodeRefDirsProfile2(refDirs: [true, true, true, true], skipMap: allSkipLtr)
-        XCTAssertTrue(allLtrBuf.isEmpty)
-        let decodedAllLtr = decodeRefDirsProfile2(buf: allLtrBuf, count: 4, skipMap: allSkipLtr)
-        XCTAssertEqual(decodedAllLtr, [true, true, true, true])
-
-        // Test all skip_prev edge case
-        let allSkipPrev: [BlockMode] = [.skip_prev, .skip_prev, .skip_prev, .skip_prev]
-        let allPrevBuf = encodeRefDirsProfile2(refDirs: [false, false, false, false], skipMap: allSkipPrev)
-        XCTAssertTrue(allPrevBuf.isEmpty)
-        let decodedAllPrev = decodeRefDirsProfile2(buf: allPrevBuf, count: 4, skipMap: allSkipPrev)
-        XCTAssertEqual(decodedAllPrev, [false, false, false, false])
     }
 }
 

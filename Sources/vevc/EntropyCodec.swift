@@ -90,7 +90,7 @@ func headerCostBits(model: rANSModel) -> Int {
 // MARK: - Model Providers
 
 struct StaticEntropyModel: EntropyModelProvider {
-    
+
     @inline(__always)
     static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
@@ -105,13 +105,13 @@ struct StaticEntropyModel: EntropyModelProvider {
 }
 
 struct AdaptiveEntropyModel: EntropyModelProvider {
-    
+
     @inline(__always)
     static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
     ) -> EntropyModelSelection {
         let totalPairs = runTokenCounts.reduce(0) { $0 + $1.reduce(0, +) }
-        
+
         let staticRunModels = [
             StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1,
             StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3,
@@ -122,7 +122,7 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
             StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3,
             StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel,
         ]
-        
+
         // Too few pairs: static tables are always the best choice (no header overhead)
         if totalPairs == 0 {
             return EntropyModelSelection(
@@ -130,14 +130,14 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
                 isStatic: true, isMerged: false
             )
         }
-        
+
         // --- Option 1: Static 4-context (no header cost) ---
         var staticCostQ8: Int = 0
         for c in 0..<4 {
             staticCostQ8 += estimateBitCostQ8(tokenCounts: runTokenCounts[c], model: staticRunModels[c])
             staticCostQ8 += estimateBitCostQ8(tokenCounts: valTokenCounts[c], model: staticValModels[c])
         }
-        
+
         // --- Option 2: Dynamic 4-context (8 tables header cost) ---
         var dynRunModels = [rANSModel]()
         var dynValModels = [rANSModel]()
@@ -159,7 +159,7 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         }
         // Add header overhead in Q8
         dynamic4CostQ8 += dynamic4HeaderBits << 8
-        
+
         // --- Option 3: Dynamic merged (2 tables header cost) ---
         var mergedRunCounts = [Int](repeating: 0, count: 64)
         var mergedValCounts = [Int](repeating: 0, count: 64)
@@ -173,7 +173,7 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         var mergedValModel = rANSModel()
         mergedRunModel.normalize(tokenCounts: mergedRunCounts)
         mergedValModel.normalize(tokenCounts: mergedValCounts)
-        
+
         var mergedCostQ8: Int = 0
         // Merged model: all contexts use the same model
         for c in 0..<4 {
@@ -182,10 +182,10 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         }
         let mergedHeaderBits = headerCostBits(model: mergedRunModel) + headerCostBits(model: mergedValModel)
         mergedCostQ8 += mergedHeaderBits << 8
-        
+
         // --- Choose minimum cost ---
         let minCost = min(staticCostQ8, min(dynamic4CostQ8, mergedCostQ8))
-        
+
         if minCost == staticCostQ8 {
             return EntropyModelSelection(
                 runModels: staticRunModels, valModels: staticValModels,
@@ -209,7 +209,7 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
 }
 
 struct StaticDPCMEntropyModel: EntropyModelProvider {
-    
+
     @inline(__always)
     static func selectModel(
         runTokenCounts: inout [[Int]], valTokenCounts: inout [[Int]]
@@ -410,7 +410,7 @@ struct EntropyEncoder {
         deferredRunTokenCounts = nil
         deferredValTokenCounts = nil
     }
-    
+
     /// Computed property for test compatibility (not used in production)
     var pairs: [(run: UInt32, val: Int16, context: UInt8)] {
         (0..<pairRuns.count).map { i in
@@ -423,7 +423,7 @@ struct EntropyEncoder {
         trailingZeros += count
         coeffCount += Int(count)
     }
-    
+
     @inline(__always)
     mutating func addPair(run: UInt32, val: Int16, context: UInt8) {
         pairRuns.append(run)
@@ -447,19 +447,19 @@ struct EntropyEncoder {
         var out = [UInt8]()
         let pairCount = pairRuns.count
         out.reserveCapacity(pairCount * 4 + 128)
-        
+
         bypassWriter.flush()
         let metaBypassData = bypassWriter.bytes
         writeVLQSize(&out, metaBypassData.count)
         out.append(contentsOf: metaBypassData)
-        
+
         writeVLQSize(&out, coeffCount)
-        
+
         guard 0 < pairCount || 0 < trailingZeros else { return out }
-        
+
         let hasTrailingZeros = 0 < trailingZeros
         let nonZeroCount = pairCount
-        
+
         if nonZeroCount <= 32 {
             out.append(0x80)
             var rawBypass = BypassWriter()
@@ -483,37 +483,37 @@ struct EntropyEncoder {
             out.append(contentsOf: rawData)
             return out
         }
-        
+
         // pairs: 4-way rANS mode
         let totalPairEntries = if hasTrailingZeros { pairCount + 1 } else { pairCount }
         let chunkBase = pairCount / 4
         let chunkRemainder = pairCount % 4
-        
+
         // chunk boundary: chunk[i] is responsible for pairs[chunkStarts[i]..<chunkStarts[i+1]]
         var chunkStarts = [Int](repeating: 0, count: 5)
         for i in 0..<4 {
             chunkStarts[i + 1] = if i < chunkRemainder { chunkStarts[i] + chunkBase + 1 } else { chunkStarts[i] + chunkBase }
         }
-        
+
         // tokenization + bypass writing for each chunk
         var chunkRunTokens = [[UInt8]](repeating: [], count: 4)
         var chunkValTokens = [[UInt8]](repeating: [], count: 4)
         var chunkBypassWriters = [BypassWriter](repeating: BypassWriter(), count: 4)
         var runTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: entropyContextCount)
         var valTokenCounts = [[Int]](repeating: Array(repeating: 0, count: 64), count: entropyContextCount)
-        
+
         for lane in 0..<4 {
             let start = chunkStarts[lane]
             let end = chunkStarts[lane + 1]
             let chunkSize = end - start
             chunkRunTokens[lane].reserveCapacity(chunkSize + 1)
             chunkValTokens[lane].reserveCapacity(chunkSize)
-            
+
             for idx in start..<end {
                 let runResult = valueTokenizeUnsigned(pairRuns[idx])
                 chunkRunTokens[lane].append(runResult.token)
                 chunkBypassWriters[lane].writeBits(runResult.bypassBits, count: runResult.bypassLen)
-                
+
                 let valResult = valueTokenize(pairVals[idx])
                 chunkValTokens[lane].append(valResult.token)
                 chunkBypassWriters[lane].writeBits(valResult.bypassBits, count: valResult.bypassLen)
@@ -523,7 +523,7 @@ struct EntropyEncoder {
                 valTokenCounts[ctx][Int(valResult.token)] += 1
             }
         }
-        
+
         // trailing zeros: add to lane3
         if hasTrailingZeros {
             let runResult = valueTokenizeUnsigned(trailingZeros)
@@ -531,7 +531,7 @@ struct EntropyEncoder {
             chunkRunTokens[3].append(runResult.token)
             chunkBypassWriters[3].writeBits(runResult.bypassBits, count: runResult.bypassLen)
         }
-        
+
         for lane in 0..<4 {
             chunkBypassWriters[lane].flush()
         }
@@ -542,7 +542,7 @@ struct EntropyEncoder {
                 if 65535 < valTokenCounts[c][i] { valTokenCounts[c][i] = 65535 }
             }
         }
-        
+
         let selection = selectModel(
             &runTokenCounts, &valTokenCounts
         )
@@ -612,10 +612,10 @@ struct EntropyEncoder {
             writeVLQSize(&out, bpData.count)
             out.append(contentsOf: bpData)
         }
-        
+
         // Interleaved 4-way rANS encode (reverse order)
         var enc = Interleaved4rANSEncoder()
-        
+
         // encode each lane in reverse order
         // trailing zeros (lane 3)
         if hasTrailingZeros {
@@ -623,29 +623,29 @@ struct EntropyEncoder {
             // Trailing zeros always use context 0
             enc.encodeSymbol(lane: 3, cumFreq: runModels[0].tokenCumFreqs[Int(trailingRunToken)], freq: runModels[0].tokenFreqs[Int(trailingRunToken)])
         }
-        
+
         // encode each lane in reverse order
         for lane in stride(from: 3, through: 0, by: -1) {
             let runTokens = chunkRunTokens[lane]
             let valTokens = chunkValTokens[lane]
             let pairEnd = valTokens.count
             let chunkStartIdx = chunkStarts[lane]
-            
+
             for i in stride(from: pairEnd - 1, through: 0, by: -1) {
                 let pairIdx = chunkStartIdx + i
                 let ctx = Int(pairContexts[pairIdx])
-                
+
                 let vt = valTokens[i]
                 enc.encodeSymbol(lane: lane, cumFreq: valModels[ctx].tokenCumFreqs[Int(vt)], freq: valModels[ctx].tokenFreqs[Int(vt)])
-                
+
                 let rt = runTokens[i]
                 enc.encodeSymbol(lane: lane, cumFreq: runModels[ctx].tokenCumFreqs[Int(rt)], freq: runModels[ctx].tokenFreqs[Int(rt)])
             }
         }
-        
+
         enc.flush()
         out.append(contentsOf: enc.getBitstream())
-        
+
         return out
     }
 }
@@ -679,7 +679,7 @@ internal func readVLQSize(_ base: UnsafePointer<UInt8>, at offset: inout Int, co
         guard offset < count else { throw DecodeError.insufficientData }
         let b = base[offset]
         offset += 1
-        
+
         val = (val << 7) | Int(b & 0x7F)
         bytesRead += 1
         if (b & 0x80) == 0 {
@@ -700,7 +700,7 @@ internal func readVLQSizeFromBytes(_ r: [UInt8], offset: inout Int) throws -> In
         guard offset < r.count else { throw DecodeError.insufficientData }
         let b = r[offset]
         offset += 1
-        
+
         val = (val << 7) | Int(b & 0x7F)
         bytesRead += 1
         if (b & 0x80) == 0 {
@@ -729,7 +729,7 @@ internal func writeCompressedFreqTable(_ out: inout [UInt8], freqs: [UInt32]) {
     out.append(UInt8((bitmap >> 16) & 0xFF))
     out.append(UInt8((bitmap >> 8) & 0xFF))
     out.append(UInt8(bitmap & 0xFF))
-    
+
     for i in 0..<64 {
         if (bitmap & (UInt64(1) << i)) != 0 {
             let val = freqs[i]
@@ -749,7 +749,7 @@ struct EntropyDecoder {
     var bypassReader: BypassReader
     var pairs: [(run: UInt32, val: Int16)] = []
     private var pairIndex: Int = 0
-    
+
     private var isRawMode: Bool = false
     private var totalPairEntries: Int = 0
     private var chunkStarts: [Int] = []
@@ -770,32 +770,32 @@ struct EntropyDecoder {
     init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws {
         self.history = history
         var offset = startOffset
-        
+
         let bypassLen = try readVLQSize(base, at: &offset, count: count)
         guard offset + bypassLen <= count else { throw DecodeError.insufficientData }
-        
+
         self.bypassReader = BypassReader(base: base.advanced(by: offset), count: bypassLen)
         offset += bypassLen
-        
+
         let coeffCount = try readVLQSize(base, at: &offset, count: count)
-        
+
         guard 0 < coeffCount else {
             self.pairs = []
             return
         }
-        
+
         guard offset < count else { throw DecodeError.insufficientData }
         let flags = base[offset]
         offset += 1
-        
+
         let isRawMode = (flags & 0x80) != 0
         self.isRawMode = isRawMode
-        
+
         if isRawMode {
             let rawDataLen = try readVLQSize(base, at: &offset, count: count)
             guard offset + rawDataLen <= count else { throw DecodeError.insufficientData }
             var rawReader = BypassReader(base: base.advanced(by: offset), count: rawDataLen)
-            
+
             var decodedPairs = [(run: UInt32, val: Int16)]()
             var zeroRun: UInt32 = 0
             for _ in 0..<coeffCount {
@@ -819,7 +819,7 @@ struct EntropyDecoder {
             self.pairs = decodedPairs
             return
         }
-        
+
         // rANS mode
         let isStaticTable = (flags & 0x40) != 0
         let isHistoryTable = (flags & 0x20) != 0
@@ -834,10 +834,10 @@ struct EntropyDecoder {
                 self.decValCounts = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
             }
         }
-        
+
         let totalPairEntries = try readVLQSize(base, at: &offset, count: count)
         self.totalPairEntries = totalPairEntries
-        
+
         // chunk size (4 lanes) - dynamically reconstructed from totalPairEntries
         let totalPairs = if hasTrailingZeros { totalPairEntries - 1 } else { totalPairEntries }
         let chunkBase = totalPairs / 4
@@ -851,7 +851,7 @@ struct EntropyDecoder {
             starts[4] += 1
         }
         self.chunkStarts = starts
-        
+
         let isMergedContext = (flags & 0x10) != 0
 
         switch true {
@@ -903,14 +903,14 @@ struct EntropyDecoder {
             for _ in 0..<entropyContextCount {
                 let runFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
                 rModels.append(rANSModel(tokenFreqs: runFreqs))
-                
+
                 let valFreqs = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: count)
                 vModels.append(rANSModel(tokenFreqs: valFreqs))
             }
             self.runModels = rModels
             self.valModels = vModels
         }
-        
+
         // 4-way bypass data
         var chunkBypassReaders = [BypassReader]()
         for _ in 0..<4 {
@@ -920,15 +920,15 @@ struct EntropyDecoder {
             offset += bpLen
         }
         self.chunkBypassReaders = chunkBypassReaders
-        
+
         // rANS stream
         self.ransDecoder = Interleaved4rANSDecoder(base: base.advanced(by: offset), count: count - offset)
     }
-    
+
     @inline(__always)
     internal static func readCompressedFreqTable(_ base: UnsafePointer<UInt8>, at offset: inout Int, count: Int) throws -> [UInt32] {
         let bitmap = try readUInt64BEFromPtr(base, offset: &offset, count: count)
-        
+
         var freqs = [UInt32](repeating: 1, count: 64)
         for i in 0..<64 {
             if (bitmap & (UInt64(1) << i)) != 0 {
@@ -955,7 +955,7 @@ struct EntropyDecoder {
         }
         return 0
     }
-    
+
     @inline(__always)
     mutating func readPair(context: UInt8) -> (run: Int, val: Int16) {
         if isRawMode {
@@ -964,17 +964,17 @@ struct EntropyDecoder {
             pairIndex += 1
             return (Int(pair.run), pair.val)
         }
-        
+
         guard pairIndex < totalPairEntries else { return (0, 0) }
-        
+
         // pairIndex increases monotonically; increment chunk index only at lane boundaries
         while currentLane < 3 && chunkStarts[currentLane + 1] <= pairIndex {
             currentLane += 1
         }
         let lane = currentLane
-        
+
         let isTZPair = (lane == 3 && hasTrailingZeros && pairIndex == chunkStarts[4] - 1)
-        
+
         if isTZPair {
             let cfRun = ransDecoder.getCumulativeFreq(lane: lane)
             let rtInfo = runModels[0].findToken(cf: cfRun)
@@ -1033,802 +1033,153 @@ struct EntropyDecoder {
 
 // MARK: - Motion Vector rANS Codec
 
-/// Backward-adaptive token-count history for one MV stream (dx/dy value
-/// models): mirrors EntropyHistoryState's acc = acc/2 + cur decay. The
-/// encoder feeds what it encoded, the decoder what it decoded, so both hold
-/// identical state without signaling.
-final class MVPayloadHistory: @unchecked Sendable {
-    private(set) var dxCounts = [Int](repeating: 0, count: 64)
-    private(set) var dyCounts = [Int](repeating: 0, count: 64)
-    private(set) var primed = false
-
-    func reset() {
-        for t in 0..<64 { dxCounts[t] = 0; dyCounts[t] = 0 }
-        primed = false
-    }
-
-    func update(dxCnts: [Int], dyCnts: [Int]) {
-        for t in 0..<64 {
-            dxCounts[t] = dxCounts[t] / 2 + min(65535, dxCnts[t])
-            dyCounts[t] = dyCounts[t] / 2 + min(65535, dyCnts[t])
-        }
-        primed = true
-    }
-
-    /// Normalized models rebuilt from the accumulated history.
-    func models() -> (dx: rANSModel, dy: rANSModel) {
-        var md = rANSModel()
-        md.normalize(tokenCounts: dxCounts)
-        var my = rANSModel()
-        my.normalize(tokenCounts: dyCounts)
-        return (md, my)
-    }
-}
-
-/// Cross-entropy of this frame's token histogram under a normalized model,
-/// in bits — cheap stand-in for the exact rANS size when cost-selecting
-/// between per-frame tables and the backward-adaptive models.
 @inline(__always)
-private func shannonBits(counts: [UInt32], model: rANSModel) -> Double {
-    var total = 0
-    for f in model.tokenFreqs { total += Int(f) }
-    if total == 0 { return .infinity }
-    var bits = 0.0
-    for t in 0..<64 where counts[t] > 0 {
-        let p = Double(Int(model.tokenFreqs[t])) / Double(total)
-        if p > 0 { bits -= Double(counts[t]) * log2(p) }
-    }
-    return bits
-}
-
-@inline(__always)
-private func encodeMVPayload(dxList: [Int16], dyList: [Int16], history: MVPayloadHistory? = nil) -> (data: [UInt8], usedHistory: Bool, dxCnts: [Int], dyCnts: [Int]) {
-    let count = dxList.count
+func encodeMVsProfile1(mvs: MotionVectors) -> [UInt8] {
     var tokensDx = [UInt8]()
     var tokensDy = [UInt8]()
-    tokensDx.reserveCapacity(count)
-    tokensDy.reserveCapacity(count)
-    
+    tokensDx.reserveCapacity(mvs.count)
+    tokensDy.reserveCapacity(mvs.count)
+
     var bypass = BypassWriter()
     var freqsDx = [UInt32](repeating: 0, count: 64)
     var freqsDy = [UInt32](repeating: 0, count: 64)
 
-    for i in 0..<count {
-        let tx = valueTokenize(dxList[i])
+    for i in 0..<mvs.count {
+        let tx = valueTokenize(mvs.dx[i])
         tokensDx.append(tx.token)
         freqsDx[Int(tx.token)] += 1
         bypass.writeBits(tx.bypassBits, count: tx.bypassLen)
 
-        let ty = valueTokenize(dyList[i])
+        let ty = valueTokenize(mvs.dy[i])
         tokensDy.append(ty.token)
         freqsDy[Int(ty.token)] += 1
         bypass.writeBits(ty.bypassBits, count: ty.bypassLen)
     }
     bypass.flush()
-    
+
     var modelDx = rANSModel(buildLUT: false)
     modelDx.normalize(tokenCounts: freqsDx.map(Int.init))
-    
+
     var modelDy = rANSModel(buildLUT: false)
     modelDy.normalize(tokenCounts: freqsDy.map(Int.init))
-    
-    let dxCnts = freqsDx.map(Int.init)
-    let dyCnts = freqsDy.map(Int.init)
 
-    var encModelDx = modelDx
-    var encModelDy = modelDy
-    var usedHistory = false
-    if let h = history, h.primed {
-        let (hd, hy) = h.models()
-        let histBits = shannonBits(counts: freqsDx, model: hd) + shannonBits(counts: freqsDy, model: hy)
-        let staticBits = shannonBits(counts: freqsDx, model: modelDx) + shannonBits(counts: freqsDy, model: modelDy)
-        var tablesTmp = [UInt8]()
-        writeCompressedFreqTable(&tablesTmp, freqs: modelDx.tokenFreqs)
-        writeCompressedFreqTable(&tablesTmp, freqs: modelDy.tokenFreqs)
-        if histBits < staticBits + Double(tablesTmp.count) * 8 {
-            encModelDx = hd
-            encModelDy = hy
-            usedHistory = true
-        }
-    }
-
-    var enc = rANSEncoder()
-    for i in stride(from: count - 1, through: 0, by: -1) {
+    var encoder = rANSEncoder()
+    for i in stride(from: tokensDx.count - 1, through: 0, by: -1) {
         let ty = tokensDy[i]
-        enc.encodeSymbol(cumFreq: encModelDy.tokenCumFreqs[Int(ty)], freq: encModelDy.tokenFreqs[Int(ty)])
+        encoder.encodeSymbol(cumFreq: modelDy.tokenCumFreqs[Int(ty)], freq: modelDy.tokenFreqs[Int(ty)])
         let tx = tokensDx[i]
-        enc.encodeSymbol(cumFreq: encModelDx.tokenCumFreqs[Int(tx)], freq: encModelDx.tokenFreqs[Int(tx)])
+        encoder.encodeSymbol(cumFreq: modelDx.tokenCumFreqs[Int(tx)], freq: modelDx.tokenFreqs[Int(tx)])
     }
-    enc.flush()
+    encoder.flush()
 
     var out = [UInt8]()
-    if !usedHistory {
-        writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
-        writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
-    }
-    let bpData = bypass.bytes
-    writeVLQSize(&out, bpData.count)
-    out.append(contentsOf: bpData)
+    writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
+    writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
 
-    let ransData = enc.getBitstream()
-    out.append(contentsOf: ransData)
-    return (out, usedHistory, dxCnts, dyCnts)
-}
+    let bypassData = bypass.bytes
+    writeVLQSize(&out, bypassData.count)
+    out.append(contentsOf: bypassData)
 
-@inline(__always)
-func encodeMVs(mvs: MotionVectors, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) -> [UInt8] {
-    if profile == 0x01 {
-        var tokensDx = [UInt8]()
-        var tokensDy = [UInt8]()
-        tokensDx.reserveCapacity(mvs.count)
-        tokensDy.reserveCapacity(mvs.count)
-        
-        var bypass = BypassWriter()
-        var freqsDx = [UInt32](repeating: 0, count: 64)
-        var freqsDy = [UInt32](repeating: 0, count: 64)
-        
-        for i in 0..<mvs.count {
-            let tx = valueTokenize(mvs.dx[i])
-            tokensDx.append(tx.token)
-            freqsDx[Int(tx.token)] += 1
-            bypass.writeBits(tx.bypassBits, count: tx.bypassLen)
-
-            let ty = valueTokenize(mvs.dy[i])
-            tokensDy.append(ty.token)
-            freqsDy[Int(ty.token)] += 1
-            bypass.writeBits(ty.bypassBits, count: ty.bypassLen)
-        }
-        bypass.flush()
-        
-        var modelDx = rANSModel(buildLUT: false)
-        modelDx.normalize(tokenCounts: freqsDx.map(Int.init))
-        
-        var modelDy = rANSModel(buildLUT: false)
-        modelDy.normalize(tokenCounts: freqsDy.map(Int.init))
-        
-        var enc = rANSEncoder()
-        for i in stride(from: tokensDx.count - 1, through: 0, by: -1) {
-            let ty = tokensDy[i]
-            enc.encodeSymbol(cumFreq: modelDy.tokenCumFreqs[Int(ty)], freq: modelDy.tokenFreqs[Int(ty)])
-            let tx = tokensDx[i]
-            enc.encodeSymbol(cumFreq: modelDx.tokenCumFreqs[Int(tx)], freq: modelDx.tokenFreqs[Int(tx)])
-        }
-        enc.flush()
-        
-        var out = [UInt8]()
-        writeCompressedFreqTable(&out, freqs: modelDx.tokenFreqs)
-        writeCompressedFreqTable(&out, freqs: modelDy.tokenFreqs)
-        
-        let bpData = bypass.bytes
-        writeVLQSize(&out, bpData.count)
-        out.append(contentsOf: bpData)
-        
-        out.append(contentsOf: enc.getBitstream())
-        return out
-    }
-    
-    var rawDxs = [Int16]()
-    var rawDys = [Int16]()
-    var predDxs = [Int16]()
-    var predDys = [Int16]()
-    rawDxs.reserveCapacity(mvs.count)
-    rawDys.reserveCapacity(mvs.count)
-    predDxs.reserveCapacity(mvs.count)
-    predDys.reserveCapacity(mvs.count)
-
-    for i in 0..<mvs.count {
-        if let sm = skipMap, sm[i] != .inter {
-            continue
-        }
-        let origDx = mvs.dx[i]
-        let origDy = mvs.dy[i]
-        rawDxs.append(origDx)
-        rawDys.append(origDy)
-
-        let col = i % cols
-        var aDx: Int16 = 0
-        var aDy: Int16 = 0
-        if 0 < col {
-            aDx = mvs.dx[i - 1]
-            aDy = mvs.dy[i - 1]
-        }
-        var bDx: Int16 = 0
-        var bDy: Int16 = 0
-        if cols <= i {
-            bDx = mvs.dx[i - cols]
-            bDy = mvs.dy[i - cols]
-        }
-        var cDx: Int16 = 0
-        var cDy: Int16 = 0
-        if cols <= i && col < (cols - 1) {
-            cDx = mvs.dx[i - cols + 1]
-            cDy = mvs.dy[i - cols + 1]
-        }
-
-        let predDx = max(min(Int(aDx), Int(bDx)), min(max(Int(aDx), Int(bDx)), Int(cDx)))
-        let predDy = max(min(Int(aDy), Int(bDy)), min(max(Int(aDy), Int(bDy)), Int(cDy)))
-
-        let resDx = Int16(Int(origDx) - predDx)
-        let resDy = Int16(Int(origDy) - predDy)
-        predDxs.append(resDx)
-        predDys.append(resDy)
-    }
-
-    let payloadRaw = encodeMVPayload(dxList: rawDxs, dyList: rawDys, history: history)
-    let payloadPred = encodeMVPayload(dxList: predDxs, dyList: predDys, history: history)
-
-    struct Candidate {
-        let mode: UInt8
-        let data: [UInt8]
-        let usedHistory: Bool
-        let dxCnts: [Int]
-        let dyCnts: [Int]
-    }
-    var candidates: [Candidate] = [
-        Candidate(mode: 0x00, data: payloadRaw.data, usedHistory: payloadRaw.usedHistory, dxCnts: payloadRaw.dxCnts, dyCnts: payloadRaw.dyCnts),
-        Candidate(mode: 0x01, data: payloadPred.data, usedHistory: payloadPred.usedHistory, dxCnts: payloadPred.dxCnts, dyCnts: payloadPred.dyCnts),
-    ]
-    if let pm = prevMVs, pm.count == mvs.count {
-        // Temporal (co-located) prediction: residual against the previous
-        // coded frame's reconstructed MV array — both sides hold zeros at
-        // skip positions, so the arrays are index-aligned.
-        var tempDxs = [Int16]()
-        var tempDys = [Int16]()
-        tempDxs.reserveCapacity(rawDxs.count)
-        tempDys.reserveCapacity(rawDys.count)
-        for i in 0..<mvs.count {
-            if let sm = skipMap, sm[i] != .inter {
-                continue
-            }
-            tempDxs.append(Int16(Int(mvs.dx[i]) - Int(pm.dx[i])))
-            tempDys.append(Int16(Int(mvs.dy[i]) - Int(pm.dy[i])))
-        }
-        let payloadTemp = encodeMVPayload(dxList: tempDxs, dyList: tempDys, history: history)
-        candidates.append(Candidate(mode: 0x02, data: payloadTemp.data, usedHistory: payloadTemp.usedHistory, dxCnts: payloadTemp.dxCnts, dyCnts: payloadTemp.dyCnts))
-    }
-
-    // Smallest payload wins; ties prefer the non-history variant (identical
-    // size means the tables were free under the Shannon estimate anyway).
-    var best = candidates[0]
-    for c in candidates.dropFirst() where c.data.count < best.data.count {
-        best = c
-    }
-
-    var out = [UInt8]()
-    out.append(best.mode | (best.usedHistory ? 0x80 : 0x00))
-    out.append(contentsOf: best.data)
-
-    // History lockstep: feed the CHOSEN payload's tokens exactly once per
-    // coded stream (empty streams neither use nor update history).
-    if updateHistory, let h = history {
-        if 0 < rawDxs.count {
-            h.update(dxCnts: best.dxCnts, dyCnts: best.dyCnts)
-        }
-    }
+    out.append(contentsOf: encoder.getBitstream())
     return out
 }
 
 @inline(__always)
-private func decodeMVsProfile1(data: [UInt8], count: Int) throws -> MotionVectors {
+func encodeMVs(
+    mvs: MotionVectors,
+    skipMap: [BlockMode],
+    cols: Int,
+    profile: UInt8,
+    prevMVs: MotionVectors?,
+    syntax: SyntaxContextModels,
+    updateHistory: Bool
+) -> [UInt8] {
+    if profile == 0x01 {
+        return encodeMVsProfile1(mvs: mvs)
+    }
+    return encodeMVsContextProfile2(
+        mvs: mvs,
+        skipMap: skipMap,
+        cols: cols,
+        prevMVs: prevMVs,
+        state: syntax,
+        updateHistory: updateHistory
+    )
+}
+
+@inline(__always)
+func decodeMVsProfile1(data: [UInt8], count: Int) throws -> MotionVectors {
     return try withUnsafePointers(data) { base in
         var offset = 0
         let bufCount = data.count
-        
+
         let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
         let modelDx = rANSModel(tokenFreqs: freqsDx)
-        
+
         let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
         let modelDy = rANSModel(tokenFreqs: freqsDy)
-        
-        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
-        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
-        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-        offset += bpLen
-        
+
+        let bypassLength = try readVLQSize(base, at: &offset, count: bufCount)
+        guard (offset + bypassLength) <= bufCount else { throw DecodeError.insufficientData }
+        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bypassLength)
+        offset += bypassLength
+
         guard offset < bufCount else { throw DecodeError.insufficientData }
-        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
-        
+        var decoder = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
+
         var mvsDx = [Int16]()
         var mvsDy = [Int16]()
         mvsDx.reserveCapacity(count)
         mvsDy.reserveCapacity(count)
-        
+
         for _ in 0..<count {
-            let txCf = dec.getCumulativeFreq()
-            let tx = modelDx.findToken(cf: txCf)
-            dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
-            
-            let tyCf = dec.getCumulativeFreq()
-            let ty = modelDy.findToken(cf: tyCf)
-            dec.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
-            
-            let dxBp = valueBypassLength(for: tx.token)
-            let dxBv = bypassReader.readBits(count: dxBp)
-            let dx = valueDetokenize(token: tx.token, bypassBits: dxBv)
-            
-            let dyBp = valueBypassLength(for: ty.token)
-            let dyBv = bypassReader.readBits(count: dyBp)
-            let dy = valueDetokenize(token: ty.token, bypassBits: dyBv)
-            
-            mvsDx.append(dx)
-            mvsDy.append(dy)
-        }
-        
-        return MotionVectors(dx: mvsDx, dy: mvsDy)
-    }
-}
+            let txCumFreq = decoder.getCumulativeFreq()
+            let tx = modelDx.findToken(cf: txCumFreq)
+            decoder.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
 
-@inline(__always)
-private func decodeMVsRaw(data: [UInt8], count: Int, skipMap: [BlockMode]?, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
-        var offset = 1
-        let bufCount = data.count
-        
-        var coded = 0
-        var dxCnts = [Int](repeating: 0, count: 64)
-        var dyCnts = [Int](repeating: 0, count: 64)
-        var modelDx: rANSModel
-        var modelDy: rANSModel
-        if useHistoryModels {
-            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
-            (modelDx, modelDy) = h.models()
-        } else {
-            let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-            modelDx = rANSModel(tokenFreqs: freqsDx)
-            
-            let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-            modelDy = rANSModel(tokenFreqs: freqsDy)
-        }
-        
-        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
-        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
-        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-        offset += bpLen
-        
-        guard offset <= bufCount else { throw DecodeError.insufficientData }
-        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
-        
-        var mvsDx = [Int16]()
-        var mvsDy = [Int16]()
-        mvsDx.reserveCapacity(count)
-        mvsDy.reserveCapacity(count)
-        
-        for i in 0..<count {
-            if let sm = skipMap, sm[i] != .inter {
-                mvsDx.append(0)
-                mvsDy.append(0)
-                continue
-            }
-            
-            let txCf = dec.getCumulativeFreq()
-            let tx = modelDx.findToken(cf: txCf)
-            dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
-            
-            let tyCf = dec.getCumulativeFreq()
-            let ty = modelDy.findToken(cf: tyCf)
-            dec.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
-            
-            let dxBp = valueBypassLength(for: tx.token)
-            let dxBv = bypassReader.readBits(count: dxBp)
-            let dx = valueDetokenize(token: tx.token, bypassBits: dxBv)
-            
-            let dyBp = valueBypassLength(for: ty.token)
-            let dyBv = bypassReader.readBits(count: dyBp)
-            let dy = valueDetokenize(token: ty.token, bypassBits: dyBv)
-            
-            dxCnts[Int(tx.token)] += 1
-            dyCnts[Int(ty.token)] += 1
-            coded += 1
+            let tyCumFreq = decoder.getCumulativeFreq()
+            let ty = modelDy.findToken(cf: tyCumFreq)
+            decoder.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
+
+            let dxBypassLength = valueBypassLength(for: tx.token)
+            let dxBypassBits = bypassReader.readBits(count: dxBypassLength)
+            let dx = valueDetokenize(token: tx.token, bypassBits: dxBypassBits)
+
+            let dyBypassLength = valueBypassLength(for: ty.token)
+            let dyBypassBits = bypassReader.readBits(count: dyBypassLength)
+            let dy = valueDetokenize(token: ty.token, bypassBits: dyBypassBits)
+
             mvsDx.append(dx)
             mvsDy.append(dy)
         }
 
-        // Lockstep with `encodeMVs`, which updates on `0 < rawDxs.count` — the
-        // number of MVs actually coded, not the block count. A P-frame whose
-        // blocks are all skips codes no MV, so the encoder leaves the history
-        // alone; guarding on `count` here made the decoder halve its histogram
-        // on such a frame and every later frame decoded against a different
-        // model than the one that encoded it.
-        if updateHistory, let h = history, 0 < coded {
-            h.update(dxCnts: dxCnts, dyCnts: dyCnts)
-        }
         return MotionVectors(dx: mvsDx, dy: mvsDy)
     }
 }
 
 @inline(__always)
-private func decodeMVsSpatialPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, cols: Int, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
-        var offset = 1
-        var coded = 0
-        var dxCnts = [Int](repeating: 0, count: 64)
-        var dyCnts = [Int](repeating: 0, count: 64)
-        let bufCount = data.count
-        
-        var modelDx: rANSModel
-        var modelDy: rANSModel
-        if useHistoryModels {
-            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
-            (modelDx, modelDy) = h.models()
-        } else {
-            let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-            modelDx = rANSModel(tokenFreqs: freqsDx)
-            
-            let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-            modelDy = rANSModel(tokenFreqs: freqsDy)
-        }
-        
-        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
-        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
-        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-        offset += bpLen
-        
-        guard offset <= bufCount else { throw DecodeError.insufficientData }
-        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
-        
-        var mvsDx = [Int16]()
-        var mvsDy = [Int16]()
-        mvsDx.reserveCapacity(count)
-        mvsDy.reserveCapacity(count)
-        
-        for i in 0..<count {
-            if let sm = skipMap, sm[i] != .inter {
-                mvsDx.append(0)
-                mvsDy.append(0)
-                continue
-            }
-            
-            let col = i % cols
-            var aDx: Int16 = 0
-            var aDy: Int16 = 0
-            if 0 < col {
-                aDx = mvsDx[i - 1]
-                aDy = mvsDy[i - 1]
-            }
-            var bDx: Int16 = 0
-            var bDy: Int16 = 0
-            if cols <= i {
-                bDx = mvsDx[i - cols]
-                bDy = mvsDy[i - cols]
-            }
-            var cDx: Int16 = 0
-            var cDy: Int16 = 0
-            if cols <= i && col < (cols - 1) {
-                cDx = mvsDx[i - cols + 1]
-                cDy = mvsDy[i - cols + 1]
-            }
-            
-            let predDx = max(min(Int(aDx), Int(bDx)), min(max(Int(aDx), Int(bDx)), Int(cDx)))
-            let predDy = max(min(Int(aDy), Int(bDy)), min(max(Int(aDy), Int(bDy)), Int(cDy)))
-            
-            let txCf = dec.getCumulativeFreq()
-            let tx = modelDx.findToken(cf: txCf)
-            dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
-            
-            let tyCf = dec.getCumulativeFreq()
-            let ty = modelDy.findToken(cf: tyCf)
-            dec.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
-            
-            let dxBp = valueBypassLength(for: tx.token)
-            let dxBv = bypassReader.readBits(count: dxBp)
-            let resDx = valueDetokenize(token: tx.token, bypassBits: dxBv)
-            
-            let dyBp = valueBypassLength(for: ty.token)
-            let dyBv = bypassReader.readBits(count: dyBp)
-            let resDy = valueDetokenize(token: ty.token, bypassBits: dyBv)
-            
-            let recDx = Int16(predDx + Int(resDx))
-            let recDy = Int16(predDy + Int(resDy))
-
-            dxCnts[Int(tx.token)] += 1
-            dyCnts[Int(ty.token)] += 1
-            coded += 1
-            mvsDx.append(recDx)
-            mvsDy.append(recDy)
-        }
-
-        // See decodeMVsRaw: the guard counts coded MVs, not blocks.
-        if updateHistory, let h = history, 0 < coded {
-            h.update(dxCnts: dxCnts, dyCnts: dyCnts)
-        }
-        return MotionVectors(dx: mvsDx, dy: mvsDy)
-    }
-}
-
-private func decodeMVsTemporalPred(data: [UInt8], count: Int, skipMap: [BlockMode]?, prevMVs: MotionVectors, history: MVPayloadHistory? = nil, useHistoryModels: Bool = false, updateHistory: Bool = true) throws -> MotionVectors {
-    return try withUnsafePointers(data) { base in
-        var offset = 1
-        var coded = 0
-        var dxCnts = [Int](repeating: 0, count: 64)
-        var dyCnts = [Int](repeating: 0, count: 64)
-        let bufCount = data.count
-        
-        var modelDx: rANSModel
-        var modelDy: rANSModel
-        if useHistoryModels {
-            guard let h = history, h.primed else { throw DecodeError.invalidBlockData }
-            (modelDx, modelDy) = h.models()
-        } else {
-            let freqsDx = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-            modelDx = rANSModel(tokenFreqs: freqsDx)
-            
-            let freqsDy = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-            modelDy = rANSModel(tokenFreqs: freqsDy)
-        }
-        
-        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
-        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
-        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-        offset += bpLen
-        
-        guard offset <= bufCount else { throw DecodeError.insufficientData }
-        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
-        
-        var mvsDx = [Int16]()
-        var mvsDy = [Int16]()
-        mvsDx.reserveCapacity(count)
-        mvsDy.reserveCapacity(count)
-        
-        for i in 0..<count {
-            if let sm = skipMap, sm[i] != .inter {
-                mvsDx.append(0)
-                mvsDy.append(0)
-                continue
-            }
-            // Co-located predictor from the previous coded frame's MV array.
-            let predDx: Int = i < prevMVs.count ? Int(prevMVs.dx[i]) : 0
-            let predDy: Int = i < prevMVs.count ? Int(prevMVs.dy[i]) : 0
-            
-            let txCf = dec.getCumulativeFreq()
-            let tx = modelDx.findToken(cf: txCf)
-            dec.advanceSymbol(cumFreq: tx.cumFreq, freq: tx.freq)
-            
-            let tyCf = dec.getCumulativeFreq()
-            let ty = modelDy.findToken(cf: tyCf)
-            dec.advanceSymbol(cumFreq: ty.cumFreq, freq: ty.freq)
-            
-            let dxBp = valueBypassLength(for: tx.token)
-            let dxBv = bypassReader.readBits(count: dxBp)
-            let resDx = valueDetokenize(token: tx.token, bypassBits: dxBv)
-            
-            let dyBp = valueBypassLength(for: ty.token)
-            let dyBv = bypassReader.readBits(count: dyBp)
-            let resDy = valueDetokenize(token: ty.token, bypassBits: dyBv)
-            
-            dxCnts[Int(tx.token)] += 1
-            dyCnts[Int(ty.token)] += 1
-            coded += 1
-            mvsDx.append(Int16(predDx + Int(resDx)))
-            mvsDy.append(Int16(predDy + Int(resDy)))
-        }
-
-        // See decodeMVsRaw: the guard counts coded MVs, not blocks.
-        if updateHistory, let h = history, 0 < coded {
-            h.update(dxCnts: dxCnts, dyCnts: dyCnts)
-        }
-        return MotionVectors(dx: mvsDx, dy: mvsDy)
-    }
-}
-
-@inline(__always)
-func decodeMVs(data: [UInt8], count: Int, skipMap: [BlockMode]? = nil, cols: Int = 0, profile: UInt8 = 0x01, prevMVs: MotionVectors? = nil, history: MVPayloadHistory? = nil, updateHistory: Bool = true) throws -> MotionVectors {
+func decodeMVs(
+    data: [UInt8],
+    count: Int,
+    skipMap: [BlockMode],
+    cols: Int,
+    profile: UInt8,
+    prevMVs: MotionVectors?,
+    syntax: SyntaxContextModels,
+    updateHistory: Bool
+) throws -> MotionVectors {
     if profile == 0x01 {
         return try decodeMVsProfile1(data: data, count: count)
     }
-    guard 0 < data.count else { throw DecodeError.insufficientData }
-    let modeFlag = data[0]
-    let useHist = (modeFlag & 0x80) != 0
-    switch modeFlag & 0x7F {
-    case 0:
-        return try decodeMVsRaw(data: data, count: count, skipMap: skipMap, history: history, useHistoryModels: useHist, updateHistory: updateHistory)
-    case 1:
-        return try decodeMVsSpatialPred(data: data, count: count, skipMap: skipMap, cols: cols, history: history, useHistoryModels: useHist, updateHistory: updateHistory)
-    case 2:
-        guard let pm = prevMVs else { throw DecodeError.invalidBlockData }
-        return try decodeMVsTemporalPred(data: data, count: count, skipMap: skipMap, prevMVs: pm, history: history, useHistoryModels: useHist, updateHistory: updateHistory)
-    default:
-        throw DecodeError.invalidBlockData
-    }
-}
-
-@inline(__always)
-private func encodeSkipMapRawRLE(runs: [(val: UInt8, count: UInt32)]) -> [UInt8] {
-    var bypass = BypassWriter()
-    for run in runs {
-        bypass.writeBits(UInt32(run.val), count: 2)
-        let tokenInfo = valueTokenizeUnsigned(run.count)
-        bypass.writeBits(UInt32(tokenInfo.token), count: 6)
-        bypass.writeBits(tokenInfo.bypassBits, count: tokenInfo.bypassLen)
-    }
-    bypass.flush()
-    let bpData = bypass.bytes
-
-    var out = [UInt8]()
-    out.append(0)
-    writeVLQSize(&out, runs.count)
-    writeVLQSize(&out, bpData.count)
-    out.append(contentsOf: bpData)
-    return out
-}
-
-@inline(__always)
-private func encodeSkipMapRansRLE(runs: [(val: UInt8, count: UInt32)]) -> [UInt8] {
-    var tokensVal = [UInt8]()
-    var tokensCount = [UInt8]()
-    tokensVal.reserveCapacity(runs.count)
-    tokensCount.reserveCapacity(runs.count)
-
-    var bypass = BypassWriter()
-    var freqsVal = [UInt32](repeating: 0, count: 64)
-    var freqsCount = [UInt32](repeating: 0, count: 64)
-
-    for run in runs {
-        let tVal = run.val
-        tokensVal.append(tVal)
-        freqsVal[Int(tVal)] += 1
-
-        let tokenInfo = valueTokenizeUnsigned(run.count)
-        tokensCount.append(tokenInfo.token)
-        freqsCount[Int(tokenInfo.token)] += 1
-        bypass.writeBits(tokenInfo.bypassBits, count: tokenInfo.bypassLen)
-    }
-    bypass.flush()
-
-    var modelVal = rANSModel(buildLUT: false)
-    modelVal.normalize(tokenCounts: freqsVal.map(Int.init))
-
-    var modelCount = rANSModel(buildLUT: false)
-    modelCount.normalize(tokenCounts: freqsCount.map(Int.init))
-
-    var enc = rANSEncoder()
-    for i in stride(from: tokensVal.count - 1, through: 0, by: -1) {
-        let tc = tokensCount[i]
-        enc.encodeSymbol(cumFreq: modelCount.tokenCumFreqs[Int(tc)], freq: modelCount.tokenFreqs[Int(tc)])
-        let tv = tokensVal[i]
-        enc.encodeSymbol(cumFreq: modelVal.tokenCumFreqs[Int(tv)], freq: modelVal.tokenFreqs[Int(tv)])
-    }
-    enc.flush()
-
-    var out = [UInt8]()
-    out.append(1)
-    writeVLQSize(&out, runs.count)
-    writeCompressedFreqTable(&out, freqs: modelVal.tokenFreqs)
-    writeCompressedFreqTable(&out, freqs: modelCount.tokenFreqs)
-
-    let bpData = bypass.bytes
-    writeVLQSize(&out, bpData.count)
-    out.append(contentsOf: bpData)
-    out.append(contentsOf: enc.getBitstream())
-    return out
-}
-
-@inline(__always)
-func encodeSkipMap(map: [BlockMode]) -> [UInt8] {
-    guard let firstMode = map.first else {
-        var out = [UInt8]()
-        out.append(0)
-        writeVLQSize(&out, 0)
-        writeVLQSize(&out, 0)
-        return out
-    }
-    var runs = [(val: UInt8, count: UInt32)]()
-    var current: UInt8 = firstMode.rawValue
-    var count: UInt32 = 0
-    for mode in map {
-        if mode.rawValue == current {
-            count += 1
-        } else {
-            runs.append((current, count))
-            current = mode.rawValue
-            count = 1
-        }
-    }
-    if 0 < count {
-        runs.append((current, count))
-    }
-
-    let out0 = encodeSkipMapRawRLE(runs: runs)
-    let out1 = encodeSkipMapRansRLE(runs: runs)
-    if out1.count < out0.count {
-        return out1
-    }
-    return out0
-}
-
-@inline(__always)
-private func decodeSkipMapRawRLE(data: [UInt8], count: Int) throws -> [BlockMode] {
-    return try withUnsafePointers(data) { base in
-        var offset = 1
-        let bufCount = data.count
-        let runCount = try readVLQSize(base, at: &offset, count: bufCount)
-        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
-        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
-
-        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-
-        var map = [BlockMode]()
-        map.reserveCapacity(count)
-
-        for _ in 0..<runCount {
-            let valBits = bypassReader.readBits(count: 2)
-            guard let mode = BlockMode(rawValue: UInt8(valBits)) else { throw DecodeError.invalidBlockData }
-            let token = bypassReader.readBits(count: 6)
-            let bypassLen = valueBypassLengthUnsigned(for: UInt8(token))
-            let bypassBits = bypassReader.readBits(count: bypassLen)
-            let run = valueDetokenizeUnsigned(token: UInt8(token), bypassBits: bypassBits)
-
-            for _ in 0..<run {
-                map.append(mode)
-            }
-        }
-
-        guard map.count == count else { throw DecodeError.invalidBlockData }
-        return map
-    }
-}
-
-@inline(__always)
-private func decodeSkipMapRansRLE(data: [UInt8], count: Int) throws -> [BlockMode] {
-    return try withUnsafePointers(data) { base in
-        var offset = 1
-        let bufCount = data.count
-
-        let runCount = try readVLQSize(base, at: &offset, count: bufCount)
-
-        let freqsVal = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelVal = rANSModel(tokenFreqs: freqsVal)
-
-        let freqsCount = try EntropyDecoder.readCompressedFreqTable(base, at: &offset, count: bufCount)
-        let modelCount = rANSModel(tokenFreqs: freqsCount)
-
-        let bpLen = try readVLQSize(base, at: &offset, count: bufCount)
-        guard (offset + bpLen) <= bufCount else { throw DecodeError.insufficientData }
-        var bypassReader = BypassReader(base: base.advanced(by: offset), count: bpLen)
-        offset += bpLen
-
-        guard offset <= bufCount else { throw DecodeError.insufficientData }
-        var dec = rANSDecoder(base: base.advanced(by: offset), count: bufCount - offset)
-
-        var map = [BlockMode]()
-        map.reserveCapacity(count)
-
-        for _ in 0..<runCount {
-            let tvCf = dec.getCumulativeFreq()
-            let tv = modelVal.findToken(cf: tvCf)
-            dec.advanceSymbol(cumFreq: tv.cumFreq, freq: tv.freq)
-
-            let tcCf = dec.getCumulativeFreq()
-            let tc = modelCount.findToken(cf: tcCf)
-            dec.advanceSymbol(cumFreq: tc.cumFreq, freq: tc.freq)
-
-            guard let mode = BlockMode(rawValue: tv.token) else { throw DecodeError.invalidBlockData }
-
-            let countBp = valueBypassLengthUnsigned(for: tc.token)
-            let countBv = bypassReader.readBits(count: countBp)
-            let run = valueDetokenizeUnsigned(token: tc.token, bypassBits: countBv)
-
-            for _ in 0..<run {
-                map.append(mode)
-            }
-        }
-
-        guard map.count == count else { throw DecodeError.invalidBlockData }
-        return map
-    }
-}
-
-@inline(__always)
-public func decodeSkipMap(data: [UInt8], count: Int) throws -> [BlockMode] {
-    guard 0 < data.count else { throw DecodeError.insufficientData }
-    let modeFlag = data[0]
-    switch modeFlag {
-    case 0:
-        return try decodeSkipMapRawRLE(data: data, count: count)
-    case 1:
-        return try decodeSkipMapRansRLE(data: data, count: count)
-    default:
-        throw DecodeError.invalidBlockData
-    }
+    return try decodeMVsContextProfile2(
+        data: data,
+        count: count,
+        skipMap: skipMap,
+        cols: cols,
+        prevMVs: prevMVs,
+        state: syntax,
+        updateHistory: updateHistory
+    )
 }
 
 // MARK: - Parent-free entropy contexts (Profile 0x02, One-Pyramid §6)
