@@ -46,14 +46,6 @@ public actor VEVCEncoder {
     /// Learned skip-safety decider on profile 0x02 P-frames. 1 = on (default),
     /// 0 = the pre-model encode path. No effect on profile 0x01.
     public nonisolated let skipModel: Int
-    /// Periodic skip refresh period in frames on profile 0x02 P-frames (#28):
-    /// a block skipped this many frames in a row is coded as inter again.
-    /// 0 = off (default). No effect on profile 0x01.
-    public nonisolated let skipRefresh: Int
-    /// Diagnostic (#28 follow-up): 1 seeds the per-block refresh counters with
-    /// `blockIndex % skipRefresh` at every I frame instead of 0, so the blocks
-    /// do not all reach the period on the same frame. 0 = shipping behaviour.
-    public nonisolated let skipRefreshPhase: Int
     /// Quality floor for early I frames (#31), in units of alpha x 100: the
     /// next frame is coded as I once a P frame's luma MSE exceeds alpha times
     /// the MSE of the I frame that opened the GOP. 0 = off (default), and
@@ -64,7 +56,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -85,8 +77,6 @@ public actor VEVCEncoder {
         self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
-        self.skipRefresh = skipRefresh
-        self.skipRefreshPhase = skipRefreshPhase
         self.iqFloor = iqFloor
 
         self.pool = BlockViewPool()
@@ -112,13 +102,11 @@ public actor VEVCEncoder {
             temporalLayers: temporalLayers,
             skipModel: skipModel,
             ransContext: ransContext,
-            skipRefresh: skipRefresh,
-            skipRefreshPhase: skipRefreshPhase,
             iqFloor: iqFloor
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = 0
@@ -139,8 +127,6 @@ public actor VEVCEncoder {
         self.smooth = smooth
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
-        self.skipRefresh = skipRefresh
-        self.skipRefreshPhase = skipRefreshPhase
         self.iqFloor = iqFloor
 
         self.pool = BlockViewPool()
@@ -166,8 +152,6 @@ public actor VEVCEncoder {
             temporalLayers: temporalLayers,
             skipModel: skipModel,
             ransContext: ransContext,
-            skipRefresh: skipRefresh,
-            skipRefreshPhase: skipRefreshPhase,
             iqFloor: iqFloor
         )
     }
@@ -202,13 +186,6 @@ public actor VEVCEncoder {
         MEStats.printStats()
 #endif
         return out
-    }
-
-    /// Periodic skip refresh counts accumulated over the stream (#28):
-    /// blocks forced back to inter, and P-frame block slots examined.
-    /// Both are 0 when the pass is disabled.
-    public func skipRefreshStats() async -> (forced: Int, examined: Int) {
-        await coreEncoder.skipRefreshStats()
     }
 
     /// Frame-type census and quality-floor firings (#31). Reporting only.
@@ -272,10 +249,6 @@ actor LayersEncodeActor {
     let smooth: Int
     let temporalLayers: Int
     let skipModel: Int
-    /// Periodic skip refresh period in frames (#28); 0 disables the pass.
-    let skipRefresh: Int
-    /// See VEVCEncoder.skipRefreshPhase.
-    let skipRefreshPhase: Int
     /// Quality floor in units of alpha x 100 (#31); 0 disables the pass.
     let iqFloor: Int
     /// Frames since the most recent coded I frame, counting every frame that
@@ -290,10 +263,6 @@ actor LayersEncodeActor {
     private var iCountScene = 0
     private var iCountFloor = 0
     private var copyFrameCount = 0
-    /// Per-block consecutive-skip counters for the refresh pass. Allocated on
-    /// first use, reset at every I frame. nil unless the pass is enabled and
-    /// applicable (profile 0x02).
-    let skipRefreshState: SkipRefreshState?
     /// nil unless the learned skip decider is both enabled and applicable
     /// (profile 0x02 only — profile 0x01 has no skip map to convert into).
     private let skipDecider: SkipDecider?
@@ -340,7 +309,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -362,11 +331,6 @@ actor LayersEncodeActor {
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
         self.skipDecider = (profile == 0x02 && skipModel == 1) ? SkipDecider.make() : nil
-        self.skipRefresh = skipRefresh
-        self.skipRefreshPhase = skipRefreshPhase
-        let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
-        refreshState?.phaseSpreadPeriod = (0 < skipRefreshPhase) ? skipRefresh : 0
-        self.skipRefreshState = refreshState
         self.iqFloor = iqFloor
         // CLI carries alpha x 100; the comparison runs in Q8.
         self.qualityFloorState = (profile == 0x02 && 0 < iqFloor)
@@ -385,7 +349,7 @@ actor LayersEncodeActor {
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, skipRefresh: Int = 0, skipRefreshPhase: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -407,11 +371,6 @@ actor LayersEncodeActor {
         self.temporalLayers = temporalLayers
         self.skipModel = skipModel
         self.skipDecider = (profile == 0x02 && skipModel == 1) ? SkipDecider.make() : nil
-        self.skipRefresh = skipRefresh
-        self.skipRefreshPhase = skipRefreshPhase
-        let refreshState = (profile == 0x02 && 0 < skipRefresh) ? SkipRefreshState() : nil
-        refreshState?.phaseSpreadPeriod = (0 < skipRefreshPhase) ? skipRefresh : 0
-        self.skipRefreshState = refreshState
         self.iqFloor = iqFloor
         // CLI carries alpha x 100; the comparison runs in Q8.
         self.qualityFloorState = (profile == 0x02 && 0 < iqFloor)
@@ -437,12 +396,6 @@ actor LayersEncodeActor {
         releasePreviousT0Recon?()
         releaseFirstRecon?()
         releaseFirstInput?()
-    }
-    
-    @inline(__always)
-    func skipRefreshStats() -> (forced: Int, examined: Int) {
-        guard let state = skipRefreshState else { return (0, 0) }
-        return (state.forcedBlocks, state.examinedBlocks)
     }
 
     /// Frame-type census and quality-floor firings (#31), for reporting only.
@@ -639,9 +592,6 @@ actor LayersEncodeActor {
             for i in 0..<self.staticCounters.count {
                 self.staticCounters[i] = framesSinceKeyframe
             }
-            // An I frame recodes every block, so no block carries an unrefreshed
-            // skip history across it. Periodic and scene-change I frames alike.
-            self.skipRefreshState?.resetCounters()
 
             previousMVs = mvs
             
@@ -834,9 +784,7 @@ actor LayersEncodeActor {
                 smooth: effSmooth,
                 updateL0Prev: updateL0,
                 skipModel: self.skipDecider,
-                ransContextWorkspace: self.ransContextWorkspace,
-                skipRefresh: self.skipRefresh,
-                skipRefreshState: self.skipRefreshState
+                ransContextWorkspace: self.ransContextWorkspace
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
@@ -1257,158 +1205,5 @@ public struct EncoderTuning: @unchecked Sendable {
             return val
         }
         return nil
-    }
-}
-
-// MARK: - EncoderTuning
-
-// Measurement hooks for encoder tuning. Inactive (nil singleton, no
-// per-block work) unless the corresponding environment variable is set.
-
-// Multi-reference skip oracle. Answers, without any bitstream change: if the
-// encoder could skip-copy from any of the last N reconstructed frames (not
-// just prev/LTR), how many blocks currently coded as inter would become
-// skips, and how far back do the matching references sit?
-//
-// Enabled by VEVC_MULTIREF_ORACLE=<poolSize> (e.g. 15). Per P-frame it tests
-// every non-skip 32x32 block against each pooled reconstruction with the
-// exact production criterion: zero-MV SAD over the four 16x16 sub-blocks
-// (luma + chroma, computeZeroSAD16x16 / computeZeroSADSubBlock) against the
-// same skipThreshold-per-pixel budget, requiring a single reference to
-// satisfy all four sub-blocks. The pool is cleared at every I-frame so no
-// candidate crosses a random-access boundary.
-//
-// Output: one cumulative "MRORACLE" line per frame on stderr; the last line
-// holds the totals. dist1 counts nearest-match age 1 (frames the current
-// skip_prev rules missed), dist2_4 / dist5_15 older re-appearances.
-// Measured 2026-08-16 (miko/ToS): upgrades ≈0 weighted by bits — negative
-// result, multi-reference pools are not worth a bitstream change.
-final class MultiRefOracle: @unchecked Sendable {
-    static let shared: MultiRefOracle? = {
-        guard let v = ProcessInfo.processInfo.environment["VEVC_MULTIREF_ORACLE"], let n = Int(v), 0 < n else { return nil }
-        return MultiRefOracle(poolSize: n)
-    }()
-
-    private let poolSize: Int
-    private let lock = NSLock()
-    private var pool: [PlaneData420] = []
-
-    private var frames = 0
-    private var totalBlocks = 0
-    private var currentSkips = 0
-    private var upgrades = 0
-    private var dist1 = 0
-    private var dist2_4 = 0
-    private var dist5_15 = 0
-
-    init(poolSize: Int) {
-        self.poolSize = poolSize
-    }
-
-    /// I-frame: random-access boundary — no reference crosses it.
-    func reset() {
-        lock.lock()
-        pool.removeAll()
-        lock.unlock()
-    }
-
-    /// Called with the final reconstruction of every frame (I and P alike),
-    /// newest first in the pool.
-    func push(recon: PlaneData420) {
-        var y = [Int16](repeating: 0, count: recon.y.count)
-        var cb = [Int16](repeating: 0, count: recon.cb.count)
-        var cr = [Int16](repeating: 0, count: recon.cr.count)
-        y.withUnsafeMutableBufferPointer { d in recon.y.withUnsafeBufferPointer { d.baseAddress!.update(from: $0.baseAddress!, count: $0.count) } }
-        cb.withUnsafeMutableBufferPointer { d in recon.cb.withUnsafeBufferPointer { d.baseAddress!.update(from: $0.baseAddress!, count: $0.count) } }
-        cr.withUnsafeMutableBufferPointer { d in recon.cr.withUnsafeBufferPointer { d.baseAddress!.update(from: $0.baseAddress!, count: $0.count) } }
-        let copy = PlaneData420(width: recon.width, height: recon.height, y: y, cb: cb, cr: cr)
-        lock.lock()
-        pool.insert(copy, at: 0)
-        if poolSize < pool.count { pool.removeLast() }
-        lock.unlock()
-    }
-
-    /// Called on P-frames after the production skipMap is decided.
-    func evaluate(pd: PlaneData420, skipMap: [BlockMode], skipThreshold: Int) {
-        lock.lock()
-        let refs = pool
-        lock.unlock()
-        guard refs.isEmpty != true else { return }
-
-        let dx = pd.width
-        let dy = pd.height
-        let bw = (dx + 31) / 32
-        var fUpgrades = 0
-        var fDist1 = 0
-        var fDist2_4 = 0
-        var fDist5_15 = 0
-        var fSkips = 0
-
-        for i in 0..<skipMap.count {
-            if skipMap[i] != .inter {
-                fSkips += 1
-                continue
-            }
-            let bx = (i % bw) * 32
-            let by = (i / bw) * 32
-            var nearest = -1
-            for (age0, ref) in refs.enumerated() {
-                if blockMatches(cur: pd, ref: ref, bx: bx, by: by, dx: dx, dy: dy, skipThreshold: skipThreshold) {
-                    nearest = age0 + 1
-                    break
-                }
-            }
-            if 0 < nearest {
-                fUpgrades += 1
-                switch nearest {
-                case 1: fDist1 += 1
-                case 2...4: fDist2_4 += 1
-                default: fDist5_15 += 1
-                }
-            }
-        }
-
-        lock.lock()
-        frames += 1
-        totalBlocks += skipMap.count
-        currentSkips += fSkips
-        upgrades += fUpgrades
-        dist1 += fDist1
-        dist2_4 += fDist2_4
-        dist5_15 += fDist5_15
-        let line = "MRORACLE frames=\(frames) blocks=\(totalBlocks) skips=\(currentSkips) upgrades=\(upgrades) dist1=\(dist1) dist2_4=\(dist2_4) dist5_15=\(dist5_15)\n"
-        lock.unlock()
-        fputs(line, stderr)
-    }
-
-    /// Production skip criterion: all four 16x16 sub-blocks of the 32x32
-    /// block within skipThreshold-per-pixel SAD (luma + chroma) against a
-    /// single reference's reconstruction.
-    private func blockMatches(cur: PlaneData420, ref: PlaneData420, bx: Int, by: Int, dx: Int, dy: Int, skipThreshold: Int) -> Bool {
-        withUnsafePlanePointers(cur, ref) { c, r in
-            for sy in 0..<2 {
-                for sx in 0..<2 {
-                    let subX = bx + sx * 16
-                    let subY = by + sy * 16
-                    let mw = min(16, dx - subX)
-                    let mh = min(16, dy - subY)
-                    if mw <= 0 || mh <= 0 { continue }
-                    let mwc = (mw + 1) / 2
-                    let mhc = (mh + 1) / 2
-                    let area = mw * mh + mwc * mhc * 2
-                    let blockThreshold = skipThreshold * area
-                    let sad: Int
-                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                        sad = computeZeroSAD16x16(cY: c.y, rY: r.y, cCb: c.cb, rCb: r.cb, cCr: c.cr, rCr: r.cr, bx: subX, by: subY, width: dx, limit: blockThreshold)
-                    } else {
-                        sad = computeZeroSADSubBlock(cY: c.y, rY: r.y, cCb: c.cb, rCb: r.cb, cCr: c.cr, rCr: r.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
-                    }
-                    if blockThreshold < sad {
-                        return false
-                    }
-                }
-            }
-            return true
-        }
     }
 }

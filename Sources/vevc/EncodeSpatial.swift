@@ -155,12 +155,6 @@ func encodeSpatialLayersIntraForProfile2(pd: PlaneData420, pool: BlockViewPool, 
 
     let (reconstructed, releaseRecon) = finishIntraReconstruction(pd: pd, pool: pool, l1Img: l1Img, l2yBlocks: l2yBlocks, l2cbBlocks: l2cbBlocks, l2crBlocks: l2crBlocks, qtY2: qtY2, qtC2: qtC2)
 
-    if let oracle = MultiRefOracle.shared {
-        // Random-access boundary: the candidate pool never crosses an I-frame.
-        oracle.reset()
-        oracle.push(recon: reconstructed)
-    }
-
     debugLog({
         return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"
     }())
@@ -494,7 +488,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, syntaxContext: SyntaxContextModels, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil, skipRefresh: Int = 0, skipRefreshState: SkipRefreshState? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, syntaxContext: SyntaxContextModels, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -511,8 +505,6 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
 
     var skipMap = await computeProfile2SkipMap(pd: pd, prevInput: prevInput, ltrInput: ltrInput, predictedPd: predictedPd, gopPosition: gopPosition, ltrAge: ltrAge, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, staticCounters: &staticCounters)
-
-    MultiRefOracle.shared?.evaluate(pd: pd, skipMap: skipMap, skipThreshold: skipThreshold)
 
     // The skip model prices both reference directions per block, which the
     // coding path does not keep; ask the search to export them when it runs.
@@ -579,24 +571,6 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             source: pd,
             prevRef: pPd,
             ltrRef: nPd
-        )
-    }
-
-    // Periodic skip refresh (#28). Runs at the same layer as the learned skip
-    // decision and after it, so it sees the final skip map: a block that has
-    // skipped for `skipRefresh` consecutive frames is coded as inter again and
-    // takes back its own motion search result. Every downstream consumer
-    // (skip map / MVs / ref dirs / layer preparation / MC subtract / L0 loop /
-    // deblock / skip copy) reads the map below this point, so coding and
-    // reconstruction stay in agreement. skipRefresh == 0 skips the pass.
-    if let refreshState = skipRefreshState, 0 < skipRefresh {
-        _ = refreshState.apply(
-            skipMap: &skipMap,
-            mvs: &mvs,
-            refDirs: &refDirs,
-            meMVs: mvs_original,
-            meRefDirs: refDirs_original,
-            period: skipRefresh
         )
     }
 
@@ -671,14 +645,12 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         if motionMaskingMinQStep <= adjustedStep {
             var tempY = pool.getInt16(count: resY.count)
             var smoothedY = pool.getInt16(count: resY.count)
-            withUnsafePointers(resY, mut: &smoothedY) { srcPtr, dstPtr in
-                withUnsafePointers(mut: &tempY) { tmpPtr in
-                    smoothResidualPlaneContinuous(
-                        src: srcPtr, dst: dstPtr, temp: tmpPtr,
-                        width: dx, height: dy, activityMap: activityMap, stride: dx,
-                        mvs: mvs, skipMap: skipMap, framerate: framerate
-                    )
-                }
+            withUnsafePointers(resY, mut: &smoothedY, mut: &tempY) { srcPtr, dstPtr, tmpPtr in
+                smoothResidualPlaneContinuous(
+                    src: srcPtr, dst: dstPtr, temp: tmpPtr,
+                    width: dx, height: dy, activityMap: activityMap, stride: dx,
+                    mvs: mvs, skipMap: skipMap, framerate: framerate
+                )
             }
             pool.putInt16(tempY)
             pool.putInt16(resY)
@@ -1032,8 +1004,6 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let releaseCr: @Sendable () -> Void = { r2Cr() }
 
     let reconstructed = PlaneData420(width: dx, height: dy, y: mutReconL2Y, cb: mutReconL2Cb, cr: mutReconL2Cr)
-
-    MultiRefOracle.shared?.push(recon: reconstructed)
 
     debugLog({
         return "  [Summary] Layer0=\(layer0.count) Layer1=\(layer1.count) Layer2=\(layer2.count) total=\(layer0.count + layer1.count + layer2.count) bytes"

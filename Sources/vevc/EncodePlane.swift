@@ -945,22 +945,21 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
     let blocks = tmpBlocks
 
     let chunkSize = 4
+    let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, r] in
-                r.data.withUnsafeBufferPointer { srcBuf in
-                    let srcBase = srcBuf.baseAddress!
-                    for i in sRow..<endRow {
-                        let h = (i * 8)
-                        for j in 0..<colCount {
-                            let w = (j * 8)
-                            if width <= w || height <= h { continue }
-                            let view = blocks[(i * colCount) + j]
-                            r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
-                            if isZeroBlock(view: view) != true {
-                                dwt2DBlock8(view)
-                            }
+            group.addTask { [blocks, safeSrc] in
+                let srcBase = safeSrc.ptr
+                for i in sRow..<endRow {
+                    let h = (i * 8)
+                    for j in 0..<colCount {
+                        let w = (j * 8)
+                        if width <= w || height <= h { continue }
+                        let view = blocks[(i * colCount) + j]
+                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
+                        if isZeroBlock(view: view) != true {
+                            dwt2DBlock8(view)
                         }
                     }
                 }
@@ -1070,42 +1069,41 @@ func extractSingleTransformBlocksBase8WithSkipMap(
     let blocks = tmpBlocks
 
     let chunkSize = 4
+    let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, isSkip, r, cullSAD, smoothFlags] in
-                r.data.withUnsafeBufferPointer { srcBuf in
-                    let srcBase = srcBuf.baseAddress!
-                    for i in sRow..<endRow {
-                        let h = (i * 8)
-                        for j in 0..<colCount {
-                            let w = (j * 8)
-                            if width <= w || height <= h { continue }
-                            let blockIdx = (i * colCount) + j
-                            let view = blocks[blockIdx]
+            group.addTask { [blocks, isSkip, cullSAD, smoothFlags, safeSrc] in
+                let srcBase = safeSrc.ptr
+                for i in sRow..<endRow {
+                    let h = (i * 8)
+                    for j in 0..<colCount {
+                        let w = (j * 8)
+                        if width <= w || height <= h { continue }
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
 
-                            if isSkip[blockIdx] {
-                                clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
-                                continue
-                            }
-                            r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
-                            if 0 < cullSAD && base8BlockSAD(view) < cullSAD {
-                                // Small residual energy: cull the whole block
-                                // pre-DWT (encoder-only policy; all-zero
-                                // coefficients are always legal).
-                                clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
-                                continue
-                            }
-                            if let sFlags = smoothFlags {
-                                if blockIdx < sFlags.count {
-                                    if sFlags[blockIdx] {
-                                        smoothResidualBlock8(base: view.base, stride: view.stride)
-                                    }
+                        if isSkip[blockIdx] {
+                            clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
+                            continue
+                        }
+                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
+                        if 0 < cullSAD && base8BlockSAD(view) < cullSAD {
+                            // Small residual energy: cull the whole block
+                            // pre-DWT (encoder-only policy; all-zero
+                            // coefficients are always legal).
+                            clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
+                            continue
+                        }
+                        if let sFlags = smoothFlags {
+                            if blockIdx < sFlags.count {
+                                if sFlags[blockIdx] {
+                                    smoothResidualBlock8(base: view.base, stride: view.stride)
                                 }
                             }
-                            if isZeroBlock(view: view) != true {
-                                dwt2DBlock8(view)
-                            }
+                        }
+                        if isZeroBlock(view: view) != true {
+                            dwt2DBlock8(view)
                         }
                     }
                 }

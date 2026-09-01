@@ -957,81 +957,74 @@ func decodePlaneBaseSubbands8WithSkipMap(
         var nzCur = 0
         let nzCount = nonZeroIndices.count
 
-        for i in 0..<blockCount {
-            if nzCur < nzCount && nonZeroIndices[nzCur] == i {
-                nzCur += 1
-                let view = blocks[i]
-                let basePtr = view.base
-                let blockY = i / colCount
-                let blockX = i % colCount
+        try withUnsafePointers(mut: &ws.cArr, mut: &ws.topBuf, mut: &ws.leftBuf) { cPtr, topPtr, leftPtr in
+            for i in 0..<blockCount {
+                if nzCur < nzCount && nonZeroIndices[nzCur] == i {
+                    nzCur += 1
+                    let view = blocks[i]
+                    let basePtr = view.base
+                    let blockY = i / colCount
+                    let blockX = i % colCount
 
-                var hasTop = false
-                if 0 < blockY {
-                    ws.topBuf.withUnsafeMutableBufferPointer { topPtr in
-                        copyLLCoeffs(from: blocks[i - colCount], to: topPtr.baseAddress!)
-                    }
-                    hasTop = true
-                }
-
-                var hasLeft = false
-                if 0 < blockX {
-                    ws.leftBuf.withUnsafeMutableBufferPointer { leftPtr in
-                        copyLLCoeffs(from: blocks[i - 1], to: leftPtr.baseAddress!)
-                    }
-                    hasLeft = true
-                }
-
-                try blockDecode4HHead(decoder: &decoder, ptr: basePtr, stride: 8)
-
-                ws.cArr[0] = basePtr[0]
-                ws.cArr[1] = basePtr[1]
-                ws.cArr[2] = basePtr[2]
-                ws.cArr[3] = basePtr[3]
-
-                var pos = 4
-                while pos < 16 {
-                    let (mu, invScale): (Int32, Int32)
-                    switch true {
-                    case hasTop && hasLeft:
-                        (mu, invScale) = withUnsafePointers(ws.cArr, ws.topBuf, ws.leftBuf) { cPtr, topPtr, leftPtr in
-                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: topPtr, leftCoeffs: leftPtr, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
-                        }
-                    case hasTop:
-                        (mu, invScale) = withUnsafePointers(ws.cArr, ws.topBuf) { cPtr, topPtr in
-                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: topPtr, leftCoeffs: nil, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
-                        }
-                    case hasLeft:
-                        (mu, invScale) = withUnsafePointers(ws.cArr, ws.leftBuf) { cPtr, leftPtr in
-                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: nil, leftCoeffs: leftPtr, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
-                        }
-                    default:
-                        (mu, invScale) = withUnsafePointers(ws.cArr) { cPtr in
-                            ws.predict(pos: pos, blockCoeffs: cPtr, topCoeffs: nil, leftCoeffs: nil, tempCoeffs: nil, isPFrame: true, plane: 0, qstep: qstep)
-                        }
-                    }
-                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                    let sym = ws.planeDecodeSymbol()
-                    if sym == 129 {
-                        ws.cArr[pos] = ws.planeDecodeEscape()
+                    let topArg: UnsafePointer<Int16>?
+                    if 0 < blockY {
+                        copyLLCoeffs(from: blocks[i - colCount], to: topPtr)
+                        topArg = UnsafePointer(topPtr)
                     } else {
-                        ws.cArr[pos] = Int16(sym - 64)
+                        topArg = nil
                     }
-                    pos += 1
-                }
 
-                var y2 = 0
-                while y2 < 4 {
-                    var x2 = 0
-                    while x2 < 4 {
-                        basePtr[(y2 * 8) + x2] = ws.cArr[(y2 * 4) + x2]
-                        x2 += 1
+                    let leftArg: UnsafePointer<Int16>?
+                    if 0 < blockX {
+                        copyLLCoeffs(from: blocks[i - 1], to: leftPtr)
+                        leftArg = UnsafePointer(leftPtr)
+                    } else {
+                        leftArg = nil
                     }
-                    y2 += 1
-                }
 
-                try blockDecode4V(decoder: &decoder, ptr: basePtr.advanced(by: half), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: basePtr.advanced(by: half * 8), stride: 8)
-                try blockDecode4H(decoder: &decoder, ptr: basePtr.advanced(by: (half * 8) + half), stride: 8)
+                    try blockDecode4HHead(decoder: &decoder, ptr: basePtr, stride: 8)
+
+                    cPtr[0] = basePtr[0]
+                    cPtr[1] = basePtr[1]
+                    cPtr[2] = basePtr[2]
+                    cPtr[3] = basePtr[3]
+
+                    var pos = 4
+                    while pos < 16 {
+                        let (mu, invScale) = ws.predict(
+                            pos: pos,
+                            blockCoeffs: UnsafePointer(cPtr),
+                            topCoeffs: topArg,
+                            leftCoeffs: leftArg,
+                            tempCoeffs: nil,
+                            isPFrame: true,
+                            plane: 0,
+                            qstep: qstep
+                        )
+                        ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
+                        let sym = ws.planeDecodeSymbol()
+                        if sym == 129 {
+                            cPtr[pos] = ws.planeDecodeEscape()
+                        } else {
+                            cPtr[pos] = Int16(sym - 64)
+                        }
+                        pos += 1
+                    }
+
+                    var y2 = 0
+                    while y2 < 4 {
+                        var x2 = 0
+                        while x2 < 4 {
+                            basePtr[(y2 * 8) + x2] = cPtr[(y2 * 4) + x2]
+                            x2 += 1
+                        }
+                        y2 += 1
+                    }
+
+                    try blockDecode4V(decoder: &decoder, ptr: basePtr.advanced(by: half), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: basePtr.advanced(by: half * 8), stride: 8)
+                    try blockDecode4H(decoder: &decoder, ptr: basePtr.advanced(by: (half * 8) + half), stride: 8)
+                }
             }
         }
 
