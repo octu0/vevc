@@ -293,17 +293,6 @@ do {
         fputs(logMsg, stderr)
     }
 
-    if 0 < iqFloor || 0 < keyint {
-        let census = await encoder.frameCensus()
-        fputs("FrameCensus: I forced/periodic=\(census.iForced) scene=\(census.iScene) floor=\(census.iFloor) copyFrame=\(census.copy)\n", stderr)
-        if 0 < iqFloor {
-            fputs("IQFloor alpha=\(iqFloor)/100 firings=\(census.firings.count)\n", stderr)
-            for f in census.firings {
-                fputs("IQFloorFire frame=\(f.frame) k=\(f.k) dist=\(f.dist) frameMSE=\(f.frameMSE) iMSE=\(f.iMSE) ratioQ8=\(0 < f.iMSE ? (f.frameMSE * 256) / f.iMSE : -1)\n", stderr)
-            }
-        }
-    }
-
     inFileHandle.closeFile()
     outFileHandle.closeFile()
 } catch {
