@@ -1839,6 +1839,13 @@ func copyBlockSafe(from src: UnsafePointer<Int16>, to dst: UnsafeMutablePointer<
             let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
             dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
         }
+    case 4:
+        for y in by..<maxY {
+            let offset = y * width + bx
+            let dstPtr = UnsafeMutableRawPointer(dst.advanced(by: offset))
+            let srcPtr = UnsafeRawPointer(src.advanced(by: offset))
+            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD4<Int16>.self), as: SIMD4<Int16>.self)
+        }
     default:
         for y in by..<maxY {
             let offset = y * width + bx

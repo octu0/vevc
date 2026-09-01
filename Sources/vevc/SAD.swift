@@ -561,18 +561,18 @@ func isNearDuplicate(a: PlaneData420, b: PlaneData420, limitQ8: Int) -> Bool {
     guard a.y.count == b.y.count, a.cb.count == b.cb.count, 0 < a.y.count else { return false }
     let bound = (limitQ8 * a.y.count) >> 8
     var sum = 0
-    let exceeded = withUnsafePointers(a.y, b.y) { aY, bY -> Bool in
-        lumaAbsDiffExceedsProgressive(aY, bY, count: a.y.count, sum: &sum, bound: bound)
+    return withUnsafePointers(a.y, a.cb, a.cr, b.y, b.cb, b.cr) { aY, aCb, aCr, bY, bCb, bCr -> Bool in
+        if lumaAbsDiffExceedsProgressive(aY, bY, count: a.y.count, sum: &sum, bound: bound) {
+            return false
+        }
+        if planeAbsDiffExceeds(aCb, bCb, count: a.cb.count, weight: 2, sum: &sum, bound: bound) {
+            return false
+        }
+        if planeAbsDiffExceeds(aCr, bCr, count: a.cr.count, weight: 2, sum: &sum, bound: bound) {
+            return false
+        }
+        return true
     }
-    if exceeded { return false }
-    let cbExceeded = withUnsafePointers(a.cb, b.cb) { aCb, bCb -> Bool in
-        planeAbsDiffExceeds(aCb, bCb, count: a.cb.count, weight: 2, sum: &sum, bound: bound)
-    }
-    if cbExceeded { return false }
-    let crExceeded = withUnsafePointers(a.cr, b.cr) { aCr, bCr -> Bool in
-        planeAbsDiffExceeds(aCr, bCr, count: a.cr.count, weight: 2, sum: &sum, bound: bound)
-    }
-    return crExceeded != true
 }
 
 /// Luma pass with a progressive rejection bound: a frame that finishes within
@@ -587,11 +587,37 @@ private func lumaAbsDiffExceedsProgressive(_ a: UnsafePointer<Int16>, _ b: Unsaf
     let slack = count / 4
     var i = 0
     var chunkAcc = 0
+    while i + 64 <= count {
+        let va0 = UnsafeRawPointer(a + i).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb0 = UnsafeRawPointer(b + i).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad0 = pointwiseMax(va0, vb0) &- pointwiseMin(va0, vb0)
+
+        let va1 = UnsafeRawPointer(a + (i + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb1 = UnsafeRawPointer(b + (i + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad1 = pointwiseMax(va1, vb1) &- pointwiseMin(va1, vb1)
+
+        let va2 = UnsafeRawPointer(a + (i + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb2 = UnsafeRawPointer(b + (i + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad2 = pointwiseMax(va2, vb2) &- pointwiseMin(va2, vb2)
+
+        let va3 = UnsafeRawPointer(a + (i + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb3 = UnsafeRawPointer(b + (i + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad3 = pointwiseMax(va3, vb3) &- pointwiseMin(va3, vb3)
+
+        chunkAcc += Int(((ad0 &+ ad1) &+ (ad2 &+ ad3)).wrappedSum())
+        i += 64
+        if i % 4096 == 0 {
+            sum += chunkAcc
+            chunkAcc = 0
+            if bound * (i + slack) < sum * count {
+                return true
+            }
+        }
+    }
     while i + 16 <= count {
         let va = UnsafeRawPointer(a + i).loadUnaligned(as: SIMD16<Int16>.self)
         let vb = UnsafeRawPointer(b + i).loadUnaligned(as: SIMD16<Int16>.self)
-        let d = va &- vb
-        let ad = d.replacing(with: 0 &- d, where: d .< 0)
+        let ad = pointwiseMax(va, vb) &- pointwiseMin(va, vb)
         chunkAcc += Int(ad.wrappedSum())
         i += 16
         if i % 4096 == 0 {
@@ -616,11 +642,35 @@ private func lumaAbsDiffExceedsProgressive(_ a: UnsafePointer<Int16>, _ b: Unsaf
 private func planeAbsDiffExceeds(_ a: UnsafePointer<Int16>, _ b: UnsafePointer<Int16>, count: Int, weight: Int, sum: inout Int, bound: Int) -> Bool {
     var i = 0
     var chunkAcc = 0
+    while i + 64 <= count {
+        let va0 = UnsafeRawPointer(a + i).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb0 = UnsafeRawPointer(b + i).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad0 = pointwiseMax(va0, vb0) &- pointwiseMin(va0, vb0)
+
+        let va1 = UnsafeRawPointer(a + (i + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb1 = UnsafeRawPointer(b + (i + 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad1 = pointwiseMax(va1, vb1) &- pointwiseMin(va1, vb1)
+
+        let va2 = UnsafeRawPointer(a + (i + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb2 = UnsafeRawPointer(b + (i + 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad2 = pointwiseMax(va2, vb2) &- pointwiseMin(va2, vb2)
+
+        let va3 = UnsafeRawPointer(a + (i + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let vb3 = UnsafeRawPointer(b + (i + 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let ad3 = pointwiseMax(va3, vb3) &- pointwiseMin(va3, vb3)
+
+        chunkAcc += Int(((ad0 &+ ad1) &+ (ad2 &+ ad3)).wrappedSum())
+        i += 64
+        if i % 4096 == 0 {
+            sum += weight * chunkAcc
+            chunkAcc = 0
+            if bound < sum { return true }
+        }
+    }
     while i + 16 <= count {
         let va = UnsafeRawPointer(a + i).loadUnaligned(as: SIMD16<Int16>.self)
         let vb = UnsafeRawPointer(b + i).loadUnaligned(as: SIMD16<Int16>.self)
-        let d = va &- vb
-        let ad = d.replacing(with: 0 &- d, where: d .< 0)
+        let ad = pointwiseMax(va, vb) &- pointwiseMin(va, vb)
         chunkAcc += Int(ad.wrappedSum())
         i += 16
         if i % 4096 == 0 {

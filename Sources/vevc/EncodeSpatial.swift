@@ -217,6 +217,22 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
     let skipThresholdPerPixel = skipThreshold
     let prevStaticCounters = staticCounters
 
+    let curYWrapper = UnsafePointerWrapper(base: pd.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let curCbWrapper = UnsafePointerWrapper(base: pd.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let curCrWrapper = UnsafePointerWrapper(base: pd.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let prevInYWrapper = UnsafePointerWrapper(base: prevInput.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInCbWrapper = UnsafePointerWrapper(base: prevInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInCrWrapper = UnsafePointerWrapper(base: prevInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let ltrInYWrapper = UnsafePointerWrapper(base: ltrInput.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInCbWrapper = UnsafePointerWrapper(base: ltrInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInCrWrapper = UnsafePointerWrapper(base: ltrInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let prevReconYWrapper = UnsafePointerWrapper(base: predictedPd.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconCbWrapper = UnsafePointerWrapper(base: predictedPd.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconCrWrapper = UnsafePointerWrapper(base: predictedPd.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
     let matchResults = await withTaskGroup(of: [(Int, Bool, Bool, Bool)].self) { group in
         let batchSize = 128
         for batchStart in stride(from: 0, to: blockCount, by: batchSize) {
@@ -225,16 +241,52 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                 var results = [(Int, Bool, Bool, Bool)]()
                 results.reserveCapacity(batchEnd - batchStart)
 
-                withUnsafePlanePointers(pd, prevInput, ltrInput, predictedPd) { cur, prevIn, ltrIn, prevRecon in
-                    for i in batchStart..<batchEnd {
-                        let bx = (i % bw) * 32
-                        let by = (i / bw) * 32
-                        let prevCount = prevStaticCounters[i]
+                let curY = curYWrapper.base, curCb = curCbWrapper.base, curCr = curCrWrapper.base
+                let prevInY = prevInYWrapper.base, prevInCb = prevInCbWrapper.base, prevInCr = prevInCrWrapper.base
+                let ltrInY = ltrInYWrapper.base, ltrInCb = ltrInCbWrapper.base, ltrInCr = ltrInCrWrapper.base
+                let prevReconY = prevReconYWrapper.base, prevReconCb = prevReconCbWrapper.base, prevReconCr = prevReconCrWrapper.base
 
-                        var allSubBlocksMatchPrev = true
-                        var allSubBlocksMatchLtr = false
-                        var allSubBlocksMatchPrevRecon = false
+                for i in batchStart..<batchEnd {
+                    let bx = (i % bw) * 32
+                    let by = (i / bw) * 32
+                    let prevCount = prevStaticCounters[i]
 
+                    var allSubBlocksMatchPrev = true
+                    var allSubBlocksMatchLtr = false
+                    var allSubBlocksMatchPrevRecon = false
+
+                    for sy in 0..<2 {
+                        for sx in 0..<2 {
+                            let subX = bx + sx * 16
+                            let subY = by + sy * 16
+                            let mw = min(16, dx - subX)
+                            let mh = min(16, dy - subY)
+                            if mw <= 0 || mh <= 0 { continue }
+                            let mwc = ((mw + 1) / 2)
+                            let mhc = ((mh + 1) / 2)
+
+                            let area = mw * mh + mwc * mhc * 2
+                            let blockThreshold = skipThresholdPerPixel * area
+
+                            let sadPrevIn: Int
+                            if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                sadPrevIn = computeZeroSAD16x16(cY: curY, rY: prevInY, cCb: curCb, rCb: prevInCb, cCr: curCr, rCr: prevInCr, bx: subX, by: subY, width: dx, limit: blockThreshold)
+                            } else {
+                                sadPrevIn = computeZeroSADSubBlock(cY: curY, rY: prevInY, cCb: curCb, rCb: prevInCb, cCr: curCr, rCr: prevInCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
+                            }
+
+                            if blockThreshold < sadPrevIn {
+                                allSubBlocksMatchPrev = false
+                                break
+                            }
+                        }
+                        if allSubBlocksMatchPrev != true { break }
+                    }
+
+                    let nextStaticCount = if allSubBlocksMatchPrev { prevCount + 1 } else { 0 }
+
+                    if nextStaticCount == ltrAge {
+                        allSubBlocksMatchLtr = true
                         for sy in 0..<2 {
                             for sx in 0..<2 {
                                 let subX = bx + sx * 16
@@ -248,89 +300,56 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                                 let area = mw * mh + mwc * mhc * 2
                                 let blockThreshold = skipThresholdPerPixel * area
 
-                                let sadPrevIn: Int
+                                let sadLtrIn: Int
                                 if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                    sadPrevIn = computeZeroSAD16x16(cY: cur.y, rY: prevIn.y, cCb: cur.cb, rCb: prevIn.cb, cCr: cur.cr, rCr: prevIn.cr, bx: subX, by: subY, width: dx, limit: blockThreshold)
+                                    sadLtrIn = computeZeroSAD16x16(cY: curY, rY: ltrInY, cCb: curCb, rCb: ltrInCb, cCr: curCr, rCr: ltrInCr, bx: subX, by: subY, width: dx, limit: blockThreshold)
                                 } else {
-                                    sadPrevIn = computeZeroSADSubBlock(cY: cur.y, rY: prevIn.y, cCb: cur.cb, rCb: prevIn.cb, cCr: cur.cr, rCr: prevIn.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
+                                    sadLtrIn = computeZeroSADSubBlock(cY: curY, rY: ltrInY, cCb: curCb, rCb: ltrInCb, cCr: curCr, rCr: ltrInCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
                                 }
 
-                                if blockThreshold < sadPrevIn {
-                                    allSubBlocksMatchPrev = false
+                                if blockThreshold < sadLtrIn {
+                                    allSubBlocksMatchLtr = false
                                     break
                                 }
                             }
-                            if allSubBlocksMatchPrev != true { break }
+                            if allSubBlocksMatchLtr != true { break }
                         }
-
-                        let nextStaticCount = allSubBlocksMatchPrev ? (prevCount + 1) : 0
-
-                        if nextStaticCount == ltrAge {
-                            allSubBlocksMatchLtr = true
-                            for sy in 0..<2 {
-                                for sx in 0..<2 {
-                                    let subX = bx + sx * 16
-                                    let subY = by + sy * 16
-                                    let mw = min(16, dx - subX)
-                                    let mh = min(16, dy - subY)
-                                    if mw <= 0 || mh <= 0 { continue }
-                                    let mwc = ((mw + 1) / 2)
-                                    let mhc = ((mh + 1) / 2)
-
-                                    let area = mw * mh + mwc * mhc * 2
-                                    let blockThreshold = skipThresholdPerPixel * area
-
-                                    let sadLtrIn: Int
-                                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                        sadLtrIn = computeZeroSAD16x16(cY: cur.y, rY: ltrIn.y, cCb: cur.cb, rCb: ltrIn.cb, cCr: cur.cr, rCr: ltrIn.cr, bx: subX, by: subY, width: dx, limit: blockThreshold)
-                                    } else {
-                                        sadLtrIn = computeZeroSADSubBlock(cY: cur.y, rY: ltrIn.y, cCb: cur.cb, rCb: ltrIn.cb, cCr: cur.cr, rCr: ltrIn.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
-                                    }
-
-                                    if blockThreshold < sadLtrIn {
-                                        allSubBlocksMatchLtr = false
-                                        break
-                                    }
-                                }
-                                if allSubBlocksMatchLtr != true { break }
-                            }
-                        }
-
-                        let isLtrMatch = allSubBlocksMatchLtr && (nextStaticCount == ltrAge)
-                        if isLtrMatch != true && allSubBlocksMatchPrev && (3 < nextStaticCount) {
-                            allSubBlocksMatchPrevRecon = true
-                            for sy in 0..<2 {
-                                for sx in 0..<2 {
-                                    let subX = bx + sx * 16
-                                    let subY = by + sy * 16
-                                    let mw = min(16, dx - subX)
-                                    let mh = min(16, dy - subY)
-                                    if mw <= 0 || mh <= 0 { continue }
-                                    let mwc = ((mw + 1) / 2)
-                                    let mhc = ((mh + 1) / 2)
-
-                                    let area = mw * mh + mwc * mhc * 2
-                                    let blockThreshold = skipThresholdPerPixel * area
-                                    let reconBlockThreshold = blockThreshold * reconThresholdScale
-
-                                    let sadPrevRecon: Int
-                                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                        sadPrevRecon = computeZeroSAD16x16(cY: cur.y, rY: prevRecon.y, cCb: cur.cb, rCb: prevRecon.cb, cCr: cur.cr, rCr: prevRecon.cr, bx: subX, by: subY, width: dx, limit: reconBlockThreshold)
-                                    } else {
-                                        sadPrevRecon = computeZeroSADSubBlock(cY: cur.y, rY: prevRecon.y, cCb: cur.cb, rCb: prevRecon.cb, cCr: cur.cr, rCr: prevRecon.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: reconBlockThreshold)
-                                    }
-
-                                    if reconBlockThreshold < sadPrevRecon {
-                                        allSubBlocksMatchPrevRecon = false
-                                        break
-                                    }
-                                }
-                                if allSubBlocksMatchPrevRecon != true { break }
-                            }
-                        }
-
-                        results.append((i, allSubBlocksMatchPrev, allSubBlocksMatchLtr, allSubBlocksMatchPrevRecon))
                     }
+
+                    let isLtrMatch = allSubBlocksMatchLtr && (nextStaticCount == ltrAge)
+                    if isLtrMatch != true && allSubBlocksMatchPrev && (3 < nextStaticCount) {
+                        allSubBlocksMatchPrevRecon = true
+                        for sy in 0..<2 {
+                            for sx in 0..<2 {
+                                let subX = bx + sx * 16
+                                let subY = by + sy * 16
+                                let mw = min(16, dx - subX)
+                                let mh = min(16, dy - subY)
+                                if mw <= 0 || mh <= 0 { continue }
+                                let mwc = ((mw + 1) / 2)
+                                let mhc = ((mh + 1) / 2)
+
+                                let area = mw * mh + mwc * mhc * 2
+                                let blockThreshold = skipThresholdPerPixel * area
+                                let reconBlockThreshold = blockThreshold * reconThresholdScale
+
+                                let sadPrevRecon: Int
+                                if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                    sadPrevRecon = computeZeroSAD16x16(cY: curY, rY: prevReconY, cCb: curCb, rCb: prevReconCb, cCr: curCr, rCr: prevReconCr, bx: subX, by: subY, width: dx, limit: reconBlockThreshold)
+                                } else {
+                                    sadPrevRecon = computeZeroSADSubBlock(cY: curY, rY: prevReconY, cCb: curCb, rCb: prevReconCb, cCr: curCr, rCr: prevReconCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: reconBlockThreshold)
+                                }
+
+                                if reconBlockThreshold < sadPrevRecon {
+                                    allSubBlocksMatchPrevRecon = false
+                                    break
+                                }
+                            }
+                            if allSubBlocksMatchPrevRecon != true { break }
+                        }
+                    }
+
+                    results.append((i, allSubBlocksMatchPrev, allSubBlocksMatchLtr, allSubBlocksMatchPrevRecon))
                 }
                 return results
             }
