@@ -56,7 +56,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0, dumpWriter: CoeffDumpWriter? = nil) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -102,14 +102,15 @@ public actor VEVCEncoder {
             temporalLayers: temporalLayers,
             skipModel: skipModel,
             ransContext: ransContext,
-            iqFloor: iqFloor
+            iqFloor: iqFloor,
+            dumpWriter: dumpWriter
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, qstep: Int? = nil, maxbitrate: Int = 0, framerate: Int = 30, zeroThreshold: Int = 4, keyint: Int = 30, sceneChangeThreshold: Int = 500, maxConcurrency: Int = 4, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0, dumpWriter: CoeffDumpWriter? = nil) {
         self.width = width
         self.height = height
-        self.maxbitrate = 0
+        self.maxbitrate = maxbitrate
         self.framerate = framerate
         self.zeroThreshold = zeroThreshold
         self.keyint = keyint
@@ -133,7 +134,7 @@ public actor VEVCEncoder {
         self.coreEncoder = LayersEncodeActor(
             width: width,
             height: height,
-            maxbitrate: 0,
+            maxbitrate: maxbitrate,
             framerate: framerate,
             zeroThreshold: zeroThreshold,
             keyint: keyint,
@@ -152,7 +153,8 @@ public actor VEVCEncoder {
             temporalLayers: temporalLayers,
             skipModel: skipModel,
             ransContext: ransContext,
-            iqFloor: iqFloor
+            iqFloor: iqFloor,
+            dumpWriter: dumpWriter
         )
     }
     
@@ -306,10 +308,11 @@ actor LayersEncodeActor {
     // every frame; only the profile-2 base8 luma plane touches it, and that
     // code path is synchronous, so the actor's serialization is enough.
     private let ransContextWorkspace: rANSContextWorkspace?
+    private let dumpWriter: CoeffDumpWriter?
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int? = nil, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0, dumpWriter: CoeffDumpWriter? = nil) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -343,13 +346,14 @@ actor LayersEncodeActor {
         } else {
             self.ransContextWorkspace = nil
         }
+        self.dumpWriter = dumpWriter
 
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8 = 0x01, skipThreshold: Int = 2, reconThresholdScale: Int = 1, gop: Int = 12, l2Cadence: Int = 0, l1Cadence: Int = 0, l0Cadence: Int = 1, motionMaskingPx: Int = 2, smooth: Int = 1, temporalLayers: Int = 1, skipModel: Int = 1, ransContext: Int = 0, iqFloor: Int = 0, dumpWriter: CoeffDumpWriter? = nil) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -383,6 +387,7 @@ actor LayersEncodeActor {
         } else {
             self.ransContextWorkspace = nil
         }
+        self.dumpWriter = dumpWriter
 
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
@@ -784,7 +789,8 @@ actor LayersEncodeActor {
                 smooth: effSmooth,
                 updateL0Prev: updateL0,
                 skipModel: self.skipDecider,
-                ransContextWorkspace: self.ransContextWorkspace
+                ransContextWorkspace: self.ransContextWorkspace,
+                dumpWriter: self.dumpWriter
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
@@ -802,7 +808,8 @@ actor LayersEncodeActor {
                 pd: plane, pool: pool, predictedPd: refPrevRecon, nextPd: firstRecon, prevInput: refPrevIn, ltrInput: firstIn, prevMVs: refPrevMVs,
                 maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                 roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
-                cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
+                cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
+                dumpWriter: self.dumpWriter
             )
             interRatioQ8 = 0
             detailThinned = false

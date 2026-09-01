@@ -7,7 +7,8 @@ let isWasmBuild = ProcessInfo.processInfo.environment["WASM_BUILD"] == "1"
 var packageProducts: [Product] = [
     .library(name: "vevc", targets: ["vevc"]),
     .library(name: "libvevc", type: .dynamic, targets: ["libvevc"]),
-    .library(name: "libvevc_static", type: .static, targets: ["libvevc"])
+    .library(name: "libvevc_static", type: .static, targets: ["libvevc"]),
+    .executable(name: "vevc-training", targets: ["vevc-training"])
 ]
 
 var packageDeps: [Package.Dependency] = [
@@ -82,6 +83,11 @@ var packageTargets: [Target] = [
             "vevc"
         ],
         path: "Sources/vevc-player"
+    ),
+    .executableTarget(
+        name: "vevc-training",
+        dependencies: ["vevc"],
+        path: "Sources/vevc-training"
     )
 ]
 

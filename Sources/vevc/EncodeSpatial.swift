@@ -367,7 +367,7 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
 /// skip blocks. Profile 0x02 lives in encodeSpatialLayersForProfile2 — the
 /// caller selects the pipeline, keeping each one branch-free.
 @inline(__always)
-func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
+func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dumpWriter: CoeffDumpWriter? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -438,6 +438,29 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
     let layer2 = encodeLayer32Payload(dx: pd.width, dy: pd.height, qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold, yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks, parentYBlocks: l1yBlocks, parentCbBlocks: l1cbBlocks, parentCrBlocks: l1crBlocks, histories: nil, selectModel: unifiedSelectModel)
 
+    if let dumper = dumpWriter {
+        dumper.stash("L0Y", blocks: base8YBlocks, planeW: sub1.width, planeH: sub1.height, blockSize: 8, includeLL: true)
+        dumper.stash("L0Cb", blocks: base8CbBlocks, planeW: (sub1.width + 1) / 2, planeH: (sub1.height + 1) / 2, blockSize: 8, includeLL: true)
+        dumper.stash("L0Cr", blocks: base8CrBlocks, planeW: (sub1.width + 1) / 2, planeH: (sub1.height + 1) / 2, blockSize: 8, includeLL: true)
+
+        dumper.stash("L1Y", blocks: l1yBlocks, planeW: sub2.width, planeH: sub2.height, blockSize: 16, includeLL: false)
+        dumper.stash("L1Cb", blocks: l1cbBlocks, planeW: l1cbDx, planeH: l1cbDy, blockSize: 16, includeLL: false)
+        dumper.stash("L1Cr", blocks: l1crBlocks, planeW: l1cbDx, planeH: l1cbDy, blockSize: 16, includeLL: false)
+
+        dumper.stash("L2Y", blocks: l2yBlocks, planeW: dx, planeH: dy, blockSize: 32, includeLL: false)
+        dumper.stash("L2Cb", blocks: l2cbBlocks, planeW: cbDx, planeH: cbDy, blockSize: 32, includeLL: false)
+        dumper.stash("L2Cr", blocks: l2crBlocks, planeW: cbDx, planeH: cbDy, blockSize: 32, includeLL: false)
+
+        dumper.finalizePFrame(
+            gopPosition: gopPosition, width: dx, height: dy, predictedPd: pPd,
+            l1yBlocks: l1yBlocks, l1cbBlocks: l1cbBlocks, l1crBlocks: l1crBlocks,
+            b8yBlocks: base8YBlocks, b8cbBlocks: base8CbBlocks, b8crBlocks: base8CrBlocks,
+            sub2W: sub2.width, sub2H: sub2.height, sub1W: sub1.width, sub1H: sub1.height,
+            qtY2: qtY2, qtC2: qtC2, qtY1: qtY1, qtC1: qtC1, qtY0: qtY0, qtC0: qtC0,
+            layer0Bytes: layer0.count, layer1Bytes: layer1.count, layer2Bytes: layer2.count
+        )
+    }
+
     let (reconL2Y, r2Y) = reconstructPlaneLayer32Y(blocks: l2yBlocks, prevImg: l1Img, width: dx, height: dy, qt: qtY2, pool: pool)
     var mutReconL2Y = reconL2Y
     let (reconL2Cb, r2Cb) = reconstructPlaneLayer32Cb(blocks: l2cbBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
@@ -488,7 +511,7 @@ let motionMaskingMinQStep: Int = 2048
 /// (skip_prev / skip_ltr block copies), the L0 closed loop when an l0State
 /// chain is attached, and backward-adaptive entropy histories.
 @inline(__always)
-func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, syntaxContext: SyntaxContextModels, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
+func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predictedPd: PlaneData420, nextPd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, prevMVs: MotionVectors?, maxbitrate: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, roundOffset: Int, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, entropyHistories: FrameEntropyHistories?, syntaxContext: SyntaxContextModels, l0State: L0RefState, l2Cadence: Int = 4, l1Cadence: Int = 2, l0Cadence: Int = 1, framerate: Int = 30, motionMaskingPx: Int = 2, adjustedStep: Int = 0, smooth: Int = 1, updateL0Prev: Bool = true, skipModel: SkipDecider? = nil, ransContextWorkspace: rANSContextWorkspace? = nil, dumpWriter: CoeffDumpWriter? = nil) async throws -> ([UInt8], PlaneData420, MotionVectors, [Int], @Sendable () -> Void, [Int16], [Int16], [BlockMode]) {
     let pPd = predictedPd
     let nPd = nextPd
 
@@ -940,6 +963,29 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         selectModel: unifiedSelectModelParentFree,
         updateHistory: updateL0Prev
     )
+
+    if let dumper = dumpWriter {
+        dumper.stash("L0Y", blocks: base8YBlocks, planeW: sub1.width, planeH: sub1.height, blockSize: 8, includeLL: true)
+        dumper.stash("L0Cb", blocks: base8CbBlocks, planeW: (sub1.width + 1) / 2, planeH: (sub1.height + 1) / 2, blockSize: 8, includeLL: true)
+        dumper.stash("L0Cr", blocks: base8CrBlocks, planeW: (sub1.width + 1) / 2, planeH: (sub1.height + 1) / 2, blockSize: 8, includeLL: true)
+
+        dumper.stash("L1Y", blocks: l1yBlocks, planeW: sub2.width, planeH: sub2.height, blockSize: 16, includeLL: false)
+        dumper.stash("L1Cb", blocks: l1cbBlocks, planeW: l1cbDx, planeH: l1cbDy, blockSize: 16, includeLL: false)
+        dumper.stash("L1Cr", blocks: l1crBlocks, planeW: l1cbDx, planeH: l1cbDy, blockSize: 16, includeLL: false)
+
+        dumper.stash("L2Y", blocks: l2yBlocks, planeW: dx, planeH: dy, blockSize: 32, includeLL: false)
+        dumper.stash("L2Cb", blocks: l2cbBlocks, planeW: cbDx, planeH: cbDy, blockSize: 32, includeLL: false)
+        dumper.stash("L2Cr", blocks: l2crBlocks, planeW: cbDx, planeH: cbDy, blockSize: 32, includeLL: false)
+
+        dumper.finalizePFrame(
+            gopPosition: gopPosition, width: dx, height: dy, predictedPd: pPd,
+            l1yBlocks: l1yBlocks, l1cbBlocks: l1cbBlocks, l1crBlocks: l1crBlocks,
+            b8yBlocks: base8YBlocks, b8cbBlocks: base8CbBlocks, b8crBlocks: base8CrBlocks,
+            sub2W: sub2.width, sub2H: sub2.height, sub1W: sub1.width, sub1H: sub1.height,
+            qtY2: qtY2, qtC2: qtC2, qtY1: qtY1, qtC1: qtC1, qtY0: qtY0, qtC0: qtC0,
+            layer0Bytes: layer0.count, layer1Bytes: layer1.count, layer2Bytes: layer2.count
+        )
+    }
 
     // skipMap must be passed here: the decoder's layer2 reconstruction skips
     // skip blocks entirely (they stay zero until the final skip copy), and
