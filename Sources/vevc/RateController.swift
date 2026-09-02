@@ -35,6 +35,12 @@ struct RateController {
     private(set) var avgPFrameSAD: Int = 0
     private(set) var lastPFrameBits: Int = 0
     private(set) var lastPFrameQStep: Int = 0
+    /// Direction of the most recent non-zero change in the P-frame coding
+    /// step, and how many times in a row the step has changed direction.
+    /// Written by `consumePFrame`, read only by the oscillation damper in
+    /// `calculatePFrameQStep`.
+    private(set) var lastStepDelta: Int = 0
+    private(set) var stepReversalRun: Int = 0
     private(set) var lastPFrameSAD: Int = 0
     
     private(set) var avgPFrameBits: Int = 0
@@ -338,6 +344,41 @@ struct RateController {
             newStepInt = Int(max(Int64(minStep), min(Int64(maxStep), smoothed)))
         }
         
+        // Two-cycle damping for the region the two blocks above do not cover.
+        //
+        // Both of them are gated on `256 <= budgetRatioQ8`, so as soon as a
+        // GOP falls behind its own pacing the proportional predictor runs with
+        // no damping at all. That predictor assumes a frame's bits move as
+        // 1/step. Measured on ToS-24fps frames 562-577 they move ~2.9x faster
+        // than that (step 2457 cost 2,256 bits; the next frame at step 986
+        // cost 39,992), which puts the update's loop gain at |1 - 2.9| = 1.9
+        // and makes its fixed point unstable. The decision then sits in a
+        // 2-cycle bounded by the clamps - 986 / 2457 / 986 / 2443, 17 direction
+        // changes in the 30 frames of one exhausted GOP tail - and the coarse
+        // half of that cycle is exactly where the stream's worst SSIM frames
+        // land.
+        //
+        // What is damped is a sustained reversal: the third direction change
+        // in a row, and only when it spans 3:2 or more. Both conditions
+        // together are what separates a limit cycle from the two things that
+        // must stay untouched - a single corrective step, and a stream pinned
+        // by saturation. Measured over the baseline trajectories, the pair
+        // fires 46 times on ToS-24fps and 0 times on miko_700, whose step
+        // spends 89% of its exhausted frames sitting on a clamp rather than
+        // moving. The damped step is the geometric mean with the previous one,
+        // i.e. half the excursion in the log domain, which turns the
+        // |1 - g| = 1.9 map into |1 - g/2| = 0.45. Both operands are already
+        // inside [minStep, maxStep], so their mean is too.
+        if budgetRatioQ8 < 256 && 0 < lastPFrameQStep && 2 <= stepReversalRun {
+            let delta = newStepInt - lastPFrameQStep
+            let reversing = (0 < lastStepDelta && delta < 0) || (lastStepDelta < 0 && 0 < delta)
+            let hi = max(newStepInt, lastPFrameQStep)
+            let lo = max(1, min(newStepInt, lastPFrameQStep))
+            if reversing && (lo * 3) <= (hi * 2) {
+                newStepInt = isqrt(newStepInt * lastPFrameQStep)
+            }
+        }
+
         let finalStep = min(16384, max(minStep, min(maxStep, newStepInt)))
         return finalStep
     }
@@ -351,6 +392,21 @@ struct RateController {
         self.gopRemainingFrames -= 1
         
         self.lastPFrameBits = bits
+        // Direction history for the 2-cycle damper. A frame that repeats the
+        // previous step carries no direction, so it breaks the run rather than
+        // extending it.
+        if 0 < self.lastPFrameQStep {
+            let delta = qStep - self.lastPFrameQStep
+            switch true {
+            case delta == 0:
+                self.stepReversalRun = 0
+            case (0 < self.lastStepDelta && delta < 0) || (self.lastStepDelta < 0 && 0 < delta):
+                self.stepReversalRun += 1
+            default:
+                self.stepReversalRun = 0
+            }
+            if delta != 0 { self.lastStepDelta = delta }
+        }
         self.lastPFrameQStep = qStep
         self.lastPFrameSAD = sad
         
