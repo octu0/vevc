@@ -89,20 +89,19 @@ class PlayerViewModel: ObservableObject {
             if fps <= 0.0 { fps = 30.0 }
         }
         
-        let encoder = VEVCEncoder(
-            width: y4mReader.width,
-            height: y4mReader.height,
-            maxbitrate: bitrate * 1000,
-            framerate: Int(round(fps)),
-            zeroThreshold: 3,
-            keyint: 30,
-            sceneChangeThreshold: 10,
-            profile: profile
-        )
+        let encoder = VEVCEncoder(width: y4mReader.width, height: y4mReader.height, profile: profile)
+        encoder.maxbitrate = bitrate * 1000
+        encoder.framerate = Int(round(fps))
+        encoder.zeroThreshold = 3
+        encoder.keyint = 30
+        encoder.sceneChangeThreshold = 10
         
-        let decoder0 = StreamingDecoderActor(maxLayer: 0, width: y4mReader.width, height: y4mReader.height, profile: profile)
-        let decoder1 = StreamingDecoderActor(maxLayer: 1, width: y4mReader.width, height: y4mReader.height, profile: profile)
-        let decoder2 = StreamingDecoderActor(maxLayer: 2, width: y4mReader.width, height: y4mReader.height, profile: profile)
+        // Self-configuring: the first encoded chunk carries the file header
+        // and splitFrameChunk preserves it, so the decoders read their
+        // dimensions/profile/GOP shape from the stream itself.
+        let decoder0 = StreamingDecoderActor(maxLayer: 0)
+        let decoder1 = StreamingDecoderActor(maxLayer: 1)
+        let decoder2 = StreamingDecoderActor(maxLayer: 2)
         
         let frameInterval = 1.0 / fps
         var frameIndex: Double = 0.0
@@ -257,6 +256,11 @@ class PlayerViewModel: ObservableObject {
         )
         
         var output = [UInt8]()
+        // Keep the file-header prefix: the decoders configure themselves from
+        // it (DataLayout) instead of taking dimensions from this caller.
+        if 0 < offset {
+            output.append(contentsOf: chunk[0 ..< offset])
+        }
         output.append(contentsOf: newHeader.serialize(profile: profile))
         
         var payloadOffset = headerOffset
@@ -322,9 +326,17 @@ class PlayerViewModel: ObservableObject {
             currentProfile = fh.profile
         }
         
-        let decoder0 = StreamingDecoderActor(maxLayer: 0, width: width, height: height, profile: currentProfile)
-        let decoder1 = StreamingDecoderActor(maxLayer: 1, width: width, height: height, profile: currentProfile)
-        let decoder2 = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: currentProfile)
+        let decoder0 = StreamingDecoderActor(maxLayer: 0)
+        let decoder1 = StreamingDecoderActor(maxLayer: 1)
+        let decoder2 = StreamingDecoderActor(maxLayer: 2)
+        // The decoders configure themselves from the file header (GOP shape
+        // included — the hand-fed values this used to pass could drift from
+        // the stream's actual layout).
+        if let h = headerChunk {
+            _ = try await decoder0.decodeNextFrame(chunk: h)
+            _ = try await decoder1.decodeNextFrame(chunk: h)
+            _ = try await decoder2.decodeNextFrame(chunk: h)
+        }
         
         let frameInterval = 1.0 / fps
         var frameIndex: Double = 0.0

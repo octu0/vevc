@@ -21,11 +21,12 @@ final class CompressionFeatureTests: XCTestCase {
             }
         }
 
-        let pmvEncoder = VEVCEncoder(width: 64, height: 64, maxbitrate: 1000 * 1024)
+        let pmvEncoder = VEVCEncoder(width: 64, height: 64, profile: 0x01)
+        pmvEncoder.maxbitrate = 1000 * 1024
         let encoded = try await pmvEncoder.encodeToData(images: [img1, img2])
         XCTAssertFalse(encoded.isEmpty)
 
-        let decoded = try await Decoder().decode(data: encoded)
+        let decoded = try await VEVCDecoder(maxLayer: 2).decode(data: encoded)
         XCTAssertEqual(decoded.count, 2)
 
         // Assert PMV recovered correctly (frame 2 should decode without error and maintain features)

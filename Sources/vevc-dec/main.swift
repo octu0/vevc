@@ -66,7 +66,7 @@ do {
         outFileHandle = f
     }
 
-    let decoder = vevc.Decoder(maxLayer: maxLayer)
+    let decoder = vevc.VEVCDecoder(maxLayer: maxLayer)
 
     var y4mWriter: Y4MWriter? = nil
     var frameCount = 0

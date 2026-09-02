@@ -32,14 +32,21 @@ actor ConcurrencyLimiter {
 }
 
 public actor StreamingDecoderActor {
-    let maxLayer: Int
-    let width: Int
-    let height: Int
+    public nonisolated let maxLayer: Int
+    private(set) var width: Int
+    private(set) var height: Int
     let pool: BlockViewPool
-    let profile: UInt8
-    let gop: Int
-    let temporalLayers: Int
-    
+    private(set) var profile: UInt8
+    private(set) var gop: Int
+    private(set) var temporalLayers: Int
+    // The stream's file header (DataLayout §1) is the only source of the
+    // members above except maxLayer: the public constructor takes just the
+    // layer this instance reconstructs — the one identity choice that can
+    // never change mid-stream — and the first chunk carrying the file header
+    // configures everything else. `configured` guards against a frame chunk
+    // arriving before any header.
+    private var configured: Bool
+
     var previousReconstructed: PlaneData420? // internal for drift diagnostics
     private var previousT0Reconstructed: PlaneData420?
     private var firstReconstructed: PlaneData420?
@@ -47,8 +54,8 @@ public actor StreamingDecoderActor {
     private var framesSinceKeyframe = 0
     private var temporalFrameIndex = 0
     private var roundOffsetIndex = 0
-    let entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
-    let mvPredictionState: MVPredictionState?
+    private(set) var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
+    private(set) var mvPredictionState: MVPredictionState?
     private var cachedYCbCrImage: YCbCrImage?
     // Quarter-resolution L0 reference chain (One-Pyramid §4). Only needed
     // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
@@ -58,13 +65,34 @@ public actor StreamingDecoderActor {
     // reused for every frame. Only the base8 luma plane can carry rANSContext,
     // so the chroma planes decoded concurrently with it never touch it; each
     // GOP-parallel decoder owns its own actor and therefore its own workspace.
-    let ransContextWorkspace: rANSContextWorkspace?
+    private(set) var ransContextWorkspace: rANSContextWorkspace?
     // Concurrent entropy decode of the 9 profile-2 streams. Wins per-frame
     // latency on a single stream; under GOP-parallel throughput decoding it
-    // only adds overhead, so the GOP-parallel Decoder turns it off.
+    // only adds overhead, so the GOP-parallel VEVCDecoder turns it off.
     let parallelEntropy: Bool
 
-    public init(maxLayer: Int, width: Int, height: Int, profile: UInt8, gop: Int, temporalLayers: Int, parallelEntropy: Bool) {
+    public init(maxLayer: Int) {
+        self.maxLayer = maxLayer
+        self.width = 0
+        self.height = 0
+        self.pool = BlockViewPool()
+        self.profile = 0x01
+        self.gop = 0
+        self.temporalLayers = 1
+        // A caller-owned single stream is exactly the case the per-frame
+        // entropy fan-out is for; the GOP-parallel VEVCDecoder uses the
+        // internal init and decides per its own concurrency.
+        self.parallelEntropy = true
+        self.entropyHistories = nil
+        self.mvPredictionState = nil
+        self.ransContextWorkspace = nil
+        self.configured = false
+    }
+
+    /// Internal plumbing for VEVCDecoder's GOP-parallel path and the raw-chunk
+    /// tests: the values are still header-derived, the caller just parsed the
+    /// header already (or encodes without one in tests).
+    internal init(maxLayer: Int, width: Int, height: Int, profile: UInt8, gop: Int, temporalLayers: Int, parallelEntropy: Bool) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
@@ -83,18 +111,25 @@ public actor StreamingDecoderActor {
             self.mvPredictionState = nil
             self.ransContextWorkspace = nil
         }
+        self.configured = true
     }
 
-    public init(width: Int, height: Int) {
-        self.init(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
-    }
-
-    public init(maxLayer: Int, width: Int, height: Int) {
-        self.init(maxLayer: maxLayer, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
-    }
-
-    public init(maxLayer: Int, width: Int, height: Int, profile: UInt8) {
-        self.init(maxLayer: maxLayer, width: width, height: height, profile: profile, gop: 12, temporalLayers: 1, parallelEntropy: true)
+    private func apply(fileHeader: VEVCFileHeader) {
+        width = fileHeader.width
+        height = fileHeader.height
+        profile = fileHeader.profile
+        gop = fileHeader.gop
+        temporalLayers = fileHeader.temporalLayers
+        if profile == 0x02 {
+            entropyHistories = FrameEntropyHistories()
+            mvPredictionState = MVPredictionState()
+            ransContextWorkspace = rANSContextWorkspace()
+        } else {
+            entropyHistories = nil
+            mvPredictionState = nil
+            ransContextWorkspace = nil
+        }
+        configured = true
     }
 
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
@@ -115,7 +150,23 @@ public actor StreamingDecoderActor {
     @inline(__always)
     public func decodeNextFrame(chunk: [UInt8]) async throws -> YCbCrImage? {
         guard chunk.isEmpty != true else { return nil }
-        
+
+        // A chunk opening with the file-header magic configures the decoder
+        // (DataLayout §1); the first frame usually follows in the same chunk,
+        // so the prefix is stripped and the remainder decodes as a frame.
+        var chunk = chunk
+        if 6 <= chunk.count && chunk[0] == 0x56 && chunk[1] == 0x45 && chunk[2] == 0x56 && chunk[3] == 0x43 {
+            var headerOffset = 0
+            let fileHeader = try VEVCFileHeader.deserialize(from: chunk, offset: &headerOffset)
+            apply(fileHeader: fileHeader)
+            if chunk.count <= headerOffset {
+                return nil
+            }
+            chunk = Array(chunk[headerOffset...])
+        }
+        if configured != true {
+            throw DecodeError.insufficientDataContext("frame chunk before VEVC file header")
+        }
         var offset = 0
         let frameHeader = try VEVCFrameHeader.deserialize(from: chunk, offset: &offset, profile: profile)
         if frameHeader.isCopyFrame {
@@ -380,24 +431,27 @@ public actor StreamingDecoderActor {
     }
 }
 
-public struct Decoder: Sendable {
+public final class VEVCDecoder: @unchecked Sendable {
+    // The constructor takes only the decoder's identity: which spatial layer
+    // it reconstructs, the one choice that can never change mid-stream.
+    // Everything the stream defines (dimensions, profile, GOP shape) is read
+    // from the file header; the remaining operating parameters are members
+    // the caller overwrites before the first decode call, frozen from then
+    // on so a mid-stream change traps instead of splitting a running decode.
     public let maxLayer: Int
-    public let maxConcurrency: Int
+    /// Number of GOPs decoded concurrently. 1 selects single-stream latency
+    /// mode, which also turns the per-frame entropy fan-out on.
+    public var maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount { willSet { preconditionConfigurable() } }
 
-    public init(
-        maxLayer: Int,
-        maxConcurrency: Int
-    ) {
-        self.maxLayer = maxLayer
-        self.maxConcurrency = maxConcurrency
-    }
-
-    public init() {
-        self.init(maxLayer: 2, maxConcurrency: ProcessInfo.processInfo.activeProcessorCount)
-    }
+    private var started = false
 
     public init(maxLayer: Int) {
-        self.init(maxLayer: maxLayer, maxConcurrency: ProcessInfo.processInfo.activeProcessorCount)
+        self.maxLayer = maxLayer
+    }
+
+    @inline(__always)
+    private func preconditionConfigurable() {
+        precondition(started != true, "VEVCDecoder configuration is frozen once decoding has started")
     }
 
     @inline(__always)
@@ -434,6 +488,7 @@ public struct Decoder: Sendable {
 
     @inline(__always)
     public func decodeStream<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<YCbCrImage, Error> where S.Element == [UInt8] {
+        started = true
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
@@ -481,7 +536,7 @@ public struct Decoder: Sendable {
                         
                         if isIFrame {
                             currentGOPInput?.finish()
-                            currentGOPInput = createGOPTask(
+                            currentGOPInput = self.createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
                                 maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile, gop: effectiveGop, temporalLayers: effectiveTemporalLayers
@@ -491,7 +546,7 @@ public struct Decoder: Sendable {
                         if let currentInput = currentGOPInput {
                             currentInput.yield(chunk)
                         } else {
-                            let newInput = createGOPTask(
+                            let newInput = self.createGOPTask(
                                 gopContinuation: gopContinuation,
                                 limiter: limiter,
                                 maxLayer: maxLayer, width: effectiveWidth, height: effectiveHeight, profile: effectiveProfile, gop: effectiveGop, temporalLayers: effectiveTemporalLayers

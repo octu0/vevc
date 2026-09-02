@@ -84,14 +84,11 @@ do {
         print("No images to encode")
         exit(1)
     }
-    let encoder = VEVCEncoder(
-        width: first.width,
-        height: first.height,
-        maxbitrate: bitrate * 1000,
-        zeroThreshold: zeroThreshold,
-        keyint: keyint,
-        sceneChangeThreshold: sceneThreshold
-    )
+    let encoder = VEVCEncoder(width: first.width, height: first.height, profile: 0x01)
+    encoder.maxbitrate = bitrate * 1000
+    encoder.zeroThreshold = zeroThreshold
+    encoder.keyint = keyint
+    encoder.sceneChangeThreshold = sceneThreshold
     let out = try await encoder.encodeToData(images: images)
     let elapsed = Date().timeIntervalSince(startTime)
     

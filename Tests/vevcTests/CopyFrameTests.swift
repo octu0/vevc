@@ -39,14 +39,12 @@ struct CopyFrameTests {
         let img = makeSolidImage(width: width, height: height, y: 128, cb: 128, cr: 128)
         let identicalImages = [img, img, img, img, img]
 
-        let identicalEncoder = VEVCEncoder(
-            width: width, height: height,
-            maxbitrate: 5_000_000,
-            framerate: 60,
-            zeroThreshold: 0,
-            keyint: 60,
-            sceneChangeThreshold: 32
-        )
+        let identicalEncoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        identicalEncoder.maxbitrate = 5_000_000
+        identicalEncoder.framerate = 60
+        identicalEncoder.zeroThreshold = 0
+        identicalEncoder.keyint = 60
+        identicalEncoder.sceneChangeThreshold = 32
         let identicalBytes = try await identicalEncoder.encodeToData(images: identicalImages)
 
         // Scenario 2: 5 different frames
@@ -57,14 +55,12 @@ struct CopyFrameTests {
         let img5 = makeSolidImage(width: width, height: height, y: 180, cb: 128, cr: 128)
         let differentImages = [img1, img2, img3, img4, img5]
 
-        let differentEncoder = VEVCEncoder(
-            width: width, height: height,
-            maxbitrate: 5_000_000,
-            framerate: 60,
-            zeroThreshold: 0,
-            keyint: 60,
-            sceneChangeThreshold: 32
-        )
+        let differentEncoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        differentEncoder.maxbitrate = 5_000_000
+        differentEncoder.framerate = 60
+        differentEncoder.zeroThreshold = 0
+        differentEncoder.keyint = 60
+        differentEncoder.sceneChangeThreshold = 32
         let differentBytes = try await differentEncoder.encodeToData(images: differentImages)
 
         let identicalSize = identicalBytes.count
@@ -94,17 +90,15 @@ struct CopyFrameTests {
         let img2 = makeSolidImage(width: width, height: height, y: 200, cb: 128, cr: 128)
         let images = [img1, img1, img2, img2, img2]
 
-        let copyEncoder = VEVCEncoder(
-            width: width, height: height,
-            maxbitrate: 5_000_000,
-            framerate: 60,
-            zeroThreshold: 0,
-            keyint: 60,
-            sceneChangeThreshold: 32
-        )
+        let copyEncoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        copyEncoder.maxbitrate = 5_000_000
+        copyEncoder.framerate = 60
+        copyEncoder.zeroThreshold = 0
+        copyEncoder.keyint = 60
+        copyEncoder.sceneChangeThreshold = 32
         let encoded = try await copyEncoder.encodeToData(images: images)
 
-        let decoded = try await Decoder().decode(data: encoded)
+        let decoded = try await VEVCDecoder(maxLayer: 2).decode(data: encoded)
         #expect(decoded.count == 5, "Should decode 5 frames, got \(decoded.count)")
 
         // Frames 0 and 1 should be similar (both derived from img1)
@@ -136,17 +130,15 @@ struct CopyFrameTests {
         for count in [2, 3, 5, 10] {
             let images = [YCbCrImage](repeating: img, count: count)
 
-            let countEncoder = VEVCEncoder(
-                width: width, height: height,
-                maxbitrate: 5_000_000,
-                framerate: 60,
-                zeroThreshold: 0,
-                keyint: 60,
-                sceneChangeThreshold: 32
-            )
+            let countEncoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+            countEncoder.maxbitrate = 5_000_000
+            countEncoder.framerate = 60
+            countEncoder.zeroThreshold = 0
+            countEncoder.keyint = 60
+            countEncoder.sceneChangeThreshold = 32
             let encoded = try await countEncoder.encodeToData(images: images)
 
-            let decoded = try await Decoder().decode(data: encoded)
+            let decoded = try await VEVCDecoder(maxLayer: 2).decode(data: encoded)
             #expect(
                 decoded.count == count,
                 "GOP with \(count) identical frames should decode to \(count) frames, got \(decoded.count)")

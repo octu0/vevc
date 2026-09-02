@@ -82,19 +82,17 @@ final class SpecV1PerformanceTests: XCTestCase {
         let height = frames[0].height
         
         let encodeStart = Date()
-        let encoder = VEVCEncoder(
-            width: width,
-            height: height,
-            maxbitrate: 500 * 1000,
-            zeroThreshold: 0, // strict quality
-            keyint: 4,
-            sceneChangeThreshold: 10
-        )
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = 500 * 1000
+        encoder.zeroThreshold = 0 // strict quality
+        encoder.keyint = 4
+        encoder.sceneChangeThreshold = 10
         let bitstream = try await encoder.encodeToData(images: frames)
         let encodeElapsed = Date().timeIntervalSince(encodeStart)
         
         let decodeStart = Date()
-        let decoder = Decoder(maxLayer: 2, maxConcurrency: 4)
+        let decoder = VEVCDecoder(maxLayer: 2)
+        decoder.maxConcurrency = 4
         let decodedFrames = try await decoder.decode(data: [UInt8](bitstream))
         let decodeElapsed = Date().timeIntervalSince(decodeStart)
         

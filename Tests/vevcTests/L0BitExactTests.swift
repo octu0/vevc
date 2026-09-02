@@ -69,10 +69,13 @@ final class L0BitExactTests: XCTestCase {
         let enc = LayersEncodeActor(
             width: width, height: height, maxbitrate: 300, framerate: 30,
             zeroThreshold: 0, keyint: 6, sceneChangeThreshold: 1_000_000_000,
-            pool: pool, qstep: qstep, profile: 0x02
+            pool: pool, qstep: qstep, profile: 0x02,
+            skipThreshold: 2, reconThresholdScale: 1, gop: 12,
+            l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1,
+            temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil
         )
-        let decFull = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x02)
-        let decL0 = StreamingDecoderActor(maxLayer: 0, width: width, height: height, profile: 0x02)
+        let decFull = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x02, gop: 12, temporalLayers: 1, parallelEntropy: true)
+        let decL0 = StreamingDecoderActor(maxLayer: 0, width: width, height: height, profile: 0x02, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         for i in 0..<frames {
             let offset: Int

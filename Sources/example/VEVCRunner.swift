@@ -126,19 +126,33 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
         return (0, [], (0,0,0), (0,0,0,0,0), (0,nil), (0,nil), (0,nil), 0, 0)
     }
     
-    // Profile 0x02 defaults: keyint 120 as an upper bound with the quality
-    // floor at alpha 2.5 placing the I frames. Resolved here rather than in the
-    // argument parser because -output-graph clones the config and flips
-    // `profile` afterwards, and the defaults have to follow the final profile.
-    // Profile 0x01 keeps keyint 30 and no floor.
-    let effKeyint = (config.profile == 0x02 && config.keyintExplicit != true) ? 120 : config.keyint
-    let effIqFloor = (config.profile == 0x02 && config.iqFloorExplicit != true) ? 250 : config.iqFloor
-
-    let vevcEncoder: VEVCEncoder
+    // The encoder init resolves the profile defaults (P2: keyint 120 +
+    // iq-floor 250), so only user-named values are written here. Constructing
+    // from the final config also covers -output-graph, which clones the config
+    // and flips `profile` afterwards.
+    let vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, profile: config.profile)
     if let qstep = config.qstep {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, qstep: qstep, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: effKeyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, iqFloor: effIqFloor)
+        vevcEncoder.qstep = qstep
     } else {
-        vevcEncoder = VEVCEncoder(width: firstFrame.width, height: firstFrame.height, maxbitrate: config.bitrate * 1000, framerate: config.framerate, zeroThreshold: config.zeroThreshold, keyint: effKeyint, sceneChangeThreshold: config.sceneThreshold, profile: config.profile, skipThreshold: config.skipThreshold, gop: config.gop, l2Cadence: config.l2Cadence, l1Cadence: config.l1Cadence, l0Cadence: config.l0Cadence, motionMaskingPx: config.motionMaskingPx, smooth: config.smooth, temporalLayers: config.temporalLayers, skipModel: config.skipModel, iqFloor: effIqFloor)
+        vevcEncoder.maxbitrate = config.bitrate * 1000
+    }
+    vevcEncoder.framerate = config.framerate
+    vevcEncoder.zeroThreshold = config.zeroThreshold
+    if config.keyintExplicit == true {
+        vevcEncoder.keyint = config.keyint
+    }
+    vevcEncoder.sceneChangeThreshold = config.sceneThreshold
+    vevcEncoder.skipThreshold = config.skipThreshold
+    vevcEncoder.gop = config.gop
+    vevcEncoder.l2Cadence = config.l2Cadence
+    vevcEncoder.l1Cadence = config.l1Cadence
+    vevcEncoder.l0Cadence = config.l0Cadence
+    vevcEncoder.motionMaskingPx = config.motionMaskingPx
+    vevcEncoder.smooth = config.smooth
+    vevcEncoder.temporalLayers = config.temporalLayers
+    vevcEncoder.skipModel = config.skipModel
+    if config.iqFloorExplicit == true {
+        vevcEncoder.iqFloor = config.iqFloor
     }
     
     let encStart1 = Date()
@@ -162,7 +176,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     
     func decodeSpeed(maxLayer: Int) async throws -> Double {
         print("  -> runVEVC Decoding Layer \(maxLayer)...")
-        let decoder = Decoder(maxLayer: maxLayer)
+        let decoder = VEVCDecoder(maxLayer: maxLayer)
         let stream = AsyncStream<[UInt8]> { continuation in
             for c in chunks { continuation.yield(c) }
             continuation.finish()
@@ -185,7 +199,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     if config.quality {
         print("  -> runVEVC Quality Pass (Layer 2)...")
         let qY4M = try Y4MIterator(path: y4mPath, config: config)
-        let decoder = Decoder(maxLayer: 2)
+        let decoder = VEVCDecoder(maxLayer: 2)
         let stream = AsyncStream<[UInt8]> { continuation in
             for c in chunks { continuation.yield(c) }
             continuation.finish()
@@ -215,7 +229,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
     if config.dumpHash {
         let encHash = SHA256.hash(data: outBytes).map { String(format: "%02x", $0) }.joined()
         var hasher = SHA256()
-        let decoder = Decoder(maxLayer: 2)
+        let decoder = VEVCDecoder(maxLayer: 2)
         let stream = AsyncStream<[UInt8]> { continuation in
             for c in chunks { continuation.yield(c) }
             continuation.finish()
@@ -234,7 +248,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
 }
 
 func extractVEVCFrames(bitstream: [UInt8], config: Config, indices: Set<Int>) async throws -> [Int: YCbCrImage] {
-    let vevcDecoder = Decoder(maxLayer: config.maxLayer)
+    let vevcDecoder = VEVCDecoder(maxLayer: config.maxLayer)
     let chunks = splitIntoChunks(data: bitstream, profile: config.profile)
     let stream = AsyncStream<[UInt8]> { continuation in
         for c in chunks { continuation.yield(c) }

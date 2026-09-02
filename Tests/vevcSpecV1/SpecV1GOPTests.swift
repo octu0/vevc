@@ -33,18 +33,16 @@ final class SpecV1GOPTests: XCTestCase {
         let height = frames[0].height
         
         // Encode
-        let encoder = VEVCEncoder(
-            width: width,
-            height: height,
-            maxbitrate: 1500 * 1000,
-            zeroThreshold: 0,
-            keyint: 4,
-            sceneChangeThreshold: 10
-        )
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = 1500 * 1000
+        encoder.zeroThreshold = 0
+        encoder.keyint = 4
+        encoder.sceneChangeThreshold = 10
         let bitstream = try await encoder.encodeToData(images: frames)
         
         // Decode
-        let decoder = Decoder(maxLayer: 2, maxConcurrency: 4)
+        let decoder = VEVCDecoder(maxLayer: 2)
+        decoder.maxConcurrency = 4
         let decodedFrames = try await decoder.decode(data: [UInt8](bitstream))
         
         XCTAssertEqual(decodedFrames.count, frameCount, "Decoded frame count should match input frame count")

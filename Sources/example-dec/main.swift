@@ -50,7 +50,7 @@ guard let inputData = try? Data(contentsOf: URL(fileURLWithPath: inputPath)) els
 do {
     let startTime = Date()
     let images: [YCbCrImage]
-    let decoder = Decoder(maxLayer: maxLayer)
+    let decoder = VEVCDecoder(maxLayer: maxLayer)
     images = try await decoder.decode(data: Array(inputData))
     let elapsed = Date().timeIntervalSince(startTime)
     print(String(

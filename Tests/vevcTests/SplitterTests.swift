@@ -155,13 +155,10 @@ struct SplitterTests {
             frames.append(frame)
         }
         
-        let encoder = VEVCEncoder(
-            width: frames[0].width,
-            height: frames[0].height,
-            maxbitrate: 1000 * 1024,
-            zeroThreshold: 3,
-            keyint: 10
-        )
+        let encoder = VEVCEncoder(width: frames[0].width, height: frames[0].height, profile: 0x01)
+        encoder.maxbitrate = 1000 * 1024
+        encoder.zeroThreshold = 3
+        encoder.keyint = 10
         
         let bitstream = try await encoder.encodeToData(images: Array(frames.prefix(5)))
         let bytes = [UInt8](bitstream)
@@ -173,7 +170,7 @@ struct SplitterTests {
         #expect(l1Result.droppedLayer1Bytes == 0)
         
         // Decode l1
-        let decoder1 = Decoder(maxLayer: 1)
+        let decoder1 = VEVCDecoder(maxLayer: 1)
         let decL1Frames = try await decoder1.decode(data: l1Result.data)
         #expect(decL1Frames.count == 5)
         
@@ -184,7 +181,7 @@ struct SplitterTests {
         #expect(0 < l0Result.droppedLayer1Bytes)
         
         // Decode l0
-        let decoder0 = Decoder(maxLayer: 0)
+        let decoder0 = VEVCDecoder(maxLayer: 0)
         let decL0Frames = try await decoder0.decode(data: l0Result.data)
         #expect(decL0Frames.count == 5)
         
@@ -195,7 +192,7 @@ struct SplitterTests {
         #expect(l2Result.droppedLayer1Bytes == 0)
         
         // Decode l2
-        let decoder2 = Decoder(maxLayer: 2)
+        let decoder2 = VEVCDecoder(maxLayer: 2)
         let decL2Frames = try await decoder2.decode(data: l2Result.data)
         #expect(decL2Frames.count == 5)
     }
@@ -214,15 +211,12 @@ struct SplitterTests {
             frames.append(frame)
         }
         
-        let encoder = VEVCEncoder(
-            width: frames[0].width,
-            height: frames[0].height,
-            maxbitrate: 1000 * 1024,
-            zeroThreshold: 3,
-            keyint: 10,
-            profile: 0x02,
-            temporalLayers: 2
-        )
+        let encoder = VEVCEncoder(width: frames[0].width, height: frames[0].height, profile: 0x02)
+        encoder.maxbitrate = 1000 * 1024
+        encoder.zeroThreshold = 3
+        encoder.keyint = 10
+        encoder.iqFloor = 0
+        encoder.temporalLayers = 2
         
         let bitstream = try await encoder.encodeToData(images: Array(frames.prefix(10)))
         let bytes = [UInt8](bitstream)
@@ -231,7 +225,7 @@ struct SplitterTests {
         let t0Result = try splitVEVCStream(input: bytes, maxLayer: 2, maxTemporalLayer: 0)
         #expect(t0Result.processedFrames == 5)
         
-        let decoder = Decoder(maxLayer: 2)
+        let decoder = VEVCDecoder(maxLayer: 2)
         let decFrames = try await decoder.decode(data: t0Result.data)
         #expect(decFrames.count == 5)
     }

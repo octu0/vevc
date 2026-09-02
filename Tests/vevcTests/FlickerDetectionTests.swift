@@ -112,9 +112,12 @@ final class FlickerDetectionTests: XCTestCase {
             zeroThreshold: 3,
             keyint: 30,  // 全フレームが1GOP内に入るようにする
             sceneChangeThreshold: 8,
-            pool: BlockViewPool()
+            pool: BlockViewPool(),
+            qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12,
+            l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1,
+            temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil
         )
-        let decoder = StreamingDecoderActor(width: width, height: height)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         var originals: [YCbCrImage] = []
         var decoded: [YCbCrImage] = []
@@ -189,7 +192,10 @@ final class FlickerDetectionTests: XCTestCase {
             zeroThreshold: 20,
             keyint: 15,
             sceneChangeThreshold: 10,
-            pool: BlockViewPool()
+            pool: BlockViewPool(),
+            qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12,
+            l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1,
+            temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil
         )
         let img = generateGradientFrame(width: width, height: height, frameIndex: 0)
         let imgSlightlyDifferent = generateGradientFrame(width: width, height: height, frameIndex: 1)

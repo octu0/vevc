@@ -47,18 +47,28 @@ final class Profile0x02FixtureTests: XCTestCase {
         }
         
         // 1. Encoding Determinism Test (2 consecutive runs produce bit-exact same SHA-256)
-        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02, l2Cadence: 1, l1Cadence: 1)
+        let encoder1 = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder1.qstep = 16
+        encoder1.keyint = 30
+        encoder1.iqFloor = 0
+        encoder1.l2Cadence = 1
+        encoder1.l1Cadence = 1
         let bitstream1 = try await encoder1.encodeToData(images: frames)
         let hash1 = SHA256.hash(data: Data(bitstream1)).compactMap { String(format: "%02x", $0) }.joined()
         
-        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02, l2Cadence: 1, l1Cadence: 1)
+        let encoder2 = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder2.qstep = 16
+        encoder2.keyint = 30
+        encoder2.iqFloor = 0
+        encoder2.l2Cadence = 1
+        encoder2.l1Cadence = 1
         let bitstream2 = try await encoder2.encodeToData(images: frames)
         let hash2 = SHA256.hash(data: Data(bitstream2)).compactMap { String(format: "%02x", $0) }.joined()
         
         XCTAssertEqual(hash1, hash2, "Profile 0x02 encoding must be strictly deterministic across repeated runs.")
         
         // 2. Roundtrip Decoding Test
-        let decodedFrames = try await Decoder().decode(data: bitstream1)
+        let decodedFrames = try await VEVCDecoder(maxLayer: 2).decode(data: bitstream1)
         
         XCTAssertEqual(decodedFrames.count, frameCount, "Decoded frame count must match input frame count.")
         
@@ -113,14 +123,17 @@ final class Profile0x02FixtureTests: XCTestCase {
         }
         
         // Encode and decode
-        let encoder = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02)
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder.qstep = 16
+        encoder.keyint = 30
+        encoder.iqFloor = 0
         let bitstream = try await encoder.encodeToData(images: frames)
         
-        let decoder = Decoder()
+        let decoder = VEVCDecoder(maxLayer: 2)
         let decoded1 = try await decoder.decode(data: bitstream)
         
         // Decode a second time with clean decoder instance to verify bit-exact consistency
-        let decoder2 = Decoder()
+        let decoder2 = VEVCDecoder(maxLayer: 2)
         let decoded2 = try await decoder2.decode(data: bitstream)
         
         XCTAssertEqual(decoded1.count, frameCount)

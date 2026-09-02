@@ -19,9 +19,12 @@ final class L0HistoryDiagTests: XCTestCase {
         let enc = LayersEncodeActor(
             width: reader.width, height: reader.height, maxbitrate: 2_500_000, framerate: 60,
             zeroThreshold: 0, keyint: 30, sceneChangeThreshold: 2000,
-            pool: pool, qstep: nil, profile: 0x02
+            pool: pool, qstep: nil, profile: 0x02,
+            skipThreshold: 2, reconThresholdScale: 1, gop: 12,
+            l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1,
+            temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil
         )
-        let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02)
+        let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         var frame = 0
         while let img = try reader.readFrame(), frame < 40 {
@@ -133,9 +136,11 @@ final class L0HistoryDiagTests: XCTestCase {
             motionMaskingPx: 2,
             smooth: 1,
             temporalLayers: 1,
-            skipModel: 1
+            skipModel: 1,
+            iqFloor: 0,
+            dumpWriter: nil
         )
-        let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02)
+        let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         var frame = 0
         var totalReconMismatches = 0
@@ -226,9 +231,10 @@ final class L0HistoryDiagTests: XCTestCase {
             smooth: 1,
             temporalLayers: 1,
             skipModel: 1,
-            iqFloor: 200
+            iqFloor: 200,
+            dumpWriter: nil
         )
-        let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02)
+        let dec = StreamingDecoderActor(maxLayer: 2, width: reader.width, height: reader.height, profile: 0x02, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         var frame = 0
         var totalReconMismatches = 0

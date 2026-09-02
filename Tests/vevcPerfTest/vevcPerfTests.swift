@@ -53,11 +53,12 @@ final class VevcPerfTests: XCTestCase {
             images.append(generateGradientImage(width: width, height: height, seed: i * 3))
         }
         
-        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024)
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = 1000 * 1024
         let encoded = try await encoder.encodeToData(images: images)
         XCTAssert(encoded.isEmpty == false)
         
-        let decoded = try await Decoder().decode(data: encoded)
+        let decoded = try await VEVCDecoder(maxLayer: 2).decode(data: encoded)
         XCTAssertEqual(decoded.count, frameCount, "デコード結果のフレーム数が\(frameCount)でない: \(decoded.count)")
         
         for i in 0..<frameCount {
@@ -76,8 +77,8 @@ final class VevcPerfTests: XCTestCase {
         let frameCount = 8
         
         // maxbitrateを10倍に
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 10000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 10000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
         
         var failedFrames: [(Int, Double)] = []
         
@@ -133,8 +134,8 @@ final class VevcPerfTests: XCTestCase {
         let height = 480
         let frameCount = 20 // GOPサイズ(15)を超えるフレーム数
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
         
         var failedFrames: [(Int, Double)] = []
         
@@ -190,8 +191,8 @@ final class VevcPerfTests: XCTestCase {
         let height = 1080
         let frameCount = 6
         
-        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 8, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+        let encoder = LayersEncodeActor(width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 8, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
         
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)

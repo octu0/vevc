@@ -21,7 +21,7 @@ func scoreExistingStream(streamPath: String, y4mPath: String, config: Config) as
 
     // Same entry point vevc-dec uses, so the frame splitting matches the
     // production decode path exactly.
-    let decoder = Decoder(maxLayer: config.maxLayer)
+    let decoder = VEVCDecoder(maxLayer: config.maxLayer)
 
     var mets = [QualityMetrics]()
     var perFrameCSV = "frame,psnr,ssim,ssimY\n"

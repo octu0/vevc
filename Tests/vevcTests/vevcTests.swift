@@ -68,11 +68,12 @@ final class VevcTests: XCTestCase {
 
         let images = [img1, img2]
 
-        let encoder = VEVCEncoder(width: 64, height: 64, maxbitrate: 1000 * 1024)
+        let encoder = VEVCEncoder(width: 64, height: 64, profile: 0x01)
+        encoder.maxbitrate = 1000 * 1024
         let encoded = try await encoder.encodeToData(images: images)
         XCTAssertFalse(encoded.isEmpty)
 
-        let decoded = try await Decoder().decode(data: encoded)
+        let decoded = try await VEVCDecoder(maxLayer: 2).decode(data: encoded)
         XCTAssertEqual(decoded.count, 2)
         XCTAssertEqual(decoded[0].width, 64)
         XCTAssertEqual(decoded[0].height, 64)
@@ -127,11 +128,12 @@ final class VevcTests: XCTestCase {
         let height = 480
         let img = generateGradientImage(width: width, height: height, seed: 42)
 
-        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 1000 * 1024)
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = 1000 * 1024
         let encoded = try await encoder.encodeToData(images: [img])
         XCTAssertFalse(encoded.isEmpty, "エンコード結果が空")
 
-        let decoded = try await Decoder().decode(data: encoded)
+        let decoded = try await VEVCDecoder(maxLayer: 2).decode(data: encoded)
         XCTAssertEqual(decoded.count, 1, "デコード結果のフレーム数が1でない")
         XCTAssertEqual(decoded[0].width, width)
         XCTAssertEqual(decoded[0].height, height)
@@ -153,8 +155,8 @@ final class VevcTests: XCTestCase {
         let frameCount = 4
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+            width: width, height: height, maxbitrate: 2000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         for i in 0..<frameCount {
             let img = generateGradientImage(width: width, height: height, seed: i * 5)
@@ -196,8 +198,8 @@ final class VevcTests: XCTestCase {
         }
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         for i in 0..<frameCount {
             let chunk = try await encoder.encodeFrame(image: baseImg)
@@ -216,8 +218,8 @@ final class VevcTests: XCTestCase {
         let frameCount = 5
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         for i in 0..<frameCount {
             var img = YCbCrImage(width: width, height: height)

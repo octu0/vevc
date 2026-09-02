@@ -35,11 +35,14 @@ final class Profile0x02Tests: XCTestCase {
         }
         
         // qstep16でエンコード
-        let encoder = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 30, profile: 0x02)
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder.qstep = 16
+        encoder.keyint = 30
+        encoder.iqFloor = 0
         let bitstream = try await encoder.encodeToData(images: frames)
         
         // デコード
-        let decoder = Decoder(maxLayer: 2)
+        let decoder = VEVCDecoder(maxLayer: 2)
         let outFrames = try await decoder.decode(data: bitstream)
         
         XCTAssertEqual(outFrames.count, 100)
@@ -228,10 +231,19 @@ final class Profile0x02Tests: XCTestCase {
         // エントロピー段とSkip機構のオーバーヘッド中立性を計測するため、
         // sceneChangeThreshold に maxEstimateFastSAD を超える値を指定してシーン検出を無効化し、
         // cadence を 1 にして間引きなしの同等レイヤー条件で P1/P2 のフレームタイプ・構造を揃える。
-        let encoder01 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, sceneChangeThreshold: 1_000_000_000, profile: 0x01)
+        let encoder01 = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder01.qstep = 16
+        encoder01.keyint = 10
+        encoder01.sceneChangeThreshold = 1_000_000_000
         let bitstream01 = try await encoder01.encodeToData(images: frames)
         
-        let encoder02 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, sceneChangeThreshold: 1_000_000_000, profile: 0x02, l2Cadence: 1, l1Cadence: 1)
+        let encoder02 = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder02.qstep = 16
+        encoder02.keyint = 10
+        encoder02.iqFloor = 0
+        encoder02.sceneChangeThreshold = 1_000_000_000
+        encoder02.l2Cadence = 1
+        encoder02.l1Cadence = 1
         let bitstream02 = try await encoder02.encodeToData(images: frames)
         
         let diff = abs(bitstream01.count - bitstream02.count)
@@ -253,10 +265,16 @@ final class Profile0x02Tests: XCTestCase {
             frames.append(img)
         }
         
-        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let encoder1 = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder1.qstep = 16
+        encoder1.keyint = 10
+        encoder1.iqFloor = 0
         let bitstream1 = try await encoder1.encodeToData(images: frames)
         
-        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let encoder2 = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder2.qstep = 16
+        encoder2.keyint = 10
+        encoder2.iqFloor = 0
         let bitstream2 = try await encoder2.encodeToData(images: frames)
         
         XCTAssertEqual(bitstream1, bitstream2)
@@ -280,15 +298,21 @@ final class Profile0x02Tests: XCTestCase {
         }
 
         // 1. rANSContext 無効時
-        let encoderBase = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let encoderBase = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoderBase.qstep = 16
+        encoderBase.keyint = 10
+        encoderBase.iqFloor = 0
         let bitstreamBase = try await encoderBase.encodeToData(images: frames)
-        let decoderBase = Decoder(maxLayer: 2)
+        let decoderBase = VEVCDecoder(maxLayer: 2)
         let outBase = try await decoderBase.decode(data: bitstreamBase)
 
         // 2. rANSContext 有効時
-        let encoderModel = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
+        let encoderModel = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoderModel.qstep = 16
+        encoderModel.keyint = 10
+        encoderModel.iqFloor = 0
         let bitstreamModel = try await encoderModel.encodeToData(images: frames)
-        let decoderModel = Decoder(maxLayer: 2)
+        let decoderModel = VEVCDecoder(maxLayer: 2)
         let outModel = try await decoderModel.decode(data: bitstreamModel)
 
         // リセット
@@ -363,15 +387,21 @@ final class Profile0x02Tests: XCTestCase {
             testedAny = true
 
             // 1. Base
-            let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
+            let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, profile: 0x02)
+            encBase.qstep = 16
+            encBase.keyint = 10
+            encBase.iqFloor = 0
             let dataBase = try await encBase.encodeToData(images: frames)
-            let decBase = Decoder(maxLayer: 2)
+            let decBase = VEVCDecoder(maxLayer: 2)
             let outBase = try await decBase.decode(data: dataBase)
 
             // 2. rANSContext
-            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, profile: 0x02)
+            encModel.qstep = 16
+            encModel.keyint = 10
+            encModel.iqFloor = 0
             let dataModel = try await encModel.encodeToData(images: frames)
-            let decModel = Decoder(maxLayer: 2)
+            let decModel = VEVCDecoder(maxLayer: 2)
             let outModel = try await decModel.decode(data: dataModel)
 
 
@@ -430,11 +460,19 @@ final class Profile0x02Tests: XCTestCase {
             testedAny = true
 
             // 1. Base
-            let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
+            let encBase = VEVCEncoder(width: frames[0].width, height: frames[0].height, profile: 0x02)
+            encBase.maxbitrate = 500_000
+            encBase.framerate = 30
+            encBase.keyint = 30
+            encBase.iqFloor = 0
             let dataBase = try await encBase.encodeToData(images: frames)
 
             // 2. rANSContext
-            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, profile: 0x02)
+            encModel.maxbitrate = 500_000
+            encModel.framerate = 30
+            encModel.keyint = 30
+            encModel.iqFloor = 0
             let dataModel = try await encModel.encodeToData(images: frames)
 
 

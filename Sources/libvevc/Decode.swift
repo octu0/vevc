@@ -14,7 +14,11 @@ final class CAPIDecoderContext: @unchecked Sendable {
     var cCapacity: Int = 0
     
     init(maxLayer: Int, width: Int, height: Int) {
-        self.actor = StreamingDecoderActor(maxLayer: maxLayer, width: width, height: height)
+        // Self-configuring: the stream's first chunk carries the file header
+        // and vevc_decode passes chunks through unmodified, so dimensions,
+        // profile and GOP shape all come from the stream itself. width/height
+        // here only size the C output buffers.
+        self.actor = StreamingDecoderActor(maxLayer: maxLayer)
         self.width = width
         self.height = height
         
@@ -89,27 +93,15 @@ public func vevc_dec_decode(dec: UnsafeMutableRawPointer, data: UnsafePointer<UI
     res.pointee.stride_u = 0
     res.pointee.stride_v = 0
     
-    var decodeChunk = chunk
-    var offset = 0
-    if 4 <= chunk.count && chunk[0] == 0x56 && chunk[1] == 0x45 && chunk[2] == 0x56 && chunk[3] == 0x43 {
-        if 6 <= chunk.count {
-            let metaSize = Int(chunk[4]) << 8 | Int(chunk[5])
-            offset = 6 + metaSize
-            if offset < chunk.count {
-                decodeChunk = Array(chunk[offset..<chunk.count])
-            } else {
-                decodeChunk = []
-            }
-        }
-    }
-    
-    guard decodeChunk.isEmpty != true else {
+    // The chunk is passed through unmodified: a leading file header configures
+    // the decoder itself (dimensions/profile/GOP from the stream, DataLayout).
+    guard chunk.isEmpty != true else {
         res.pointee.status = VEVC_ERR
         return UnsafeMutableRawPointer(res)
     }
-    
+
     do {
-        if let img = try ctx.decode(chunk: decodeChunk) {
+        if let img = try ctx.decode(chunk: chunk) {
             res.pointee.width = Int32(img.width)
             res.pointee.height = Int32(img.height)
             res.pointee.stride_y = Int32(img.width)

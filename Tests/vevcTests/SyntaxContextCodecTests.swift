@@ -254,7 +254,14 @@ final class SyntaxContextCodecTests: XCTestCase {
         let gop = 8
         let totalFrames = 20
 
-        let encoder = VEVCEncoder(width: width, height: height, maxbitrate: 500, framerate: 30, zeroThreshold: 0, keyint: gop, sceneChangeThreshold: 100, maxConcurrency: 1, profile: 0x02, gop: gop)
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encoder.maxbitrate = 500
+        encoder.framerate = 30
+        encoder.zeroThreshold = 0
+        encoder.keyint = gop
+        encoder.iqFloor = 0
+        encoder.sceneChangeThreshold = 100
+        encoder.gop = gop
         var encodedChunks = [[UInt8]]()
         var s: UInt64 = 12345
         for _ in 0..<totalFrames {
@@ -278,7 +285,8 @@ final class SyntaxContextCodecTests: XCTestCase {
         }
 
         // Full decode of all frames using Decoder (serial)
-        let fullDecoder = Decoder(maxLayer: 2, maxConcurrency: 1)
+        let fullDecoder = VEVCDecoder(maxLayer: 2)
+        fullDecoder.maxConcurrency = 1
         var fullRecons = [YCbCrImage]()
         for try await img in fullDecoder.decodeStream(stream: AsyncChunks(chunks: encodedChunks)) {
             fullRecons.append(img)
@@ -300,7 +308,8 @@ final class SyntaxContextCodecTests: XCTestCase {
             raChunks.append(encodedChunks[f])
         }
 
-        let raDecoder = Decoder(maxLayer: 2, maxConcurrency: 1)
+        let raDecoder = VEVCDecoder(maxLayer: 2)
+        raDecoder.maxConcurrency = 1
         var raRecons = [YCbCrImage]()
         for try await img in raDecoder.decodeStream(stream: AsyncChunks(chunks: raChunks)) {
             raRecons.append(img)

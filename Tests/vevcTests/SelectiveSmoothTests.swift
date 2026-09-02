@@ -100,11 +100,20 @@ final class SelectiveSmoothTests: XCTestCase {
         }
 
         // デフォルト初期化
-        let encDefault = VEVCEncoder(width: width, height: height, qstep: 16, framerate: 30, profile: 0x02)
+        let encDefault = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encDefault.qstep = 16
+        encDefault.framerate = 30
+        encDefault.keyint = 30
+        encDefault.iqFloor = 0
         let bytesDefault = try await encDefault.encodeToData(images: frames)
 
         // 明示的に smooth: 1 を指定
-        let encExplicitDefault = VEVCEncoder(width: width, height: height, qstep: 16, framerate: 30, profile: 0x02, smooth: 1)
+        let encExplicitDefault = VEVCEncoder(width: width, height: height, profile: 0x02)
+        encExplicitDefault.qstep = 16
+        encExplicitDefault.framerate = 30
+        encExplicitDefault.keyint = 30
+        encExplicitDefault.iqFloor = 0
+        encExplicitDefault.smooth = 1
         let bytesExplicitDefault = try await encExplicitDefault.encodeToData(images: frames)
 
         XCTAssertEqual(bytesDefault, bytesExplicitDefault, "Default settings must produce bit-exact output to explicit smooth: 1")
@@ -130,11 +139,16 @@ final class SelectiveSmoothTests: XCTestCase {
             frames.append(img)
         }
 
-        let enc = VEVCEncoder(width: width, height: height, qstep: 16, framerate: 30, profile: 0x02, smooth: 1)
+        let enc = VEVCEncoder(width: width, height: height, profile: 0x02)
+        enc.qstep = 16
+        enc.framerate = 30
+        enc.keyint = 30
+        enc.iqFloor = 0
+        enc.smooth = 1
         let bytes = try await enc.encodeToData(images: frames)
         XCTAssertFalse(bytes.isEmpty)
 
-        let decoder = Decoder(maxLayer: 2)
+        let decoder = VEVCDecoder(maxLayer: 2)
         let decoded = try await decoder.decode(data: bytes)
         XCTAssertEqual(decoded.count, 10)
     }

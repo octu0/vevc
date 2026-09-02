@@ -22,14 +22,11 @@ final class SpecV1FormatTests: XCTestCase {
         guard allFrames.isEmpty != true else { return }
         let width = allFrames[0].width
         let height = allFrames[0].height
-        let encoder = VEVCEncoder(
-            width: width,
-            height: height,
-            maxbitrate: 1000 * 1024,
-            zeroThreshold: 3,
-            keyint: 4,
-            sceneChangeThreshold: 10
-        )
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = 1000 * 1024
+        encoder.zeroThreshold = 3
+        encoder.keyint = 4
+        encoder.sceneChangeThreshold = 10
         
         let bitstream = try await encoder.encodeToData(images: allFrames)
         let bytes = [UInt8](bitstream)

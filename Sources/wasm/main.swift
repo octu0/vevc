@@ -23,8 +23,8 @@ final class UnsafeEncoder: @unchecked Sendable {
 }
 
 final class UnsafeDecoder: @unchecked Sendable {
-    let raw: vevc.Decoder
-    init(_ raw: vevc.Decoder) { self.raw = raw }
+    let raw: vevc.VEVCDecoder
+    init(_ raw: vevc.VEVCDecoder) { self.raw = raw }
 }
 
 final class ResolverBox: @unchecked Sendable {
@@ -114,7 +114,10 @@ class EncoderSession {
         self.id = id
         self.width = width
         self.height = height
-        self.encoder = UnsafeEncoder(vevc.VEVCEncoder(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate))
+        let vevcEncoder = vevc.VEVCEncoder(width: width, height: height, profile: 0x01)
+        vevcEncoder.maxbitrate = maxbitrate
+        vevcEncoder.framerate = framerate
+        self.encoder = UnsafeEncoder(vevcEncoder)
         self.onChunk = onChunk
         
         self.inbox = FrameInbox(capacity: 2)
@@ -155,7 +158,7 @@ class DecoderSession {
     
     init(id: Int, onFrame: JSObject) {
         self.id = id
-        self.decoder = UnsafeDecoder(vevc.Decoder(maxLayer: 2))
+        self.decoder = UnsafeDecoder(vevc.VEVCDecoder(maxLayer: 2))
         self.onFrame = onFrame
         
         self.inbox = FrameInbox(capacity: 2)

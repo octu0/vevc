@@ -843,15 +843,11 @@ public final class TrainingDumpEncoder: @unchecked Sendable {
                 }
             }
         }
-        let encoder = VEVCEncoder(
-            width: y4m.width,
-            height: y4m.height,
-            qstep: qstep,
-            maxbitrate: maxbitrate,
-            framerate: fps,
-            profile: profile,
-            dumpWriter: dumper
-        )
+        let encoder = VEVCEncoder(width: y4m.width, height: y4m.height, profile: profile)
+        encoder.qstep = qstep
+        encoder.maxbitrate = maxbitrate
+        encoder.framerate = fps
+        encoder.dumpWriter = dumper
         while let frame = try y4m.readFrame() {
             _ = try await encoder.encode(image: frame)
         }

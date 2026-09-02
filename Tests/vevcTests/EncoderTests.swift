@@ -95,8 +95,10 @@ final class EncoderTests: XCTestCase {
             for i in 0..<ptr.count { ptr[i] = 128 }
         }
 
-        let encoder1 = VEVCEncoder(width: width, height: height, qstep: 100)
-        let encoder2 = VEVCEncoder(width: width, height: height, qstep: 100)
+        let encoder1 = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder1.qstep = 100
+        let encoder2 = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder2.qstep = 100
 
         let bytes1 = try await encoder1.encode(image: img1)
         let bytes2 = try await encoder2.encode(image: img2)

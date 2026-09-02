@@ -6,8 +6,9 @@ var outPath = ""
 var bitrate = 500
 var zeroThreshold = 4
 var keyint = 30
-/// Whether the user named -keyint / -iq-floor on the command line. The
-/// profile 0x02 defaults below only fill in the ones that were left out.
+/// Whether the user named -keyint / -iq-floor on the command line. Only
+/// named values are written to the encoder; the encoder init resolves the
+/// per-profile defaults for the ones that were left out.
 var keyintExplicit = false
 var iqFloorExplicit = false
 var sceneThreshold = 500
@@ -154,16 +155,6 @@ while i < args.count {
     i += 1
 }
 
-// Profile 0x02 defaults. The quality floor places the I frames and `keyint`
-// only caps the GOP, so the pair ships together: keyint 120 as the upper bound
-// and alpha 2.5 as the floor. Resolved after the whole argument list is read,
-// because -profile can appear anywhere in it. Profile 0x01 is untouched — it
-// has no floor and keeps its fixed keyint 30 period.
-if profile == 0x02 {
-    if keyintExplicit != true { keyint = 120 }
-    if iqFloorExplicit != true { iqFloor = 250 }
-}
-
 if inputPath.isEmpty || outPath.isEmpty {
     fputs("Usage: vevc-enc -i </path/to/input.y4m | -> -o </path/to/output.vevc | -> [-b <kilobit> | --bitrate <kilobit>] [-qstep <val>] [-framerate <out_fps>] [-in-fps <in_fps>] [-keyint <keyint>] [-zero-threshold <threshold>] [-scene-threshold <sad>] [-profile <profile>] [-gop <gop>] [-l2-cadence <n>] [-l1-cadence <n>] [-l0-cadence <n>] [-skip-threshold <threshold>] [-recon-threshold-scale <scale>] [-mvt <px>] [-smooth <0|1>] [-temporal-layers <1|2>] [-skip-model <0|1>] [-iq-floor <alphax100>]\n  -iq-floor <alphax100>: Quality floor for early I frames; codes an I once a P frame's luma MSE exceeds alpha x the GOP's I-frame MSE, making -keyint an upper bound (default: 250 on profile 2, 0 = off on profile 1)\n  -keyint <keyint>: Maximum GOP size (default: 120 on profile 2, 30 on profile 1)\n  -mvt <px>: Motion masking threshold in px/frame; drops full-resolution detail on high-motion blocks (motion masking); active only during saturation (default: 2, 0 disables)\n  -smooth <0|1>: P-frame residual plane smoothing (default: 1, 0 disables)\n  -temporal-layers <1|2>: Number of temporal layers (default: 1, 2 for T0/T1)\n  -skip-model <0|1>: Learned skip-safety decider on profile 0x02 P-frames (default: 1, 0 disables; no effect on profile 0x01)\n", stderr)
     exit(1)
@@ -211,51 +202,32 @@ do {
         converter = vevc.FrameRateConverter(inFps: sourceFps, outFps: targetFps)
     }
     
-    let encoder: vevc.VEVCEncoder
+    // The encoder init resolves the profile defaults (P2: keyint 120 +
+    // iq-floor 250), so only the values the user named are written here.
+    let encoder = vevc.VEVCEncoder(width: y4mReader.width, height: y4mReader.height, profile: profile)
     if let qstep = qstep {
-        encoder = vevc.VEVCEncoder(
-            width: y4mReader.width,
-            height: y4mReader.height,
-            qstep: qstep,
-            framerate: targetFps,
-            zeroThreshold: zeroThreshold,
-            keyint: keyint,
-            sceneChangeThreshold: sceneThreshold,
-            profile: profile,
-            skipThreshold: skipThreshold,
-            reconThresholdScale: reconThresholdScale,
-            gop: gop,
-            l2Cadence: l2Cadence,
-            l1Cadence: l1Cadence,
-            l0Cadence: l0Cadence,
-            motionMaskingPx: motionMaskingPx,
-            smooth: smooth,
-            temporalLayers: temporalLayers,
-            skipModel: skipModel,
-            iqFloor: iqFloor
-        )
+        encoder.qstep = qstep
     } else {
-        encoder = vevc.VEVCEncoder(
-            width: y4mReader.width,
-            height: y4mReader.height,
-            maxbitrate: bitrate * 1000,
-            framerate: targetFps,
-            zeroThreshold: zeroThreshold,
-            keyint: keyint,
-            sceneChangeThreshold: sceneThreshold,
-            profile: profile,
-            skipThreshold: skipThreshold,
-            reconThresholdScale: reconThresholdScale,
-            gop: gop,
-            l2Cadence: l2Cadence,
-            l1Cadence: l1Cadence,
-            l0Cadence: l0Cadence,
-            motionMaskingPx: motionMaskingPx,
-            smooth: smooth,
-            temporalLayers: temporalLayers,
-            skipModel: skipModel,
-            iqFloor: iqFloor
-        )
+        encoder.maxbitrate = bitrate * 1000
+    }
+    encoder.framerate = targetFps
+    encoder.zeroThreshold = zeroThreshold
+    if keyintExplicit == true {
+        encoder.keyint = keyint
+    }
+    encoder.sceneChangeThreshold = sceneThreshold
+    encoder.skipThreshold = skipThreshold
+    encoder.reconThresholdScale = reconThresholdScale
+    encoder.gop = gop
+    encoder.l2Cadence = l2Cadence
+    encoder.l1Cadence = l1Cadence
+    encoder.l0Cadence = l0Cadence
+    encoder.motionMaskingPx = motionMaskingPx
+    encoder.smooth = smooth
+    encoder.temporalLayers = temporalLayers
+    encoder.skipModel = skipModel
+    if iqFloorExplicit == true {
+        encoder.iqFloor = iqFloor
     }
 
     var frameCount = 0

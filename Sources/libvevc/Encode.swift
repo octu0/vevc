@@ -11,10 +11,13 @@ final class CAPIEncoderContext: @unchecked Sendable {
     var dataCapacity: Int = 0
     
     init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int) {
-        self.encoder = VEVCEncoder(
-            width: width, height: height, maxbitrate: maxbitrate, framerate: framerate,
-            zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold
-        )
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = maxbitrate
+        encoder.framerate = framerate
+        encoder.zeroThreshold = zeroThreshold
+        encoder.keyint = keyint
+        encoder.sceneChangeThreshold = sceneChangeThreshold
+        self.encoder = encoder
         self.width = width
         self.height = height
         

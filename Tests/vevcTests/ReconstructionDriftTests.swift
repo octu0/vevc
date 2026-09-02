@@ -116,8 +116,8 @@ final class ReconstructionDriftTests: XCTestCase {
         let height = 480
 
         let encoder = LayersEncodeActor(
-            width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool())
-        let decoder = StreamingDecoderActor(width: width, height: height)
+            width: width, height: height, maxbitrate: 500 * 1024, framerate: 30, zeroThreshold: 3, keyint: 15, sceneChangeThreshold: 32, pool: BlockViewPool(), qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         var img0 = YCbCrImage(width: width, height: height)
         for y in 0..<height {

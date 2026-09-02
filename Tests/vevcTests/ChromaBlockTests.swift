@@ -129,9 +129,12 @@ final class ChromaBlockTests: XCTestCase {
             zeroThreshold: 3,
             keyint: 15,
             sceneChangeThreshold: 8,
-            pool: BlockViewPool()
+            pool: BlockViewPool(),
+            qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12,
+            l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1,
+            temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil
         )
-        let decoder = StreamingDecoderActor(width: width, height: height)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         let original = generateColorBarFrame(width: width, height: height)
         let chunk = try await encoder.encodeFrame(image: original)
@@ -178,9 +181,12 @@ final class ChromaBlockTests: XCTestCase {
             zeroThreshold: 3,
             keyint: 15,
             sceneChangeThreshold: 8,
-            pool: BlockViewPool()
+            pool: BlockViewPool(),
+            qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12,
+            l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1,
+            temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil
         )
-        let decoder = StreamingDecoderActor(width: width, height: height)
+        let decoder = StreamingDecoderActor(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
 
         // I-frame
         let frame0 = generateDiagonalGradientFrame(width: width, height: height)

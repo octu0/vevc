@@ -147,16 +147,12 @@ public func runVEVCPipeline(images: [YCbCrImage], bitrate: Int, fps: Int, profil
     let width = images[0].width
     let height = images[0].height
     
-    let encoder = VEVCEncoder(
-        width: width,
-        height: height,
-        maxbitrate: bitrate * 1000,
-        framerate: fps,
-        zeroThreshold: 3,
-        keyint: 30,
-        sceneChangeThreshold: 10,
-        profile: profile
-    )
+    let encoder = VEVCEncoder(width: width, height: height, profile: profile)
+    encoder.maxbitrate = bitrate * 1000
+    encoder.framerate = fps
+    encoder.zeroThreshold = 3
+    encoder.keyint = 30
+    encoder.sceneChangeThreshold = 10
     
     var chunks: [[UInt8]] = []
     var frameSizes: [Int] = []
@@ -174,7 +170,7 @@ public func runVEVCPipeline(images: [YCbCrImage], bitrate: Int, fps: Int, profil
     }
     
     onProgress("Decoding VEVC (Layer 2)...")
-    let decoder = Decoder(maxLayer: 2)
+    let decoder = VEVCDecoder(maxLayer: 2)
     let stream = AsyncStream<[UInt8]> { continuation in
         for c in chunks { continuation.yield(c) }
         continuation.finish()

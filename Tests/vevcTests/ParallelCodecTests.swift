@@ -57,8 +57,12 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 1. Parallel Encoding Test
-        let encoder = VEVCEncoder(
-            width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 4, sceneChangeThreshold: 100, maxConcurrency: 2)
+        let encoder = VEVCEncoder(width: width, height: height, profile: 0x01)
+        encoder.maxbitrate = 1000 * 1024
+        encoder.framerate = 30
+        encoder.zeroThreshold = 3
+        encoder.keyint = 4
+        encoder.sceneChangeThreshold = 100
 
         var chunks: [[UInt8]] = []
         let chunkStream = await encoder.encodeStream(stream: frameStream)
@@ -77,7 +81,8 @@ final class ParallelCodecTests: XCTestCase {
         }
 
         // 2. Parallel Decoding Test
-        let decoder = Decoder(maxLayer: 2, maxConcurrency: 2)
+        let decoder = VEVCDecoder(maxLayer: 2)
+        decoder.maxConcurrency = 2
         var decodedImages: [YCbCrImage] = []
         let imageStream = decoder.decodeStream(stream: encodedStream)
         for try await img in imageStream {
