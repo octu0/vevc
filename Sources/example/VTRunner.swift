@@ -43,7 +43,11 @@ class QualityBox: @unchecked Sendable {
     }
 }
 
-func runH264(y4mPath: String, config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
+func runH264(y4mPath: String, config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
+    return try await runH264(y4mPath: y4mPath, config: config, width: width, height: height, disableHWA: false)
+}
+
+func runH264(y4mPath: String, config: Config, width: Int, height: Int, disableHWA: Bool) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
     var encTime: Double = 0
     var compSize: Int = 0
 
@@ -253,7 +257,11 @@ func runH264(y4mPath: String, config: Config, width: Int, height: Int, disableHW
     return (encTime, decTime, compSize, metrics, frameBox.frames)
 }
 
-func runHEVC(y4mPath: String, config: Config, width: Int, height: Int, disableHWA: Bool = false) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
+func runHEVC(y4mPath: String, config: Config, width: Int, height: Int) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
+    return try await runHEVC(y4mPath: y4mPath, config: config, width: width, height: height, disableHWA: false)
+}
+
+func runHEVC(y4mPath: String, config: Config, width: Int, height: Int, disableHWA: Bool) async throws -> (encTime: Double, decTime: Double, compSize: Int, metrics: [QualityMetrics]?, bitstream: [VTFrameData]) {
     var encTime: Double = 0
     var compSize: Int = 0
     

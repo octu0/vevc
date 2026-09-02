@@ -35,7 +35,7 @@ struct RawBypassThresholdTests {
             encoder.addTrailingZeros(trailingZeros)
         }
         encoder.flush()
-        return encoder.getData(selectModel: StaticEntropyModel.selectModel).count
+        return encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true).count
     }
 
     /// Generate realistic DWT coefficient pairs that mimic the distribution
@@ -76,13 +76,13 @@ struct RawBypassThresholdTests {
             encoder.addPair(run: pair.run, val: pair.val, context: 0)
         }
         encoder.flush()
-        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
 
         // getData() structure: [bypassLen(VLQ)] [bypassData] [coeffCount(VLQ)] [mode(1B)] ...
         var offset = 0
         let bypassLen = try readVLQSizeFromBytes(Array(data), offset: &offset)
         offset += bypassLen  // skip bypassData
-        let _ = try readVLQSizeFromBytes(Array(data), offset: &offset)  // skip coeffCount
+        try readVLQSizeFromBytes(Array(data), offset: &offset)  // skip coeffCount
         let modeByteOffset = offset
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         #expect(data[modeByteOffset] == 0x80, "Should be raw bypass mode (0x80) for \(pairs.count) pairs")
@@ -96,12 +96,12 @@ struct RawBypassThresholdTests {
             encoder.addPair(run: pair.run, val: pair.val, context: 0)
         }
         encoder.flush()
-        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
 
         var offset = 0
         let bypassLen = try readVLQSizeFromBytes(Array(data), offset: &offset)
         offset += bypassLen  // skip bypassData
-        let _ = try readVLQSizeFromBytes(Array(data), offset: &offset)  // skip coeffCount
+        try readVLQSizeFromBytes(Array(data), offset: &offset)  // skip coeffCount
         let modeByteOffset = offset
         #expect(modeByteOffset < data.count, "Data should contain mode byte")
         let modeByte = data[modeByteOffset]
@@ -181,15 +181,15 @@ struct RawBypassThresholdTests {
                 encoder.addPair(run: pair.run, val: pair.val, context: 0)
             }
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
 
             // Decode
             try data.withUnsafeBufferPointer { ptr in
-                var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+                var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
                 let hasNonZero = try decoder.decodeBypass()
                 #expect(hasNonZero == 1, "hasNonZero should be 1")
-                let _ = try decoder.decodeBypass()  // lscpX
-                let _ = try decoder.decodeBypass()  // lscpY
+                try decoder.decodeBypass()  // lscpX
+                try decoder.decodeBypass()  // lscpY
 
                 for (idx, original) in originalPairs.enumerated() {
                     let decoded = decoder.readPair(context: 0)

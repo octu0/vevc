@@ -9,7 +9,7 @@ struct SpatialAdaptiveTests {
     @Test("spatialWeight: center block returns minimum weight (≈1024)")
     func centerBlockWeight() {
         // Center of an 11x11 grid (odd size = exact center)
-        let w = spatialWeight(blockCol: 5, blockRow: 5, colCount: 11, rowCount: 11)
+        let w = spatialWeight(blockCol: 5, blockRow: 5, colCount: 11, rowCount: 11, edgeScale: 1536)
         #expect(abs(w - 1024) < 10, "Center block should have weight ≈ 1024, got \(w)")
     }
 
@@ -17,8 +17,8 @@ struct SpatialAdaptiveTests {
     func cornerBlockWeight() {
         let colCount = 10
         let rowCount = 10
-        let center = spatialWeight(blockCol: 5, blockRow: 5, colCount: colCount, rowCount: rowCount)
-        let corner = spatialWeight(blockCol: 0, blockRow: 0, colCount: colCount, rowCount: rowCount)
+        let center = spatialWeight(blockCol: 5, blockRow: 5, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
+        let corner = spatialWeight(blockCol: 0, blockRow: 0, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
         #expect(center < corner, "Corner weight \(corner) should be > center weight \(center)")
         // 1.3 * 1024 = 1331
         #expect(1331 < corner, "Corner weight \(corner) should be > 1331 (1.3 in 1024-scale)")
@@ -31,11 +31,11 @@ struct SpatialAdaptiveTests {
         let centerCol = colCount / 2
         let centerRow = rowCount / 2
 
-        var prevWeight = spatialWeight(blockCol: centerCol, blockRow: centerRow, colCount: colCount, rowCount: rowCount)
+        var prevWeight = spatialWeight(blockCol: centerCol, blockRow: centerRow, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
         // Walk from center to corner
         for step in 1...min(centerCol, centerRow) {
-            let w = spatialWeight(blockCol: centerCol - step, blockRow: centerRow - step, colCount: colCount, rowCount: rowCount)
-            #expect(w >= prevWeight, "Weight should increase from center: step=\(step) w=\(w) prev=\(prevWeight)")
+            let w = spatialWeight(blockCol: centerCol - step, blockRow: centerRow - step, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
+            #expect(prevWeight <= w, "Weight should increase from center: step=\(step) w=\(w) prev=\(prevWeight)")
             prevWeight = w
         }
     }
@@ -44,14 +44,14 @@ struct SpatialAdaptiveTests {
     func symmetric() {
         let colCount = 10
         let rowCount = 10
-        let w1 = spatialWeight(blockCol: 2, blockRow: 3, colCount: colCount, rowCount: rowCount)
-        let w2 = spatialWeight(blockCol: colCount - 1 - 2, blockRow: rowCount - 1 - 3, colCount: colCount, rowCount: rowCount)
+        let w1 = spatialWeight(blockCol: 2, blockRow: 3, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
+        let w2 = spatialWeight(blockCol: colCount - 1 - 2, blockRow: rowCount - 1 - 3, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
         #expect(abs(w1 - w2) < 2, "Symmetric blocks should have equal weight: \(w1) vs \(w2)")
     }
 
     @Test("spatialWeight: 1x1 grid returns 1024")
     func singleBlock() {
-        let w = spatialWeight(blockCol: 0, blockRow: 0, colCount: 1, rowCount: 1)
+        let w = spatialWeight(blockCol: 0, blockRow: 0, colCount: 1, rowCount: 1, edgeScale: 1536)
         #expect(abs(w - 1024) < 10, "Single block should have weight 1024, got \(w)")
     }
 

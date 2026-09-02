@@ -73,7 +73,7 @@ func skipDeciderNormalize(
 }
 
 @inline(__always)
-func skipDeciderNormalize(_ x: UnsafePointer<Int32>, _ w: SkipDeciderWeights, into out: UnsafeMutablePointer<Int32>) {
+func skipDeciderNormalizeWithWeights(_ x: UnsafePointer<Int32>, _ w: SkipDeciderWeights, into out: UnsafeMutablePointer<Int32>) {
     withUnsafePointers(w.mu, w.scale) { mu, scale in
         skipDeciderNormalize(x, mu: mu, scale: scale, normShift: w.normShift, n: w.f, into: out)
     }
@@ -117,7 +117,7 @@ func skipDeciderClassify(
 }
 
 @inline(__always)
-func skipDeciderClassify(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
+func skipDeciderClassifyWithWeights(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
     return withUnsafePointers(w.w1, w.b1, w.w2) { w1, b1, w2 in
         skipDeciderClassify(q, w1: w1, b1: b1, w2: w2, b2: w.b2, f: w.f, h: w.h, shift1: w.shift1, hbuf: hbuf)
     }

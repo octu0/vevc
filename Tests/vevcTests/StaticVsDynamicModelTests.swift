@@ -72,7 +72,7 @@ struct StaticVsDynamicModelTests {
             encoder.addTrailingZeros(trailingZeros)
         }
         encoder.flush()
-        return encoder.getData(selectModel: selectModel).count
+        return encoder.getData(selectModel: selectModel, history: nil, updateHistory: true).count
     }
 
     // MARK: - Test: Static vs Dynamic at various data sizes
@@ -133,14 +133,14 @@ struct StaticVsDynamicModelTests {
                 encoder.addPair(run: pair.run, val: pair.val, context: 0)
             }
             encoder.flush()
-            let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
             try data.withUnsafeBufferPointer { ptr in
-                var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+                var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
                 let hasNonZero = try decoder.decodeBypass()
                 #expect(hasNonZero == 1)
-                let _ = try decoder.decodeBypass()  // lscpX
-                let _ = try decoder.decodeBypass()  // lscpY
+                try decoder.decodeBypass()  // lscpX
+                try decoder.decodeBypass()  // lscpY
 
                 for (pIdx, original) in pairs.enumerated() {
                     let decoded = decoder.readPair(context: 0)

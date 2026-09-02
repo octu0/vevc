@@ -26,7 +26,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
         let pool = BlockViewPool()
 
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
@@ -119,11 +119,11 @@ final class EntropyPairsCompareTests: XCTestCase {
         let encCoeffCount = encoder.coeffCount
 
         // getData()でバイト列を取得
-        let entropyData = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let entropyData = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         // デコーダでpairsを復元
         try entropyData.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             var decPairs: [(run: Int, val: Int16)] = []
             for i in 0..<encoder.pairs.count {
                 let pair = decoder.readPair(context: encoder.pairs[i].context)
@@ -156,7 +156,7 @@ final class EntropyPairsCompareTests: XCTestCase {
         // bypassのデコード比較（blockDecode16内のdecodeBypass呼び出しを再現）
         let decBlocks = (0..<blocks.count).map { _ in BlockView.allocate(width: 32, height: 32) }
         try entropyData.withUnsafeBufferPointer { ptr in
-            var decoder2 = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder2 = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
 
             for (i, task) in tasks {
                 let view = decBlocks[i]

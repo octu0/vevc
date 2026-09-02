@@ -27,7 +27,7 @@ func scoreExistingStream(streamPath: String, y4mPath: String, config: Config) as
     var perFrameCSV = "frame,psnr,ssim,ssimY\n"
     var frameIdx = 0
     let decodeStart = Date()
-    for try await decodedImg in decoder.decode(fileHandle: streamHandle) {
+    for try await decodedImg in decoder.decodeFile(fileHandle: streamHandle) {
         guard let orig = try iter.next() else { break }
         let psnr = calculatePSNR(img1: orig.vevcImage, img2: decodedImg)
         let ssim = calculateSSIM(img1: orig.vevcImage, img2: decodedImg)

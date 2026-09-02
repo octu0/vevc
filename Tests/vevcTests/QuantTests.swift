@@ -3,17 +3,17 @@ import XCTest
 
 final class QuantTests: XCTestCase {
     func testQuantizerInit() {
-        let q1 = Quantizer(step: 64, roundToNearest: false)
+        let q1 = Quantizer(step: 64, roundToNearest: false, deadZoneBias: 0, centroidOffset: false)
         XCTAssertEqual(q1.step, 64)
         XCTAssertEqual(q1.mul, 16384)  // (1<<20)/64 = 16384
         XCTAssertEqual(q1.bias, 0)
 
-        let q2 = Quantizer(step: 64, roundToNearest: true)
+        let q2 = Quantizer(step: 64, roundToNearest: true, deadZoneBias: 0, centroidOffset: false)
         XCTAssertEqual(q2.bias, 32768)  // 1<<15
     }
 
     func testQuantizationTableInit() {
-        let qt = QuantizationTable(baseStep: 1600) // Q4 rep of 100
+        let qt = QuantizationTable(baseStep: 1600, isChroma: false, layerIndex: 0) // Q4 rep of 100
         XCTAssertEqual(qt.step, 1600)
         XCTAssertEqual(qt.qLow.step, 192) // 1600 / 8 = 200, capped at qLowCapQ4 (real step 12, DC banding threshold)
         XCTAssertEqual(qt.qMid.step, 768) // 1600 clipped at 768
@@ -23,7 +23,7 @@ final class QuantTests: XCTestCase {
     func performRoundTripTest(width: Int, height: Int, step: Int, roundToNearest: Bool, signedMapping: Bool) {
         var block = BlockView.allocate(width: width, height: height)
         defer { block.deallocate() }
-        let q = Quantizer(step: step, roundToNearest: roundToNearest)
+        let q = Quantizer(step: step, roundToNearest: roundToNearest, deadZoneBias: 0, centroidOffset: false)
 
         let originalValues: [Int16] = (0..<(width * height)).map { i in
             Int16.random(in: -32767...32767)

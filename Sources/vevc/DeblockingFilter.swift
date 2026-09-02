@@ -2,9 +2,9 @@
 
 // Smooths block boundary discontinuities to suppress block noise.
 // tc/beta parameters use non-linear scaling based on quantization step.
-/// In-place applies deblocking filter to the reconstructed image (32x32 block resolution).
+/// In-place applies deblocking filter to the reconstructed image (32x32 block resolution) without motion vectors.
 @inline(__always)
-func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
+func applyDeblockingFilter32WithoutMVs(plane: inout [Int16], width: Int, height: Int, qStep: Int) {
     if qStep <= 3 { return }
     withUnsafePointers(mut: &plane) { base in
         let rawTc = (qStep / 2) + 3
@@ -46,12 +46,12 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
     }
 }
 
-/// In-place applies deblocking filter to the reconstructed image (32x32 block resolution), with Intra/Inter boundary enhancement.
+/// In-place applies deblocking filter to the reconstructed image (32x32 block resolution), with Intra/Inter boundary enhancement using motion vectors and skip map.
 @inline(__always)
-func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: MotionVectors, skipMap: [BlockMode]? = nil) {
+func applyDeblockingFilter32WithMVsAndSkipMap(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: MotionVectors, skipMap: [BlockMode]) {
     if qStep <= 3 { return }
     guard mvs.isEmpty != true else {
-        applyDeblockingFilter32(plane: &plane, width: width, height: height, qStep: qStep)
+        applyDeblockingFilter32WithoutMVs(plane: &plane, width: width, height: height, qStep: qStep)
         return
     }
     
@@ -69,11 +69,11 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
             default: Int32(min(50, rawBeta))
         }
         
-        let rawETc = ((qStep / 2) + 3) * 2
+        let rawETc = ((qStep / 2) + 3) * 3 / 2
         let enhancedTc: Int16 = switch true {
             case qStep <= 3: 0
             case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
-            default: Int16(min(30, rawETc))
+            default: Int16(min(22, rawETc))
         }
         let rawEBeta = (qStep + 6) * 2
         let enhancedBeta: Int32 = switch true {
@@ -86,6 +86,7 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
         
         let colCount = (width + 31) / 32
         let rowCount = (height + 31) / 32
+        let mvColCount = colCount
         
         let hFast = (height / 32) * 32
         let wFast = (width / 32) * 32
@@ -99,12 +100,12 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
             if width <= x + 1 { continue }  // skip boundary columns where reading the right neighbor q1 would run out of range
             for row in 0..<rowCount {
                 let y = row * 32
-                let idx = row * colCount + col
+                let idx = row * mvColCount + col
                 let leftIdx = idx - 1
                 
-                if let sm = skipMap, idx < sm.count, leftIdx < sm.count {
-                    let leftMode = sm[leftIdx]
-                    let rightMode = sm[idx]
+                if idx < skipMap.count, leftIdx < skipMap.count {
+                    let leftMode = skipMap[leftIdx]
+                    let rightMode = skipMap[idx]
                     if leftMode != .inter && rightMode != .inter && leftMode == rightMode {
                         continue
                     }
@@ -137,12 +138,12 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
             if height <= y + 1 { continue }  // skip boundary rows where reading the lower neighbor q1's row would run out of range
             for col in 0..<colCount {
                 let x = col * 32
-                let idx = row * colCount + col
-                let topIdx = idx - colCount
+                let idx = row * mvColCount + col
+                let topIdx = idx - mvColCount
                 
-                if let sm = skipMap, idx < sm.count, topIdx < sm.count {
-                    let topMode = sm[topIdx]
-                    let bottomMode = sm[idx]
+                if idx < skipMap.count, topIdx < skipMap.count {
+                    let topMode = skipMap[topIdx]
+                    let bottomMode = skipMap[idx]
                     if topMode != .inter && bottomMode != .inter && topMode == bottomMode {
                         continue
                     }
@@ -171,8 +172,119 @@ func applyDeblockingFilter32(plane: inout [Int16], width: Int, height: Int, qSte
     }
 }
 
+/// In-place applies deblocking filter to the reconstructed image (32x32 block resolution), with Intra/Inter boundary enhancement using motion vectors (without skip map).
 @inline(__always)
-func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: MotionVectors, skipMap: [BlockMode]? = nil) {
+func applyDeblockingFilter32WithMVs(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: MotionVectors) {
+    if qStep <= 3 { return }
+    guard mvs.isEmpty != true else {
+        applyDeblockingFilter32WithoutMVs(plane: &plane, width: width, height: height, qStep: qStep)
+        return
+    }
+    
+    withUnsafePointers(mut: &plane, mvs.dx) { base, mvDxBase in
+        let rawTc = (qStep / 2) + 3
+        let defaultTc: Int16 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
+        }
+        let rawBeta = qStep + 6
+        let defaultBeta: Int32 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
+        }
+        
+        let rawETc = ((qStep / 2) + 3) * 3 / 2
+        let enhancedTc: Int16 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
+            default: Int16(min(22, rawETc))
+        }
+        let rawEBeta = (qStep + 6) * 2
+        let enhancedBeta: Int32 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawEBeta * (qStep - 3)) / 12)
+            default: Int32(min(100, rawEBeta))
+        }
+        
+        if defaultTc == 0 && defaultBeta == 0 && enhancedTc == 0 && enhancedBeta == 0 { return }
+        
+        let colCount = (width + 31) / 32
+        let rowCount = (height + 31) / 32
+        let mvColCount = colCount
+        
+        let hFast = (height / 32) * 32
+        let wFast = (width / 32) * 32
+        let hRem = height - hFast
+        let wRem = width - wFast
+        let mvCount = mvs.dx.count
+            
+        // Vertical Edges
+        for col in 1..<colCount {
+            let x = col * 32
+            if width <= x + 1 { continue }
+            for row in 0..<rowCount {
+                let y = row * 32
+                let idx = row * mvColCount + col
+                let leftIdx = idx - 1
+                
+                let leftDx: Int16 = if leftIdx < mvCount { mvDxBase[leftIdx] } else { 0 }
+                let rightDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let leftIsIntra = leftDx == 32767
+                let rightIsIntra = rightDx == 32767
+                
+                let isIntraBoundary = leftIsIntra || rightIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if y < hFast {
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
+                    } else {
+                        let safeH = min(hRem, height - y)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                    }
+                }
+            }
+        }
+        
+        // Horizontal Edges
+        for row in 1..<rowCount {
+            let y = row * 32
+            if height <= y + 1 { continue }
+            for col in 0..<colCount {
+                let x = col * 32
+                let idx = row * mvColCount + col
+                let topIdx = idx - mvColCount
+                
+                let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
+                let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let topIsIntra = topDx == 32767
+                let bottomIsIntra = bottomDx == 32767
+                
+                let isIntraBoundary = topIsIntra || bottomIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if x < wFast {
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 32, tc: tc, beta: beta)
+                    } else {
+                        let safeW = min(wRem, width - x)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// In-place applies deblocking filter to chroma 16x16 with Intra/Inter boundary enhancement using motion vectors and skip map.
+@inline(__always)
+func applyDeblockingFilterChroma16WithMVsAndSkipMap(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: MotionVectors, skipMap: [BlockMode]) {
     if qStep <= 3 { return }
     guard mvs.isEmpty != true else {
         applyDeblockingFilter16(plane: &plane, width: width, height: height, qStep: qStep)
@@ -227,9 +339,9 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                 let idx = row * mvColCount + col
                 let leftIdx = idx - 1
                 
-                if let sm = skipMap, idx < sm.count, leftIdx < sm.count {
-                    let leftMode = sm[leftIdx]
-                    let rightMode = sm[idx]
+                if idx < skipMap.count, leftIdx < skipMap.count {
+                    let leftMode = skipMap[leftIdx]
+                    let rightMode = skipMap[idx]
                     if leftMode != .inter && rightMode != .inter && leftMode == rightMode {
                         continue
                     }
@@ -265,13 +377,123 @@ func applyDeblockingFilterChroma16(plane: inout [Int16], width: Int, height: Int
                 let idx = row * mvColCount + col
                 let topIdx = idx - mvColCount
                 
-                if let sm = skipMap, idx < sm.count, topIdx < sm.count {
-                    let topMode = sm[topIdx]
-                    let bottomMode = sm[idx]
+                if idx < skipMap.count, topIdx < skipMap.count {
+                    let topMode = skipMap[topIdx]
+                    let bottomMode = skipMap[idx]
                     if topMode != .inter && bottomMode != .inter && topMode == bottomMode {
                         continue
                     }
                 }
+                
+                let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
+                let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let topIsIntra = topDx == 32767
+                let bottomIsIntra = bottomDx == 32767
+                
+                let isIntraBoundary = topIsIntra || bottomIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if x < wFast {
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
+                    } else {
+                        let safeW = min(wRem, width - x)
+                        deblockFilterHorizontalEdge(base: base, width: width, x: x, y: y, count: safeW, tc: tc, beta: beta)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// In-place applies deblocking filter to chroma 16x16 with Intra/Inter boundary enhancement using motion vectors (without skip map).
+@inline(__always)
+func applyDeblockingFilterChroma16WithMVs(plane: inout [Int16], width: Int, height: Int, qStep: Int, mvs: MotionVectors) {
+    if qStep <= 3 { return }
+    guard mvs.isEmpty != true else {
+        applyDeblockingFilter16(plane: &plane, width: width, height: height, qStep: qStep)
+        return
+    }
+    
+    withUnsafePointers(mut: &plane, mvs.dx) { base, mvDxBase in
+        let rawTc = (qStep / 2) + 3
+        let defaultTc: Int16 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawTc * (qStep - 3)) / 12)
+            default: Int16(min(15, rawTc))
+        }
+        let rawBeta = qStep + 6
+        let defaultBeta: Int32 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawBeta * (qStep - 3)) / 12)
+            default: Int32(min(50, rawBeta))
+        }
+        
+        let rawETc = ((qStep / 2) + 3) * 3 / 2
+        let enhancedTc: Int16 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int16((rawETc * (qStep - 3)) / 12)
+            default: Int16(min(22, rawETc))
+        }
+        let rawEBeta = (qStep + 6) * 2
+        let enhancedBeta: Int32 = switch true {
+            case qStep <= 3: 0
+            case qStep <= 15: Int32((rawEBeta * (qStep - 3)) / 12)
+            default: Int32(min(100, rawEBeta))
+        }
+        
+        if defaultTc == 0 && defaultBeta == 0 && enhancedTc == 0 && enhancedBeta == 0 { return }
+        
+        let colCountC = (width + 15) / 16
+        let rowCountC = (height + 15) / 16
+        let mvColCount = colCountC 
+        
+        let hFast = (height / 16) * 16
+        let wFast = (width / 16) * 16
+        let hRem = height - hFast
+        let wRem = width - wFast
+        let mvCount = mvs.dx.count
+            
+        // Vertical Edges
+        for col in 1..<colCountC {
+            let x = col * 16
+            if width <= x + 1 { continue }
+            for row in 0..<rowCountC {
+                let y = row * 16
+                let idx = row * mvColCount + col
+                let leftIdx = idx - 1
+                
+                let leftDx: Int16 = if leftIdx < mvCount { mvDxBase[leftIdx] } else { 0 }
+                let rightDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }
+                
+                let leftIsIntra = leftDx == 32767
+                let rightIsIntra = rightDx == 32767
+                
+                let isIntraBoundary = leftIsIntra || rightIsIntra
+                let tc = if isIntraBoundary { enhancedTc } else { defaultTc }
+                let beta = if isIntraBoundary { enhancedBeta } else { defaultBeta }
+                
+                if tc != 0 || beta != 0 {
+                    if y < hFast {
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: 16, tc: tc, beta: beta)
+                    } else {
+                        let safeH = min(hRem, height - y)
+                        deblockFilterVerticalEdge(base: base, width: width, x: x, y: y, count: safeH, tc: tc, beta: beta)
+                    }
+                }
+            }
+        }
+        
+        // Horizontal Edges
+        for row in 1..<rowCountC {
+            let y = row * 16
+            if height <= y + 1 { continue }
+            for col in 0..<colCountC {
+                let x = col * 16
+                let idx = row * mvColCount + col
+                let topIdx = idx - mvColCount
                 
                 let topDx: Int16 = if topIdx < mvCount { mvDxBase[topIdx] } else { 0 }
                 let bottomDx: Int16 = if idx < mvCount { mvDxBase[idx] } else { 0 }

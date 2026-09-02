@@ -26,7 +26,7 @@ final class RealPairsRansTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
         let pool = BlockViewPool()
 
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
@@ -65,10 +65,10 @@ final class RealPairsRansTests: XCTestCase {
             encoder.addPair(run: pair.run, val: pair.val, context: pair.context)
         }
 
-        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
         var decPairs: [(run: Int, val: Int16)] = []
         try data.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             for i in 0..<encoder.pairs.count {
                 let pair = decoder.readPair(context: encoder.pairs[i].context)
                 decPairs.append(pair)

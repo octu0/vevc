@@ -23,7 +23,7 @@ final class BlockRoundtripTests: XCTestCase {
         var encoder = EntropyEncoder()
         blockEncode16V(encoder: &encoder, block: block)
         encoder.flush()
-        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         // blockEncode16のゼロクリア修正後のデータ
         let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 256))
@@ -33,7 +33,7 @@ final class BlockRoundtripTests: XCTestCase {
         defer { decBlock.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
             print("DEBUG: Init Decoder with count \(ptr.count)")
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             print("DEBUG: Calling blockDecode16V")
             fflush(stdout)
             try! blockDecode16V(decoder: &decoder, ptr: decBlock.base, stride: decBlock.stride)
@@ -63,14 +63,14 @@ final class BlockRoundtripTests: XCTestCase {
         var encoder = EntropyEncoder()
         blockEncode8V(encoder: &encoder, block: block)
         encoder.flush()
-        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         let afterEncodeData = Array(UnsafeBufferPointer(start: block.base, count: 64))
 
         let decBlock = BlockView.allocate(width: 8, height: 8)
         defer { decBlock.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             try! blockDecode8V(decoder: &decoder, ptr: decBlock.base, stride: decBlock.stride)
         }
         for i in 0..<64 {
@@ -136,7 +136,7 @@ final class BlockRoundtripTests: XCTestCase {
         hlView = BlockView(base: block32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
         blockEncode16V(encoder: &encoder, block: hlView)
         encoder.flush()
-        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let encoded = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         // エンコード後のHLサブバンドデータ
         var encAfterHL = [Int16](repeating: 0, count: 256)
@@ -152,7 +152,7 @@ final class BlockRoundtripTests: XCTestCase {
         let decBlock32 = BlockView.allocate(width: 32, height: 32)
         defer { decBlock32.deallocate() }
         try encoded.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             hlView = BlockView(base: decBlock32.base.advanced(by: 16), width: 16, height: 16, stride: 32)
             try! blockDecode16V(decoder: &decoder, ptr: hlView.base, stride: hlView.stride)
         }

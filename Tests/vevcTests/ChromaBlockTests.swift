@@ -229,7 +229,7 @@ final class ChromaBlockTests: XCTestCase {
         var distortions: [(step: Int, mse: Double)] = []
 
         for step in testSteps {
-            let qt = QuantizationTable(baseStep: step)
+            let qt = QuantizationTable(baseStep: step, isChroma: false, layerIndex: 0)
             
             // Generate synthetic gradient block
             let originalValues: [Int16] = (0..<(blockSize * blockSize)).map { i in

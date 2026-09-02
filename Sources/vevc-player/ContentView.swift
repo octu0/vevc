@@ -15,9 +15,19 @@ struct ContentView: View {
         var id: String { rawValue }
     }
     
-    init(args: PlayerArguments = PlayerArguments()) {
+    init() {
+        self.init(args: PlayerArguments())
+    }
+
+    init(args: PlayerArguments) {
         self.args = args
-        self._mode = State(initialValue: args.isCompareMode ? .compare : .layer)
+        let initialMode: AppMode
+        if args.isCompareMode {
+            initialMode = .compare
+        } else {
+            initialMode = .layer
+        }
+        self._mode = State(initialValue: initialMode)
         self._compareViewModel = StateObject(wrappedValue: CompareViewModel(
             initialBitrate: args.bitrate,
             initialProfile: args.profile

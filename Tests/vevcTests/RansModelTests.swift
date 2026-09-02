@@ -31,7 +31,7 @@ final class RansModelTests: XCTestCase {
             }
         }
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }
         for i in blocks.indices { evaluateQuantizeLayer32(view: blocks[i], qt: qtY) }

@@ -52,7 +52,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         // エンコード後のHL
         var encAfterHL: [[Int16]] = []
@@ -159,7 +159,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         // decodePlaneSubbands32
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: 3)
@@ -207,7 +207,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
 
         // DWT + 量子化のみ実行して、encodePlaneSubbands32へ渡すブロック配列を取得
         var (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
@@ -218,7 +218,7 @@ final class SubbandsRoundtripTests: XCTestCase {
 
         // encodePlaneSubbands32
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         // decodePlaneSubbands32
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
@@ -273,7 +273,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             }
         }
 
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
         let reader = Int16Reader(data: rY, width: width, height: height)
         var (blocks, _, rel) = await extractSingleTransformBlocks32(r: reader, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }
@@ -282,7 +282,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
+        let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
 
         var totalDiff = 0
@@ -339,7 +339,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             }
 
             let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-            let qtY = QuantizationTable(baseStep: 2)
+            let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
 
             var (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: w, height: h, pool: pool, qt: qtY)
             defer { rel() }
@@ -348,7 +348,7 @@ final class SubbandsRoundtripTests: XCTestCase {
             }
 
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
-            let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel)
+            let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
             let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
 
             var totalDiff = 0

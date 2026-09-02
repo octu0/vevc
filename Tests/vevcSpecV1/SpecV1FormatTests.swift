@@ -125,7 +125,7 @@ final class SpecV1FormatTests: XCTestCase {
         appendUInt32BE(&badBytes1, 100) // layer2Size
         
         var offset1 = 0
-        XCTAssertThrowsError(try VEVCFrameHeader.deserialize(from: badBytes1, offset: &offset1)) { error in
+        XCTAssertThrowsError(try VEVCFrameHeader.deserialize(from: badBytes1, offset: &offset1, profile: 0x01)) { error in
             XCTAssertTrue(error is DecodeError)
             if let decodeError = error as? DecodeError {
                 XCTAssertEqual(decodeError.description, "DecodeError.invalidHeader")
@@ -143,7 +143,7 @@ final class SpecV1FormatTests: XCTestCase {
         appendUInt32BE(&badBytes2, 100) // layer2Size
         
         var offset2 = 0
-        XCTAssertThrowsError(try VEVCFrameHeader.deserialize(from: badBytes2, offset: &offset2)) { error in
+        XCTAssertThrowsError(try VEVCFrameHeader.deserialize(from: badBytes2, offset: &offset2, profile: 0x01)) { error in
             XCTAssertTrue(error is DecodeError)
             if let decodeError = error as? DecodeError {
                 XCTAssertEqual(decodeError.description, "DecodeError.invalidHeader")

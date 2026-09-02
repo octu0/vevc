@@ -112,7 +112,7 @@ enum EncodeTask32 {
 }
 
 @inline(__always)
-func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> [UInt8] {
+func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -128,7 +128,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
         if useSpatialWeight {
             let col = i % colCount
             let row = i / colCount
-            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
             blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
         } else {
             blockThreshold = zeroThreshold
@@ -212,7 +212,7 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
 }
 
 @inline(__always)
-func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool]) {
+func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]?, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
@@ -248,7 +248,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         if useSpatialWeight {
             let col = i % colCount
             let row = i / colCount
-            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
             if zeroThreshold == 0 {
                 blockThreshold = 0
             } else {
@@ -342,7 +342,7 @@ enum EncodeTask16 {
 }
 
 @inline(__always)
-func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> [UInt8] {
+func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -358,7 +358,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
         if useSpatialWeight {
             let col = i % colCount
             let row = i / colCount
-            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
             blockThreshold = if zeroThreshold == 0 { 0 } else { (zeroThreshold * weight) / 1024 }
         } else {
             blockThreshold = zeroThreshold
@@ -439,7 +439,7 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
 }
 
 @inline(__always)
-func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]? = nil, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool]) {
+func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]?, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool]) {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
@@ -475,7 +475,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         if useSpatialWeight {
             let col = i % colCount
             let row = i / colCount
-            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount)
+            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
             if zeroThreshold == 0 {
                 blockThreshold = 0
             } else {
@@ -562,7 +562,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, selectModel: ModelSelectorFn = unifiedSelectModel, isProfile2: Bool = false) -> [UInt8] {
+func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, selectModel: ModelSelectorFn, isProfile2: Bool) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -609,12 +609,12 @@ func encodePlaneBaseSubbands8(blocks: inout [BlockView], zeroThreshold: Int, sel
     
     encoder.flush()
     var out = bwFlags.bytes
-    out.append(contentsOf: encoder.getData(selectModel: selectModel))
+    out.append(contentsOf: encoder.getData(selectModel: selectModel, history: nil, updateHistory: true))
     return out
 }
 
 @inline(__always)
-func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int, history: EntropyHistoryState? = nil, selectModel: ModelSelectorFn = unifiedSelectModel, updateHistory: Bool = true) -> [UInt8] {
+func encodePlaneBaseSubbands8PFrame(blocks: inout [BlockView], zeroThreshold: Int, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     var bwFlags = BypassWriter()
     var nonZeroIndices: [Int] = []
     
@@ -690,11 +690,11 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
     qstep: Int32,
     zeroThreshold: Int,
     isSkip: [Bool],
-    isTreez: [Bool]? = nil,
-    isLuma: Bool = true,
+    isTreez: [Bool]?,
+    isLuma: Bool,
     history: EntropyHistoryState?,
     selectModel: ModelSelectorFn,
-    updateHistory: Bool = true,
+    updateHistory: Bool,
     // Owned by the encoder (one instance per LayersEncodeActor) and reused for
     // every frame. nil for planes that can never take the model path (chroma),
     // which is what keeps the non-model path allocation-free.

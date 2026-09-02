@@ -99,12 +99,12 @@ final class QualityDropTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
-        let qtC = QuantizationTable(baseStep: 6)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
+        let qtC = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 0)
         let pool = BlockViewPool()
 
         // 1. Base8
-        let (bytesB8, reconB8, _, _, _, relb8) = await encodePlaneBase8Intra(
+        let (bytesB8, reconB8, _, _, _, relb8) = await encodePlaneBase8IntraProfile1(
             pd: pd, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 3, selectModel: unifiedSelectModel)
         defer { relb8() }
         let (decB8, _, _, _, _, _) = try await decodeBase8(r: bytesB8, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
@@ -125,7 +125,7 @@ final class QualityDropTests: XCTestCase {
         var (sub16, l1yBlocks, l1cbBlocks, l1crBlocks, rel16) = await preparePlaneLayer16(
             pd: pd, pool: pool, qtY: qtY, qtC: qtC)
         defer { rel16() }
-        let (b8ReconBytes, b8Recon, _, _, _, relb8_a) = await encodePlaneBase8Intra(
+        let (b8ReconBytes, b8Recon, _, _, _, relb8_a) = await encodePlaneBase8IntraProfile1(
             pd: sub16, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 3, selectModel: unifiedSelectModel)
         defer { relb8_a() }
 
@@ -138,7 +138,7 @@ final class QualityDropTests: XCTestCase {
         let cbh = (pd.height + 1) / 2
         let (reconL1Cb, _) = reconstructPlaneLayer16Cb(blocks: l1cbBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC, pool: pool)
         let (reconL1Cr, _) = reconstructPlaneLayer16Cr(blocks: l1crBlocks, prevImg: prevImg, width: cbw, height: cbh, qt: qtC, pool: pool)
-        let (_, _, _, _, _, relb8_b) = await encodePlaneBase8Intra(
+        let (_, _, _, _, _, relb8_b) = await encodePlaneBase8IntraProfile1(
             pd: sub16, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 3, selectModel: unifiedSelectModel)
         defer { relb8_b() }
         let (decB8_sub16, _, _, _, _, _) = try await decodeBase8(r: b8ReconBytes, pool: pool, layer: 0, dx: pd.width, dy: pd.height, isIFrame: true)
@@ -146,8 +146,8 @@ final class QualityDropTests: XCTestCase {
         let recon16 = PlaneData420(width: pd.width, height: pd.height, y: reconL1Y, cb: reconL1Cb, cr: reconL1Cr)
         let decImg16 = planeDataToImage(pd: recon16)
 
-        let (decL16, _, _, _) = try await decodeLayer16(
-            r: bytesL16, pool: pool, layer: 1, dx: pd.width, dy: pd.height, prev: decB8_sub16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil)
+        let (decL16, _, _, _) = try await decodeLayer16WithoutParentBlocks(
+            r: bytesL16, pool: pool, layer: 1, dx: pd.width, dy: pd.height, prev: decB8_sub16)
         let decL16Pd = PlaneData420(width: pd.width, height: pd.height, y: decL16.y, cb: decL16.cb, cr: decL16.cr)
         let decImg16Final = planeDataToImage(pd: decL16Pd)
 
@@ -177,7 +177,7 @@ final class QualityDropTests: XCTestCase {
         var (sub16_2, l1yBlocks_2, l1cbBlocks_2, l1crBlocks_2, rel16_2) = await preparePlaneLayer16(
             pd: sub32, pool: pool, qtY: qtY, qtC: qtC)
         defer { rel16_2() }
-        let (_, b8Recon_2, _, _, _, relb8_c) = await encodePlaneBase8Intra(
+        let (_, b8Recon_2, _, _, _, relb8_c) = await encodePlaneBase8IntraProfile1(
             pd: sub16_2, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 3, selectModel: unifiedSelectModel)
         defer { relb8_c() }
 
@@ -206,16 +206,15 @@ final class QualityDropTests: XCTestCase {
 
         let prevImg16 = Image16(width: sub32.width, height: sub32.height, y: r1Y, cb: r1Cb, cr: r1Cr)
 
-        let (r32Y, _) = reconstructPlaneLayer32Y(blocks: l32yBlocks, prevImg: prevImg16, width: pd.width, height: pd.height, qt: qtY, pool: pool)
-        let (r32Cb, _) = reconstructPlaneLayer32Cb(blocks: l32cbBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
-        let (r32Cr, _) = reconstructPlaneLayer32Cr(blocks: l32crBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
+        let (r32Y, _) = reconstructPlaneLayer32YWithoutSkipMap(blocks: l32yBlocks, prevImg: prevImg16, width: pd.width, height: pd.height, qt: qtY, pool: pool)
+        let (r32Cb, _) = reconstructPlaneLayer32CbWithoutSkipMap(blocks: l32cbBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
+        let (r32Cr, _) = reconstructPlaneLayer32CrWithoutSkipMap(blocks: l32crBlocks, prevImg: prevImg16, width: cbw, height: cbh, qt: qtC, pool: pool)
 
         let recon32 = PlaneData420(width: pd.width, height: pd.height, y: r32Y, cb: r32Cb, cr: r32Cr)
         let img32 = planeDataToImage(pd: recon32)
 
-        let decL32 = try await decodeLayer32(
-            r: bytesL32, pool: pool, layer: 2, dx: pd.width, dy: pd.height, prev: decL16, parentYBlocks: nil, parentCbBlocks: nil, parentCrBlocks: nil,
-            roundOffset: 0)
+        let decL32 = try await decodeLayer32WithoutParentBlocks(
+            r: bytesL32, pool: pool, layer: 2, dx: pd.width, dy: pd.height, prev: decL16)
         let decL32Pd = PlaneData420(width: pd.width, height: pd.height, y: decL32.y, cb: decL32.cb, cr: decL32.cr)
         let decImg32Final = planeDataToImage(pd: decL32Pd)
 

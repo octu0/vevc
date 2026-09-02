@@ -22,7 +22,7 @@ final class QuantRoundtripTests: XCTestCase {
         ]
         XCTAssertEqual(testValues.count, size * size)
 
-        let qt = QuantizationTable(baseStep: 1)
+        let qt = QuantizationTable(baseStep: 1, isChroma: false, layerIndex: 0)
 
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
@@ -54,7 +54,7 @@ final class QuantRoundtripTests: XCTestCase {
     /// 16x16ブロックでSignedMappingのラウンドトリップ
     func testSignedMappingRoundTrip16x16_Step1() {
         let size = 16
-        let qt = QuantizationTable(baseStep: 1)
+        let qt = QuantizationTable(baseStep: 1, isChroma: false, layerIndex: 0)
 
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
@@ -92,7 +92,7 @@ final class QuantRoundtripTests: XCTestCase {
     /// 32x32ブロックでSignedMappingのラウンドトリップ
     func testSignedMappingRoundTrip32x32_Step1() {
         let size = 32
-        let qt = QuantizationTable(baseStep: 1)
+        let qt = QuantizationTable(baseStep: 1, isChroma: false, layerIndex: 0)
 
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
@@ -121,7 +121,7 @@ final class QuantRoundtripTests: XCTestCase {
     /// step=2でのSignedMappingラウンドトリップ（量子化損失はあるが符号は保持されるべき）
     func testSignedMappingRoundTrip_Step2_SignPreserved() {
         let size = 8
-        let qt = QuantizationTable(baseStep: 2)  // qLow.step=2
+        let qt = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)  // qLow.step=2
 
         let block = BlockView.allocate(width: size, height: size)
         defer { block.deallocate() }
@@ -163,7 +163,7 @@ final class QuantRoundtripTests: XCTestCase {
     /// Mid/High量子化のSignedMappingラウンドトリップもテスト
     func testMidHighSignedMappingRoundTrip() {
         let size = 8
-        let qt = QuantizationTable(baseStep: 1)  // qMid.step=2, qHigh.step=4
+        let qt = QuantizationTable(baseStep: 1, isChroma: false, layerIndex: 0)  // qMid.step=2, qHigh.step=4
 
         let testValues: [Int16] = [
             10, -10, 20, -20, 30, -30, 0, 0,

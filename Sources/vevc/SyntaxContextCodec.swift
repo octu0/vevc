@@ -27,9 +27,13 @@ struct AdaptiveBinModel {
 
     /// `oneIn` seeds p(1) as 1/oneIn. refDir is 0.25-2% ones, so starting at
     /// 1/2 would waste the first few hundred symbols of every frame.
-    init(oneIn: UInt32 = 2) {
+    init(oneIn: UInt32) {
         let f1 = max(adaptiveModelMinFrequency, adaptiveModelFrequencyTotal / max(1, oneIn))
         self.f0 = adaptiveModelFrequencyTotal - f1
+    }
+
+    init() {
+        self.init(oneIn: 2)
     }
 
     @inline(__always)

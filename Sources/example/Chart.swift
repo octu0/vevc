@@ -207,7 +207,13 @@ struct SsimChart: View {
 
 @available(macOS 13.0, *)
 @MainActor
-func generateAndSaveSpeedSizeChart(results: [CodecBenchmarkResult], outPath: String, showEncode: Bool = true) {
+func generateAndSaveSpeedSizeChart(results: [CodecBenchmarkResult], outPath: String) {
+    generateAndSaveSpeedSizeChart(results: results, outPath: outPath, showEncode: true)
+}
+
+@available(macOS 13.0, *)
+@MainActor
+func generateAndSaveSpeedSizeChart(results: [CodecBenchmarkResult], outPath: String, showEncode: Bool) {
     let speedSizeView = SpeedSizeChart(results: results, showEncode: showEncode)
     let speedSizeRenderer = ImageRenderer(content: speedSizeView)
     speedSizeRenderer.scale = 2.0
@@ -223,7 +229,13 @@ func generateAndSaveSpeedSizeChart(results: [CodecBenchmarkResult], outPath: Str
 
 @available(macOS 13.0, *)
 @MainActor
-func generateAndSaveQualityCharts(results: [CodecBenchmarkResult], outDir: String = "docs", suffix: String = "") {
+func generateAndSaveQualityCharts(results: [CodecBenchmarkResult]) {
+    generateAndSaveQualityCharts(results: results, outDir: "docs", suffix: "")
+}
+
+@available(macOS 13.0, *)
+@MainActor
+func generateAndSaveQualityCharts(results: [CodecBenchmarkResult], outDir: String, suffix: String) {
     // PSNR Chart
     if results.contains(where: { $0.stats != nil }) {
         let psnrView = PsnrChart(results: results)

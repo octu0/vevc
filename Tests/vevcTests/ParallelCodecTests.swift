@@ -61,7 +61,7 @@ final class ParallelCodecTests: XCTestCase {
             width: width, height: height, maxbitrate: 1000 * 1024, framerate: 30, zeroThreshold: 3, keyint: 4, sceneChangeThreshold: 100, maxConcurrency: 2)
 
         var chunks: [[UInt8]] = []
-        let chunkStream = await encoder.encode(stream: frameStream)
+        let chunkStream = await encoder.encodeStream(stream: frameStream)
         for try await chunk in chunkStream {
             chunks.append(chunk)
         }
@@ -79,7 +79,7 @@ final class ParallelCodecTests: XCTestCase {
         // 2. Parallel Decoding Test
         let decoder = Decoder(maxLayer: 2, maxConcurrency: 2)
         var decodedImages: [YCbCrImage] = []
-        let imageStream = decoder.decode(stream: encodedStream)
+        let imageStream = decoder.decodeStream(stream: encodedStream)
         for try await img in imageStream {
             decodedImages.append(img)
         }

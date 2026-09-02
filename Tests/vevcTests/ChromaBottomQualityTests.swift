@@ -250,8 +250,8 @@ final class ChromaBottomQualityTests: XCTestCase {
         let pd0 = toPlaneData420(image: img0, pool: BlockViewPool()).0
         let pd1 = toPlaneData420(image: img1, pool: BlockViewPool()).0
 
-        let qtY = QuantizationTable(baseStep: 1)  // 量子化を最小にして処理フローのみ検証
-        let qtC = QuantizationTable(baseStep: 1)
+        let qtY = QuantizationTable(baseStep: 1, isChroma: false, layerIndex: 0)  // 量子化を最小にして処理フローのみ検証
+        let qtC = QuantizationTable(baseStep: 1, isChroma: true, layerIndex: 0)
 
         // I-Frame: encode → reconstruct
         let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayersIntra(

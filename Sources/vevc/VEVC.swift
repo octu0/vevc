@@ -50,12 +50,11 @@ struct BlockView: @unchecked Sendable {
     }
 
     @inline(__always)
-    static func allocate(width: Int, height: Int, stride strideVal: Int? = nil) -> BlockView {
-        let s = strideVal ?? width
-        let count = s * height
+    static func allocate(width: Int, height: Int) -> BlockView {
+        let count = width * height
         let ptr = UnsafeMutablePointer<Int16>.allocate(capacity: count)
         ptr.initialize(repeating: 0, count: count)
-        return BlockView(base: ptr, width: width, height: height, stride: s)
+        return BlockView(base: ptr, width: width, height: height, stride: width)
     }
 
     @inline(__always)
@@ -137,7 +136,7 @@ final class BaseBlockViewPool: @unchecked Sendable {
     private let _lock = PlatformLock()
     #endif
     
-    init(maxPerSize: Int = 256) {
+    init(maxPerSize: Int) {
         self.maxPerSize = maxPerSize
     }
     
@@ -409,14 +408,12 @@ final class BaseBlockViewPool: @unchecked Sendable {
     }
 
     @inline(__always)
-    func getInt16(count: Int, zeroed: Bool = true) -> [Int16] {
+    func getInt16(count: Int) -> [Int16] {
         #if arch(wasm32)
         if var bucket = int16Pools[count], bucket.isEmpty != true {
             var arr = bucket.removeLast()
             int16Pools[count] = bucket
-            if zeroed {
-                arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
-            }
+            arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
             return arr
         }
         #else
@@ -424,18 +421,32 @@ final class BaseBlockViewPool: @unchecked Sendable {
         if let pool = int16Pools[count], pool.isEmpty != true {
             var arr = int16Pools[count]!.removeLast()
             _lock.unlock()
-            if zeroed {
-                arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
-            }
+            arr.withUnsafeMutableBufferPointer { $0.baseAddress!.update(repeating: 0, count: count) }
             return arr
         }
         _lock.unlock()
         #endif
-        if zeroed {
-            return [Int16](repeating: 0, count: count)
-        } else {
-            return [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
+        return [Int16](repeating: 0, count: count)
+    }
+
+    @inline(__always)
+    func getInt16Uninitialized(count: Int) -> [Int16] {
+        #if arch(wasm32)
+        if var bucket = int16Pools[count], bucket.isEmpty != true {
+            let arr = bucket.removeLast()
+            int16Pools[count] = bucket
+            return arr
         }
+        #else
+        _lock.lock()
+        if let pool = int16Pools[count], pool.isEmpty != true {
+            let arr = int16Pools[count]!.removeLast()
+            _lock.unlock()
+            return arr
+        }
+        _lock.unlock()
+        #endif
+        return [Int16](unsafeUninitializedCapacity: count) { _, c in c = count }
     }
     
     @inline(__always)
@@ -530,7 +541,25 @@ final class BlockViewPool: @unchecked Sendable {
     private let shards: [BaseBlockViewPool]
     #endif
 
-    init(shardCount: Int = 4, maxPerSize: Int = 256) {
+    init() {
+        #if arch(wasm32)
+        self.pool = BaseBlockViewPool(maxPerSize: 256)
+        #else
+        self.shardCount = 4
+        self.shards = (0..<4).map { _ in BaseBlockViewPool(maxPerSize: 256) }
+        #endif
+    }
+
+    init(maxPerSize: Int) {
+        #if arch(wasm32)
+        self.pool = BaseBlockViewPool(maxPerSize: maxPerSize)
+        #else
+        self.shardCount = 4
+        self.shards = (0..<4).map { _ in BaseBlockViewPool(maxPerSize: maxPerSize) }
+        #endif
+    }
+
+    init(shardCount: Int, maxPerSize: Int) {
         #if arch(wasm32)
         self.pool = BaseBlockViewPool(maxPerSize: maxPerSize)
         #else
@@ -650,12 +679,22 @@ final class BlockViewPool: @unchecked Sendable {
     }
 
     @inline(__always)
-    func getInt16(count: Int, zeroed: Bool = true) -> [Int16] {
+    func getInt16(count: Int) -> [Int16] {
         #if arch(wasm32)
-        return pool.getInt16(count: count, zeroed: zeroed)
+        return pool.getInt16(count: count)
         #else
         let idx = currentThreadShardIndex(shardCount: shardCount)
-        return shards[idx].getInt16(count: count, zeroed: zeroed)
+        return shards[idx].getInt16(count: count)
+        #endif
+    }
+
+    @inline(__always)
+    func getInt16Uninitialized(count: Int) -> [Int16] {
+        #if arch(wasm32)
+        return pool.getInt16Uninitialized(count: count)
+        #else
+        let idx = currentThreadShardIndex(shardCount: shardCount)
+        return shards[idx].getInt16Uninitialized(count: count)
         #endif
     }
     

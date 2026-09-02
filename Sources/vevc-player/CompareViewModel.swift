@@ -47,7 +47,15 @@ public final class CompareViewModel: ObservableObject {
     private var playbackTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
     
-    public init(initialBitrate: Int = 1000, initialProfile: UInt8 = 0x01) {
+    public convenience init() {
+        self.init(initialBitrate: 1000, initialProfile: 0x01)
+    }
+
+    public convenience init(initialBitrate: Int) {
+        self.init(initialBitrate: initialBitrate, initialProfile: 0x01)
+    }
+
+    public init(initialBitrate: Int, initialProfile: UInt8) {
         self.bitrate = initialBitrate
         self.profile = initialProfile
     }

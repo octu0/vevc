@@ -20,7 +20,7 @@ struct EntropyModelSelection {
     /// option, used to compare against backward-adapted history tables.
     let costQ8: Int
 
-    init(runModels: [rANSModel], valModels: [rANSModel], isStatic: Bool, isMerged: Bool, costQ8: Int = 0) {
+    init(runModels: [rANSModel], valModels: [rANSModel], isStatic: Bool, isMerged: Bool, costQ8: Int) {
         self.runModels = runModels
         self.valModels = valModels
         self.isStatic = isStatic
@@ -99,7 +99,8 @@ struct StaticEntropyModel: EntropyModelProvider {
             runModels: [StaticRANSModels.shared.runModel0, StaticRANSModels.shared.runModel1, StaticRANSModels.shared.runModel2, StaticRANSModels.shared.runModel3, StaticRANSModels.shared.dpcmRunModel, StaticRANSModels.shared.lscpRunModel],
             valModels: [StaticRANSModels.shared.valModel0, StaticRANSModels.shared.valModel1, StaticRANSModels.shared.valModel2, StaticRANSModels.shared.valModel3, StaticRANSModels.shared.dpcmValModel, StaticRANSModels.shared.dpcmValModel],
             isStatic: true,
-            isMerged: false
+            isMerged: false,
+            costQ8: 0
         )
     }
 }
@@ -127,7 +128,8 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         if totalPairs == 0 {
             return EntropyModelSelection(
                 runModels: staticRunModels, valModels: staticValModels,
-                isStatic: true, isMerged: false
+                isStatic: true, isMerged: false,
+                costQ8: 0
             )
         }
 
@@ -189,7 +191,8 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
         if minCost == staticCostQ8 {
             return EntropyModelSelection(
                 runModels: staticRunModels, valModels: staticValModels,
-                isStatic: true, isMerged: false
+                isStatic: true, isMerged: false,
+                costQ8: minCost
             )
         }
         if minCost == mergedCostQ8 {
@@ -197,13 +200,15 @@ struct AdaptiveEntropyModel: EntropyModelProvider {
             let mergedVal6 = [rANSModel](repeating: mergedValModel, count: entropyContextCount)
             return EntropyModelSelection(
                 runModels: mergedRun6, valModels: mergedVal6,
-                isStatic: false, isMerged: true
+                isStatic: false, isMerged: true,
+                costQ8: minCost
             )
         }
         // dynamic 4-context fallback padded to 6
         return EntropyModelSelection(
             runModels: dynRunModels, valModels: dynValModels,
-            isStatic: false, isMerged: false
+            isStatic: false, isMerged: false,
+            costQ8: minCost
         )
     }
 }
@@ -220,7 +225,8 @@ struct StaticDPCMEntropyModel: EntropyModelProvider {
             runModels: [dpcmRun, dpcmRun, dpcmRun, dpcmRun, dpcmRun, dpcmRun],
             valModels: [dpcmVal, dpcmVal, dpcmVal, dpcmVal, dpcmVal, dpcmVal],
             isStatic: true,
-            isMerged: false
+            isMerged: false,
+            costQ8: 0
         )
     }
 }
@@ -280,7 +286,8 @@ private func unifiedSelectModelCore(
         return EntropyModelSelection(
             runModels: staticACRunModels + [staticDPCMRun, staticLSCPRun],
             valModels: staticACValModels + [staticDPCMVal, staticDPCMVal],
-            isStatic: true, isMerged: false
+            isStatic: true, isMerged: false,
+            costQ8: 0
         )
     }
 
@@ -443,7 +450,7 @@ struct EntropyEncoder {
     }
 
     @inline(__always)
-    mutating func getData(selectModel: ModelSelectorFn, history: EntropyHistoryState? = nil, updateHistory: Bool = true) -> [UInt8] {
+    mutating func getData(selectModel: ModelSelectorFn, history: EntropyHistoryState?, updateHistory: Bool) -> [UInt8] {
         var out = [UInt8]()
         let pairCount = pairRuns.count
         out.reserveCapacity(pairCount * 4 + 128)
@@ -648,6 +655,7 @@ struct EntropyEncoder {
 
         return out
     }
+
 }
 
 @inline(__always)
@@ -767,7 +775,7 @@ struct EntropyDecoder {
     private var decRunCounts: [[Int]] = []
     private var decValCounts: [[Int]] = []
 
-    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int = 0, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws {
+    init(base: UnsafePointer<UInt8>, count: Int, startOffset: Int, history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool) throws {
         self.history = history
         var offset = startOffset
 
@@ -924,6 +932,7 @@ struct EntropyDecoder {
         // rANS stream
         self.ransDecoder = Interleaved4rANSDecoder(base: base.advanced(by: offset), count: count - offset)
     }
+
 
     @inline(__always)
     internal static func readCompressedFreqTable(_ base: UnsafePointer<UInt8>, at offset: inout Int, count: Int) throws -> [UInt32] {

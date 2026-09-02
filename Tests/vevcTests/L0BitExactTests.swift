@@ -60,7 +60,11 @@ final class L0BitExactTests: XCTestCase {
         try await runL0ChainCheck(width: 200, height: 120, frames: 13, qstep: nil, sceneChangeAt: 8)
     }
 
-    private func runL0ChainCheck(width: Int, height: Int, frames: Int, qstep: Int?, sceneChangeAt: Int? = nil) async throws {
+    private func runL0ChainCheck(width: Int, height: Int, frames: Int, qstep: Int?) async throws {
+        try await runL0ChainCheck(width: width, height: height, frames: frames, qstep: qstep, sceneChangeAt: nil)
+    }
+
+    private func runL0ChainCheck(width: Int, height: Int, frames: Int, qstep: Int?, sceneChangeAt: Int?) async throws {
         let pool = BlockViewPool()
         let enc = LayersEncodeActor(
             width: width, height: height, maxbitrate: 300, framerate: 30,
@@ -71,9 +75,20 @@ final class L0BitExactTests: XCTestCase {
         let decL0 = StreamingDecoderActor(maxLayer: 0, width: width, height: height, profile: 0x02)
 
         for i in 0..<frames {
-            let offset = (sceneChangeAt != nil && sceneChangeAt! <= i) ? 500 : 0
+            let offset: Int
+            if let sc = sceneChangeAt, sc <= i {
+                offset = 500
+            } else {
+                offset = 0
+            }
             let input = makeFrame(index: i + offset, width: width, height: height)
-            let chunk = try await enc.encodeFrame(image: input, forceKeyFrame: i == sceneChangeAt)
+            let isForceKey = (sceneChangeAt != nil && i == sceneChangeAt!)
+            let chunk: [UInt8]
+            if isForceKey {
+                chunk = try await enc.encodeForcedKeyFrame(image: input)
+            } else {
+                chunk = try await enc.encodeFrame(image: input)
+            }
             let fullImg = try await decFull.decodeNextFrame(chunk: chunk)
             let l0Img = try await decL0.decodeNextFrame(chunk: chunk)
             XCTAssertNotNil(fullImg, "frame \(i) full decode")
@@ -90,7 +105,7 @@ final class L0BitExactTests: XCTestCase {
             // (b) == (c): the standalone L0-only decoder output must be the
             // rendering of the very same chain state.
             if let ref = decPrev, let l0 = l0Img {
-                let rendered = ref.toYCbCr()
+                let rendered = ref.toYCbCrImage()
                 XCTAssertEqual(rendered.yPlane, l0.yPlane, "frame \(i) L0-only Y")
                 XCTAssertEqual(rendered.cbPlane, l0.cbPlane, "frame \(i) L0-only Cb")
                 XCTAssertEqual(rendered.crPlane, l0.crPlane, "frame \(i) L0-only Cr")

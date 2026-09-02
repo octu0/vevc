@@ -6,7 +6,7 @@ struct Int16Reader {
     let height: Int
     
     @inline(__always)
-    func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView, srcBase: UnsafePointer<Int16>) {
+    func readBlockFromBase(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView, srcBase: UnsafePointer<Int16>) {
         let vBase = view.base
         let vStride = view.stride
         if 0 <= x && 0 <= y && (y + blockHeight) <= height && (x + blockWidth) <= width {
@@ -80,7 +80,7 @@ struct Int16Reader {
     @inline(__always)
     func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView) {
         withUnsafePointers(data) { srcBase in
-            readBlock(x: x, y: y, width: blockWidth, height: blockHeight, into: view, srcBase: srcBase)
+            readBlockFromBase(x: x, y: y, width: blockWidth, height: blockHeight, into: view, srcBase: srcBase)
         }
     }
 }
@@ -113,7 +113,7 @@ extension PlaneData420 {
     }
     
     @inline(__always)
-    func toYCbCr() -> YCbCrImage {
+    func toYCbCrImage() -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
         toYCbCr(into: &img)
         return img
@@ -334,7 +334,7 @@ public struct YCbCrImage: Sendable {
         }
     }
     
-    public init(width: Int, height: Int, ratio: YCbCrRatio = .ratio420, fps: Int? = nil) {
+    public init(width: Int, height: Int, ratio: YCbCrRatio, fps: Int?) {
         self.width = width
         self.height = height
         self.ratio = ratio
@@ -353,6 +353,18 @@ public struct YCbCrImage: Sendable {
             self.cbPlane = [UInt8](unsafeUninitializedCapacity: cSize) { _, c in c = cSize }
             self.crPlane = [UInt8](unsafeUninitializedCapacity: cSize) { _, c in c = cSize }
         }
+    }
+
+    public init(width: Int, height: Int, ratio: YCbCrRatio) {
+        self.init(width: width, height: height, ratio: ratio, fps: nil)
+    }
+
+    public init(width: Int, height: Int, fps: Int?) {
+        self.init(width: width, height: height, ratio: .ratio420, fps: fps)
+    }
+
+    public init(width: Int, height: Int) {
+        self.init(width: width, height: height, ratio: .ratio420, fps: nil)
     }
     
     @inline(__always)
@@ -472,14 +484,24 @@ struct Image16: Sendable {
     let width: Int
     let height: Int
     
-    init(width: Int, height: Int, pool: BlockViewPool, zeroed: Bool = true) {
+    init(width: Int, height: Int, pool: BlockViewPool) {
         self.width = width
         self.height = height
-        self.y = pool.getInt16(count: width * height, zeroed: zeroed)
+        self.y = pool.getInt16(count: width * height)
         let cWidth = (width + 1) / 2
         let cHeight = (height + 1) / 2
-        self.cb = pool.getInt16(count: cWidth * cHeight, zeroed: zeroed)
-        self.cr = pool.getInt16(count: cWidth * cHeight, zeroed: zeroed)
+        self.cb = pool.getInt16(count: cWidth * cHeight)
+        self.cr = pool.getInt16(count: cWidth * cHeight)
+    }
+
+    init(uninitializedWidth width: Int, height: Int, pool: BlockViewPool) {
+        self.width = width
+        self.height = height
+        self.y = pool.getInt16Uninitialized(count: width * height)
+        let cWidth = (width + 1) / 2
+        let cHeight = (height + 1) / 2
+        self.cb = pool.getInt16Uninitialized(count: cWidth * cHeight)
+        self.cr = pool.getInt16Uninitialized(count: cWidth * cHeight)
     }
     
     init(width: Int, height: Int, y: [Int16], cb: [Int16], cr: [Int16]) {

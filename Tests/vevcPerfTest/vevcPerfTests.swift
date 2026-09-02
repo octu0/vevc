@@ -20,8 +20,11 @@ final class VevcPerfTests: XCTestCase {
         return 10.0 * log10(255.0 * 255.0 / mse)
     }
     
-    /// テスト用のグラデーション画像を生成する
-    private func generateGradientImage(width: Int, height: Int, seed: Int = 0) -> YCbCrImage {
+    private func generateGradientImage(width: Int, height: Int) -> YCbCrImage {
+        return generateGradientImage(width: width, height: height, seed: 0)
+    }
+
+    private func generateGradientImage(width: Int, height: Int, seed: Int) -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
         let cWidth = (width + 1) / 2
         for y in 0..<height {

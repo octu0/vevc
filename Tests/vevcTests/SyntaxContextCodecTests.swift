@@ -280,7 +280,7 @@ final class SyntaxContextCodecTests: XCTestCase {
         // Full decode of all frames using Decoder (serial)
         let fullDecoder = Decoder(maxLayer: 2, maxConcurrency: 1)
         var fullRecons = [YCbCrImage]()
-        for try await img in fullDecoder.decode(stream: AsyncChunks(chunks: encodedChunks)) {
+        for try await img in fullDecoder.decodeStream(stream: AsyncChunks(chunks: encodedChunks)) {
             fullRecons.append(img)
         }
         XCTAssertEqual(fullRecons.count, totalFrames)
@@ -302,7 +302,7 @@ final class SyntaxContextCodecTests: XCTestCase {
 
         let raDecoder = Decoder(maxLayer: 2, maxConcurrency: 1)
         var raRecons = [YCbCrImage]()
-        for try await img in raDecoder.decode(stream: AsyncChunks(chunks: raChunks)) {
+        for try await img in raDecoder.decodeStream(stream: AsyncChunks(chunks: raChunks)) {
             raRecons.append(img)
         }
         XCTAssertEqual(raRecons.count, totalFrames - gop1Start)

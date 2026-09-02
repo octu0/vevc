@@ -88,16 +88,29 @@ struct RateController {
         return false
     }
 
-    /// `profile` selects how the requested bitrate is priced; it defaults to
-    /// 0x01 to match `VEVCEncoder`'s own default, so a caller that does not
-    /// name a profile keeps the historical allowance.
-    init(maxbitrate: Int, framerate: Int, keyint: Int, profile: UInt8 = 0x01, targetDistortion: Int = 600) {
+    init(maxbitrate: Int, framerate: Int, keyint: Int, targetDistortion: Int) {
+        self.init(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: 0x01, targetDistortion: targetDistortion)
+    }
+
+    init(maxbitrate: Int, framerate: Int, keyint: Int, profile: UInt8, targetDistortion: Int) {
         self.baseMaxBitrate = maxbitrate
-        self.plannedBitrate = (profile == 0x02) ? maxbitrate : (maxbitrate * 13) / 10
+        if profile == 0x02 {
+            self.plannedBitrate = maxbitrate
+        } else {
+            self.plannedBitrate = (maxbitrate * 13) / 10
+        }
         self.pricesCodedFrames = (profile == 0x02)
         self.framerate = framerate
         self.keyint = keyint
         self.targetDistortionQ8 = targetDistortion
+    }
+
+    init(maxbitrate: Int, framerate: Int, keyint: Int, profile: UInt8) {
+        self.init(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: profile, targetDistortion: 600)
+    }
+
+    init(maxbitrate: Int, framerate: Int, keyint: Int) {
+        self.init(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: 0x01, targetDistortion: 600)
     }
 
     /// Records whether the frame just handed to the controller was coded or

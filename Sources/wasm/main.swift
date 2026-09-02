@@ -127,7 +127,7 @@ class EncoderSession {
         Task {
             do {
                 print("EncoderTask: starting encode")
-                let outStream = await localEncoder.raw.encode(stream: stream)
+                let outStream = await localEncoder.raw.encodeStream(stream: stream)
                 for try await chunk in outStream {
                     print("EncoderTask: got chunk of size \(chunk.count)")
                     let result = chunk.withUnsafeBytes { buf in
@@ -167,7 +167,7 @@ class DecoderSession {
         
         Task {
             do {
-                let outStream = await localDecoder.raw.decode(stream: stream)
+                let outStream = await localDecoder.raw.decodeStream(stream: stream)
                 for try await img in outStream {
                     let rgba = vevc.ycbcrToRGBA(img: img)
                     _ = callbacks.onFrame.callAsFunction(makeImageObject(width: img.width, height: img.height, data: rgba))

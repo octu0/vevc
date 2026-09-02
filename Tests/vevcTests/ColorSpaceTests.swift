@@ -22,7 +22,7 @@ struct ColorSpaceTests {
 
         // Convert ratio444 to ratio420 as typically done in Encoder
         let pd420 = toPlaneData420(image: ycbcr, pool: BlockViewPool()).0
-        let restoredYCbCr = pd420.toYCbCr()
+        let restoredYCbCr = pd420.toYCbCrImage()
 
         let restoredRGBA = ycbcrToRGBA(img: restoredYCbCr)
 

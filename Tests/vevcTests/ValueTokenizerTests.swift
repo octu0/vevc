@@ -58,7 +58,7 @@ final class ValueTokenizerTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
 
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
         defer { rel() }
@@ -84,11 +84,11 @@ final class ValueTokenizerTests: XCTestCase {
         print("=== Encoder: pairs=\(encoder.pairs.count) coeffCount=\(encoder.coeffCount) trailingZeros=\(encoder.trailingZeros) ===")
 
         let encPairs = encoder.pairs
-        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
         var decPairs: [(run: Int, val: Int16)] = []
 
         try data.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             for i in 0..<encPairs.count {
                 let pair = decoder.readPair(context: encPairs[i].context)
                 decPairs.append(pair)

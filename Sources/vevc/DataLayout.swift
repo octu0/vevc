@@ -9,7 +9,7 @@ public struct VEVCFileHeader {
     public let gop: Int
     public let temporalLayers: Int
     
-    public init(width: Int, height: Int, framerate: Int, profile: UInt8 = 0x01, gop: Int = 12, temporalLayers: Int = 1) {
+    public init(width: Int, height: Int, framerate: Int, profile: UInt8, gop: Int, temporalLayers: Int) {
         self.width = width
         self.height = height
         self.framerate = framerate
@@ -137,7 +137,7 @@ public struct VEVCFrameHeader {
     public let layer1Size: Int
     public let layer2Size: Int
 
-    public init(frameType: FrameType, hasRefDir: Bool, hasRANSContext: Bool = false, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int = 0, lumaOffset: Int = 0, chromaOffset: Int = 0, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
+    public init(frameType: FrameType, hasRefDir: Bool, hasRANSContext: Bool, skipMapSize: Int, mvsSize: Int, refDirSize: Int, treeMapSize: Int, lumaOffset: Int, chromaOffset: Int, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
         self.frameType = frameType
         self.hasRefDir = hasRefDir
         self.hasRANSContext = hasRANSContext
@@ -150,6 +150,10 @@ public struct VEVCFrameHeader {
         self.layer0Size = layer0Size
         self.layer1Size = layer1Size
         self.layer2Size = layer2Size
+    }
+
+    public init(frameType: FrameType, hasRefDir: Bool, skipMapSize: Int, mvsSize: Int, refDirSize: Int, lumaOffset: Int, chromaOffset: Int, layer0Size: Int, layer1Size: Int, layer2Size: Int) {
+        self.init(frameType: frameType, hasRefDir: hasRefDir, hasRANSContext: false, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: 0, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
     
     @inline(__always)
@@ -170,7 +174,7 @@ public struct VEVCFrameHeader {
     }
     
     @inline(__always)
-    public func serialize(profile: UInt8 = 0x01) -> [UInt8] {
+    public func serialize(profile: UInt8) -> [UInt8] {
         var out = [UInt8]()
         var refDirFlag: UInt8 = 0x00
         if hasRefDir {
@@ -199,9 +203,9 @@ public struct VEVCFrameHeader {
         }
         return out
     }
-    
+
     @inline(__always)
-    public static func deserialize(from r: [UInt8], offset: inout Int, profile: UInt8 = 0x01) throws -> VEVCFrameHeader {
+    public static func deserialize(from r: [UInt8], offset: inout Int, profile: UInt8) throws -> VEVCFrameHeader {
         guard offset < r.count else { throw BinaryError.insufficientData(message: "VEVCFrameHeader flag") }
         let flag = r[offset]
         offset += 1
@@ -253,6 +257,8 @@ public struct VEVCFrameHeader {
         
         return VEVCFrameHeader(frameType: fType, hasRefDir: hasRefDir, hasRANSContext: hasRANSContext, skipMapSize: skipMapSize, mvsSize: mvsSize, refDirSize: refDirSize, treeMapSize: treeMapSize, lumaOffset: lumaOffset, chromaOffset: chromaOffset, layer0Size: layer0Size, layer1Size: layer1Size, layer2Size: layer2Size)
     }
+
+
 }
 
 /// Derive MV block column count from frame width.
@@ -387,7 +393,7 @@ public enum SplitterError: Error {
 ///   - maxTemporalLayer: Maximum temporal layer to retain (0 = T0 only / 30fps, 1 = T0+T1 / all frames).
 /// - Returns: A `SplitterResult` containing the stripped bitstream and statistics.
 @inline(__always)
-public func splitVEVCStream(input: [UInt8], maxLayer: Int, maxTemporalLayer: Int = 1) throws -> SplitterResult {
+public func splitVEVCStream(input: [UInt8], maxLayer: Int, maxTemporalLayer: Int) throws -> SplitterResult {
     guard 0 <= maxLayer, maxLayer <= 2 else {
         throw SplitterError.invalidMaxLayer(maxLayer)
     }
@@ -483,6 +489,7 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int, maxTemporalLayer: Int
         let newHeader = VEVCFrameHeader(
             frameType: frameHeader.frameType,
             hasRefDir: frameHeader.hasRefDir,
+            hasRANSContext: frameHeader.hasRANSContext,
             skipMapSize: frameHeader.skipMapSize,
             mvsSize: frameHeader.mvsSize,
             refDirSize: frameHeader.refDirSize,
@@ -569,3 +576,5 @@ public func splitVEVCStream(input: [UInt8], maxLayer: Int, maxTemporalLayer: Int
         droppedLayer2Bytes: droppedLayer2Bytes
     )
 }
+
+

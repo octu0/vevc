@@ -27,8 +27,8 @@ final class BlockDataCompareTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
-        let qtC = QuantizationTable(baseStep: 6)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
+        let qtC = QuantizationTable(baseStep: 6, isChroma: true, layerIndex: 0)
         let pool = BlockViewPool()
 
         // エンコーダ: Layer32 のバイト + blocks を取得

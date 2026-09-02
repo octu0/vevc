@@ -182,7 +182,7 @@ public func runVEVCPipeline(images: [YCbCrImage], bitrate: Int, fps: Int, profil
     
     var decodedFrames: [YCbCrImage] = []
     var frameIdx = 0
-    for try await frame in decoder.decode(stream: stream) {
+    for try await frame in decoder.decodeStream(stream: stream) {
         try Task.checkCancellation()
         decodedFrames.append(frame)
         frameIdx += 1

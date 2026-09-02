@@ -26,7 +26,7 @@ final class Block13DebugTests: XCTestCase {
         }
 
         let pd = toPlaneData420(image: img, pool: BlockViewPool()).0
-        let qtY = QuantizationTable(baseStep: 2)
+        let qtY = QuantizationTable(baseStep: 2, isChroma: false, layerIndex: 0)
         let pool = BlockViewPool()
 
         let (blocks, _, rel) = await extractSingleTransformBlocks32(r: pd.rY, width: width, height: height, pool: pool, qt: qtY)
@@ -61,7 +61,7 @@ final class Block13DebugTests: XCTestCase {
         }
 
         // encodePlaneSubbands32
-        let data = encodePlaneSubbands32(blocks: &blocks2, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: (width + 31) / 32, rowCount: (height + 31) / 32, history: nil, selectModel: unifiedSelectModel)
+        let data = encodePlaneSubbands32(blocks: &blocks2, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: (width + 31) / 32, rowCount: (height + 31) / 32, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         // decodePlaneSubbands32
         let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks2.count)

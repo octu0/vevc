@@ -39,7 +39,7 @@ private let kSqrt2Scaled: Int = 1448
 ///   - edgeScale: Maximum weight at corners in 1024-scale (default 1536 = 1.5x).
 /// - Returns: Weight in [1024, edgeScale] (1024-scale fixed-point).
 @inline(__always)
-func spatialWeight(blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int, edgeScale: Int = 1536) -> Int {
+func spatialWeight(blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int, edgeScale: Int) -> Int {
     guard 1 < colCount && 1 < rowCount else { return 1024 }
     
     // Normalize block position to [-1024, 1024] centered coordinates (1024-scale)
@@ -61,7 +61,7 @@ func spatialWeight(blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int, e
 /// Edge blocks get higher thresholds → more likely to be fully skipped.
 @inline(__always)
 func spatialSADThreshold(baseSAD: Int, blockCol: Int, blockRow: Int, colCount: Int, rowCount: Int) -> Int {
-    let weight = spatialWeight(blockCol: blockCol, blockRow: blockRow, colCount: colCount, rowCount: rowCount)
+    let weight = spatialWeight(blockCol: blockCol, blockRow: blockRow, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
     return (baseSAD * weight) / 1024
 }
 

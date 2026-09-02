@@ -169,7 +169,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
         }
         let decStart = Date()
         var count = 0
-        for try await _ in decoder.decode(stream: stream) {
+        for try await _ in decoder.decodeStream(stream: stream) {
             count += 1
         }
         let decTime = Date().timeIntervalSince(decStart)
@@ -194,7 +194,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
         var mets = [QualityMetrics]()
         var perFrameCSV = "frame,psnr,ssim,ssimY\n"
         var frameIdx = 0
-        for try await decodedImg in decoder.decode(stream: stream) {
+        for try await decodedImg in decoder.decodeStream(stream: stream) {
             guard let orig = try qY4M.next() else { break }
             let psnr = calculatePSNR(img1: orig.vevcImage, img2: decodedImg)
             let ssim = calculateSSIM(img1: orig.vevcImage, img2: decodedImg)
@@ -220,7 +220,7 @@ func runVEVC(y4mPath: String, config: Config) async throws -> (
             for c in chunks { continuation.yield(c) }
             continuation.finish()
         }
-        for try await frame in decoder.decode(stream: stream) {
+        for try await frame in decoder.decodeStream(stream: stream) {
             frame.yPlane.withUnsafeBufferPointer { hasher.update(bufferPointer: UnsafeRawBufferPointer($0)) }
             frame.cbPlane.withUnsafeBufferPointer { hasher.update(bufferPointer: UnsafeRawBufferPointer($0)) }
             frame.crPlane.withUnsafeBufferPointer { hasher.update(bufferPointer: UnsafeRawBufferPointer($0)) }
@@ -243,7 +243,7 @@ func extractVEVCFrames(bitstream: [UInt8], config: Config, indices: Set<Int>) as
     
     var extracted: [Int: YCbCrImage] = [:]
     var i = 0
-    for try await frame in vevcDecoder.decode(stream: stream) {
+    for try await frame in vevcDecoder.decodeStream(stream: stream) {
         if indices.contains(i) {
             extracted[i] = frame
         }

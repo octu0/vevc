@@ -30,12 +30,12 @@ final class BackwardAdaptiveTests: XCTestCase {
             enc.addPair(run: p.run, val: p.val, context: p.ctx)
         }
         enc.flush()
-        return enc.getData(selectModel: unifiedSelectModel, history: history)
+        return enc.getData(selectModel: unifiedSelectModel, history: history, updateHistory: true)
     }
 
     private func decodeFrame(data: [UInt8], pairs: [(run: UInt32, val: Int16, ctx: UInt8)], history: EntropyHistoryState?) throws -> [(run: Int, val: Int16)] {
         try data.withUnsafeBufferPointer { buf in
-            var dec = try EntropyDecoder(base: buf.baseAddress!, count: buf.count, startOffset: 0, history: history)
+            var dec = try EntropyDecoder(base: buf.baseAddress!, count: buf.count, startOffset: 0, history: history, parentFreeStatics: false, updateHistory: true)
             var out = [(run: Int, val: Int16)]()
             out.reserveCapacity(pairs.count)
             for p in pairs {

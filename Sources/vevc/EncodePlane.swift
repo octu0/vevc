@@ -356,7 +356,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                         let w = (j * 32)
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32(view: view, qt: qt)
@@ -427,7 +427,7 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
                             clearBlockRegion(base: view.base, width: 32, height: 32, stride: view.stride)
                             continue
                         }
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32(view: view, qt: qt)
@@ -498,7 +498,7 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
                             clearBlockRegion(base: view.base, width: 32, height: 32, stride: view.stride)
                             continue
                         }
-                        r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32WithActivity(view: view, qt: qt, activity: activity[blockIdx])
@@ -682,7 +682,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                         let w = (j * 16)
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16(view: view, qt: qt)
@@ -753,7 +753,7 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
                             clearBlockRegion(base: view.base, width: 16, height: 16, stride: view.stride)
                             continue
                         }
-                        r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16(view: view, qt: qt)
@@ -824,7 +824,7 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
                             clearBlockRegion(base: view.base, width: 16, height: 16, stride: view.stride)
                             continue
                         }
-                        r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16WithActivity(view: view, qt: qt, activity: activity[blockIdx])
@@ -958,7 +958,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
                         let w = (j * 8)
                         if width <= w || height <= h { continue }
                         let view = blocks[(i * colCount) + j]
-                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
                             dwt2DBlock8(ptr: view.base, stride: view.stride)
                         }
@@ -1088,7 +1088,7 @@ func extractSingleTransformBlocksBase8WithSkipMap(
                             clearBlockRegion(base: view.base, width: 8, height: 8, stride: view.stride)
                             continue
                         }
-                        r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
+                        r.readBlockFromBase(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
                         if 0 < cullSAD && base8BlockSAD(view) < cullSAD {
                             // Small residual energy: cull the whole block
                             // pre-DWT (encoder-only policy; all-zero
@@ -1264,7 +1264,7 @@ func preparePlaneLayer16WithSkipMapAndActivity(pd: PlaneData420, pool: BlockView
 /// encode the three coefficient planes (EncodeTransform.swift), and serialize
 /// the VEVCLayerData container.
 @inline(__always)
-func encodeLayer32Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> [UInt8] {
+func encodeLayer32Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     // Layer2 (32x32) contains the highest-frequency DWT subbands with the
     // lowest CSF sensitivity. P-frame residuals at this level can be zeroed
     // more aggressively (threshold=3) than Layer1 (threshold=2) without
@@ -1294,7 +1294,7 @@ func encodeLayer32Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: Quantiz
 }
 
 @inline(__always)
-func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool], [Bool], [Bool]) {
+func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], isTreezY: [Bool]?, isTreezCb: [Bool]?, isTreezCr: [Bool]?, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool], [Bool], [Bool]) {
     let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
 
@@ -1324,7 +1324,7 @@ func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, q
 /// encode the three coefficient planes (EncodeTransform.swift), and serialize
 /// the VEVCLayerData container.
 @inline(__always)
-func encodeLayer16Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> [UInt8] {
+func encodeLayer16Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
 
@@ -1350,7 +1350,7 @@ func encodeLayer16Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: Quantiz
 }
 
 @inline(__always)
-func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool = true) -> ([UInt8], [Bool], [Bool], [Bool]) {
+func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], isTreezY: [Bool]?, isTreezCb: [Bool]?, isTreezCr: [Bool]?, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool], [Bool], [Bool]) {
     let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
     let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
 
@@ -1431,10 +1431,10 @@ func reconstructPlaneBase8(blocks: [BlockView], width: Int, height: Int, qt: Qua
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32YWithSkipMap(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
-    let sCount = skipMap?.count ?? 0
+    let sCount = skipMap.count
     var plane = pool.getInt16(count: width * height)
     withUnsafePointers(mut: &plane) { dstBase in
         var idx = 0
@@ -1453,11 +1453,9 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
                 let blk = blocks[idx]
                 idx += 1
                 
-                if let map = skipMap {
-                    let l2Index = row * colCount + col
-                    if l2Index < sCount && map[l2Index] != .inter {
-                        continue
-                    }
+                let l2Index = row * colCount + col
+                if l2Index < sCount && skipMap[l2Index] != .inter {
+                    continue
                 }
                 
                 let llX = startX / 2
@@ -1496,7 +1494,64 @@ func reconstructPlaneLayer32Y(blocks: [BlockView], prevImg: Image16, width: Int,
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil, skipBw: Int = 0, skipBh: Int = 0) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32YWithoutSkipMap(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+    let colCount = (width + 31) / 32
+    let rowCount = (height + 31) / 32
+    var plane = pool.getInt16(count: width * height)
+    withUnsafePointers(mut: &plane) { dstBase in
+        var idx = 0
+        for row in 0..<rowCount {
+            let startY = row * 32
+            let validEndY = min(height, startY + 32)
+            let loopH = validEndY - startY
+            let isEdgeY = (loopH < 32)
+            
+            for col in 0..<colCount {
+                let startX = col * 32
+                let validEndX = min(width, startX + 32)
+                let loopW = validEndX - startX
+                let isEdgeX = (loopW < 32)
+                
+                let blk = blocks[idx]
+                idx += 1
+                
+                let llX = startX / 2
+                let llY = startY / 2
+                prevImg.readY(x: llX, y: llY, size: 16, into: blk)
+                                        
+                let view = blk
+                let base = view.base
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: view.base, stride: view.stride)
+                            
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
+                    let v = blk
+                    for h in 0..<32 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 32)
+                    }
+                case 0 < loopH && 0 < loopW:
+                    let v = blk
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
+                    }
+                default:
+                    break
+                }
+            }
+        }
+    }
+    return (plane, { [plane] in pool.putInt16(plane) })
+}
+
+@inline(__always)
+func reconstructPlaneLayer32CbWithSkipMap(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode], skipBw: Int, skipBh: Int) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -1519,7 +1574,7 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 // Chroma blocks span 2×2 luma-geometry skip-map entries (a
                 // 32px chroma block covers 64px at full resolution).
-                if let map = skipMap, 0 < skipBw, base8ChromaAllSkip(skipMap: map, bw: skipBw, bh: skipBh, c: col, r: row) {
+                if 0 < skipBw, base8ChromaAllSkip(skipMap: skipMap, bw: skipBw, bh: skipBh, c: col, r: row) {
                     continue
                 }
 
@@ -1559,7 +1614,64 @@ func reconstructPlaneLayer32Cb(blocks: [BlockView], prevImg: Image16, width: Int
 }
 
 @inline(__always)
-func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode]? = nil, skipBw: Int = 0, skipBh: Int = 0) -> ([Int16], @Sendable () -> Void) {
+func reconstructPlaneLayer32CbWithoutSkipMap(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+    let colCount = (width + 31) / 32
+    let rowCount = (height + 31) / 32
+    var plane = pool.getInt16(count: width * height)
+    withUnsafePointers(mut: &plane) { dstBase in
+        var idx = 0
+        for row in 0..<rowCount {
+            let startY = row * 32
+            let validEndY = min(height, startY + 32)
+            let loopH = validEndY - startY
+            let isEdgeY = (loopH < 32)
+            
+            for col in 0..<colCount {
+                let startX = col * 32
+                let validEndX = min(width, startX + 32)
+                let loopW = validEndX - startX
+                let isEdgeX = (loopW < 32)
+                
+                let blk = blocks[idx]
+                idx += 1
+
+                let llX = startX / 2
+                let llY = startY / 2
+                prevImg.readCb(x: llX, y: llY, size: 16, into: blk)
+                
+                let view = blk
+                let base = view.base
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: view.base, stride: view.stride)
+                            
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
+                    let v = blk
+                    for h in 0..<32 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 32)
+                    }
+                case 0 < loopH && 0 < loopW:
+                    let v = blk
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
+                    }
+                default:
+                    break
+                }
+            }
+        }
+    }
+    return (plane, { [plane] in pool.putInt16(plane) })
+}
+
+@inline(__always)
+func reconstructPlaneLayer32CrWithSkipMap(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool, skipMap: [BlockMode], skipBw: Int, skipBh: Int) -> ([Int16], @Sendable () -> Void) {
     let colCount = (width + 31) / 32
     let rowCount = (height + 31) / 32
     var plane = pool.getInt16(count: width * height)
@@ -1582,9 +1694,66 @@ func reconstructPlaneLayer32Cr(blocks: [BlockView], prevImg: Image16, width: Int
                 
                 // Chroma blocks span 2×2 luma-geometry skip-map entries (a
                 // 32px chroma block covers 64px at full resolution).
-                if let map = skipMap, 0 < skipBw, base8ChromaAllSkip(skipMap: map, bw: skipBw, bh: skipBh, c: col, r: row) {
+                if 0 < skipBw, base8ChromaAllSkip(skipMap: skipMap, bw: skipBw, bh: skipBh, c: col, r: row) {
                     continue
                 }
+
+                let llX = startX / 2
+                let llY = startY / 2
+                prevImg.readCr(x: llX, y: llY, size: 16, into: blk)
+                
+                let view = blk
+                let base = view.base
+                dequantize16(ptr: base.advanced(by: 16), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 512), stride: 32, q: qt.qMid)
+                dequantize16(ptr: base.advanced(by: 528), stride: 32, q: qt.qHigh)
+                inverseDWT2DBlock32(ptr: view.base, stride: view.stride)
+                            
+                switch true {
+                case isEdgeY != true && isEdgeX != true:
+                    let v = blk
+                    for h in 0..<32 {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: 32)
+                    }
+                case 0 < loopH && 0 < loopW:
+                    let v = blk
+                    for h in 0..<loopH {
+                        let srcPtr = v.rowPointer(y: h)
+                        let destPtr = dstBase.advanced(by: (startY + h) * width + startX)
+                        destPtr.update(from: srcPtr, count: loopW)
+                    }
+                default:
+                    break
+                }
+            }
+        }
+    }
+    return (plane, { [plane] in pool.putInt16(plane) })
+}
+
+@inline(__always)
+func reconstructPlaneLayer32CrWithoutSkipMap(blocks: [BlockView], prevImg: Image16, width: Int, height: Int, qt: QuantizationTable, pool: BlockViewPool) -> ([Int16], @Sendable () -> Void) {
+    let colCount = (width + 31) / 32
+    let rowCount = (height + 31) / 32
+    var plane = pool.getInt16(count: width * height)
+    withUnsafePointers(mut: &plane) { dstBase in
+        var idx = 0
+        for row in 0..<rowCount {
+            let startY = row * 32
+            let validEndY = min(height, startY + 32)
+            let loopH = validEndY - startY
+            let isEdgeY = (loopH < 32)
+            
+            for col in 0..<colCount {
+                let startX = col * 32
+                let validEndX = min(width, startX + 32)
+                let loopW = validEndX - startX
+                let isEdgeX = (loopW < 32)
+                
+                let blk = blocks[idx]
+                idx += 1
 
                 let llX = startX / 2
                 let llY = startY / 2
@@ -1796,7 +1965,7 @@ func reconstructPlaneLayer16Cr(blocks: [BlockView], prevImg: Image16, width: Int
 /// encodePlaneBaseSubbands8 via blockEncodeDPCM4/MED), no SAD gating, no
 /// history state. selectModel picks the profile's static AC tables.
 @inline(__always)
-func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, selectModel: @escaping ModelSelectorFn, isProfile2: Bool = false) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+func encodePlaneBase8IntraProfile1(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, selectModel: @escaping ModelSelectorFn) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -1809,7 +1978,7 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
         }
 
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: isProfile2)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: false)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
@@ -1823,7 +1992,7 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: isProfile2)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: false)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1837,7 +2006,81 @@ func encodePlaneBase8Intra(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizat
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: isProfile2)
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: false)
+
+        let quantizedBlocks = blocks
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
+    }()
+
+    let (bufY, reconY, r0Y, base8YBlocks, relYBlocks) = await taskBufY
+    let (bufCb, reconCb, r0Cb, base8CbBlocks, relCbBlocks) = await taskBufCb
+    let (bufCr, reconCr, r0Cr, base8CrBlocks, relCrBlocks) = await taskBufCr
+
+    let reconstructed = PlaneData420(width: dx, height: dy, y: reconY, cb: reconCb, cr: reconCr)
+
+    debugLog({
+        return "  [Layer 0/Base] Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
+    }())
+
+    let out = VEVCLayerData.serialize(
+        qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
+        bufY: bufY, bufCb: bufCb, bufCr: bufCr
+    )
+
+    return (out, reconstructed, base8YBlocks, base8CbBlocks, base8CrBlocks, {
+        r0Y()
+        r0Cb()
+        r0Cr()
+        relYBlocks()
+        relCbBlocks()
+        relCrBlocks()
+    })
+}
+
+@inline(__always)
+func encodePlaneBase8IntraProfile2(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, selectModel: @escaping ModelSelectorFn) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
+    let dx = pd.width
+    let dy = pd.height
+    let cbDx = ((dx + 1) / 2)
+    let cbDy = ((dy + 1) / 2)
+
+    async let taskBufY = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rY, width: dx, height: dy, pool: pool)
+        for i in blocks.indices {
+            evaluateQuantizeBase8(view: blocks[i], qt: qtY)
+        }
+
+        let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: true)
+
+        let quantizedBlocks = blocks
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
+        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
+    }()
+
+    async let taskBufCb = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCb, width: cbDx, height: cbDy, pool: pool)
+        for i in blocks.indices {
+            evaluateQuantizeBase8(view: blocks[i], qt: qtC)
+        }
+
+        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: true)
+
+        let quantizedBlocks = blocks
+        let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
+        return (buf, reconPlane, rPlane, quantizedBlocks, relBlocks)
+    }()
+
+    async let taskBufCr = { () -> ([UInt8], [Int16], @Sendable () -> Void, [BlockView], @Sendable () -> Void) in
+        var (blocks, relBlocks) = await extractSingleTransformBlocksBase8(r: pd.rCr, width: cbDx, height: cbDy, pool: pool)
+        for i in blocks.indices {
+            evaluateQuantizeBase8(view: blocks[i], qt: qtC)
+        }
+
+        let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
+        let buf = encodePlaneBaseSubbands8(blocks: &blocks, zeroThreshold: safeThreshold, selectModel: selectModel, isProfile2: true)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1899,7 +2142,7 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
 
         // P-frame Base8: apply safeThreshold to zero out imperceptible residuals
         let safeThreshold = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: nil, selectModel: unifiedSelectModel)
+        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: dx, height: dy, qt: qtY, pool: pool)
@@ -1913,7 +2156,7 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step)  / 32)))
-        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: nil, selectModel: unifiedSelectModel)
+        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
@@ -1927,7 +2170,7 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
         }
 
         let safeThreshold = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: nil, selectModel: unifiedSelectModel)
+        let buf = encodePlaneBaseSubbands8PFrame(blocks: &blocks, zeroThreshold: safeThreshold, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         let quantizedBlocks = blocks
         let (reconPlane, rPlane) = reconstructPlaneBase8(blocks: blocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)

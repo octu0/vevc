@@ -14,9 +14,9 @@ func encodeLayer32PayloadNoParents(dx: Int, dy: Int, qtY: QuantizationTable, qtC
     let cbDy = (dy + 1) / 2
     let colCountC = (cbDx + 31) / 32
     let rowCountC = (cbDy + 31) / 32
-    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: nil, colCount: colCountY, rowCount: rowCountY, history: nil, selectModel: unifiedSelectModel)
-    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel)
-    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel)
+    let bufY = encodePlaneSubbands32(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: nil, colCount: colCountY, rowCount: rowCountY, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
+    let bufCb = encodePlaneSubbands32(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
+    let bufCr = encodePlaneSubbands32(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
     return VEVCLayerData.serialize(
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
         bufY: bufY, bufCb: bufCb, bufCr: bufCr
@@ -32,9 +32,9 @@ func encodeLayer16PayloadNoParents(dx: Int, dy: Int, qtY: QuantizationTable, qtC
     let cbDy = (dy + 1) / 2
     let colCountC = (cbDx + 15) / 16
     let rowCountC = (cbDy + 15) / 16
-    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: nil, colCount: colCountY, rowCount: rowCountY, history: nil, selectModel: unifiedSelectModel)
-    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel)
-    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel)
+    let bufY = encodePlaneSubbands16(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: nil, colCount: colCountY, rowCount: rowCountY, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
+    let bufCb = encodePlaneSubbands16(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
+    let bufCr = encodePlaneSubbands16(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: nil, colCount: colCountC, rowCount: rowCountC, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
     return VEVCLayerData.serialize(
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
         bufY: bufY, bufCb: bufCb, bufCr: bufCr

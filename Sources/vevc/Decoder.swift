@@ -64,7 +64,7 @@ public actor StreamingDecoderActor {
     // only adds overhead, so the GOP-parallel Decoder turns it off.
     let parallelEntropy: Bool
 
-    public init(maxLayer: Int = 2, width: Int = 0, height: Int = 0, profile: UInt8 = 0x01, gop: Int = 12, temporalLayers: Int = 1, parallelEntropy: Bool = true) {
+    public init(maxLayer: Int, width: Int, height: Int, profile: UInt8, gop: Int, temporalLayers: Int, parallelEntropy: Bool) {
         self.maxLayer = maxLayer
         self.width = width
         self.height = height
@@ -73,11 +73,28 @@ public actor StreamingDecoderActor {
         self.gop = gop
         self.temporalLayers = temporalLayers
         self.parallelEntropy = parallelEntropy
-        self.entropyHistories = (profile == 0x02) ? FrameEntropyHistories() : nil
-        self.mvPredictionState = (profile == 0x02) ? MVPredictionState() : nil
-        // Not gated on any environment variable: the decoder must be able to
-        // read a rANSContext stream regardless of how it was launched.
-        self.ransContextWorkspace = (profile == 0x02) ? rANSContextWorkspace() : nil
+        let isProfile2 = (profile == 0x02)
+        if isProfile2 {
+            self.entropyHistories = FrameEntropyHistories()
+            self.mvPredictionState = MVPredictionState()
+            self.ransContextWorkspace = rANSContextWorkspace()
+        } else {
+            self.entropyHistories = nil
+            self.mvPredictionState = nil
+            self.ransContextWorkspace = nil
+        }
+    }
+
+    public init(width: Int, height: Int) {
+        self.init(maxLayer: 2, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
+    }
+
+    public init(maxLayer: Int, width: Int, height: Int) {
+        self.init(maxLayer: maxLayer, width: width, height: height, profile: 0x01, gop: 12, temporalLayers: 1, parallelEntropy: true)
+    }
+
+    public init(maxLayer: Int, width: Int, height: Int, profile: UInt8) {
+        self.init(maxLayer: maxLayer, width: width, height: height, profile: profile, gop: 12, temporalLayers: 1, parallelEntropy: true)
     }
 
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
@@ -368,11 +385,19 @@ public struct Decoder: Sendable {
     public let maxConcurrency: Int
 
     public init(
-        maxLayer: Int = 2,
-        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount
+        maxLayer: Int,
+        maxConcurrency: Int
     ) {
         self.maxLayer = maxLayer
         self.maxConcurrency = maxConcurrency
+    }
+
+    public init() {
+        self.init(maxLayer: 2, maxConcurrency: ProcessInfo.processInfo.activeProcessorCount)
+    }
+
+    public init(maxLayer: Int) {
+        self.init(maxLayer: maxLayer, maxConcurrency: ProcessInfo.processInfo.activeProcessorCount)
     }
 
     @inline(__always)
@@ -408,7 +433,7 @@ public struct Decoder: Sendable {
     }
 
     @inline(__always)
-    public func decode<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<YCbCrImage, Error> where S.Element == [UInt8] {
+    public func decodeStream<S: AsyncSequence & Sendable>(stream: S) -> AsyncThrowingStream<YCbCrImage, Error> where S.Element == [UInt8] {
         return AsyncThrowingStream { continuation in
             Task {
                 var iterator = stream.makeAsyncIterator()
@@ -530,14 +555,14 @@ public struct Decoder: Sendable {
             continuation.finish()
         }
         var images: [YCbCrImage] = []
-        for try await img in self.decode(stream: stream) {
+        for try await img in self.decodeStream(stream: stream) {
             images.append(img)
         }
         return images
     }
 
     @inline(__always)
-    public func decode(chunks: [[UInt8]]) async throws -> [YCbCrImage] {
+    public func decodeChunks(chunks: [[UInt8]]) async throws -> [YCbCrImage] {
         let stream = AsyncStream<[UInt8]> { continuation in
             for chunk in chunks {
                 continuation.yield(chunk)
@@ -545,14 +570,14 @@ public struct Decoder: Sendable {
             continuation.finish()
         }
         var images: [YCbCrImage] = []
-        for try await img in self.decode(stream: stream) {
+        for try await img in self.decodeStream(stream: stream) {
             images.append(img)
         }
         return images
     }
     
     @inline(__always)
-    public func decode(fileHandle: FileHandle) -> AsyncThrowingStream<YCbCrImage, Error> {
+    public func decodeFile(fileHandle: FileHandle) -> AsyncThrowingStream<YCbCrImage, Error> {
         let stream = AsyncStream<[UInt8]> { continuation in
             Task {
                 do {
@@ -643,7 +668,7 @@ public struct Decoder: Sendable {
                 }
             }
         }
-        return self.decode(stream: stream)
+        return self.decodeStream(stream: stream)
     }
 
     @inline(__always)

@@ -46,7 +46,7 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
                 let copyH = min(q, llH - dy0)
                 if copyH <= 0 { continue }
                 for c in 0..<colCount {
-                    reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view, srcBase: pBase)
+                    reader.readBlockFromBase(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view, srcBase: pBase)
                     // LL-only forward lifting: bit-identical LL bytes, the other
                     // quadrants (never gathered here) stay unspecified.
                     switch blockSize {
@@ -377,7 +377,7 @@ func applyPredictionOffset4(plane: inout [Int16], offset: Int, mvs: MotionVector
 /// Frame-level offset application for a full-resolution prediction plane
 /// set (32px luma / 16px chroma blocks).
 @inline(__always)
-func applyPredictionOffsetsL2(pd: inout PlaneData420, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+func applyPredictionOffsetsL2ToPlaneData(pd: inout PlaneData420, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
     if lumaOffset != 0 {
         applyPredictionOffset32(plane: &pd.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: pd.width, height: pd.height)
     }
@@ -392,7 +392,7 @@ func applyPredictionOffsetsL2(pd: inout PlaneData420, lumaOffset: Int, chromaOff
 /// Frame-level offset application for a full-resolution reconstruction image
 /// (32px luma / 16px chroma blocks).
 @inline(__always)
-func applyPredictionOffsetsL2(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+func applyPredictionOffsetsL2ToImage(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
     if lumaOffset != 0 {
         applyPredictionOffset32(plane: &img.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: img.width, height: img.height)
     }
@@ -407,7 +407,7 @@ func applyPredictionOffsetsL2(img: inout Image16, lumaOffset: Int, chromaOffset:
 /// Half-resolution variant (16px luma / 8px chroma blocks) for the L1
 /// prediction and the layer1 display path.
 @inline(__always)
-func applyPredictionOffsetsL1(pd: inout PlaneData420, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+func applyPredictionOffsetsL1ToPlaneData(pd: inout PlaneData420, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
     if lumaOffset != 0 {
         applyPredictionOffset16(plane: &pd.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: pd.width, height: pd.height)
     }
@@ -420,7 +420,7 @@ func applyPredictionOffsetsL1(pd: inout PlaneData420, lumaOffset: Int, chromaOff
 }
 
 @inline(__always)
-func applyPredictionOffsetsL1(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
+func applyPredictionOffsetsL1ToImage(img: inout Image16, lumaOffset: Int, chromaOffset: Int, mvs: MotionVectors, refDirs: [Bool], skipMap: [BlockMode]) {
     if lumaOffset != 0 {
         applyPredictionOffset16(plane: &img.y, offset: lumaOffset, mvs: mvs, refDirs: refDirs, skipMap: skipMap, width: img.width, height: img.height)
     }

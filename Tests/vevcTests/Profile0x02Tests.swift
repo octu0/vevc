@@ -159,8 +159,8 @@ final class Profile0x02Tests: XCTestCase {
         let width = 640
         let height = 480
         let pool = BlockViewPool()
-        let qtY = QuantizationTable(baseStep: 16)
-        let qtC = QuantizationTable(baseStep: 16)
+        let qtY = QuantizationTable(baseStep: 16, isChroma: false, layerIndex: 0)
+        let qtC = QuantizationTable(baseStep: 16, isChroma: true, layerIndex: 0)
         
         var img0 = YCbCrImage(width: width, height: height, ratio: .ratio420)
         var img1 = YCbCrImage(width: width, height: height, ratio: .ratio420)
@@ -187,7 +187,7 @@ final class Profile0x02Tests: XCTestCase {
         let (bytesI, encReconI, _, _, relEncI) = try await encodeSpatialLayersIntraForProfile2(
             pd: pd0, pool: pool, qtY: qtY, qtC: qtC, zeroThreshold: 5, l0State: l0StateEnc)
         defer { relEncI() }
-        let decImg16I = try await decodeSpatialLayersForProfile2(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: l0StateDec, parallelEntropy: true)
+        let decImg16I = try await decodeSpatialLayersForProfile2(r: bytesI, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: nil, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: l0StateDec, mvState: nil, parallelEntropy: true, updateL0Prev: true, ransContextWorkspace: nil)
         let decReconI = PlaneData420(img16: decImg16I)
         
         // P-frame
@@ -197,10 +197,10 @@ final class Profile0x02Tests: XCTestCase {
         var counters = [Int](repeating: 0, count: bw * bh)
         let syntaxContext = SyntaxContextModels()
         let (bytesP, encReconP, _, _, relEncP, _, _, _) = try await encodeSpatialLayersForProfile2(
-            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, gopPosition: 2, ltrAge: 1, skipThreshold: 2, reconThresholdScale: 1, staticCounters: &counters, cachedNextSub2: nil, cachedNextSub1: nil, entropyHistories: nil, syntaxContext: syntaxContext, l0State: l0StateEnc)
+            pd: pd1, pool: pool, predictedPd: encReconI, nextPd: encReconI, prevInput: pd1, ltrInput: encReconI, prevMVs: nil, maxbitrate: 500*1024, qtY: qtY, qtC: qtC, zeroThreshold: 5, roundOffset: 0, gopPosition: 2, ltrAge: 1, skipThreshold: 2, reconThresholdScale: 1, staticCounters: &counters, cachedNextSub2: nil, cachedNextSub1: nil, entropyHistories: nil, syntaxContext: syntaxContext, l0State: l0StateEnc, l2Cadence: 1, l1Cadence: 1, l0Cadence: 1, framerate: 30, motionMaskingPx: 0, adjustedStep: Int(qtY.step), smooth: 0, updateL0Prev: true, skipModel: nil, ransContextWorkspace: nil, dumpWriter: nil)
         defer { relEncP() }
         
-        let decImg16P = try await decodeSpatialLayersForProfile2(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: l0StateDec, parallelEntropy: true)
+        let decImg16P = try await decodeSpatialLayersForProfile2(r: bytesP, pool: pool, maxLayer: 2, dx: width, dy: height, predictedPd: decReconI, nextPd: nil, roundOffset: 0, entropyHistories: nil, l0State: l0StateDec, mvState: nil, parallelEntropy: true, updateL0Prev: true, ransContextWorkspace: nil)
         let decReconP = PlaneData420(img16: decImg16P)
         
         XCTAssertEqual(encReconP.y, decReconP.y)
@@ -318,7 +318,7 @@ final class Profile0x02Tests: XCTestCase {
 
     func testRDDiagnostic() async throws {
         let ws = rANSContextWorkspace()
-        var coeffs: [Int16] = [10, 0, 0, 0,  2, 1, 0, 0,  1, 0, 0, 0,  0, 0, 0, 0]
+        let coeffs: [Int16] = [10, 0, 0, 0,  2, 1, 0, 0,  1, 0, 0, 0,  0, 0, 0, 0]
         let c4h = coeffs.withUnsafeBufferPointer { estimate4HTailBits(blockCoeffs: $0.baseAddress!) }
         let cModel = coeffs.withUnsafeBufferPointer {
             ws.estimateModelTailBits(

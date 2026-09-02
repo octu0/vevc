@@ -19,8 +19,11 @@ final class VevcTests: XCTestCase {
         return 10.0 * log10(255.0 * 255.0 / mse)
     }
 
-    /// テスト用のグラデーション画像を生成する
-    private func generateGradientImage(width: Int, height: Int, seed: Int = 0) -> YCbCrImage {
+    private func generateGradientImage(width: Int, height: Int) -> YCbCrImage {
+        return generateGradientImage(width: width, height: height, seed: 0)
+    }
+
+    private func generateGradientImage(width: Int, height: Int, seed: Int) -> YCbCrImage {
         var img = YCbCrImage(width: width, height: height)
         let cWidth = (width + 1) / 2
         for y in 0..<height {
@@ -289,8 +292,8 @@ final class VevcTests: XCTestCase {
         let pd0 = toPlaneData420(image: img0, pool: BlockViewPool()).0
         let pd3 = toPlaneData420(image: img3, pool: BlockViewPool()).0
 
-        let qtY = QuantizationTable(baseStep: 1)  // 最小量子化ステップ
-        let qtC = QuantizationTable(baseStep: 1)
+        let qtY = QuantizationTable(baseStep: 1, isChroma: false, layerIndex: 0)  // 最小量子化ステップ
+        let qtC = QuantizationTable(baseStep: 1, isChroma: true, layerIndex: 0)
 
         // I-Frame: encode→reconstructを取得
         let (iBytes, iRecon, _, _, releaseI) = try await encodeSpatialLayersIntra(
@@ -302,7 +305,7 @@ final class VevcTests: XCTestCase {
         let iPd = PlaneData420(img16: iDecoded)
 
         // I-Frame品質確認
-        let iImg = iPd.toYCbCr()
+        let iImg = iPd.toYCbCrImage()
         let iPsnr = calculatePSNR(original: img0.yPlane, decoded: iImg.yPlane)
         XCTAssertGreaterThan(iPsnr, 30.0, "I-Frame PSNR(\(String(format: "%.1f", iPsnr))dB)がqt.step=1でも低い")
 

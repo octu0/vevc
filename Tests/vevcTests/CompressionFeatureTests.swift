@@ -56,13 +56,13 @@ final class CompressionFeatureTests: XCTestCase {
         blockEncode(encoder: &encoder, block: block, size: size)
         encoder.flush()
 
-        let encodedData = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let encodedData = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         let outBlock = BlockView.allocate(width: size, height: size)
         defer { outBlock.deallocate() }
 
         try encodedData.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             try blockDecode(decoder: &decoder, block: outBlock, size: size)
         }
 

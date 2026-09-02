@@ -237,7 +237,7 @@ final class ImageUtilTests: XCTestCase {
         XCTAssertEqual(pds.count, 1)
 
         // Now convert back
-        let upsampled = pd.toYCbCr()
+        let upsampled = pd.toYCbCrImage()
 
         // It has 420 chroma subsampling, so Cb and Cr are expected at (x/2)
         // Let's read the values at x=96, y=180

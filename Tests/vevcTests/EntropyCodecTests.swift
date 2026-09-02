@@ -18,10 +18,10 @@ final class EntropyCodecTests: XCTestCase {
             expectedPairs.append((run: run, val: val))
         }
 
-        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         try data.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
 
             for (i, expected) in expectedPairs.enumerated() {
                 let pair = decoder.readPair(context: 0)
@@ -51,13 +51,13 @@ final class EntropyCodecTests: XCTestCase {
             blockEncode16V(encoder: &encoder, block: blocks[i])
         }
 
-        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: AdaptiveEntropyModel.selectModel, history: nil, updateHistory: true)
 
         // デコード
         let decBlocks = (0..<16).map { _ in BlockView.allocate(width: 16, height: 16) }
         defer { for b in decBlocks { b.deallocate() } }
         try data.withUnsafeBufferPointer { ptr in
-            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count)
+            var decoder = try EntropyDecoder(base: ptr.baseAddress!, count: ptr.count, startOffset: 0, history: nil, parentFreeStatics: false, updateHistory: true)
             for i in 0..<16 {
                 try! blockDecode16V(decoder: &decoder, ptr: decBlocks[i].base, stride: decBlocks[i].stride)
             }

@@ -85,7 +85,7 @@ public class Y4MWriter {
     private let fileHandle: FileHandle
     private let frameHeader = "FRAME\n".data(using: .ascii)!
 
-    public init(fileHandle: FileHandle, width: Int, height: Int, fpsHeader: String = "F30:1") throws {
+    public init(fileHandle: FileHandle, width: Int, height: Int, fpsHeader: String) throws {
         self.fileHandle = fileHandle
         let headerStr = "YUV4MPEG2 W\(width) H\(height) \(fpsHeader) Ip A0:0 C420mpeg2 XYSCSS=420JPEG\n"
         if let data = headerStr.data(using: .ascii) {

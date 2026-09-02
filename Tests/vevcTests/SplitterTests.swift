@@ -10,11 +10,11 @@ struct SplitterTests {
         let maxLayer: Int = 2
 
         #expect(throws: (any Error).self) {
-            try splitVEVCStream(input: input, maxLayer: maxLayer)
+            try splitVEVCStream(input: input, maxLayer: maxLayer, maxTemporalLayer: 1)
         }
 
         do {
-            _ = try splitVEVCStream(input: input, maxLayer: maxLayer)
+            _ = try splitVEVCStream(input: input, maxLayer: maxLayer, maxTemporalLayer: 1)
         } catch let error as SplitterError {
             if case .invalidMagic = error {
                 // Success
@@ -68,7 +68,7 @@ struct SplitterTests {
         bitstream.append(0xFC) // layer2 payload
 
         // Full bitstream works
-        let result = try splitVEVCStream(input: bitstream, maxLayer: 2)
+        let result = try splitVEVCStream(input: bitstream, maxLayer: 2, maxTemporalLayer: 1)
         #expect(result.processedFrames == 1)
 
         // Truncate at every possible length less than full size
@@ -82,17 +82,17 @@ struct SplitterTests {
             let isEndOfMetadata = (i == 4 + 2 + metadataPayload.count) // 16
 
             if isEndOfMetadata {
-                let truncResult = try splitVEVCStream(input: truncated, maxLayer: 2)
+                let truncResult = try splitVEVCStream(input: truncated, maxLayer: 2, maxTemporalLayer: 1)
                 #expect(truncResult.processedFrames == 0)
                 continue
             }
 
             #expect(throws: (any Error).self) {
-                try splitVEVCStream(input: truncated, maxLayer: 2)
+                try splitVEVCStream(input: truncated, maxLayer: 2, maxTemporalLayer: 1)
             }
 
             do {
-                _ = try splitVEVCStream(input: truncated, maxLayer: 2)
+                _ = try splitVEVCStream(input: truncated, maxLayer: 2, maxTemporalLayer: 1)
             } catch let error as SplitterError {
                 if case .unexpectedEOF = error {
                     // Success
@@ -121,11 +121,11 @@ struct SplitterTests {
         ]
 
         #expect(throws: (any Error).self) {
-            try splitVEVCStream(input: bitstream, maxLayer: 2)
+            try splitVEVCStream(input: bitstream, maxLayer: 2, maxTemporalLayer: 1)
         }
 
         do {
-            _ = try splitVEVCStream(input: bitstream, maxLayer: 2)
+            _ = try splitVEVCStream(input: bitstream, maxLayer: 2, maxTemporalLayer: 1)
         } catch let error as SplitterError {
             if case .unexpectedEOF = error {
                 // Success
@@ -167,7 +167,7 @@ struct SplitterTests {
         let bytes = [UInt8](bitstream)
         
         // 1. Split to maxLayer = 1
-        let l1Result = try splitVEVCStream(input: bytes, maxLayer: 1)
+        let l1Result = try splitVEVCStream(input: bytes, maxLayer: 1, maxTemporalLayer: 1)
         #expect(l1Result.processedFrames == 5)
         #expect(0 < l1Result.droppedLayer2Bytes)
         #expect(l1Result.droppedLayer1Bytes == 0)
@@ -178,7 +178,7 @@ struct SplitterTests {
         #expect(decL1Frames.count == 5)
         
         // 2. Split to maxLayer = 0
-        let l0Result = try splitVEVCStream(input: bytes, maxLayer: 0)
+        let l0Result = try splitVEVCStream(input: bytes, maxLayer: 0, maxTemporalLayer: 1)
         #expect(l0Result.processedFrames == 5)
         #expect(0 < l0Result.droppedLayer2Bytes)
         #expect(0 < l0Result.droppedLayer1Bytes)
@@ -189,7 +189,7 @@ struct SplitterTests {
         #expect(decL0Frames.count == 5)
         
         // 3. Split to maxLayer = 2 (should be same as original)
-        let l2Result = try splitVEVCStream(input: bytes, maxLayer: 2)
+        let l2Result = try splitVEVCStream(input: bytes, maxLayer: 2, maxTemporalLayer: 1)
         #expect(l2Result.processedFrames == 5)
         #expect(l2Result.droppedLayer2Bytes == 0)
         #expect(l2Result.droppedLayer1Bytes == 0)

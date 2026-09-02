@@ -193,11 +193,15 @@ struct rANSModel {
     private(set) var tokenCumFreqs: [UInt32]
     private(set) var tokenLUT: [UInt8]
     
-    init(buildLUT: Bool = true) {
+    init(buildLUT: Bool) {
         self.tokenFreqs = Array(repeating: rANSScale / 64, count: 64)
         self.tokenCumFreqs = (0..<64).map { UInt32($0) * (rANSScale / 64) }
         self.tokenLUT = if buildLUT { [UInt8](repeating: 0, count: Int(rANSScale)) } else { [] }
         if buildLUT { self.buildLUT() }
+    }
+
+    init() {
+        self.init(buildLUT: true)
     }
     
     init(tokenFreqs: [UInt32]) {

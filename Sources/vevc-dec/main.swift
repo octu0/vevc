@@ -71,7 +71,7 @@ do {
     var y4mWriter: Y4MWriter? = nil
     var frameCount = 0
 
-    let imageStream = decoder.decode(fileHandle: inFileHandle)
+    let imageStream = decoder.decodeFile(fileHandle: inFileHandle)
     let (count, decodeTime) = try await Task(priority: .userInitiated) {
         var localCount = 0
         var localDecodeTime: TimeInterval = 0

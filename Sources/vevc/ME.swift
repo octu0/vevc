@@ -508,7 +508,7 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func searchPixels(
+    static func searchPixelsFromArrays(
         currPlane: [Int16], 
         prevPlane: [Int16], 
         cPtr: UnsafeMutablePointer<Int16>,
@@ -538,7 +538,7 @@ struct MotionEstimation {
     /// Extract approximate structure contrast (max - min) from 8x8 block
     /// Zero-cost feature extraction without additional SIMD loop overheads.
     @inline(__always)
-    static func extractContrast8x8(plane: [Int16], width: Int, height: Int, bx: Int, by: Int) -> Int {
+    static func extractContrast8x8FromArray(plane: [Int16], width: Int, height: Int, bx: Int, by: Int) -> Int {
         return plane.withUnsafeBufferPointer { base in
             extractContrast8x8(base: base.baseAddress!, width: width, height: height, bx: bx, by: by)
         }
@@ -576,7 +576,7 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func computeChromaSAD(
+    static func computeChromaSADFromPointers(
         currCb: UnsafePointer<Int16>, currCr: UnsafePointer<Int16>,
         refCb: UnsafePointer<Int16>, refCr: UnsafePointer<Int16>,
         cbw: Int, cbh: Int,
@@ -630,7 +630,7 @@ struct MotionEstimation {
         let cbw = (curr.width + 1) / 2
         let cbh = (curr.height + 1) / 2
         return withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
-            computeChromaSAD(currCb: cCb, currCr: cCr, refCb: rCb, refCr: rCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: refDx, refDy: refDy)
+            computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: rCb, refCr: rCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: refDx, refDy: refDy)
         }
     }
 
@@ -959,7 +959,7 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func searchPixelsSubpixelRefinement32(
+    static func searchPixelsSubpixelRefinement32FromArrays(
         currPlane: [Int16],
         prevPlane: [Int16],
         width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
@@ -1062,7 +1062,7 @@ struct UnsafePointerWrapper<T>: @unchecked Sendable {
 }
 
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]? = nil, cachedNextSub1: [Int16]? = nil, dualOut: DualMVSink? = nil) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dualOut: DualMVSink?) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1300,7 +1300,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
                     )
                     
-                    let prevChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
+                    let prevChromaSad = MotionEstimation.computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
                     mutSADPrev += prevChromaSad / 4
                     let prevSAD = mutSADPrev
                     
@@ -1325,7 +1325,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             
                             let contrastDiff = Int((currContrast - nextContrast).magnitude)
                             let structurePenalty = (contrastDiff * contrastDiff) / 4
-                            let chromaSAD = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+                            let chromaSAD = MotionEstimation.computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
                             cachedNextChromaSad = chromaSAD
                             let chromaPenalty = chromaSAD / 4
                             
@@ -1346,7 +1346,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         }
                     }
                     dynamicThreshold = max(1024, currContrast * 48)
-                    let nextChromaSad = if cachedNextChromaSad != -1 { cachedNextChromaSad } else { MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) }
+                    let nextChromaSad = if cachedNextChromaSad != -1 { cachedNextChromaSad } else { MotionEstimation.computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) }
                     let finalSAD = if dir { mutSADNext + (nextChromaSad / 4) } else { prevSAD }
                     switch true {
                     case dynamicThreshold < finalSAD:

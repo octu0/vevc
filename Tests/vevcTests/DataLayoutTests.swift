@@ -8,7 +8,7 @@ final class DataLayoutTests: XCTestCase {
         let expectedWidth = 1920
         let expectedHeight = 1080
         let expectedFramerate = 30
-        var chunk = VEVCFileHeader(width: expectedWidth, height: expectedHeight, framerate: expectedFramerate).serialize()
+        var chunk = VEVCFileHeader(width: expectedWidth, height: expectedHeight, framerate: expectedFramerate, profile: 0x01, gop: 12, temporalLayers: 1).serialize()
 
         // Mutate the first byte of the magic number to an invalid value
         chunk[0] = 0x00

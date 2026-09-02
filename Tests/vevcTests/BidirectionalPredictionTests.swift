@@ -73,9 +73,9 @@ final class BidirectionalPredictionTests: XCTestCase {
         let dummyMVs = MotionVectors(dx: [Int16](repeating: 0, count: count), dy: [Int16](repeating: 0, count: count))
         let skipMap = [BlockMode](repeating: .inter, count: count)
 
-        // 前方MV（pd0 → pd1）と後方MV（pd2 → pd1）を計算
-        let (_, fwdSADs, _, _, _, _) = await computeBidirectionalMotionVectors(curr: pd1, prev: pd0, next: pd0, prevMVs: dummyMVs, pool: pool, roundOffset: 0, gopPosition: 1, skipMap: skipMap)
-        let (_, bwdSADs, _, _, _, _) = await computeBidirectionalMotionVectors(curr: pd1, prev: pd2, next: pd2, prevMVs: dummyMVs, pool: pool, roundOffset: 0, gopPosition: 1, skipMap: skipMap)
+        // 前方MV（pd0 → pd1）と後方MV（pd0 → pd1）を計算
+        let (_, fwdSADs, _, _, _, _) = await computeBidirectionalMotionVectors(curr: pd1, prev: pd0, next: pd0, prevMVs: dummyMVs, pool: pool, roundOffset: 0, gopPosition: 1, skipMap: skipMap, cachedNextSub2: nil, cachedNextSub1: nil, dualOut: nil)
+        let (_, bwdSADs, _, _, _, _) = await computeBidirectionalMotionVectors(curr: pd1, prev: pd2, next: pd2, prevMVs: dummyMVs, pool: pool, roundOffset: 0, gopPosition: 1, skipMap: skipMap, cachedNextSub2: nil, cachedNextSub1: nil, dualOut: nil)
 
         // ブロックごとに、前方/後方のSADを比較して選択する
         var fwdBetterCount = 0

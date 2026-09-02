@@ -34,7 +34,7 @@ struct DataSizeBreakdownTests {
             encoder.addPair(run: 0, val: 1, context: 0)
             encoder.addTrailingZeros(15)
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
             print("  4x4 single-coeff-at-0,0: \(data.count)B")
         }
 
@@ -47,7 +47,7 @@ struct DataSizeBreakdownTests {
             // Let's just measure the full block
             encoder.addPair(run: 15, val: 1, context: 0)  // run=15 to reach (3,3) in 4x4
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
             print("  4x4 single-coeff-at-3,3: \(data.count)B")
         }
 
@@ -61,7 +61,7 @@ struct DataSizeBreakdownTests {
                 encoder.addPair(run: 0, val: 1, context: 0)
             }
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
             print("  4x4 all-nonzero (val=1): \(data.count)B")
         }
 
@@ -85,7 +85,7 @@ struct DataSizeBreakdownTests {
                 encoder.addTrailingZeros(run)
             }
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
             print("  4x4 realistic-dwt-coeffs: \(data.count)B (non-zero pairs: \(vals.filter { $0 != 0 }.count))")
         }
 
@@ -94,7 +94,7 @@ struct DataSizeBreakdownTests {
             var encoder = EntropyEncoder()
             encoder.encodeBypass(binVal: 0)  // hasNonZero = false
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
             print("  4x4 all-zero: \(data.count)B")
         }
     }
@@ -120,7 +120,7 @@ struct DataSizeBreakdownTests {
                 encoder.addTrailingZeros(12)  // rest are zero
             }
             encoder.flush()
-            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+            let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
             let bytesPerBlock = Double(data.count) / Double(count)
             print("  blocks=\(count) total=\(data.count)B bytes/block=\(String(format: "%.1f", bytesPerBlock))")
         }
@@ -144,7 +144,7 @@ struct DataSizeBreakdownTests {
             encoder.addTrailingZeros(12)
         }
         encoder.flush()
-        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel)
+        let data = encoder.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
 
         // Parse the structure to find the bypass/rANS split
         let bypassLen = Int(UInt32(data[0]) << 24 | UInt32(data[1]) << 16 | UInt32(data[2]) << 8 | UInt32(data[3]))
@@ -188,7 +188,7 @@ struct DataSizeBreakdownTests {
             }
         }
         encoder.flush()
-        let llData = encoder.getData(selectModel: StaticDPCMEntropyModel.selectModel)
+        let llData = encoder.getData(selectModel: StaticDPCMEntropyModel.selectModel, history: nil, updateHistory: true)
 
         var encoder2 = EntropyEncoder()
 
@@ -203,7 +203,7 @@ struct DataSizeBreakdownTests {
             encoder2.addTrailingZeros(12)
         }
         encoder2.flush()
-        let subbandData = encoder2.getData(selectModel: StaticEntropyModel.selectModel)
+        let subbandData = encoder2.getData(selectModel: StaticEntropyModel.selectModel, history: nil, updateHistory: true)
 
         print("  Estimated LL (DPCM): \(llData.count)B for \(nonZeroBlocks) blocks")
         print("  Estimated HL+LH+HH: \(subbandData.count)B for \(nonZeroBlocks * 3) blocks")

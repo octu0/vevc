@@ -664,10 +664,6 @@ private func emitTable(_ name: String, _ freqs: [UInt32]) -> String {
     return s
 }
 
-public func runTableTraining(trainPath: String, testPath: String) throws -> String {
-    try runTableTraining(trainPath: trainPath, testPath: testPath, parentFree: false)
-}
-
 public func runTableTraining(trainPath: String, testPath: String, parentFree: Bool) throws -> String {
     var gRun = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)
     var gVal = [[Int]](repeating: [Int](repeating: 0, count: 64), count: entropyContextCount)

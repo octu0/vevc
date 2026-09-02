@@ -20,7 +20,7 @@ struct Quantizer: Sendable {
     ///     Positive values narrow the dead zone (towards round-to-nearest).
     ///     Negative values widen the dead zone (more values become 0).
     ///     Common values: -6554 (-0.10), -3277 (-0.05), 0 (none).
-    init(step: Int, roundToNearest: Bool = false, deadZoneBias: Int32 = 0, centroidOffset: Bool = true) {
+    init(step: Int, roundToNearest: Bool, deadZoneBias: Int32, centroidOffset: Bool) {
         self.step = Int16(step)
         // reciprocal in Q16 fixed-point converts division to multiply+shift
         // Optimize by approximating division: val / step ≈ (val * mul) >> 16
@@ -80,7 +80,7 @@ struct QuantizationTable: Sendable {
     let qMidIncoherent: Quantizer
     let qHighIncoherent: Quantizer
 
-    init(baseStep: Int, isChroma: Bool = false, layerIndex: Int = 0) {
+    init(baseStep: Int, isChroma: Bool, layerIndex: Int) {
         let s = max(16, min(baseStep, 4096))
         self.step = Int16(s)
         self.isChroma = isChroma
@@ -182,7 +182,7 @@ struct QuantizationTable: Sendable {
             // red/green block splats on fast pans (measured on the Cr plane).
             let cHigh = min(768, max(16, (baseStep * qHighNum) / qHighDen))
 
-            self.qLow = Quantizer(step: Int(cLow), roundToNearest: true)
+            self.qLow = Quantizer(step: Int(cLow), roundToNearest: true, deadZoneBias: 0, centroidOffset: true)
             self.qMid = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: dzMidC, centroidOffset: offsetOn)
             self.qHigh = Quantizer(step: Int(cHigh), roundToNearest: false, deadZoneBias: dzHighC, centroidOffset: offsetOn)
             self.qMidFlat = Quantizer(step: Int(cMid), roundToNearest: false, deadZoneBias: min(32768, dzMidC + aqDelta), centroidOffset: offsetOn)
@@ -194,7 +194,7 @@ struct QuantizationTable: Sendable {
         } else {
             // qLow is the DC component: NEVER scale it!
             let lLow = min(qLowCapQ4, max(16, baseStep / qLowDivisor))
-            self.qLow = Quantizer(step: Int(lLow), roundToNearest: true)
+            self.qLow = Quantizer(step: Int(lLow), roundToNearest: true, deadZoneBias: 0, centroidOffset: true)
 
             // Luma stepMult is 1: Never scale Luma steps because they ruin SSIM.
             let lMid = min(768, max(16, (baseStep * qMidNum) / qMidDen))
