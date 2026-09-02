@@ -13,8 +13,6 @@ struct MotionVector: Sendable {
     var isIntra: Bool {
         return dx == 32767 && dy == 32767
     }
-    
-    static let intraBlock = MotionVector(dx: 32767, dy: 32767)
 }
 
 /// SoA (Structure of Arrays) layout for motion vectors.

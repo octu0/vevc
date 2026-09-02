@@ -5,13 +5,6 @@
 final class rANSContextWeights: @unchecked Sendable {
     static let shared = rANSContextWeights()
 
-    static let qShift: Int = 12
-    static let qScale: Int32 = 4096
-    static let hiddenDim: Int = 32
-    static let alphabetM: Int = 64
-    static let totalSymbols: Int = 130
-    static let escapeSymbol: Int = 129
-
     let invScalesQ: [Int32]
     let b2Q: [Int32]
     let inDims: [Int]

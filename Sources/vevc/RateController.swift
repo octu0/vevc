@@ -437,6 +437,7 @@ final class QualityFloorState: @unchecked Sendable {
     /// Evaluates a coded P frame against the floor. `k` is the periodic-grid
     /// position of the frame just coded and `dist` its true distance from the
     /// last coded I frame. Returns true when this frame armed an early I.
+    @discardableResult
     @inline(__always)
     func notePFrame(mse: Int, frameIndex: Int, k: Int, dist: Int) -> Bool {
         codedFrames += 1

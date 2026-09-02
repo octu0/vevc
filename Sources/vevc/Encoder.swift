@@ -822,7 +822,7 @@ actor LayersEncodeActor {
         // that opened the GOP. framesSinceKeyframe is still this frame's GOP
         // position here; it is incremented at the end of the call.
         if let floor = qualityFloorState {
-            _ = floor.notePFrame(
+            floor.notePFrame(
                 mse: lumaMSEInteger(reconstructed: reconstructed, source: plane),
                 frameIndex: frameIndex,
                 k: framesSinceKeyframe,

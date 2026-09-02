@@ -7,11 +7,6 @@ fileprivate struct SendableInt16Ptr: @unchecked Sendable {
 
 // MARK: - Spatial Adaptive Weight
 
-final class ConcurrentBox<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
-}
-
 @inline(__always)
 func isBlockAllSkip(skipMap: [BlockMode], mapWidth: Int, lxStart: Int, lyStart: Int, countX: Int, countY: Int) -> Bool {
     for y in 0..<countY {
@@ -1165,39 +1160,6 @@ func preparePlaneLayer32(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizatio
     return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
 }
 
-@inline(__always)
-func preparePlaneLayer32WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
-    let dx = pd.width
-    let dy = pd.height
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-
-    let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
-    let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
-
-    async let taskBufY = { [ySkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip)
-        return (subband, blocks, r)
-    }()
-
-    async let taskBufCb = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
-        return (subband, blocks, r)
-    }()
-
-    async let taskBufCr = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks32WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
-        return (subband, blocks, r)
-    }()
-
-    let (subY, yBlocks, relY) = await taskBufY
-    let (subCb, cbBlocks, relCb) = await taskBufCb
-    let (subCr, crBlocks, relCr) = await taskBufCr
-
-    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
-    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
-}
-
 /// σ-normalized AQ variant: the LUMA plane quantizes with per-block dead-zone
 /// variants selected by the activity map; chroma is untouched (masking is
 /// luma-driven, and the chroma block grid spans 2×2 luma blocks).
@@ -1253,39 +1215,6 @@ func preparePlaneLayer16(pd: PlaneData420, pool: BlockViewPool, qtY: Quantizatio
 
     async let taskBufCr = { () -> ([Int16], [BlockView], @Sendable () -> Void) in
         let (blocks, subband, r) = await extractSingleTransformBlocks16(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC)
-        return (subband, blocks, r)
-    }()
-
-    let (subY, yBlocks, relY) = await taskBufY
-    let (subCb, cbBlocks, relCb) = await taskBufCb
-    let (subCr, crBlocks, relCr) = await taskBufCr
-
-    let subPlane = PlaneData420(width: (dx + 1) / 2, height: (dy + 1) / 2, y: subY, cb: subCb, cr: subCr)
-    return (subPlane, yBlocks, cbBlocks, crBlocks, { relY(); relCb(); relCr() })
-}
-
-@inline(__always)
-func preparePlaneLayer16WithSkipMap(pd: PlaneData420, pool: BlockViewPool, qtY: QuantizationTable, qtC: QuantizationTable, skipMap: [BlockMode], skipMapWidth: Int) async -> (PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
-    let dx = pd.width
-    let dy = pd.height
-    let cbDx = ((dx + 1) / 2)
-    let cbDy = ((dy + 1) / 2)
-
-    let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (dy + 15) / 16, colCount: (dx + 15) / 16)
-    let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 15) / 16, colCount: (cbDx + 15) / 16)
-
-    async let taskBufY = { [ySkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, qt: qtY, isSkip: ySkip)
-        return (subband, blocks, r)
-    }()
-
-    async let taskBufCb = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMap(r: pd.rCb, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
-        return (subband, blocks, r)
-    }()
-
-    async let taskBufCr = { [cSkip] () -> ([Int16], [BlockView], @Sendable () -> Void) in
-        let (blocks, subband, r) = await extractSingleTransformBlocks16WithSkipMap(r: pd.rCr, width: cbDx, height: cbDy, pool: pool, qt: qtC, isSkip: cSkip)
         return (subband, blocks, r)
     }()
 
@@ -2194,34 +2123,4 @@ func serializePlaneBase8PFrameWithSkipMap(
         r0Cb()
         r0Cr()
     }, yZeros, cbZeros, crZeros, hasRANSContext)
-}
-
-/// Base8 encode, P-frame profile 0x02: skip-block bypass (One-Pyramid §5),
-/// SAD-gated luma clearing, parent-free static tables, and backward-adaptive
-/// history streams.
-@inline(__always)
-func encodePlaneBase8PFrameWithSkipMap(pd: PlaneData420, pool: BlockViewPool, sads: [Int], qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, skipMap: [BlockMode], skipMapWidth: Int, isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil, histories: [EntropyHistoryState]?, updateHistory: Bool = true) async -> ([UInt8], PlaneData420, [BlockView], [BlockView], [BlockView], @Sendable () -> Void, [Bool], [Bool], [Bool]) {
-    let (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBlocks) = await preparePlaneBase8WithSkipMap(
-        pd: pd, pool: pool, sads: sads,
-        qtY: qtY, qtC: qtC,
-        skipMap: skipMap, skipMapWidth: skipMapWidth
-    )
-    var mutYBlocks = base8YBlocks
-    var mutCbBlocks = base8CbBlocks
-    var mutCrBlocks = base8CrBlocks
-
-    let (out, reconstructed, releaseRecon, yZeros, cbZeros, crZeros, _) = serializePlaneBase8PFrameWithSkipMap(
-        pd: pd, pool: pool,
-        qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
-        base8YBlocks: &mutYBlocks, base8CbBlocks: &mutCbBlocks, base8CrBlocks: &mutCrBlocks,
-        skipMap: skipMap, skipMapWidth: skipMapWidth,
-        isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
-        histories: histories,
-        updateHistory: updateHistory
-    )
-
-    return (out, reconstructed, mutYBlocks, mutCbBlocks, mutCrBlocks, {
-        releaseRecon()
-        releaseBlocks()
-    }, yZeros, cbZeros, crZeros)
 }

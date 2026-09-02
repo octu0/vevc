@@ -508,16 +508,6 @@ func fusePredictionPlane16(recon: inout [Int16], p: [Int16], skipMap: [BlockMode
 }
 
 @inline(__always)
-func fusePredictionPlane8(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int) {
-    fusePredictionPlane(recon: &recon, p: p, skipMap: skipMap, width: width, height: height, blockSize: 8)
-}
-
-@inline(__always)
-func fusePredictionPlane4(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int) {
-    fusePredictionPlane(recon: &recon, p: p, skipMap: skipMap, width: width, height: height, blockSize: 4)
-}
-
-@inline(__always)
 private func fusePredictionPlane(recon: inout [Int16], p: [Int16], skipMap: [BlockMode], width: Int, height: Int, blockSize: Int) {
     let bw = (width + blockSize - 1) / blockSize
     let bh = (height + blockSize - 1) / blockSize

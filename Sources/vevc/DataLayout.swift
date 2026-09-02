@@ -67,12 +67,10 @@ public struct VEVCFileHeader {
         let w = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
         let h = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
         
-        _ = chunk[offset] // ColorGamut
-        offset += 1
+        offset += 1 // ColorGamut
         
         let fps = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
-        _ = chunk[offset] // Timescale
-        offset += 1
+        offset += 1 // Timescale
         
         guard offset < payloadEnd else {
             throw DecodeError.insufficientDataContext("VEVC FileHeader Table Flag missing")
