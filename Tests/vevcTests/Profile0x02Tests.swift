@@ -286,7 +286,7 @@ final class Profile0x02Tests: XCTestCase {
         let outBase = try await decoderBase.decode(data: bitstreamBase)
 
         // 2. rANSContext 有効時
-        let encoderModel = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02, ransContext: 1)
+        let encoderModel = VEVCEncoder(width: width, height: height, qstep: 16, keyint: 10, profile: 0x02)
         let bitstreamModel = try await encoderModel.encodeToData(images: frames)
         let decoderModel = Decoder(maxLayer: 2)
         let outModel = try await decoderModel.decode(data: bitstreamModel)
@@ -369,7 +369,7 @@ final class Profile0x02Tests: XCTestCase {
             let outBase = try await decBase.decode(data: dataBase)
 
             // 2. rANSContext
-            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02, ransContext: 1)
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, qstep: 16, keyint: 10, profile: 0x02)
             let dataModel = try await encModel.encodeToData(images: frames)
             let decModel = Decoder(maxLayer: 2)
             let outModel = try await decModel.decode(data: dataModel)
@@ -434,7 +434,7 @@ final class Profile0x02Tests: XCTestCase {
             let dataBase = try await encBase.encodeToData(images: frames)
 
             // 2. rANSContext
-            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02, ransContext: 1)
+            let encModel = VEVCEncoder(width: frames[0].width, height: frames[0].height, maxbitrate: 500_000, framerate: 30, profile: 0x02)
             let dataModel = try await encModel.encodeToData(images: frames)
 
 

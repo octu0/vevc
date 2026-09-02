@@ -56,7 +56,7 @@ public actor VEVCEncoder {
     private var frameIndex = 0
     private let pool: BlockViewPool
     
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, maxConcurrency: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, maxConcurrency: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -101,13 +101,12 @@ public actor VEVCEncoder {
             smooth: smooth,
             temporalLayers: temporalLayers,
             skipModel: skipModel,
-            ransContext: ransContext,
             iqFloor: iqFloor,
             dumpWriter: dumpWriter
         )
     }
 
-    public init(width: Int, height: Int, qstep: Int?, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, maxConcurrency: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
+    public init(width: Int, height: Int, qstep: Int?, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, maxConcurrency: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -152,106 +151,97 @@ public actor VEVCEncoder {
             smooth: smooth,
             temporalLayers: temporalLayers,
             skipModel: skipModel,
-            ransContext: ransContext,
             iqFloor: iqFloor,
             dumpWriter: dumpWriter
         )
     }
 
     public init(width: Int, height: Int, maxbitrate: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, profile: UInt8) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
-    }
-
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, profile: UInt8, ransContext: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: ransContext, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int, keyint: Int, profile: UInt8) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
-    }
-
-    public init(width: Int, height: Int, qstep: Int, keyint: Int, profile: UInt8, ransContext: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: ransContext, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int, keyint: Int, profile: UInt8, l2Cadence: Int, l1Cadence: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, l2Cadence: Int, l1Cadence: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: 30, zeroThreshold: 4, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int, framerate: Int, profile: UInt8) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int, framerate: Int, profile: UInt8, smooth: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: smooth, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: smooth, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, qstep: Int?, maxbitrate: Int, framerate: Int, profile: UInt8, dumpWriter: CoeffDumpWriter?) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: dumpWriter)
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: 4, keyint: 30, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: dumpWriter)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, zeroThreshold: Int, keyint: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, zeroThreshold: Int, keyint: Int, profile: UInt8, temporalLayers: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: temporalLayers, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: 500, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: temporalLayers, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: 30, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, maxConcurrency: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: maxConcurrency, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: maxConcurrency, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, maxConcurrency: Int, profile: UInt8, gop: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: maxConcurrency, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: gop, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: maxConcurrency, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: gop, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, ransContext: ransContext, iqFloor: iqFloor, dumpWriter: nil)
+    public init(width: Int, height: Int, qstep: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int) {
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, iqFloor: iqFloor, dumpWriter: nil)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, ransContext: ransContext, iqFloor: iqFloor, dumpWriter: nil)
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int) {
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, iqFloor: iqFloor, dumpWriter: nil)
     }
 
-    public init(width: Int, height: Int, qstep: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int) {
-        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: 1, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, ransContext: ransContext, iqFloor: iqFloor, dumpWriter: nil)
+    public init(width: Int, height: Int, qstep: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int) {
+        self.init(width: width, height: height, qstep: qstep, maxbitrate: 0, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: 1, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, iqFloor: iqFloor, dumpWriter: nil)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: 1, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, ransContext: ransContext, iqFloor: iqFloor, dumpWriter: nil)
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int) {
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, maxConcurrency: 4, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: 1, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, iqFloor: iqFloor, dumpWriter: nil)
     }
     
     @inline(__always)
@@ -424,7 +414,7 @@ actor LayersEncodeActor {
     private var consecutiveCopyFrames = 0
     private var sadBaseline: Int?
 
-    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int?, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
+    internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int?, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -459,7 +449,7 @@ actor LayersEncodeActor {
         }
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: profile)
-        if profile == 0x02 && ransContext == 1 {
+        if profile == 0x02 {
             self.ransContextWorkspace = rANSContextWorkspace()
         } else {
             self.ransContextWorkspace = nil
@@ -472,22 +462,22 @@ actor LayersEncodeActor {
     }
 
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: nil, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int?, profile: UInt8) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: qstep, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: qstep, profile: profile, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int?, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: qstep, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: qstep, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, iqFloor: 0, dumpWriter: nil)
     }
 
     internal init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, pool: BlockViewPool, qstep: Int?, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: qstep, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, ransContext: 0, iqFloor: iqFloor, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, pool: pool, qstep: qstep, profile: profile, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, gop: gop, l2Cadence: l2Cadence, l1Cadence: l1Cadence, l0Cadence: l0Cadence, motionMaskingPx: motionMaskingPx, smooth: smooth, temporalLayers: temporalLayers, skipModel: skipModel, iqFloor: iqFloor, dumpWriter: nil)
     }
 
-    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, ransContext: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
+    public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int, profile: UInt8, skipThreshold: Int, reconThresholdScale: Int, gop: Int, l2Cadence: Int, l1Cadence: Int, l0Cadence: Int, motionMaskingPx: Int, smooth: Int, temporalLayers: Int, skipModel: Int, iqFloor: Int, dumpWriter: CoeffDumpWriter?) {
         self.width = width
         self.height = height
         self.maxbitrate = maxbitrate
@@ -522,7 +512,7 @@ actor LayersEncodeActor {
         }
         self.framesSinceLtrUpdate = 0
         self.rateController = RateController(maxbitrate: maxbitrate, framerate: framerate, keyint: keyint, profile: profile)
-        if profile == 0x02 && ransContext == 1 {
+        if profile == 0x02 {
             self.ransContextWorkspace = rANSContextWorkspace()
         } else {
             self.ransContextWorkspace = nil
@@ -535,7 +525,7 @@ actor LayersEncodeActor {
     }
 
     public init(width: Int, height: Int, maxbitrate: Int, framerate: Int, zeroThreshold: Int, keyint: Int, sceneChangeThreshold: Int) {
-        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, ransContext: 0, iqFloor: 0, dumpWriter: nil)
+        self.init(width: width, height: height, maxbitrate: maxbitrate, framerate: framerate, zeroThreshold: zeroThreshold, keyint: keyint, sceneChangeThreshold: sceneChangeThreshold, profile: 0x01, skipThreshold: 2, reconThresholdScale: 1, gop: 12, l2Cadence: 0, l1Cadence: 0, l0Cadence: 1, motionMaskingPx: 2, smooth: 1, temporalLayers: 1, skipModel: 1, iqFloor: 0, dumpWriter: nil)
     }
 
     deinit {

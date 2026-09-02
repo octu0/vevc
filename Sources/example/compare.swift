@@ -76,7 +76,6 @@ struct Config {
     var motionMaskingPx: Int = 2
     var smooth: Int = 1
     var skipModel: Int = 1
-    var ransContext: Int = 0
     var iqFloor: Int = 0
     /// Whether the user named -keyint / -iq-floor. runVEVC fills in the
     /// profile 0x02 defaults for the ones that were left out; it resolves them
@@ -312,11 +311,6 @@ struct CompareApp {
             case "-skip-model", "--skip-model":
                 if (i + 1) < args.count {
                     if let v = Int(args[i + 1]) { config.skipModel = v }
-                    i += 1
-                }
-            case "-rans-context", "--rans-context":
-                if (i + 1) < args.count {
-                    if let v = Int(args[i + 1]) { config.ransContext = v }
                     i += 1
                 }
             case "-iq-floor", "--iq-floor":
