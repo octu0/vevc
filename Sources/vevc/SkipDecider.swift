@@ -148,7 +148,8 @@ func skipDeciderZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: I
             let c1 = UnsafeRawPointer(rc.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
             let r1 = UnsafeRawPointer(rr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
             let d1 = pointwiseMax(c1, r1) &- pointwiseMin(c1, r1)
-            sad &+= Int(d0.wrappedSum()) &+ Int(d1.wrappedSum())
+            sad &+= Int(SIMD16<Int32>(truncatingIfNeeded: d0).wrappedSum())
+                &+ Int(SIMD16<Int32>(truncatingIfNeeded: d1).wrappedSum())
         }
         for y in 0..<16 {
             let rcb = cur.cb.advanced(by: (cby + y) * cw + cbx)
@@ -163,7 +164,8 @@ func skipDeciderZeroSAD32(cur: PlanePointers, ref: PlanePointers, bx: Int, by: I
             let rr0 = UnsafeRawPointer(rrr).loadUnaligned(as: SIMD16<Int16>.self)
             let dr0 = pointwiseMax(cr0, rr0) &- pointwiseMin(cr0, rr0)
             
-            sad &+= Int(db0.wrappedSum()) &+ Int(dr0.wrappedSum())
+            sad &+= Int(SIMD16<Int32>(truncatingIfNeeded: db0).wrappedSum())
+                &+ Int(SIMD16<Int32>(truncatingIfNeeded: dr0).wrappedSum())
         }
         return sad
     }
@@ -227,6 +229,11 @@ final class SkipDecider: @unchecked Sendable {
     static func make() -> SkipDecider? {
         guard let w = SkipDeciderWeights.parse(SkipDeciderWeightsData.blob) else { return nil }
         if w.f != SkipDeciderFeature.count { return nil }
+        // The SIMD forward pass in skipDeciderClassify hardcodes a 16-lane
+        // hidden layer: a wider one traps on the lane store and a narrower
+        // one reads past the end of w2. Reject any retrained weights whose
+        // hidden width no longer matches instead of running them.
+        if w.h != 16 { return nil }
         return SkipDecider(weights: w)
     }
 

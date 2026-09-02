@@ -218,12 +218,12 @@ struct MotionEstimation {
 
     @inline(__always)
     static func compute64PointSADBlocksWithStride(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>, pStride: Int) -> Int {
-        var sad: Int16 = 0
+        var sad: Int32 = 0
         for ry in 0..<8 {
             let c = UnsafeRawPointer(cBase.advanced(by: ry * 8)).loadUnaligned(as: SIMD8<Int16>.self)
             let p = UnsafeRawPointer(pBase.advanced(by: ry * pStride)).loadUnaligned(as: SIMD8<Int16>.self)
             let d = pointwiseMax(c, p) &- pointwiseMin(c, p)
-            sad &+= d.wrappedSum()
+            sad &+= SIMD8<Int32>(truncatingIfNeeded: d).wrappedSum()
         }
         return Int(sad)
     }
@@ -246,7 +246,8 @@ struct MotionEstimation {
         let p3 = UnsafeRawPointer(pBase.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
         let d3 = pointwiseMax(c3, p3) &- pointwiseMin(c3, p3)
 
-        let sum = (d0 &+ d1) &+ (d2 &+ d3)
+        let sum = (SIMD16<Int32>(truncatingIfNeeded: d0) &+ SIMD16<Int32>(truncatingIfNeeded: d1))
+            &+ (SIMD16<Int32>(truncatingIfNeeded: d2) &+ SIMD16<Int32>(truncatingIfNeeded: d3))
         return Int(sum.wrappedSum())
     }
 
@@ -601,7 +602,7 @@ struct MotionEstimation {
         let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 13 <= cbw) && (cry + 13 <= cbh)
 
         if isCurrSafe && isRefSafe {
-            var sad: Int16 = 0
+            var sad: Int32 = 0
             for y in 0..<4 {
                 let currOffset = (cy + y * 4) * cbw + cx
                 let refOffset = (cry + y * 4) * cbw + crx
@@ -614,7 +615,7 @@ struct MotionEstimation {
                 let rCr = SIMD4<Int16>(refCr[refOffset], refCr[refOffset + 4], refCr[refOffset + 8], refCr[refOffset + 12])
                 let dCr = pointwiseMax(cCr, rCr) &- pointwiseMin(cCr, rCr)
 
-                sad &+= (dCb &+ dCr).wrappedSum()
+                sad &+= (SIMD4<Int32>(truncatingIfNeeded: dCb) &+ SIMD4<Int32>(truncatingIfNeeded: dCr)).wrappedSum()
             }
             return Int(sad) * 4 // Luma SAD scale matching (16 sample positions × 2 planes vs 64 luma points)
         }
@@ -660,7 +661,7 @@ struct MotionEstimation {
         width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
         cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32
     ) -> Int {
-        var sad: Int16 = 0
+        var sad: Int32 = 0
         let vCX0 = SIMD16<Int32>(repeating: cX0)
         let vCX1 = SIMD16<Int32>(repeating: cX1)
         let vCX2 = SIMD16<Int32>(repeating: cX2)
@@ -678,8 +679,9 @@ struct MotionEstimation {
             let p2Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: 2)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
             
             let h0 = (vCX0 &* m1Even &+ vCX1 &* r0Even) &+ (vCX2 &* p1Even &+ vCX3 &* p2Even)
-            let pVal = SIMD16<Int16>(truncatingIfNeeded: (h0 &+ 3) &>> 3)
-            let diff = pointwiseMax(cEven, pVal) &- pointwiseMin(cEven, pVal)
+            let pVal = (h0 &+ 3) &>> 3
+            let cWide = SIMD16<Int32>(truncatingIfNeeded: cEven)
+            let diff = pointwiseMax(cWide, pVal) &- pointwiseMin(cWide, pVal)
             sad &+= diff.wrappedSum()
         }
         return Int(sad)
@@ -691,7 +693,7 @@ struct MotionEstimation {
         width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
         cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
     ) -> Int {
-        var sad: Int16 = 0
+        var sad: Int32 = 0
         let vCY0 = SIMD16<Int32>(repeating: cY0)
         let vCY1 = SIMD16<Int32>(repeating: cY1)
         let vCY2 = SIMD16<Int32>(repeating: cY2)
@@ -712,8 +714,9 @@ struct MotionEstimation {
             let p2Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
             
             let vertSum = (vCY0 &* m1Even &+ vCY1 &* r0Even) &+ (vCY2 &* p1Even &+ vCY3 &* p2Even)
-            let pVal = SIMD16<Int16>(truncatingIfNeeded: (vertSum &+ 3) &>> 3)
-            let diff = pointwiseMax(cEven, pVal) &- pointwiseMin(cEven, pVal)
+            let pVal = (vertSum &+ 3) &>> 3
+            let cWide = SIMD16<Int32>(truncatingIfNeeded: cEven)
+            let diff = pointwiseMax(cWide, pVal) &- pointwiseMin(cWide, pVal)
             sad &+= diff.wrappedSum()
         }
         return Int(sad)
@@ -726,7 +729,7 @@ struct MotionEstimation {
         cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32,
         cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
     ) -> Int {
-        var sad: Int16 = 0
+        var sad: Int32 = 0
         let vCX0 = SIMD16<Int32>(repeating: cX0)
         let vCX1 = SIMD16<Int32>(repeating: cX1)
         let vCX2 = SIMD16<Int32>(repeating: cX2)
@@ -772,8 +775,9 @@ struct MotionEstimation {
             let vP2 = (vCX0 &* p2_m1 &+ vCX1 &* p2_0) &+ (vCX2 &* p2_p1 &+ vCX3 &* p2_p2)
 
             let refVal = (vCY0 &* vM1 &+ vCY1 &* v0) &+ (vCY2 &* vP1 &+ vCY3 &* vP2)
-            let pVal = SIMD16<Int16>(truncatingIfNeeded: (refVal &+ 31) &>> 6)
-            let diff = pointwiseMax(cEven, pVal) &- pointwiseMin(cEven, pVal)
+            let pVal = (refVal &+ 31) &>> 6
+            let cWide = SIMD16<Int32>(truncatingIfNeeded: cEven)
+            let diff = pointwiseMax(cWide, pVal) &- pointwiseMin(cWide, pVal)
             sad &+= diff.wrappedSum()
         }
         return Int(sad)

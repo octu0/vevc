@@ -260,6 +260,10 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
 
 /// Builds the full-resolution prediction plane by running the decoder's
 /// layer2 MC (32-block luma / 16-block chroma, mvShift 0) into zeroed planes.
+/// Both sides derive LL2(P) from this, so it must be produced by the
+/// identical call sequence the decoder uses when adding prediction at
+/// layer2 — any divergence here is an enc/dec recon asymmetry that
+/// accumulates over the GOP.
 @inline(__always)
 func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async -> PlaneData420 {
     let cbDx = (dx + 1) / 2
