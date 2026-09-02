@@ -601,13 +601,25 @@ func decodeLayer32(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: I
     // MC: MV is layer0 precision -> layer2 (full resolution) mvScale=4
     if let tPrev = predictedPd, let mvs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
-            await applyScaledBidirectionalMotionCompensationLuma(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-            await applyScaledBidirectionalMotionCompensationChroma(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-            await applyScaledBidirectionalMotionCompensationChroma(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            if let sMap = skipMap {
+                await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            } else {
+                await applyScaledBidirectionalMotionCompensationLumaWithoutSkipMap(plane: &sub.y, prevPlane: tPrev.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &sub.cb, prevPlane: tPrev.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &sub.cr, prevPlane: tPrev.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            }
         } else {
-            await applyScaledMotionCompensationLuma(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, skipMap: skipMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-            await applyScaledMotionCompensationChroma(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-            await applyScaledMotionCompensationChroma(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            if let sMap = skipMap {
+                await applyScaledMotionCompensationLumaWithSkipMap(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledMotionCompensationChromaWithSkipMap(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledMotionCompensationChromaWithSkipMap(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            } else {
+                await applyScaledMotionCompensationLumaWithoutSkipMap(plane: &sub.y, prevPlane: tPrev.y, mvs: mvs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &sub.cb, prevPlane: tPrev.cb, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+                await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &sub.cr, prevPlane: tPrev.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            }
         }
     }
 

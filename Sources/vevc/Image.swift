@@ -7,11 +7,13 @@ struct Int16Reader {
     
     @inline(__always)
     func readBlock(x: Int, y: Int, width blockWidth: Int, height blockHeight: Int, into view: BlockView, srcBase: UnsafePointer<Int16>) {
+        let vBase = view.base
+        let vStride = view.stride
         if 0 <= x && 0 <= y && (y + blockHeight) <= height && (x + blockWidth) <= width {
             switch blockWidth {
             case 32:
                 for line in 0..<blockHeight {
-                    let dstPtr = view.rowPointer(y: line)
+                    let dstPtr = vBase.advanced(by: line * vStride)
                     let srcPtr = srcBase.advanced(by: (y + line) * self.width + x)
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                     let s1 = UnsafeRawPointer(srcPtr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
@@ -20,28 +22,28 @@ struct Int16Reader {
                 }
             case 16:
                 for line in 0..<blockHeight {
-                    let dstPtr = view.rowPointer(y: line)
+                    let dstPtr = vBase.advanced(by: line * vStride)
                     let srcPtr = srcBase.advanced(by: (y + line) * self.width + x)
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD16<Int16>.self)
                     UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD16<Int16>.self)
                 }
             case 8:
                 for line in 0..<blockHeight {
-                    let dstPtr = view.rowPointer(y: line)
+                    let dstPtr = vBase.advanced(by: line * vStride)
                     let srcPtr = srcBase.advanced(by: (y + line) * self.width + x)
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD8<Int16>.self)
                     UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD8<Int16>.self)
                 }
             case 4:
                 for line in 0..<blockHeight {
-                    let dstPtr = view.rowPointer(y: line)
+                    let dstPtr = vBase.advanced(by: line * vStride)
                     let srcPtr = srcBase.advanced(by: (y + line) * self.width + x)
                     let s0 = UnsafeRawPointer(srcPtr).loadUnaligned(as: SIMD4<Int16>.self)
                     UnsafeMutableRawPointer(dstPtr).storeBytes(of: s0, as: SIMD4<Int16>.self)
                 }
             default:
                 for line in 0..<blockHeight {
-                    let dstPtr = view.rowPointer(y: line)
+                    let dstPtr = vBase.advanced(by: line * vStride)
                     let srcPtr = srcBase.advanced(by: (y + line) * self.width + x)
                     dstPtr.update(from: srcPtr, count: blockWidth)
                 }
@@ -53,7 +55,7 @@ struct Int16Reader {
             let currentY = y + line
             let safeY = min(currentY, self.height - 1)
             
-            let dstPtr = view.rowPointer(y: line)
+            let dstPtr = vBase.advanced(by: line * vStride)
             let limit = min(blockWidth, self.width - x)
             
             if 0 < limit {

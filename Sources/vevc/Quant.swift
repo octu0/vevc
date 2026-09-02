@@ -409,28 +409,44 @@ internal func dequantize4(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quan
     let step = Int32(q.step)
     let vStep = SIMD4<Int32>(repeating: step)
     let v8 = SIMD4<Int32>(repeating: 8)
-    let offQ: Int32 = if q.centroidOffset { (dequantOffsetNumQ4 &* step) >> 4 } else { 0 }
-    let vOffPos = SIMD4<Int32>(repeating: offQ)
-    let vOffNeg = SIMD4<Int32>(repeating: 0 &- offQ)
-    let vZero32 = SIMD4<Int32>(repeating: 0)
     let limitMin = SIMD4<Int32>(repeating: -32768)
     let limitMax = SIMD4<Int32>(repeating: 32767)
     
-    var rowPtr = ptr
-    for _ in 0..<4 {
-        let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
-        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
-        let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
-        let val32 = SIMD4<Int32>(truncatingIfNeeded: v16)
-        
-        var off = vZero32
-        off.replace(with: vOffPos, where: vZero32 .< val32)
-        off.replace(with: vOffNeg, where: val32 .< vZero32)
-        
-        let res32 = (val32 &* vStep &+ off &+ v8) &>> 4
-        let res16 = SIMD4<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
-        UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD4<Int16>.self)
-        rowPtr = rowPtr.advanced(by: stride)
+    switch true {
+    case q.centroidOffset:
+        let offQ = (dequantOffsetNumQ4 &* step) >> 4
+        let vOffPos = SIMD4<Int32>(repeating: offQ)
+        let vOffNeg = SIMD4<Int32>(repeating: 0 &- offQ)
+        let vZero32 = SIMD4<Int32>.zero
+        var rowPtr = ptr
+        for _ in 0..<4 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD4<Int32>(truncatingIfNeeded: v16)
+            
+            var off = vZero32
+            off.replace(with: vOffPos, where: vZero32 .< val32)
+            off.replace(with: vOffNeg, where: val32 .< vZero32)
+            
+            let res32 = (val32 &* vStep &+ off &+ v8) &>> 4
+            let res16 = SIMD4<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD4<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
+    default:
+        var rowPtr = ptr
+        for _ in 0..<4 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD4<Int32>(truncatingIfNeeded: v16)
+            
+            let res32 = (val32 &* vStep &+ v8) &>> 4
+            let res16 = SIMD4<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD4<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
     }
 }
 
@@ -439,28 +455,44 @@ internal func dequantize8(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quan
     let step = Int32(q.step)
     let vStep = SIMD8<Int32>(repeating: step)
     let v8 = SIMD8<Int32>(repeating: 8)
-    let offQ: Int32 = if q.centroidOffset { (dequantOffsetNumQ4 &* step) >> 4 } else { 0 }
-    let vOffPos = SIMD8<Int32>(repeating: offQ)
-    let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
-    let vZero32 = SIMD8<Int32>(repeating: 0)
     let limitMin = SIMD8<Int32>(repeating: -32768)
     let limitMax = SIMD8<Int32>(repeating: 32767)
     
-    var rowPtr = ptr
-    for _ in 0..<8 {
-        let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
-        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
-        let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
-        let val32 = SIMD8<Int32>(truncatingIfNeeded: v16)
-        
-        var off = vZero32
-        off.replace(with: vOffPos, where: vZero32 .< val32)
-        off.replace(with: vOffNeg, where: val32 .< vZero32)
-        
-        let res32 = (val32 &* vStep &+ off &+ v8) &>> 4
-        let res16 = SIMD8<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
-        UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD8<Int16>.self)
-        rowPtr = rowPtr.advanced(by: stride)
+    switch true {
+    case q.centroidOffset:
+        let offQ = (dequantOffsetNumQ4 &* step) >> 4
+        let vOffPos = SIMD8<Int32>(repeating: offQ)
+        let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
+        let vZero32 = SIMD8<Int32>.zero
+        var rowPtr = ptr
+        for _ in 0..<8 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD8<Int32>(truncatingIfNeeded: v16)
+            
+            var off = vZero32
+            off.replace(with: vOffPos, where: vZero32 .< val32)
+            off.replace(with: vOffNeg, where: val32 .< vZero32)
+            
+            let res32 = (val32 &* vStep &+ off &+ v8) &>> 4
+            let res16 = SIMD8<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD8<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
+    default:
+        var rowPtr = ptr
+        for _ in 0..<8 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD8<Int32>(truncatingIfNeeded: v16)
+            
+            let res32 = (val32 &* vStep &+ v8) &>> 4
+            let res16 = SIMD8<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD8<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
     }
 }
 
@@ -469,41 +501,61 @@ internal func dequantize16(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Qua
     let step = Int32(q.step)
     let vStep = SIMD8<Int32>(repeating: step)
     let v8 = SIMD8<Int32>(repeating: 8)
-    let offQ: Int32 = if q.centroidOffset { (dequantOffsetNumQ4 &* step) >> 4 } else { 0 }
-    let vOffPos = SIMD8<Int32>(repeating: offQ)
-    let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
-    let vZero32 = SIMD8<Int32>(repeating: 0)
     let limitMin = SIMD8<Int32>(repeating: -32768)
     let limitMax = SIMD8<Int32>(repeating: 32767)
     
-    var rowPtr = ptr
-    for _ in 0..<16 {
-        let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<UInt16>.self)
-        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
-        let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
+    switch true {
+    case q.centroidOffset:
+        let offQ = (dequantOffsetNumQ4 &* step) >> 4
+        let vOffPos = SIMD8<Int32>(repeating: offQ)
+        let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
+        let vZero32 = SIMD8<Int32>.zero
+        var rowPtr = ptr
+        for _ in 0..<16 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
 
-        let low8 = v16.lowHalf
-        let high8 = v16.highHalf
+            let l32 = SIMD8<Int32>(truncatingIfNeeded: v16.lowHalf)
+            let h32 = SIMD8<Int32>(truncatingIfNeeded: v16.highHalf)
 
-        let l32 = SIMD8<Int32>(truncatingIfNeeded: low8)
-        let h32 = SIMD8<Int32>(truncatingIfNeeded: high8)
+            var offL = vZero32
+            offL.replace(with: vOffPos, where: vZero32 .< l32)
+            offL.replace(with: vOffNeg, where: l32 .< vZero32)
+            var offH = vZero32
+            offH.replace(with: vOffPos, where: vZero32 .< h32)
+            offH.replace(with: vOffNeg, where: h32 .< vZero32)
 
-        var offL = vZero32
-        offL.replace(with: vOffPos, where: vZero32 .< l32)
-        offL.replace(with: vOffNeg, where: l32 .< vZero32)
-        var offH = vZero32
-        offH.replace(with: vOffPos, where: vZero32 .< h32)
-        offH.replace(with: vOffNeg, where: h32 .< vZero32)
+            let resLow8 = (l32 &* vStep &+ offL &+ v8) &>> 4
+            let resHigh8 = (h32 &* vStep &+ offH &+ v8) &>> 4
+            
+            let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            
+            let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
+    default:
+        var rowPtr = ptr
+        for _ in 0..<16 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
 
-        let resLow8 = (l32 &* vStep &+ offL &+ v8) &>> 4
-        let resHigh8 = (h32 &* vStep &+ offH &+ v8) &>> 4
-        
-        let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: limitMin, upperBound: limitMax))
-        let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: limitMin, upperBound: limitMax))
-        
-        let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
-        UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
-        rowPtr = rowPtr.advanced(by: stride)
+            let l32 = SIMD8<Int32>(truncatingIfNeeded: v16.lowHalf)
+            let h32 = SIMD8<Int32>(truncatingIfNeeded: v16.highHalf)
+
+            let resLow8 = (l32 &* vStep &+ v8) &>> 4
+            let resHigh8 = (h32 &* vStep &+ v8) &>> 4
+            
+            let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            
+            let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
     }
 }
 

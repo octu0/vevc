@@ -93,27 +93,23 @@ func skipDeciderClassify(
     shift1: Int32,
     hbuf: UnsafeMutablePointer<Int32>
 ) -> Int {
+    let q0 = UnsafeRawPointer(q).loadUnaligned(as: SIMD16<Int32>.self)
+    let q1 = UnsafeRawPointer(q.advanced(by: 16)).loadUnaligned(as: SIMD4<Int32>.self)
+    var hVec = SIMD16<Int32>()
     for i in 0..<h {
-        var acc = b1[i]
-        let row = w1 + (i * f)
-        for j in 0..<f {
-            acc &+= row[j] &* q[j]
-        }
-        acc >>= shift1
-        var relu: Int32 = 0
-        if 0 < acc {
-            relu = acc
-        }
+        let rowPtr = w1 + (i * f)
+        let wRow0 = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<Int32>.self)
+        let wRow1 = UnsafeRawPointer(rowPtr.advanced(by: 16)).loadUnaligned(as: SIMD4<Int32>.self)
+        let dot = (wRow0 &* q0).wrappedSum() &+ (wRow1 &* q1).wrappedSum()
+        let acc = (b1[i] &+ dot) >> shift1
+        let relu = max(0, acc)
         hbuf[i] = relu
+        hVec[i] = relu
     }
-    var o0: Int32 = b2[0]
-    var o1: Int32 = b2[1]
-    let r0 = w2
-    let r1 = w2 + h
-    for i in 0..<h {
-        o0 &+= r0[i] &* hbuf[i]
-        o1 &+= r1[i] &* hbuf[i]
-    }
+    let w2_0 = UnsafeRawPointer(w2).loadUnaligned(as: SIMD16<Int32>.self)
+    let w2_1 = UnsafeRawPointer(w2.advanced(by: h)).loadUnaligned(as: SIMD16<Int32>.self)
+    let o0 = b2[0] &+ (w2_0 &* hVec).wrappedSum()
+    let o1 = b2[1] &+ (w2_1 &* hVec).wrappedSum()
     if o0 < o1 {
         return 1
     }
@@ -339,23 +335,53 @@ final class SkipDecider: @unchecked Sendable {
             bx: bx, by: by, bw: blockW, bh: blockH
         )
         let col = i % bw
-        let leftDec: Int32 = 0 < col ? Int32(skipMap[i - 1].rawValue) : -1
-        let upDec: Int32 = bw <= i ? Int32(skipMap[i - bw].rawValue) : -1
+        let leftDec: Int32 = switch true {
+        case 0 < col: Int32(skipMap[i - 1].rawValue)
+        default: -1
+        }
+        let upDec: Int32 = switch true {
+        case bw <= i: Int32(skipMap[i - bw].rawValue)
+        default: -1
+        }
         let base = i * SkipDeciderFeature.count
         feat[base + 0] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: pRef, bx: bx, by: by, width: width, height: height))
         feat[base + 1] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: lRef, bx: bx, by: by, width: width, height: height))
-        feat[base + 2] = Int32(clamping: i < inputs.meSadPrev.count ? inputs.meSadPrev[i] : 0)
-        feat[base + 3] = Int32(clamping: i < inputs.meSadLtr.count ? inputs.meSadLtr[i] : 0)
+        let sadPrev: Int = switch true {
+        case i < inputs.meSadPrev.count: inputs.meSadPrev[i]
+        default: 0
+        }
+        feat[base + 2] = Int32(clamping: sadPrev)
+        let sadLtr: Int = switch true {
+        case i < inputs.meSadLtr.count: inputs.meSadLtr[i]
+        default: 0
+        }
+        feat[base + 3] = Int32(clamping: sadLtr)
         feat[base + 4] = Int32(abs(Int(inputs.mvsPrev.dx[i])) + abs(Int(inputs.mvsPrev.dy[i])))
         feat[base + 5] = Int32(abs(Int(inputs.mvsLtr.dx[i])) + abs(Int(inputs.mvsLtr.dy[i])))
-        feat[base + 6] = i < inputs.variance.count ? inputs.variance[i] : 0
-        feat[base + 7] = i < inputs.activityClass.count ? Int32(inputs.activityClass[i].rawValue) : 0
+        let variance: Int32 = switch true {
+        case i < inputs.variance.count: inputs.variance[i]
+        default: 0
+        }
+        feat[base + 6] = variance
+        let actClass: Int32 = switch true {
+        case i < inputs.activityClass.count: Int32(inputs.activityClass[i].rawValue)
+        default: 0
+        }
+        feat[base + 7] = actClass
         feat[base + 8] = Int32(clamping: inputs.adjustedStep)
         feat[base + 9] = Int32(clamping: inputs.gopPosition)
         feat[base + 10] = Int32(clamping: inputs.ltrAge)
-        feat[base + 11] = Int32(clamping: i < inputs.staticCounters.count ? inputs.staticCounters[i] : 0)
+        let staticCount: Int = switch true {
+        case i < inputs.staticCounters.count: inputs.staticCounters[i]
+        default: 0
+        }
+        feat[base + 11] = Int32(clamping: staticCount)
         feat[base + 12] = Int32(skipMap[i].rawValue)
-        feat[base + 13] = refDirs[i] ? 1 : 0
+        let refDirVal: Int32 = switch true {
+        case refDirs[i]: 1
+        default: 0
+        }
+        feat[base + 13] = refDirVal
         feat[base + 14] = leftDec
         feat[base + 15] = upDec
         feat[base + 16] = prevLabel[i]

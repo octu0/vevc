@@ -475,23 +475,17 @@ private func deblockComputeFilter(
     betaV: SIMD16<Int16>, betahV: SIMD16<Int16>, tcV: SIMD16<Int16>, ntcV: SIMD16<Int16>
 ) -> (SIMD16<Int16>, SIMD16<Int16>) {
     let delta = q0 &- p0
-    let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
-    
-    let deltaP = p1 &- p0
-    let deltaQ = q1 &- q0
-    let absP = deltaP.replacing(with: .zero &- deltaP, where: deltaP .< 0)
-    let absQ = deltaQ.replacing(with: .zero &- deltaQ, where: deltaQ .< 0)
+    let absDelta = pointwiseMax(q0, p0) &- pointwiseMin(q0, p0)
+    let absP = pointwiseMax(p1, p0) &- pointwiseMin(p1, p0)
+    let absQ = pointwiseMax(q1, q0) &- pointwiseMin(q1, q0)
     
     let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
     
-    var d = (delta &+ 1) &>> 1
-    d.replace(with: tcV, where: tcV .< d)
-    d.replace(with: ntcV, where: d .< ntcV)
+    let rawD = (delta &+ 1) &>> 1
+    let d = pointwiseMax(ntcV, pointwiseMin(tcV, rawD))
     
-    var newP0 = p0
-    var newQ0 = q0
-    newP0.replace(with: p0 &+ d, where: mask)
-    newQ0.replace(with: q0 &- d, where: mask)
+    let newP0 = p0.replacing(with: p0 &+ d, where: mask)
+    let newQ0 = q0.replacing(with: q0 &- d, where: mask)
     
     return (newP0, newQ0)
 }

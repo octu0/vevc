@@ -245,7 +245,7 @@ final class ChromaBlockTests: XCTestCase {
                     ptr[x] = originalValues[y * blockSize + x]
                 }
             }
-            dwt2DBlock8(view)
+            dwt2DBlock8(ptr: view.base, stride: view.stride)
 
             // 量子化
             evaluateQuantizeBase8(view: block, qt: qt)

@@ -15,16 +15,17 @@ final class DWTTests: XCTestCase {
             let original = data
 
             data.withUnsafeMutableBufferPointer { ptr in
+                let base = ptr.baseAddress!
                 switch size {
                 case 8:
-                    lift53Block8(ptr, stride: 1)
-                    inverseLift53Block8(base: ptr.baseAddress!)
+                    lift53Block8(base: base)
+                    inverseLift53Block8(base: base)
                 case 16:
-                    lift53Block16(ptr, stride: 1)
-                    inverseLift53Block16(base: ptr.baseAddress!)
+                    lift53Block16(base: base)
+                    inverseLift53Block16(base: base)
                 case 32:
-                    lift53Block32(ptr, stride: 1)
-                    inverseLift53Block32(base: ptr.baseAddress!)
+                    lift53Block32(base: base)
+                    inverseLift53Block32(base: base)
                 default:
                     XCTFail("Unsupported size: \(size)")
                 }
@@ -50,13 +51,13 @@ final class DWTTests: XCTestCase {
 
             switch size {
             case 8:
-                dwt2DBlock8(block)
+                dwt2DBlock8(ptr: block.base, stride: block.stride)
                 inverseDWT2DBlock8(ptr: block.base, stride: block.stride)
             case 16:
-                dwt2DBlock16(block)
+                dwt2DBlock16(ptr: block.base, stride: block.stride)
                 inverseDWT2DBlock16(ptr: block.base, stride: block.stride)
             case 32:
-                dwt2DBlock32(block)
+                dwt2DBlock32(ptr: block.base, stride: block.stride)
                 inverseDWT2DBlock32(ptr: block.base, stride: block.stride)
             default:
                 XCTFail("Unsupported size: \(size)")
@@ -79,16 +80,17 @@ final class DWTTests: XCTestCase {
                 let original = data
 
                 data.withUnsafeMutableBufferPointer { ptr in
+                    let base = ptr.baseAddress!
                     switch size {
                     case 8:
-                        lift53Block8(ptr, stride: 1)
-                        inverseLift53Block8(base: ptr.baseAddress!)
+                        lift53Block8(base: base)
+                        inverseLift53Block8(base: base)
                     case 16:
-                        lift53Block16(ptr, stride: 1)
-                        inverseLift53Block16(base: ptr.baseAddress!)
+                        lift53Block16(base: base)
+                        inverseLift53Block16(base: base)
                     case 32:
-                        lift53Block32(ptr, stride: 1)
-                        inverseLift53Block32(base: ptr.baseAddress!)
+                        lift53Block32(base: base)
+                        inverseLift53Block32(base: base)
                     default:
                         XCTFail("Unsupported size: \(size)")
                     }
