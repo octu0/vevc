@@ -1,9 +1,3 @@
-enum DecodeTask32 {
-    case skip
-    case decode16
-    case split8(Bool, Bool, Bool, Bool)
-}
-
 @inline(__always)
 func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, history: EntropyHistoryState? = nil, parentFreeStatics: Bool = false, updateHistory: Bool = true) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
@@ -389,12 +383,6 @@ func decodePlaneSubbands32WithParentBlocksAndSkipMap(data: ArraySlice<UInt8>, po
         decoder.finalizeHistory()
         return blocks
     }
-}
-
-enum DecodeTask16 {
-    case skip
-    case decode8
-    case split4(Bool, Bool, Bool, Bool)
 }
 
 @inline(__always)
