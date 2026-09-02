@@ -13,6 +13,11 @@ struct RateController {
     /// allowance: its streams and the quality baselines drawn from them are
     /// frozen.
     let plannedBitrate: Int
+    /// Whether the I-frame share is priced per coded frame rather than per
+    /// frame slot. On for profile 0x02 only: profile 0x01's streams are frozen
+    /// on the same grounds as `plannedBitrate` above, and its own pulldown
+    /// undershoot is left where it is.
+    let pricesCodedFrames: Bool
     let framerate: Int
     let keyint: Int
     let targetDistortionQ8: Int
@@ -58,7 +63,15 @@ struct RateController {
     
     private(set) var saturationAnchorStep: Int = 0
     private(set) var driftStreak: Int = 0
-    
+
+    // Frame slots and coded frames seen since the current GOP opened, and the
+    // ratio the previous GOP realized (Q8). A CopyFrame occupies a slot but
+    // spends only its 64-bit header, so the number of frames a GOP codes is
+    // not `keyint` on duplicated input - see `beginGOP` for what reads this.
+    private(set) var gopSlots: Int = 0
+    private(set) var gopCodedFrames: Int = 0
+    private(set) var prevGopCodedRatioQ8: Int = 256
+
     /// Single distortion spikes are noise or normal fluctuations; requires 2 consecutive frames of sustained distortion plus an in-GOP position guard to force an I-frame only during runaway drift (based on measurements where drift-I blew up to 5,287 frames = 61% on src_1). Real scene changes are caught by the input-based cut detector.
     @inline(__always)
     func isDriftAccelerating(framesSinceKeyframe: Int) -> Bool {
@@ -75,9 +88,20 @@ struct RateController {
     init(maxbitrate: Int, framerate: Int, keyint: Int, profile: UInt8 = 0x01, targetDistortion: Int = 600) {
         self.baseMaxBitrate = maxbitrate
         self.plannedBitrate = (profile == 0x02) ? maxbitrate : (maxbitrate * 13) / 10
+        self.pricesCodedFrames = (profile == 0x02)
         self.framerate = framerate
         self.keyint = keyint
         self.targetDistortionQ8 = targetDistortion
+    }
+
+    /// Records whether the frame just handed to the controller was coded or
+    /// copied. Read once per GOP, in `beginGOP`.
+    @inline(__always)
+    private mutating func noteFrameCoded(_ coded: Bool) {
+        self.gopSlots += 1
+        if coded {
+            self.gopCodedFrames += 1
+        }
     }
 
     @inline(__always)
@@ -97,6 +121,15 @@ struct RateController {
     
     @inline(__always)
     mutating func beginGOP() -> Int {
+        // Close the GOP that just ended: its coded-frame share is the estimate
+        // the next GOP's I-frame price is drawn from. Clamped to [1/8, 1] so a
+        // pathological run of copies cannot blow the divisor up.
+        if 0 < self.gopSlots {
+            self.prevGopCodedRatioQ8 = max(32, min(256, (self.gopCodedFrames * 256) / self.gopSlots))
+        }
+        self.gopSlots = 0
+        self.gopCodedFrames = 0
+
         // Update closed-loop gain from the previous GOP's actual consumption.
         // Scene-change may cut a GOP short, so compare against the budget
         // prorated by the number of frames actually consumed.
@@ -123,7 +156,21 @@ struct RateController {
         self.gopRemainingFrames = self.keyint
         
         let absoluteFloor = (self.plannedBitrate * 6) / self.framerate
-        let iFrameBitsProp = (self.gopTargetBits * 5) / (self.keyint + 4)
+        // The I frame is priced at five coded frames' worth of the GOP budget:
+        // (coded - 1) P frames plus its own 5 shares. Written against `keyint`
+        // the denominator counts frame slots, and a CopyFrame slot costs 64
+        // bits, so on duplicated input (2:3 pulldown measures 41% coded) the I
+        // frame is priced at 41% of what the GOP can afford. calculateIFrameQStep
+        // then chases that target across GOPs - measured on 1920x800 ToS
+        // duplicated to 60fps, the I step ratcheted 512 -> 1261 -> 1805 -> ...
+        // until it pinned at the quantization cap 4096, and because P frames
+        // may not quantize finer than the I frame, the whole stream ran at the
+        // coarsest step available while spending 47% of the requested rate.
+        // The previous GOP's realized coded-frame share is the estimate: it is
+        // exact rather than smoothed, and it is a per-GOP quantity for what is
+        // a per-GOP decision.
+        let iShareFrames = self.pricesCodedFrames ? max(1, (self.keyint * self.prevGopCodedRatioQ8) / 256) : self.keyint
+        let iFrameBitsProp = (self.gopTargetBits * 5) / (iShareFrames + 4)
         return max(1000, max(absoluteFloor, iFrameBitsProp))
     }
     
@@ -143,8 +190,9 @@ struct RateController {
         
         self.staticStreak = 0
         self.driftStreak = 0
+        self.noteFrameCoded(true)
     }
-    
+
     /// Closed-loop I-frame step: proportional prediction from the previous
     /// I-frame's (bits, step) pair, the same model calculatePFrameQStep uses
     /// for P-frames. estimateQuantization's open-loop prediction misses by
@@ -337,6 +385,7 @@ struct RateController {
         }
         
         updateSaturationState()
+        self.noteFrameCoded(true)
     }
     
     @inline(__always)
@@ -365,6 +414,7 @@ struct RateController {
         self.gopRemainingBits -= bits
         self.gopRemainingFrames -= 1
         self.staticStreak = 0
+        self.noteFrameCoded(false)
     }
 }
 
