@@ -42,11 +42,11 @@ final class ChromaDriftInvestigationTests: XCTestCase {
                 // 2D DWT
                 switch size {
                 case 8:
-                    dwt2DBlock8(block)
+                    dwt2DBlock8(ptr: block.base, stride: block.stride)
                 case 16:
-                    dwt2DBlock16(block)
+                    dwt2DBlock16(ptr: block.base, stride: block.stride)
                 case 32:
-                    dwt2DBlock32(block)
+                    dwt2DBlock32(ptr: block.base, stride: block.stride)
                 default:
                     break
                 }
@@ -175,7 +175,7 @@ final class ChromaDriftInvestigationTests: XCTestCase {
         chromaBlockSize: Int,
         roundOffset: Int
     ) async {
-        await applyScaledMotionCompensationChroma(
+        await applyScaledMotionCompensationChromaWithoutSkipMap(
             plane: &plane,
             prevPlane: prevPlane,
             mvs: mvs,

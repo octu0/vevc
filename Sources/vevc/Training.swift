@@ -105,11 +105,11 @@ public final class CoeffDumpWriter: @unchecked Sendable {
                     reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view)
                     switch blockSize {
                     case 32:
-                        dwt2DBlock32(view)
+                        dwt2DBlock32(ptr: sBase, stride: blockSize)
                     case 16:
-                        dwt2DBlock16(view)
+                        dwt2DBlock16(ptr: sBase, stride: blockSize)
                     default:
-                        dwt2DBlock8(view)
+                        dwt2DBlock8(ptr: sBase, stride: blockSize)
                     }
                     for (pi, off) in offsets.enumerated() {
                         subs[pi].data.withUnsafeMutableBufferPointer { dst in

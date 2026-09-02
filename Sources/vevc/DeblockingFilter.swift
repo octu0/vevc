@@ -416,13 +416,20 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
     let q0Row = base.advanced(by: y * width)
     let q1Row = base.advanced(by: (y + 1) * width)
     
+    let betah = Int16(beta >> 1)
+    let beta16 = Int16(beta)
+    let betaV = SIMD16<Int16>(repeating: beta16)
+    let betahV = SIMD16<Int16>(repeating: betah)
+    let tcV = SIMD16<Int16>(repeating: tc)
+    let ntcV = .zero &- tcV
+    
     while curX &+ 16 <= endX {
         let p1 = UnsafeRawPointer(p1Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
         let p0 = UnsafeRawPointer(p0Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
         let q0 = UnsafeRawPointer(q0Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
         let q1 = UnsafeRawPointer(q1Row.advanced(by: curX)).loadUnaligned(as: SIMD16<Int16>.self)
         
-        let (newP0, newQ0) = deblockComputeFilter(p1: p1, p0: p0, q0: q0, q1: q1, tc: tc, beta: beta)
+        let (newP0, newQ0) = deblockComputeFilter(p1: p1, p0: p0, q0: q0, q1: q1, betaV: betaV, betahV: betahV, tcV: tcV, ntcV: ntcV)
         
         UnsafeMutableRawPointer(p0Row.advanced(by: curX)).storeBytes(of: newP0, as: SIMD16<Int16>.self)
         UnsafeMutableRawPointer(q0Row.advanced(by: curX)).storeBytes(of: newQ0, as: SIMD16<Int16>.self)
@@ -431,7 +438,6 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
     
     if curX == endX { return }
     
-    let betah = beta >> 1
     while curX < endX {
         let p1 = p1Row[curX]
         var p0 = p0Row[curX]
@@ -445,7 +451,7 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
             let deltaQ = Int32(q1) - Int32(q0)
             let absP = if deltaP < 0 { -1 * deltaP } else { deltaP }
             let absQ = if deltaQ < 0 { -1 * deltaQ } else { deltaQ }
-            if absP < betah && absQ < betah {
+            if absP < Int32(betah) && absQ < Int32(betah) {
                 var d = (delta + 1) >> 1
                 let t = Int32(tc)
                 if t < d { d = t }
@@ -464,33 +470,22 @@ private func deblockFilterHorizontalEdge(base: UnsafeMutablePointer<Int16>, widt
 }
 
 @inline(__always)
-private func deblockComputeFilter(p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>, tc: Int16, beta: Int32) -> (SIMD16<Int16>, SIMD16<Int16>) {
-    let betah = Int16(beta >> 1)
-    let beta16 = Int16(beta)
-    
-    let betaV = SIMD16<Int16>(repeating: beta16)
-    let betahV = SIMD16<Int16>(repeating: betah)
-    let tcV = SIMD16<Int16>(repeating: tc)
-    let ntcV = .zero &- tcV
-    
+private func deblockComputeFilter(
+    p1: SIMD16<Int16>, p0: SIMD16<Int16>, q0: SIMD16<Int16>, q1: SIMD16<Int16>,
+    betaV: SIMD16<Int16>, betahV: SIMD16<Int16>, tcV: SIMD16<Int16>, ntcV: SIMD16<Int16>
+) -> (SIMD16<Int16>, SIMD16<Int16>) {
     let delta = q0 &- p0
-    let absDelta = delta.replacing(with: .zero &- delta, where: delta .< 0)
-    
-    let deltaP = p1 &- p0
-    let deltaQ = q1 &- q0
-    let absP = deltaP.replacing(with: .zero &- deltaP, where: deltaP .< 0)
-    let absQ = deltaQ.replacing(with: .zero &- deltaQ, where: deltaQ .< 0)
+    let absDelta = pointwiseMax(q0, p0) &- pointwiseMin(q0, p0)
+    let absP = pointwiseMax(p1, p0) &- pointwiseMin(p1, p0)
+    let absQ = pointwiseMax(q1, q0) &- pointwiseMin(q1, q0)
     
     let mask = (absDelta .< betaV) .& (absP .< betahV) .& (absQ .< betahV)
     
-    var d = (delta &+ 1) &>> 1
-    d.replace(with: tcV, where: tcV .< d)
-    d.replace(with: ntcV, where: d .< ntcV)
+    let rawD = (delta &+ 1) &>> 1
+    let d = pointwiseMax(ntcV, pointwiseMin(tcV, rawD))
     
-    var newP0 = p0
-    var newQ0 = q0
-    newP0.replace(with: p0 &+ d, where: mask)
-    newQ0.replace(with: q0 &- d, where: mask)
+    let newP0 = p0.replacing(with: p0 &+ d, where: mask)
+    let newQ0 = q0.replacing(with: q0 &- d, where: mask)
     
     return (newP0, newQ0)
 }

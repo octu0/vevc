@@ -248,17 +248,22 @@ internal func quantize4(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
+    let mulV = SIMD4<Int32>(repeating: mul)
+    let biasV = SIMD4<Int32>(repeating: bias)
+    let limitMin = SIMD4<Int32>(repeating: -32768)
+    let limitMax = SIMD4<Int32>(repeating: 32767)
+    let zero4 = SIMD4<Int32>.zero
     for y in 0..<4 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<4 {
-            let val = Int32(ptr[i])
-            let signMask = val &>> 31
-            let absVal = (val ^ signMask) &- signMask
-            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
-            let res = (qVal ^ signMask) &- signMask
-            let v = Int16(clamping: res)
-            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
-        }
+        let raw = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD4<Int16>.self)
+        let val = SIMD4<Int32>(truncatingIfNeeded: raw)
+        let signMask = val &>> 31
+        let absVal = (val ^ signMask) &- signMask
+        let qVal = pointwiseMax(zero4, (((absVal &* mulV) &+ biasV) &>> shift))
+        let res = (qVal ^ signMask) &- signMask
+        let v = SIMD4<Int16>(truncatingIfNeeded: res.clamped(lowerBound: limitMin, upperBound: limitMax))
+        let zigzag = ((v &<< 1) ^ (v &>> 15))
+        UnsafeMutableRawPointer(ptr).storeBytes(of: zigzag, as: SIMD4<Int16>.self)
     }
 }
 
@@ -267,17 +272,22 @@ internal func quantize8(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
+    let mulV = SIMD8<Int32>(repeating: mul)
+    let biasV = SIMD8<Int32>(repeating: bias)
+    let limitMin = SIMD8<Int32>(repeating: -32768)
+    let limitMax = SIMD8<Int32>(repeating: 32767)
+    let zero8 = SIMD8<Int32>.zero
     for y in 0..<8 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<8 {
-            let val = Int32(ptr[i])
-            let signMask = val &>> 31
-            let absVal = (val ^ signMask) &- signMask
-            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
-            let res = (qVal ^ signMask) &- signMask
-            let v = Int16(clamping: res)
-            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
-        }
+        let raw = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD8<Int16>.self)
+        let val = SIMD8<Int32>(truncatingIfNeeded: raw)
+        let signMask = val &>> 31
+        let absVal = (val ^ signMask) &- signMask
+        let qVal = pointwiseMax(zero8, (((absVal &* mulV) &+ biasV) &>> shift))
+        let res = (qVal ^ signMask) &- signMask
+        let v = SIMD8<Int16>(truncatingIfNeeded: res.clamped(lowerBound: limitMin, upperBound: limitMax))
+        let zigzag = ((v &<< 1) ^ (v &>> 15))
+        UnsafeMutableRawPointer(ptr).storeBytes(of: zigzag, as: SIMD8<Int16>.self)
     }
 }
 
@@ -286,17 +296,32 @@ internal func quantize16(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
+    let mulV = SIMD8<Int32>(repeating: mul)
+    let biasV = SIMD8<Int32>(repeating: bias)
+    let limitMin = SIMD8<Int32>(repeating: -32768)
+    let limitMax = SIMD8<Int32>(repeating: 32767)
+    let zero8 = SIMD8<Int32>.zero
     for y in 0..<16 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<16 {
-            let val = Int32(ptr[i])
-            let signMask = val &>> 31
-            let absVal = (val ^ signMask) &- signMask
-            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
-            let res = (qVal ^ signMask) &- signMask
-            let v = Int16(clamping: res)
-            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
-        }
+        let raw = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        let valLow = SIMD8<Int32>(truncatingIfNeeded: raw.lowHalf)
+        let valHigh = SIMD8<Int32>(truncatingIfNeeded: raw.highHalf)
+        
+        let signLow = valLow &>> 31
+        let absLow = (valLow ^ signLow) &- signLow
+        let qLow = pointwiseMax(zero8, (((absLow &* mulV) &+ biasV) &>> shift))
+        let resLow = (qLow ^ signLow) &- signLow
+        let vLow = SIMD8<Int16>(truncatingIfNeeded: resLow.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let signHigh = valHigh &>> 31
+        let absHigh = (valHigh ^ signHigh) &- signHigh
+        let qHigh = pointwiseMax(zero8, (((absHigh &* mulV) &+ biasV) &>> shift))
+        let resHigh = (qHigh ^ signHigh) &- signHigh
+        let vHigh = SIMD8<Int16>(truncatingIfNeeded: resHigh.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let v = SIMD16<Int16>(lowHalf: vLow, highHalf: vHigh)
+        let zigzag = ((v &<< 1) ^ (v &>> 15))
+        UnsafeMutableRawPointer(ptr).storeBytes(of: zigzag, as: SIMD16<Int16>.self)
     }
 }
 
@@ -305,17 +330,52 @@ internal func quantize32(_ block: BlockView, q: Quantizer) {
     let mul = q.mul
     let shift = Int32(q.shift)
     let bias = q.bias
+    let mulV = SIMD8<Int32>(repeating: mul)
+    let biasV = SIMD8<Int32>(repeating: bias)
+    let limitMin = SIMD8<Int32>(repeating: -32768)
+    let limitMax = SIMD8<Int32>(repeating: 32767)
+    let zero8 = SIMD8<Int32>.zero
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
-        for i in 0..<32 {
-            let val = Int32(ptr[i])
-            let signMask = val &>> 31
-            let absVal = (val ^ signMask) &- signMask
-            let qVal = max(0, (((absVal &* mul) &+ bias) &>> shift))
-            let res = (qVal ^ signMask) &- signMask
-            let v = Int16(clamping: res)
-            ptr[i] = Int16(bitPattern: UInt16(bitPattern: ((v &<< 1) ^ (v &>> 15))))
-        }
+        let raw0 = UnsafeRawPointer(ptr).loadUnaligned(as: SIMD16<Int16>.self)
+        let valLow0 = SIMD8<Int32>(truncatingIfNeeded: raw0.lowHalf)
+        let valHigh0 = SIMD8<Int32>(truncatingIfNeeded: raw0.highHalf)
+        
+        let signLow0 = valLow0 &>> 31
+        let absLow0 = (valLow0 ^ signLow0) &- signLow0
+        let qLow0 = pointwiseMax(zero8, (((absLow0 &* mulV) &+ biasV) &>> shift))
+        let resLow0 = (qLow0 ^ signLow0) &- signLow0
+        let vLow0 = SIMD8<Int16>(truncatingIfNeeded: resLow0.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let signHigh0 = valHigh0 &>> 31
+        let absHigh0 = (valHigh0 ^ signHigh0) &- signHigh0
+        let qHigh0 = pointwiseMax(zero8, (((absHigh0 &* mulV) &+ biasV) &>> shift))
+        let resHigh0 = (qHigh0 ^ signHigh0) &- signHigh0
+        let vHigh0 = SIMD8<Int16>(truncatingIfNeeded: resHigh0.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let v0 = SIMD16<Int16>(lowHalf: vLow0, highHalf: vHigh0)
+        let zigzag0 = ((v0 &<< 1) ^ (v0 &>> 15))
+        UnsafeMutableRawPointer(ptr).storeBytes(of: zigzag0, as: SIMD16<Int16>.self)
+        
+        let raw1 = UnsafeRawPointer(ptr.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let valLow1 = SIMD8<Int32>(truncatingIfNeeded: raw1.lowHalf)
+        let valHigh1 = SIMD8<Int32>(truncatingIfNeeded: raw1.highHalf)
+        
+        let signLow1 = valLow1 &>> 31
+        let absLow1 = (valLow1 ^ signLow1) &- signLow1
+        let qLow1 = pointwiseMax(zero8, (((absLow1 &* mulV) &+ biasV) &>> shift))
+        let resLow1 = (qLow1 ^ signLow1) &- signLow1
+        let vLow1 = SIMD8<Int16>(truncatingIfNeeded: resLow1.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let signHigh1 = valHigh1 &>> 31
+        let absHigh1 = (valHigh1 ^ signHigh1) &- signHigh1
+        let qHigh1 = pointwiseMax(zero8, (((absHigh1 &* mulV) &+ biasV) &>> shift))
+        let resHigh1 = (qHigh1 ^ signHigh1) &- signHigh1
+        let vHigh1 = SIMD8<Int16>(truncatingIfNeeded: resHigh1.clamped(lowerBound: limitMin, upperBound: limitMax))
+        
+        let v1 = SIMD16<Int16>(lowHalf: vLow1, highHalf: vHigh1)
+        let zigzag1 = ((v1 &<< 1) ^ (v1 &>> 15))
+        UnsafeMutableRawPointer(ptr.advanced(by: 16)).storeBytes(of: zigzag1, as: SIMD16<Int16>.self)
     }
 }
 
@@ -347,38 +407,92 @@ let dequantOffsetNumQ4: Int32 = 3
 @inline(__always)
 internal func dequantize4(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quantizer) {
     let step = Int32(q.step)
-    let offQ = q.centroidOffset ? (dequantOffsetNumQ4 &* step) >> 4 : 0
-    var rowPtr = ptr
-    for _ in 0..<4 {
-        let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
-        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
-        let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
-        @inline(__always) func deq(_ s: Int16) -> Int16 {
-            let adj: Int32 = s == 0 ? 0 : (0 < s ? offQ : -offQ)
-            return Int16(clamping: (Int32(s) &* step &+ adj &+ 8) >> 4)
+    let vStep = SIMD4<Int32>(repeating: step)
+    let v8 = SIMD4<Int32>(repeating: 8)
+    let limitMin = SIMD4<Int32>(repeating: -32768)
+    let limitMax = SIMD4<Int32>(repeating: 32767)
+    
+    switch true {
+    case q.centroidOffset:
+        let offQ = (dequantOffsetNumQ4 &* step) >> 4
+        let vOffPos = SIMD4<Int32>(repeating: offQ)
+        let vOffNeg = SIMD4<Int32>(repeating: 0 &- offQ)
+        let vZero32 = SIMD4<Int32>.zero
+        var rowPtr = ptr
+        for _ in 0..<4 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD4<Int32>(truncatingIfNeeded: v16)
+            
+            var off = vZero32
+            off.replace(with: vOffPos, where: vZero32 .< val32)
+            off.replace(with: vOffNeg, where: val32 .< vZero32)
+            
+            let res32 = (val32 &* vStep &+ off &+ v8) &>> 4
+            let res16 = SIMD4<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD4<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
         }
-        let res16 = SIMD4<Int16>(deq(v16[0]), deq(v16[1]), deq(v16[2]), deq(v16[3]))
-        UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD4<Int16>.self)
-        rowPtr = rowPtr.advanced(by: stride)
+    default:
+        var rowPtr = ptr
+        for _ in 0..<4 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD4<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD4<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD4<Int32>(truncatingIfNeeded: v16)
+            
+            let res32 = (val32 &* vStep &+ v8) &>> 4
+            let res16 = SIMD4<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD4<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
     }
 }
 
 @inline(__always)
 internal func dequantize8(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Quantizer) {
     let step = Int32(q.step)
-    let offQ = q.centroidOffset ? (dequantOffsetNumQ4 &* step) >> 4 : 0
-    var rowPtr = ptr
-    for _ in 0..<8 {
-        let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
-        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
-        let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
-        @inline(__always) func deq(_ s: Int16) -> Int16 {
-            let adj: Int32 = s == 0 ? 0 : (0 < s ? offQ : -offQ)
-            return Int16(clamping: (Int32(s) &* step &+ adj &+ 8) >> 4)
+    let vStep = SIMD8<Int32>(repeating: step)
+    let v8 = SIMD8<Int32>(repeating: 8)
+    let limitMin = SIMD8<Int32>(repeating: -32768)
+    let limitMax = SIMD8<Int32>(repeating: 32767)
+    
+    switch true {
+    case q.centroidOffset:
+        let offQ = (dequantOffsetNumQ4 &* step) >> 4
+        let vOffPos = SIMD8<Int32>(repeating: offQ)
+        let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
+        let vZero32 = SIMD8<Int32>.zero
+        var rowPtr = ptr
+        for _ in 0..<8 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD8<Int32>(truncatingIfNeeded: v16)
+            
+            var off = vZero32
+            off.replace(with: vOffPos, where: vZero32 .< val32)
+            off.replace(with: vOffNeg, where: val32 .< vZero32)
+            
+            let res32 = (val32 &* vStep &+ off &+ v8) &>> 4
+            let res16 = SIMD8<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD8<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
         }
-        let res16 = SIMD8<Int16>(deq(v16[0]), deq(v16[1]), deq(v16[2]), deq(v16[3]), deq(v16[4]), deq(v16[5]), deq(v16[6]), deq(v16[7]))
-        UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD8<Int16>.self)
-        rowPtr = rowPtr.advanced(by: stride)
+    default:
+        var rowPtr = ptr
+        for _ in 0..<8 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD8<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD8<Int16>(truncatingIfNeeded: decodedUInt)
+            let val32 = SIMD8<Int32>(truncatingIfNeeded: v16)
+            
+            let res32 = (val32 &* vStep &+ v8) &>> 4
+            let res16 = SIMD8<Int16>(truncatingIfNeeded: res32.clamped(lowerBound: limitMin, upperBound: limitMax))
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD8<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
     }
 }
 
@@ -387,38 +501,61 @@ internal func dequantize16(ptr: UnsafeMutablePointer<Int16>, stride: Int, q: Qua
     let step = Int32(q.step)
     let vStep = SIMD8<Int32>(repeating: step)
     let v8 = SIMD8<Int32>(repeating: 8)
-    let offQ = q.centroidOffset ? (dequantOffsetNumQ4 &* step) >> 4 : 0
-    let vOffPos = SIMD8<Int32>(repeating: offQ)
-    let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
-    let vZero32 = SIMD8<Int32>(repeating: 0)
-    var rowPtr = ptr
-    for _ in 0..<16 {
-        let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<UInt16>.self)
-        let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
-        let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
+    let limitMin = SIMD8<Int32>(repeating: -32768)
+    let limitMax = SIMD8<Int32>(repeating: 32767)
+    
+    switch true {
+    case q.centroidOffset:
+        let offQ = (dequantOffsetNumQ4 &* step) >> 4
+        let vOffPos = SIMD8<Int32>(repeating: offQ)
+        let vOffNeg = SIMD8<Int32>(repeating: 0 &- offQ)
+        let vZero32 = SIMD8<Int32>.zero
+        var rowPtr = ptr
+        for _ in 0..<16 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
 
-        let low8 = v16.lowHalf
-        let high8 = v16.highHalf
+            let l32 = SIMD8<Int32>(truncatingIfNeeded: v16.lowHalf)
+            let h32 = SIMD8<Int32>(truncatingIfNeeded: v16.highHalf)
 
-        let l32 = SIMD8<Int32>(truncatingIfNeeded: low8)
-        let h32 = SIMD8<Int32>(truncatingIfNeeded: high8)
+            var offL = vZero32
+            offL.replace(with: vOffPos, where: vZero32 .< l32)
+            offL.replace(with: vOffNeg, where: l32 .< vZero32)
+            var offH = vZero32
+            offH.replace(with: vOffPos, where: vZero32 .< h32)
+            offH.replace(with: vOffNeg, where: h32 .< vZero32)
 
-        var offL = vZero32
-        offL.replace(with: vOffPos, where: vZero32 .< l32)
-        offL.replace(with: vOffNeg, where: l32 .< vZero32)
-        var offH = vZero32
-        offH.replace(with: vOffPos, where: vZero32 .< h32)
-        offH.replace(with: vOffNeg, where: h32 .< vZero32)
+            let resLow8 = (l32 &* vStep &+ offL &+ v8) &>> 4
+            let resHigh8 = (h32 &* vStep &+ offH &+ v8) &>> 4
+            
+            let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            
+            let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
+    default:
+        var rowPtr = ptr
+        for _ in 0..<16 {
+            let v = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<UInt16>.self)
+            let decodedUInt = ((v &>> 1) ^ (.zero &- (v & 1)))
+            let v16 = SIMD16<Int16>(truncatingIfNeeded: decodedUInt)
 
-        let resLow8 = (l32 &* vStep &+ offL &+ v8) &>> 4
-        let resHigh8 = (h32 &* vStep &+ offH &+ v8) &>> 4
-        
-        let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: SIMD8(repeating: -32768), upperBound: SIMD8(repeating: 32767)))
-        let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: SIMD8(repeating: -32768), upperBound: SIMD8(repeating: 32767)))
-        
-        let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
-        UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
-        rowPtr = rowPtr.advanced(by: stride)
+            let l32 = SIMD8<Int32>(truncatingIfNeeded: v16.lowHalf)
+            let h32 = SIMD8<Int32>(truncatingIfNeeded: v16.highHalf)
+
+            let resLow8 = (l32 &* vStep &+ v8) &>> 4
+            let resHigh8 = (h32 &* vStep &+ v8) &>> 4
+            
+            let cLow8 = SIMD8<Int16>(truncatingIfNeeded: resLow8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            let cHigh8 = SIMD8<Int16>(truncatingIfNeeded: resHigh8.clamped(lowerBound: limitMin, upperBound: limitMax))
+            
+            let res16 = SIMD16<Int16>(lowHalf: cLow8, highHalf: cHigh8)
+            UnsafeMutableRawPointer(rowPtr).storeBytes(of: res16, as: SIMD16<Int16>.self)
+            rowPtr = rowPtr.advanced(by: stride)
+        }
     }
 }
 
@@ -427,6 +564,9 @@ internal func dequantize32(_ block: BlockView, q: Quantizer) {
     let step = Int32(q.step)
     let vStep = SIMD8<Int32>(repeating: step)
     let v8 = SIMD8<Int32>(repeating: 8)
+    let limitMin = SIMD8<Int32>(repeating: -32768)
+    let limitMax = SIMD8<Int32>(repeating: 32767)
+    
     for y in 0..<32 {
         let ptr = block.rowPointer(y: y)
         let ptrRaw0 = UnsafeRawPointer(ptr)
@@ -453,9 +593,6 @@ internal func dequantize32(_ block: BlockView, q: Quantizer) {
         let resHigh8_0 = (h32_0 &* vStep &+ v8) &>> 4
         let resLow8_1 = (l32_1 &* vStep &+ v8) &>> 4
         let resHigh8_1 = (h32_1 &* vStep &+ v8) &>> 4
-        
-        let limitMin = SIMD8<Int32>(repeating: -32768)
-        let limitMax = SIMD8<Int32>(repeating: 32767)
         
         let cLow8_0 = SIMD8<Int16>(truncatingIfNeeded: resLow8_0.clamped(lowerBound: limitMin, upperBound: limitMax))
         let cHigh8_0 = SIMD8<Int16>(truncatingIfNeeded: resHigh8_0.clamped(lowerBound: limitMin, upperBound: limitMax))

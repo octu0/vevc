@@ -217,6 +217,22 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
     let skipThresholdPerPixel = skipThreshold
     let prevStaticCounters = staticCounters
 
+    let curYWrapper = UnsafePointerWrapper(base: pd.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let curCbWrapper = UnsafePointerWrapper(base: pd.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let curCrWrapper = UnsafePointerWrapper(base: pd.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let prevInYWrapper = UnsafePointerWrapper(base: prevInput.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInCbWrapper = UnsafePointerWrapper(base: prevInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInCrWrapper = UnsafePointerWrapper(base: prevInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let ltrInYWrapper = UnsafePointerWrapper(base: ltrInput.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInCbWrapper = UnsafePointerWrapper(base: ltrInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInCrWrapper = UnsafePointerWrapper(base: ltrInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let prevReconYWrapper = UnsafePointerWrapper(base: predictedPd.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconCbWrapper = UnsafePointerWrapper(base: predictedPd.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconCrWrapper = UnsafePointerWrapper(base: predictedPd.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
     let matchResults = await withTaskGroup(of: [(Int, Bool, Bool, Bool)].self) { group in
         let batchSize = 128
         for batchStart in stride(from: 0, to: blockCount, by: batchSize) {
@@ -225,16 +241,52 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                 var results = [(Int, Bool, Bool, Bool)]()
                 results.reserveCapacity(batchEnd - batchStart)
 
-                withUnsafePlanePointers(pd, prevInput, ltrInput, predictedPd) { cur, prevIn, ltrIn, prevRecon in
-                    for i in batchStart..<batchEnd {
-                        let bx = (i % bw) * 32
-                        let by = (i / bw) * 32
-                        let prevCount = prevStaticCounters[i]
+                let curY = curYWrapper.base, curCb = curCbWrapper.base, curCr = curCrWrapper.base
+                let prevInY = prevInYWrapper.base, prevInCb = prevInCbWrapper.base, prevInCr = prevInCrWrapper.base
+                let ltrInY = ltrInYWrapper.base, ltrInCb = ltrInCbWrapper.base, ltrInCr = ltrInCrWrapper.base
+                let prevReconY = prevReconYWrapper.base, prevReconCb = prevReconCbWrapper.base, prevReconCr = prevReconCrWrapper.base
 
-                        var allSubBlocksMatchPrev = true
-                        var allSubBlocksMatchLtr = false
-                        var allSubBlocksMatchPrevRecon = false
+                for i in batchStart..<batchEnd {
+                    let bx = (i % bw) * 32
+                    let by = (i / bw) * 32
+                    let prevCount = prevStaticCounters[i]
 
+                    var allSubBlocksMatchPrev = true
+                    var allSubBlocksMatchLtr = false
+                    var allSubBlocksMatchPrevRecon = false
+
+                    for sy in 0..<2 {
+                        for sx in 0..<2 {
+                            let subX = bx + sx * 16
+                            let subY = by + sy * 16
+                            let mw = min(16, dx - subX)
+                            let mh = min(16, dy - subY)
+                            if mw <= 0 || mh <= 0 { continue }
+                            let mwc = ((mw + 1) / 2)
+                            let mhc = ((mh + 1) / 2)
+
+                            let area = mw * mh + mwc * mhc * 2
+                            let blockThreshold = skipThresholdPerPixel * area
+
+                            let sadPrevIn: Int
+                            if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                sadPrevIn = computeZeroSAD16x16(cY: curY, rY: prevInY, cCb: curCb, rCb: prevInCb, cCr: curCr, rCr: prevInCr, bx: subX, by: subY, width: dx, limit: blockThreshold)
+                            } else {
+                                sadPrevIn = computeZeroSADSubBlock(cY: curY, rY: prevInY, cCb: curCb, rCb: prevInCb, cCr: curCr, rCr: prevInCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
+                            }
+
+                            if blockThreshold < sadPrevIn {
+                                allSubBlocksMatchPrev = false
+                                break
+                            }
+                        }
+                        if allSubBlocksMatchPrev != true { break }
+                    }
+
+                    let nextStaticCount = if allSubBlocksMatchPrev { prevCount + 1 } else { 0 }
+
+                    if nextStaticCount == ltrAge {
+                        allSubBlocksMatchLtr = true
                         for sy in 0..<2 {
                             for sx in 0..<2 {
                                 let subX = bx + sx * 16
@@ -248,89 +300,56 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                                 let area = mw * mh + mwc * mhc * 2
                                 let blockThreshold = skipThresholdPerPixel * area
 
-                                let sadPrevIn: Int
+                                let sadLtrIn: Int
                                 if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                    sadPrevIn = computeZeroSAD16x16(cY: cur.y, rY: prevIn.y, cCb: cur.cb, rCb: prevIn.cb, cCr: cur.cr, rCr: prevIn.cr, bx: subX, by: subY, width: dx, limit: blockThreshold)
+                                    sadLtrIn = computeZeroSAD16x16(cY: curY, rY: ltrInY, cCb: curCb, rCb: ltrInCb, cCr: curCr, rCr: ltrInCr, bx: subX, by: subY, width: dx, limit: blockThreshold)
                                 } else {
-                                    sadPrevIn = computeZeroSADSubBlock(cY: cur.y, rY: prevIn.y, cCb: cur.cb, rCb: prevIn.cb, cCr: cur.cr, rCr: prevIn.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
+                                    sadLtrIn = computeZeroSADSubBlock(cY: curY, rY: ltrInY, cCb: curCb, rCb: ltrInCb, cCr: curCr, rCr: ltrInCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
                                 }
 
-                                if blockThreshold < sadPrevIn {
-                                    allSubBlocksMatchPrev = false
+                                if blockThreshold < sadLtrIn {
+                                    allSubBlocksMatchLtr = false
                                     break
                                 }
                             }
-                            if allSubBlocksMatchPrev != true { break }
+                            if allSubBlocksMatchLtr != true { break }
                         }
-
-                        let nextStaticCount = allSubBlocksMatchPrev ? (prevCount + 1) : 0
-
-                        if nextStaticCount == ltrAge {
-                            allSubBlocksMatchLtr = true
-                            for sy in 0..<2 {
-                                for sx in 0..<2 {
-                                    let subX = bx + sx * 16
-                                    let subY = by + sy * 16
-                                    let mw = min(16, dx - subX)
-                                    let mh = min(16, dy - subY)
-                                    if mw <= 0 || mh <= 0 { continue }
-                                    let mwc = ((mw + 1) / 2)
-                                    let mhc = ((mh + 1) / 2)
-
-                                    let area = mw * mh + mwc * mhc * 2
-                                    let blockThreshold = skipThresholdPerPixel * area
-
-                                    let sadLtrIn: Int
-                                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                        sadLtrIn = computeZeroSAD16x16(cY: cur.y, rY: ltrIn.y, cCb: cur.cb, rCb: ltrIn.cb, cCr: cur.cr, rCr: ltrIn.cr, bx: subX, by: subY, width: dx, limit: blockThreshold)
-                                    } else {
-                                        sadLtrIn = computeZeroSADSubBlock(cY: cur.y, rY: ltrIn.y, cCb: cur.cb, rCb: ltrIn.cb, cCr: cur.cr, rCr: ltrIn.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: blockThreshold)
-                                    }
-
-                                    if blockThreshold < sadLtrIn {
-                                        allSubBlocksMatchLtr = false
-                                        break
-                                    }
-                                }
-                                if allSubBlocksMatchLtr != true { break }
-                            }
-                        }
-
-                        let isLtrMatch = allSubBlocksMatchLtr && (nextStaticCount == ltrAge)
-                        if isLtrMatch != true && allSubBlocksMatchPrev && (3 < nextStaticCount) {
-                            allSubBlocksMatchPrevRecon = true
-                            for sy in 0..<2 {
-                                for sx in 0..<2 {
-                                    let subX = bx + sx * 16
-                                    let subY = by + sy * 16
-                                    let mw = min(16, dx - subX)
-                                    let mh = min(16, dy - subY)
-                                    if mw <= 0 || mh <= 0 { continue }
-                                    let mwc = ((mw + 1) / 2)
-                                    let mhc = ((mh + 1) / 2)
-
-                                    let area = mw * mh + mwc * mhc * 2
-                                    let blockThreshold = skipThresholdPerPixel * area
-                                    let reconBlockThreshold = blockThreshold * reconThresholdScale
-
-                                    let sadPrevRecon: Int
-                                    if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
-                                        sadPrevRecon = computeZeroSAD16x16(cY: cur.y, rY: prevRecon.y, cCb: cur.cb, rCb: prevRecon.cb, cCr: cur.cr, rCr: prevRecon.cr, bx: subX, by: subY, width: dx, limit: reconBlockThreshold)
-                                    } else {
-                                        sadPrevRecon = computeZeroSADSubBlock(cY: cur.y, rY: prevRecon.y, cCb: cur.cb, rCb: prevRecon.cb, cCr: cur.cr, rCr: prevRecon.cr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: reconBlockThreshold)
-                                    }
-
-                                    if reconBlockThreshold < sadPrevRecon {
-                                        allSubBlocksMatchPrevRecon = false
-                                        break
-                                    }
-                                }
-                                if allSubBlocksMatchPrevRecon != true { break }
-                            }
-                        }
-
-                        results.append((i, allSubBlocksMatchPrev, allSubBlocksMatchLtr, allSubBlocksMatchPrevRecon))
                     }
+
+                    let isLtrMatch = allSubBlocksMatchLtr && (nextStaticCount == ltrAge)
+                    if isLtrMatch != true && allSubBlocksMatchPrev && (3 < nextStaticCount) {
+                        allSubBlocksMatchPrevRecon = true
+                        for sy in 0..<2 {
+                            for sx in 0..<2 {
+                                let subX = bx + sx * 16
+                                let subY = by + sy * 16
+                                let mw = min(16, dx - subX)
+                                let mh = min(16, dy - subY)
+                                if mw <= 0 || mh <= 0 { continue }
+                                let mwc = ((mw + 1) / 2)
+                                let mhc = ((mh + 1) / 2)
+
+                                let area = mw * mh + mwc * mhc * 2
+                                let blockThreshold = skipThresholdPerPixel * area
+                                let reconBlockThreshold = blockThreshold * reconThresholdScale
+
+                                let sadPrevRecon: Int
+                                if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                    sadPrevRecon = computeZeroSAD16x16(cY: curY, rY: prevReconY, cCb: curCb, rCb: prevReconCb, cCr: curCr, rCr: prevReconCr, bx: subX, by: subY, width: dx, limit: reconBlockThreshold)
+                                } else {
+                                    sadPrevRecon = computeZeroSADSubBlock(cY: curY, rY: prevReconY, cCb: curCb, rCb: prevReconCb, cCr: curCr, rCr: prevReconCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: reconBlockThreshold)
+                                }
+
+                                if reconBlockThreshold < sadPrevRecon {
+                                    allSubBlocksMatchPrevRecon = false
+                                    break
+                                }
+                            }
+                            if allSubBlocksMatchPrevRecon != true { break }
+                        }
+                    }
+
+                    results.append((i, allSubBlocksMatchPrev, allSubBlocksMatchLtr, allSubBlocksMatchPrevRecon))
                 }
                 return results
             }
@@ -390,22 +409,21 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     var mutPdCr = pool.getInt16(count: pd.cr.count)
 
     copyPlaneBuffers(y: pd.y, cb: pd.cb, cr: pd.cr, intoY: &mutPdY, cb: &mutPdCb, cr: &mutPdCr)
-
     let mvsConst = mvs
     let refDirsConst = refDirs
     async let tY = { [mvsConst, refDirsConst] () -> [Int16] in
         var y = mutPdY
-        subtractScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst, refDirs: refDirsConst, skipMap: nil, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+        subtractScaledBidirectionalMotionCompensationLumaWithoutSkipMap(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst, refDirs: refDirsConst, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         return y
     }()
     async let tCb = { [mvsConst, refDirsConst] () -> [Int16] in
         var cb = mutPdCb
-        subtractScaledBidirectionalMotionCompensationChroma(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst, refDirs: refDirsConst, skipMap: nil, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        subtractScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst, refDirs: refDirsConst, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         return cb
     }()
     async let tCr = { [mvsConst, refDirsConst] () -> [Int16] in
         var cr = mutPdCr
-        subtractScaledBidirectionalMotionCompensationChroma(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst, refDirs: refDirsConst, skipMap: nil, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        subtractScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst, refDirs: refDirsConst, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         return cr
     }()
 
@@ -468,9 +486,9 @@ func encodeSpatialLayers(pd: PlaneData420, pool: BlockViewPool, predictedPd: Pla
     let (reconL2Cr, r2Cr) = reconstructPlaneLayer32Cr(blocks: l2crBlocks, prevImg: l1Img, width: cbDx, height: cbDy, qt: qtC2, pool: pool)
     var mutReconL2Cr = reconL2Cr
 
-    await applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: nil, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-    await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: nil, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-    await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: nil, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    await applyScaledBidirectionalMotionCompensationLumaWithoutSkipMap(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+    await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+    await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
 
     let mvData = encodeMVsProfile1(mvs: mvs)
 
@@ -639,17 +657,17 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let refDirsConst = refDirs
     async let tY = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
         var y = mutPdY
-        subtractScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+        subtractScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         return y
     }()
     async let tCb = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
         var cb = mutPdCb
-        subtractScaledBidirectionalMotionCompensationChroma(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         return cb
     }()
     async let tCr = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
         var cr = mutPdCr
-        subtractScaledBidirectionalMotionCompensationChroma(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         return cr
     }()
 
@@ -1010,9 +1028,9 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         fusePredictionPlane16(recon: &mutReconL2Cb, p: fullP.cb, skipMap: sMap, width: cbDx, height: cbDy)
         fusePredictionPlane16(recon: &mutReconL2Cr, p: fullP.cr, skipMap: sMap, width: cbDx, height: cbDy)
     } else {
-        await applyScaledBidirectionalMotionCompensationLuma(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &mutReconL2Cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
         if wpLuma != 0 {
             applyPredictionOffset32(plane: &mutReconL2Y, offset: wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
         }

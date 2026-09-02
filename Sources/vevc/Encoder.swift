@@ -1110,7 +1110,7 @@ private func estimateRiceBitsDPCM4(block: BlockView, lastVal: inout Int16) -> In
 @inline(__always)
 private func measureBlockBits8(block: inout BlockView, qt: QuantizationTable) -> Int {
     let view = block
-    let sub = dwt2DBlock8Subbands(view)
+    let sub = dwt2DBlock8Subbands(ptr: view.base, stride: view.stride)
     
     quantizeDPCM(sub.ll, q: qt.qLow)
     quantize4(sub.hl, q: qt.qMid)

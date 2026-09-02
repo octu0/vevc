@@ -98,7 +98,7 @@ public func calculatePSNR(img1: YCbCrImage, img2: YCbCrImage) -> Double {
 
 @inline(__always)
 private func calcPlanePSNR(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: Int, stride2: Int) -> Double {
-    var ssd = 0
+    var ssd: UInt64 = 0
     let count = w * h
     if count == 0 { return 100.0 }
     
@@ -108,9 +108,21 @@ private func calcPlanePSNR(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: In
             for y in 0..<h {
                 let r1 = b1.advanced(by: y * stride1)
                 let r2 = b2.advanced(by: y * stride2)
-                for x in 0..<w {
+                var x = 0
+                while x + 16 <= w {
+                    let u1 = UnsafeRawPointer(r1.advanced(by: x)).loadUnaligned(as: SIMD16<UInt8>.self)
+                    let u2 = UnsafeRawPointer(r2.advanced(by: x)).loadUnaligned(as: SIMD16<UInt8>.self)
+                    let maxU = pointwiseMax(u1, u2)
+                    let minU = pointwiseMin(u1, u2)
+                    let diff = SIMD16<UInt32>(truncatingIfNeeded: maxU &- minU)
+                    let sq = diff &* diff
+                    ssd &+= UInt64(sq.wrappedSum())
+                    x &+= 16
+                }
+                while x < w {
                     let diff = Int(r1[x]) - Int(r2[x])
-                    ssd += diff * diff
+                    ssd &+= UInt64(diff * diff)
+                    x &+= 1
                 }
             }
         }
@@ -178,23 +190,11 @@ private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: In
                         let u8_1 = r1.loadUnaligned(as: SIMD8<UInt8>.self)
                         let u8_2 = r2.loadUnaligned(as: SIMD8<UInt8>.self)
 
-                        let v1 = SIMD8<UInt16>(
-                            UInt16(u8_1[0]), UInt16(u8_1[1]), UInt16(u8_1[2]), UInt16(u8_1[3]),
-                            UInt16(u8_1[4]), UInt16(u8_1[5]), UInt16(u8_1[6]), UInt16(u8_1[7])
-                        )
-                        let v2 = SIMD8<UInt16>(
-                            UInt16(u8_2[0]), UInt16(u8_2[1]), UInt16(u8_2[2]), UInt16(u8_2[3]),
-                            UInt16(u8_2[4]), UInt16(u8_2[5]), UInt16(u8_2[6]), UInt16(u8_2[7])
-                        )
+                        let v1 = SIMD8<UInt16>(truncatingIfNeeded: u8_1)
+                        let v2 = SIMD8<UInt16>(truncatingIfNeeded: u8_2)
 
-                        let v1_32 = SIMD8<UInt32>(
-                            UInt32(u8_1[0]), UInt32(u8_1[1]), UInt32(u8_1[2]), UInt32(u8_1[3]),
-                            UInt32(u8_1[4]), UInt32(u8_1[5]), UInt32(u8_1[6]), UInt32(u8_1[7])
-                        )
-                        let v2_32 = SIMD8<UInt32>(
-                            UInt32(u8_2[0]), UInt32(u8_2[1]), UInt32(u8_2[2]), UInt32(u8_2[3]),
-                            UInt32(u8_2[4]), UInt32(u8_2[5]), UInt32(u8_2[6]), UInt32(u8_2[7])
-                        )
+                        let v1_32 = SIMD8<UInt32>(truncatingIfNeeded: u8_1)
+                        let v2_32 = SIMD8<UInt32>(truncatingIfNeeded: u8_2)
 
                         vSum1 &+= v1
                         vSum2 &+= v2
@@ -203,11 +203,11 @@ private func calcPlaneSSIM(p1: [UInt8], p2: [UInt8], w: Int, h: Int, stride1: In
                         vSum12 &+= v1_32 &* v2_32
                     }
                     
-                    let sum1 = Int(vSum1[0] &+ vSum1[1] &+ vSum1[2] &+ vSum1[3] &+ vSum1[4] &+ vSum1[5] &+ vSum1[6] &+ vSum1[7])
-                    let sum2 = Int(vSum2[0] &+ vSum2[1] &+ vSum2[2] &+ vSum2[3] &+ vSum2[4] &+ vSum2[5] &+ vSum2[6] &+ vSum2[7])
-                    let sum1sq = Int(vSum1sq[0] &+ vSum1sq[1] &+ vSum1sq[2] &+ vSum1sq[3] &+ vSum1sq[4] &+ vSum1sq[5] &+ vSum1sq[6] &+ vSum1sq[7])
-                    let sum2sq = Int(vSum2sq[0] &+ vSum2sq[1] &+ vSum2sq[2] &+ vSum2sq[3] &+ vSum2sq[4] &+ vSum2sq[5] &+ vSum2sq[6] &+ vSum2sq[7])
-                    let sum12 = Int(vSum12[0] &+ vSum12[1] &+ vSum12[2] &+ vSum12[3] &+ vSum12[4] &+ vSum12[5] &+ vSum12[6] &+ vSum12[7])
+                    let sum1 = Int(vSum1.wrappedSum())
+                    let sum2 = Int(vSum2.wrappedSum())
+                    let sum1sq = Int(vSum1sq.wrappedSum())
+                    let sum2sq = Int(vSum2sq.wrappedSum())
+                    let sum12 = Int(vSum12.wrappedSum())
 
                     let n = 64.0
                     let mu1 = Double(sum1) / n

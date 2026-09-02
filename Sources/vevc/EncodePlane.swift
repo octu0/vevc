@@ -363,7 +363,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock32(view)
+                            dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32(view: view, qt: qt)
                         }
                     }
@@ -434,7 +434,7 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
                         }
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock32(view)
+                            dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32(view: view, qt: qt)
                         }
                     }
@@ -505,7 +505,7 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
                         }
                         r.readBlock(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock32(view)
+                            dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
                     }
@@ -573,14 +573,21 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
                                 let sy = blockY * 2
                                 let srcRow0 = srcBase.advanced(by: sy * 32)
                                 let srcRow1 = srcBase.advanced(by: (sy + 1) * 32)
-                                for blockX in 0..<16 {
-                                    let sx = blockX * 2
-                                    let p0 = Int(srcRow0[sx])
-                                    let p1 = Int(srcRow0[sx + 1])
-                                    let p2 = Int(srcRow1[sx])
-                                    let p3 = Int(srcRow1[sx + 1])
-                                    dstPtr[blockX] = Int16((p0 + p1 + p2 + p3) >> 2)
-                                }
+                                let v0_0 = UnsafeRawPointer(srcRow0).loadUnaligned(as: SIMD16<Int16>.self)
+                                let v0_1 = UnsafeRawPointer(srcRow0.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                                let v1_0 = UnsafeRawPointer(srcRow1).loadUnaligned(as: SIMD16<Int16>.self)
+                                let v1_1 = UnsafeRawPointer(srcRow1.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+                                
+                                let sum0_0 = SIMD8<Int32>(truncatingIfNeeded: v0_0.evenHalf) &+ SIMD8<Int32>(truncatingIfNeeded: v0_0.oddHalf)
+                                let sum1_0 = SIMD8<Int32>(truncatingIfNeeded: v1_0.evenHalf) &+ SIMD8<Int32>(truncatingIfNeeded: v1_0.oddHalf)
+                                let out0 = SIMD8<Int16>(truncatingIfNeeded: (sum0_0 &+ sum1_0) &>> 2)
+                                
+                                let sum0_1 = SIMD8<Int32>(truncatingIfNeeded: v0_1.evenHalf) &+ SIMD8<Int32>(truncatingIfNeeded: v0_1.oddHalf)
+                                let sum1_1 = SIMD8<Int32>(truncatingIfNeeded: v1_1.evenHalf) &+ SIMD8<Int32>(truncatingIfNeeded: v1_1.oddHalf)
+                                let out1 = SIMD8<Int16>(truncatingIfNeeded: (sum0_1 &+ sum1_1) &>> 2)
+                                
+                                let out = SIMD16<Int16>(lowHalf: out0, highHalf: out1)
+                                UnsafeMutableRawPointer(dstPtr).storeBytes(of: out, as: SIMD16<Int16>.self)
                             }
                         } else {
                             for blockY in 0..<subSize {
@@ -682,7 +689,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock16(view)
+                            dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16(view: view, qt: qt)
                         }
                     }
@@ -753,7 +760,7 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
                         }
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock16(view)
+                            dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16(view: view, qt: qt)
                         }
                     }
@@ -824,7 +831,7 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
                         }
                         r.readBlock(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock16(view)
+                            dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
                     }
@@ -892,14 +899,13 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
                                 let sy = blockY * 2
                                 let srcRow0 = srcBase.advanced(by: sy * 16)
                                 let srcRow1 = srcBase.advanced(by: (sy + 1) * 16)
-                                for blockX in 0..<8 {
-                                    let sx = blockX * 2
-                                    let p0 = Int(srcRow0[sx])
-                                    let p1 = Int(srcRow0[sx + 1])
-                                    let p2 = Int(srcRow1[sx])
-                                    let p3 = Int(srcRow1[sx + 1])
-                                    dstPtr[blockX] = Int16((p0 + p1 + p2 + p3) >> 2)
-                                }
+                                let v0 = UnsafeRawPointer(srcRow0).loadUnaligned(as: SIMD16<Int16>.self)
+                                let v1 = UnsafeRawPointer(srcRow1).loadUnaligned(as: SIMD16<Int16>.self)
+                                
+                                let sum0 = SIMD8<Int32>(truncatingIfNeeded: v0.evenHalf) &+ SIMD8<Int32>(truncatingIfNeeded: v0.oddHalf)
+                                let sum1 = SIMD8<Int32>(truncatingIfNeeded: v1.evenHalf) &+ SIMD8<Int32>(truncatingIfNeeded: v1.oddHalf)
+                                let out = SIMD8<Int16>(truncatingIfNeeded: (sum0 &+ sum1) &>> 2)
+                                UnsafeMutableRawPointer(dstPtr).storeBytes(of: out, as: SIMD8<Int16>.self)
                             }
                         } else {
                             for blockY in 0..<subSize {
@@ -959,7 +965,7 @@ func extractSingleTransformBlocksBase8(r: Int16Reader, width: Int, height: Int, 
                         let view = blocks[(i * colCount) + j]
                         r.readBlock(x: w, y: h, width: 8, height: 8, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock8(view)
+                            dwt2DBlock8(ptr: view.base, stride: view.stride)
                         }
                     }
                 }
@@ -1103,7 +1109,7 @@ func extractSingleTransformBlocksBase8WithSkipMap(
                             }
                         }
                         if isZeroBlock(view: view) != true {
-                            dwt2DBlock8(view)
+                            dwt2DBlock8(ptr: view.base, stride: view.stride)
                         }
                     }
                 }

@@ -34,30 +34,71 @@ func llAnalyzeLevel(_ plane: [Int16], w: Int, h: Int, blockSize: Int) -> [Int16]
     let rowCount = (h + blockSize - 1) / blockSize
     let llW = (w + 1) / 2
     let llH = (h + 1) / 2
-    var ll = [Int16](repeating: 0, count: llW * llH)
-    var scratch = [Int16](repeating: 0, count: blockSize * blockSize)
+    let llCount = llW * llH
+    var ll = [Int16](unsafeUninitializedCapacity: llCount) { _, c in c = llCount }
     let reader = Int16Reader(data: plane, width: w, height: h)
-    withUnsafePointers(mut: &scratch, mut: &ll) { sBase, dBase in
-        let view = BlockView(base: sBase, width: blockSize, height: blockSize, stride: blockSize)
-        for r in 0..<rowCount {
-            for c in 0..<colCount {
-                reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view)
-                // LL-only forward lifting: bit-identical LL bytes, the other
-                // quadrants (never gathered here) stay unspecified.
-                switch blockSize {
-                case 32: dwt2DBlock32LL(view)
-                case 16: dwt2DBlock16LL(view)
-                default: dwt2DBlock8(view)
-                }
-                let dx0 = c * q
+    withUnsafeTemporaryAllocation(of: Int16.self, capacity: blockSize * blockSize) { scratchBuffer in
+        let sBase = scratchBuffer.baseAddress!
+        withUnsafePointers(plane, mut: &ll) { pBase, dBase in
+            let view = BlockView(base: sBase, width: blockSize, height: blockSize, stride: blockSize)
+            for r in 0..<rowCount {
                 let dy0 = r * q
-                let copyW = min(q, llW - dx0)
-                if copyW <= 0 { continue }
-                for y in 0..<q {
-                    let dy = dy0 + y
-                    if dy < llH {
-                        let src = sBase.advanced(by: y * blockSize)
-                        dBase.advanced(by: dy * llW + dx0).update(from: src, count: copyW)
+                let copyH = min(q, llH - dy0)
+                if copyH <= 0 { continue }
+                for c in 0..<colCount {
+                    reader.readBlock(x: c * blockSize, y: r * blockSize, width: blockSize, height: blockSize, into: view, srcBase: pBase)
+                    // LL-only forward lifting: bit-identical LL bytes, the other
+                    // quadrants (never gathered here) stay unspecified.
+                    switch blockSize {
+                    case 32: dwt2DBlock32LL(ptr: sBase, stride: blockSize)
+                    case 16: dwt2DBlock16LL(ptr: sBase, stride: blockSize)
+                    default: dwt2DBlock8(ptr: sBase, stride: blockSize)
+                    }
+                    let dx0 = c * q
+                    let copyW = min(q, llW - dx0)
+                    if copyW <= 0 { continue }
+                    switch copyW {
+                    case 16:
+                        if copyH == 16 {
+                            for y in 0..<16 {
+                                let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD16<Int16>.self)
+                                UnsafeMutableRawPointer(dBase.advanced(by: (dy0 + y) * llW + dx0)).storeBytes(of: src, as: SIMD16<Int16>.self)
+                            }
+                        } else {
+                            for y in 0..<copyH {
+                                let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD16<Int16>.self)
+                                UnsafeMutableRawPointer(dBase.advanced(by: (dy0 + y) * llW + dx0)).storeBytes(of: src, as: SIMD16<Int16>.self)
+                            }
+                        }
+                    case 8:
+                        if copyH == 8 {
+                            for y in 0..<8 {
+                                let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD8<Int16>.self)
+                                UnsafeMutableRawPointer(dBase.advanced(by: (dy0 + y) * llW + dx0)).storeBytes(of: src, as: SIMD8<Int16>.self)
+                            }
+                        } else {
+                            for y in 0..<copyH {
+                                let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD8<Int16>.self)
+                                UnsafeMutableRawPointer(dBase.advanced(by: (dy0 + y) * llW + dx0)).storeBytes(of: src, as: SIMD8<Int16>.self)
+                            }
+                        }
+                    case 4:
+                        if copyH == 4 {
+                            for y in 0..<4 {
+                                let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD4<Int16>.self)
+                                UnsafeMutableRawPointer(dBase.advanced(by: (dy0 + y) * llW + dx0)).storeBytes(of: src, as: SIMD4<Int16>.self)
+                            }
+                        } else {
+                            for y in 0..<copyH {
+                                let src = UnsafeRawPointer(sBase.advanced(by: y * blockSize)).loadUnaligned(as: SIMD4<Int16>.self)
+                                UnsafeMutableRawPointer(dBase.advanced(by: (dy0 + y) * llW + dx0)).storeBytes(of: src, as: SIMD4<Int16>.self)
+                            }
+                        }
+                    default:
+                        for y in 0..<copyH {
+                            let src = sBase.advanced(by: y * blockSize)
+                            dBase.advanced(by: (dy0 + y) * llW + dx0).update(from: src, count: copyW)
+                        }
                     }
                 }
             }
@@ -96,13 +137,25 @@ func applyL0MotionCompensation(img: inout Image16, prevPd: PlaneData420, ltrPd: 
     let cbDx0 = (l0dx + 1) / 2
     let cbDy0 = (l0dy + 1) / 2
     if let tNext = ltrPd, let dirs = refDirs {
-        await applyScaledBidirectionalMotionCompensationLuma(plane: &img.y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &img.cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &img.cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        if let sMap = skipMap {
+            await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &img.y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: sMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &img.cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &img.cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        } else {
+            await applyScaledBidirectionalMotionCompensationLumaWithoutSkipMap(plane: &img.y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &img.cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &img.cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        }
     } else {
-        await applyScaledMotionCompensationLuma(plane: &img.y, prevPlane: prevPd.y, mvs: mvs, skipMap: skipMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &img.cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &img.cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: skipMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        if let sMap = skipMap {
+            await applyScaledMotionCompensationLumaWithSkipMap(plane: &img.y, prevPlane: prevPd.y, mvs: mvs, skipMap: sMap, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithSkipMap(plane: &img.cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: sMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithSkipMap(plane: &img.cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: sMap, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        } else {
+            await applyScaledMotionCompensationLumaWithoutSkipMap(plane: &img.y, prevPlane: prevPd.y, mvs: mvs, width: l0dx, height: l0dy, lumaBlockSize: 8, mvShift: 2, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &img.cb, prevPlane: prevPd.cb, mvs: mvs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &img.cr, prevPlane: prevPd.cr, mvs: mvs, width: cbDx0, height: cbDy0, chromaBlockSize: 4, mvShift: 1, roundOffset: roundOffset)
+        }
     }
 }
 
@@ -189,7 +242,7 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
             let p = base.advanced(by: x)
             let v = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self)
             let clampedMin = v.replacing(with: vMin, where: v .< vMin)
-            let clamped = clampedMin.replacing(with: vMax, where: clampedMin .> vMax)
+            let clamped = clampedMin.replacing(with: vMax, where: vMax .< clampedMin)
             UnsafeMutableRawPointer(p).storeBytes(of: clamped, as: SIMD16<Int16>.self)
             x &+= 16
         }
@@ -205,10 +258,8 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
     }
 }
 
-/// Builds the full-resolution prediction plane P = MC_full(refs) by applying
-/// the layer2 MC (32-block, mvShift 0) into zeroed planes. Both sides derive
-/// LL2(P) from this, so it must be produced by the identical call sequence
-/// the decoder uses when adding prediction at layer2.
+/// Builds the full-resolution prediction plane by running the decoder's
+/// layer2 MC (32-block luma / 16-block chroma, mvShift 0) into zeroed planes.
 @inline(__always)
 func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async -> PlaneData420 {
     let cbDx = (dx + 1) / 2
@@ -217,13 +268,25 @@ func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd
     var cb = [Int16](repeating: 0, count: cbDx * cbDy)
     var cr = [Int16](repeating: 0, count: cbDx * cbDy)
     if let tNext = ltrPd, let dirs = refDirs {
-        await applyScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        if let sMap = skipMap {
+            await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        } else {
+            await applyScaledBidirectionalMotionCompensationLumaWithoutSkipMap(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        }
     } else {
-        await applyScaledMotionCompensationLuma(plane: &y, prevPlane: prevPd.y, mvs: mvs, skipMap: skipMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: skipMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        if let sMap = skipMap {
+            await applyScaledMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: prevPd.y, mvs: mvs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        } else {
+            await applyScaledMotionCompensationLumaWithoutSkipMap(plane: &y, prevPlane: prevPd.y, mvs: mvs, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &cb, prevPlane: prevPd.cb, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &cr, prevPlane: prevPd.cr, mvs: mvs, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+        }
     }
     return PlaneData420(width: dx, height: dy, y: y, cb: cb, cr: cr)
 }
@@ -239,13 +302,25 @@ func buildL1Prediction(l1dx: Int, l1dy: Int, prevPd: PlaneData420, ltrPd: PlaneD
     var cb = [Int16](repeating: 0, count: cbDx1 * cbDy1)
     var cr = [Int16](repeating: 0, count: cbDx1 * cbDy1)
     if let tNext = ltrPd, let dirs = refDirs {
-        await applyScaledBidirectionalMotionCompensationLuma(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledBidirectionalMotionCompensationChroma(plane: &cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        if let sMap = skipMap {
+            await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: sMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, skipMap: sMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        } else {
+            await applyScaledBidirectionalMotionCompensationLumaWithoutSkipMap(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &cb, prevPlane: prevPd.cb, nextPlane: tNext.cb, mvs: mvs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledBidirectionalMotionCompensationChromaWithoutSkipMap(plane: &cr, prevPlane: prevPd.cr, nextPlane: tNext.cr, mvs: mvs, refDirs: dirs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        }
     } else {
-        await applyScaledMotionCompensationLuma(plane: &y, prevPlane: prevPd.y, mvs: mvs, skipMap: skipMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
-        await applyScaledMotionCompensationChroma(plane: &cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: skipMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        if let sMap = skipMap {
+            await applyScaledMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: prevPd.y, mvs: mvs, skipMap: sMap, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: prevPd.cb, mvs: mvs, skipMap: sMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: prevPd.cr, mvs: mvs, skipMap: sMap, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        } else {
+            await applyScaledMotionCompensationLumaWithoutSkipMap(plane: &y, prevPlane: prevPd.y, mvs: mvs, width: l1dx, height: l1dy, lumaBlockSize: 16, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &cb, prevPlane: prevPd.cb, mvs: mvs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+            await applyScaledMotionCompensationChromaWithoutSkipMap(plane: &cr, prevPlane: prevPd.cr, mvs: mvs, width: cbDx1, height: cbDy1, chromaBlockSize: 8, mvShift: 1, roundOffset: roundOffset)
+        }
     }
     return PlaneData420(width: l1dx, height: l1dy, y: y, cb: cb, cr: cr)
 }

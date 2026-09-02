@@ -29,8 +29,7 @@ private func makeSubbands(base: UnsafeMutablePointer<Int16>, size: Int, stride: 
 // stride=1 optimized: contiguous SIMD load/store
 
 @inline(__always)
-func lift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    let base = buffer.baseAddress!
+func lift53Block8(base: UnsafeMutablePointer<Int16>) {
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD8<Int16>.self)
     var low = raw.evenHalf
     var high = raw.oddHalf
@@ -48,8 +47,7 @@ func lift53Block8(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func lift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    let base = buffer.baseAddress!
+func lift53Block16(base: UnsafeMutablePointer<Int16>) {
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD16<Int16>.self)
     var low = raw.evenHalf
     var high = raw.oddHalf
@@ -67,8 +65,7 @@ func lift53Block16(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
 }
 
 @inline(__always)
-func lift53Block32(_ buffer: UnsafeMutableBufferPointer<Int16>, stride: Int) {
-    let base = buffer.baseAddress!
+func lift53Block32(base: UnsafeMutablePointer<Int16>) {
     let raw = UnsafeRawPointer(base).loadUnaligned(as: SIMD32<Int16>.self)
     var low = raw.evenHalf
     var high = raw.oddHalf
@@ -426,46 +423,40 @@ func lift53Block16VerticalLLOnly(_ base: UnsafeMutablePointer<Int16>, stride s: 
 // converting all SIMD operations to contiguous memory access.
 
 @inline(__always)
-func dwt2DBlock8(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+func dwt2DBlock8(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     // Row lifting (stride=1, contiguous)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (0 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (1 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (2 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (3 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (4 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (5 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (6 * width), count: 8), stride: 1)
-    lift53Block8(UnsafeMutableBufferPointer(start: base + (7 * width), count: 8), stride: 1)
+    lift53Block8(base: base + (0 * width))
+    lift53Block8(base: base + (1 * width))
+    lift53Block8(base: base + (2 * width))
+    lift53Block8(base: base + (3 * width))
+    lift53Block8(base: base + (4 * width))
+    lift53Block8(base: base + (5 * width))
+    lift53Block8(base: base + (6 * width))
+    lift53Block8(base: base + (7 * width))
     // Vertical lifting directly without transpose
     lift53Block8Vertical(base, stride: width)
 }
 
 @inline(__always)
-func dwt2DBlock8Subbands(_ block: BlockView) -> Subbands {
-    dwt2DBlock8(block)
-    return makeSubbands(base: block.base, size: 8, stride: block.stride)
+func dwt2DBlock8Subbands(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) -> Subbands {
+    dwt2DBlock8(ptr: base, stride: width)
+    return makeSubbands(base: base, size: 8, stride: width)
 }
 
 @inline(__always)
-func dwt2DBlock16(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+func dwt2DBlock16(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     for y in 0..<16 {
-        lift53Block16(UnsafeMutableBufferPointer(start: base + (y * width), count: 16), stride: 1)
+        lift53Block16(base: base.advanced(by: y * width))
     }
     // Vertical lifting directly without transpose
     lift53Block16Vertical(base, stride: width)
 }
 
 @inline(__always)
-func dwt2DBlock32(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+func dwt2DBlock32(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     // Row lifting (stride=1, contiguous)
     for y in 0..<32 {
-        lift53Block32(UnsafeMutableBufferPointer(start: base + (y * width), count: 32), stride: 1)
+        lift53Block32(base: base.advanced(by: y * width))
     }
     // Vertical lifting directly without transpose
     lift53Block32Vertical(base, stride: width)
@@ -476,11 +467,9 @@ func dwt2DBlock32(_ block: BlockView) {
 /// columns depend on the row high-pass — and the vertical stage is LL-only.
 /// The other three quadrants are left unspecified.
 @inline(__always)
-func dwt2DBlock32LL(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+func dwt2DBlock32LL(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     for y in 0..<32 {
-        lift53Block32(UnsafeMutableBufferPointer(start: base + (y * width), count: 32), stride: 1)
+        lift53Block32(base: base.advanced(by: y * width))
     }
     lift53Block32VerticalLLOnly(base, stride: width)
 }
@@ -488,11 +477,9 @@ func dwt2DBlock32LL(_ block: BlockView) {
 /// dwt2DBlock16 keeping only the LL quadrant valid (upper-left 8×8, bit-
 /// identical to the full transform there).
 @inline(__always)
-func dwt2DBlock16LL(_ block: BlockView) {
-    let base = block.base
-    let width = block.stride
+func dwt2DBlock16LL(ptr base: UnsafeMutablePointer<Int16>, stride width: Int) {
     for y in 0..<16 {
-        lift53Block16(UnsafeMutableBufferPointer(start: base + (y * width), count: 16), stride: 1)
+        lift53Block16(base: base.advanced(by: y * width))
     }
     lift53Block16VerticalLLOnly(base, stride: width)
 }

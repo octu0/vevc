@@ -85,10 +85,9 @@ struct MotionEstimation {
         if 0 <= x && 0 <= y && x + 8 <= width && y + 8 <= height {
             for ry in 0..<8 {
                 let offset = (y + ry) * width + x
-                let sPtr = plane.advanced(by: offset)
-                let dPtr = dest.advanced(by: ry * 8)
-                dPtr[0] = sPtr[0]; dPtr[1] = sPtr[1]; dPtr[2] = sPtr[2]; dPtr[3] = sPtr[3]
-                dPtr[4] = sPtr[4]; dPtr[5] = sPtr[5]; dPtr[6] = sPtr[6]; dPtr[7] = sPtr[7]
+                let sPtr = UnsafeRawPointer(plane.advanced(by: offset))
+                let dPtr = UnsafeMutableRawPointer(dest.advanced(by: ry * 8))
+                dPtr.storeBytes(of: sPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
             }
         } else {
             for i in 0..<64 {
@@ -110,34 +109,42 @@ struct MotionEstimation {
         
         if 0 <= intX && 0 <= intY && ((intX + 8) + fractX) <= width && ((intY + 8) + fractY) <= height {
             if fractY == 0 {
+                let vRound = SIMD8<Int16>(repeating: Int16(roundOffset))
                 for ry in 0..<8 {
                     let row = plane.advanced(by: (intY + ry) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 {
-                        dst[rx] = Int16((Int(row[rx]) + Int(row[rx + 1]) + roundOffset) >> 1)
-                    }
+                    let r0 = UnsafeRawPointer(row).loadUnaligned(as: SIMD8<Int16>.self)
+                    let r1 = UnsafeRawPointer(row.advanced(by: 1)).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = (r0 &+ r1 &+ vRound) &>> 1
+                    UnsafeMutableRawPointer(dst).storeBytes(of: res, as: SIMD8<Int16>.self)
                 }
                 return
             }
             if fractX == 0 {
+                let vRound = SIMD8<Int16>(repeating: Int16(roundOffset))
                 for ry in 0..<8 {
                     let row0 = plane.advanced(by: (intY + ry) * width + intX)
                     let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
                     let dst = dest.advanced(by: ry * 8)
-                    for rx in 0..<8 {
-                        dst[rx] = Int16((Int(row0[rx]) + Int(row1[rx]) + roundOffset) >> 1)
-                    }
+                    let r0 = UnsafeRawPointer(row0).loadUnaligned(as: SIMD8<Int16>.self)
+                    let r1 = UnsafeRawPointer(row1).loadUnaligned(as: SIMD8<Int16>.self)
+                    let res = (r0 &+ r1 &+ vRound) &>> 1
+                    UnsafeMutableRawPointer(dst).storeBytes(of: res, as: SIMD8<Int16>.self)
                 }
                 return
             }
             
+            let vRound = SIMD8<Int16>(repeating: Int16(1 + roundOffset))
             for ry in 0..<8 {
                 let row0 = plane.advanced(by: (intY + ry) * width + intX)
                 let row1 = plane.advanced(by: (intY + ry + 1) * width + intX)
                 let dst = dest.advanced(by: ry * 8)
-                for rx in 0..<8 {
-                    dst[rx] = Int16((Int(row0[rx]) + Int(row0[rx+1]) + Int(row1[rx]) + Int(row1[rx+1]) + 1 + roundOffset) >> 2)
-                }
+                let r00 = UnsafeRawPointer(row0).loadUnaligned(as: SIMD8<Int16>.self)
+                let r01 = UnsafeRawPointer(row0.advanced(by: 1)).loadUnaligned(as: SIMD8<Int16>.self)
+                let r10 = UnsafeRawPointer(row1).loadUnaligned(as: SIMD8<Int16>.self)
+                let r11 = UnsafeRawPointer(row1.advanced(by: 1)).loadUnaligned(as: SIMD8<Int16>.self)
+                let res = (r00 &+ r01 &+ r10 &+ r11 &+ vRound) &>> 2
+                UnsafeMutableRawPointer(dst).storeBytes(of: res, as: SIMD8<Int16>.self)
             }
             return
         }
@@ -213,91 +220,36 @@ struct MotionEstimation {
 
     @inline(__always)
     static func compute64PointSADBlocksWithStride(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>, pStride: Int) -> Int {
-        var sad: Int32 = 0
+        var sad: Int16 = 0
         for ry in 0..<8 {
-            let cRow = cBase.advanced(by: ry * 8)
-            let pRow = pBase.advanced(by: ry * pStride)
-            
-            sad &+= Int32((Int32(cRow[0]) - Int32(pRow[0])).magnitude)
-            sad &+= Int32((Int32(cRow[1]) - Int32(pRow[1])).magnitude)
-            sad &+= Int32((Int32(cRow[2]) - Int32(pRow[2])).magnitude)
-            sad &+= Int32((Int32(cRow[3]) - Int32(pRow[3])).magnitude)
-            sad &+= Int32((Int32(cRow[4]) - Int32(pRow[4])).magnitude)
-            sad &+= Int32((Int32(cRow[5]) - Int32(pRow[5])).magnitude)
-            sad &+= Int32((Int32(cRow[6]) - Int32(pRow[6])).magnitude)
-            sad &+= Int32((Int32(cRow[7]) - Int32(pRow[7])).magnitude)
+            let c = UnsafeRawPointer(cBase.advanced(by: ry * 8)).loadUnaligned(as: SIMD8<Int16>.self)
+            let p = UnsafeRawPointer(pBase.advanced(by: ry * pStride)).loadUnaligned(as: SIMD8<Int16>.self)
+            let d = pointwiseMax(c, p) &- pointwiseMin(c, p)
+            sad &+= d.wrappedSum()
         }
         return Int(sad)
     }
 
     @inline(__always)
     static func compute64PointSADBlocks(cBase: UnsafePointer<Int16>, pBase: UnsafePointer<Int16>) -> Int {
-        var sad: Int32 = 0
-        sad &+= Int32((Int32(cBase[0]) - Int32(pBase[0])).magnitude)
-        sad &+= Int32((Int32(cBase[1]) - Int32(pBase[1])).magnitude)
-        sad &+= Int32((Int32(cBase[2]) - Int32(pBase[2])).magnitude)
-        sad &+= Int32((Int32(cBase[3]) - Int32(pBase[3])).magnitude)
-        sad &+= Int32((Int32(cBase[4]) - Int32(pBase[4])).magnitude)
-        sad &+= Int32((Int32(cBase[5]) - Int32(pBase[5])).magnitude)
-        sad &+= Int32((Int32(cBase[6]) - Int32(pBase[6])).magnitude)
-        sad &+= Int32((Int32(cBase[7]) - Int32(pBase[7])).magnitude)
-        sad &+= Int32((Int32(cBase[8]) - Int32(pBase[8])).magnitude)
-        sad &+= Int32((Int32(cBase[9]) - Int32(pBase[9])).magnitude)
-        sad &+= Int32((Int32(cBase[10]) - Int32(pBase[10])).magnitude)
-        sad &+= Int32((Int32(cBase[11]) - Int32(pBase[11])).magnitude)
-        sad &+= Int32((Int32(cBase[12]) - Int32(pBase[12])).magnitude)
-        sad &+= Int32((Int32(cBase[13]) - Int32(pBase[13])).magnitude)
-        sad &+= Int32((Int32(cBase[14]) - Int32(pBase[14])).magnitude)
-        sad &+= Int32((Int32(cBase[15]) - Int32(pBase[15])).magnitude)
-        sad &+= Int32((Int32(cBase[16]) - Int32(pBase[16])).magnitude)
-        sad &+= Int32((Int32(cBase[17]) - Int32(pBase[17])).magnitude)
-        sad &+= Int32((Int32(cBase[18]) - Int32(pBase[18])).magnitude)
-        sad &+= Int32((Int32(cBase[19]) - Int32(pBase[19])).magnitude)
-        sad &+= Int32((Int32(cBase[20]) - Int32(pBase[20])).magnitude)
-        sad &+= Int32((Int32(cBase[21]) - Int32(pBase[21])).magnitude)
-        sad &+= Int32((Int32(cBase[22]) - Int32(pBase[22])).magnitude)
-        sad &+= Int32((Int32(cBase[23]) - Int32(pBase[23])).magnitude)
-        sad &+= Int32((Int32(cBase[24]) - Int32(pBase[24])).magnitude)
-        sad &+= Int32((Int32(cBase[25]) - Int32(pBase[25])).magnitude)
-        sad &+= Int32((Int32(cBase[26]) - Int32(pBase[26])).magnitude)
-        sad &+= Int32((Int32(cBase[27]) - Int32(pBase[27])).magnitude)
-        sad &+= Int32((Int32(cBase[28]) - Int32(pBase[28])).magnitude)
-        sad &+= Int32((Int32(cBase[29]) - Int32(pBase[29])).magnitude)
-        sad &+= Int32((Int32(cBase[30]) - Int32(pBase[30])).magnitude)
-        sad &+= Int32((Int32(cBase[31]) - Int32(pBase[31])).magnitude)
-        sad &+= Int32((Int32(cBase[32]) - Int32(pBase[32])).magnitude)
-        sad &+= Int32((Int32(cBase[33]) - Int32(pBase[33])).magnitude)
-        sad &+= Int32((Int32(cBase[34]) - Int32(pBase[34])).magnitude)
-        sad &+= Int32((Int32(cBase[35]) - Int32(pBase[35])).magnitude)
-        sad &+= Int32((Int32(cBase[36]) - Int32(pBase[36])).magnitude)
-        sad &+= Int32((Int32(cBase[37]) - Int32(pBase[37])).magnitude)
-        sad &+= Int32((Int32(cBase[38]) - Int32(pBase[38])).magnitude)
-        sad &+= Int32((Int32(cBase[39]) - Int32(pBase[39])).magnitude)
-        sad &+= Int32((Int32(cBase[40]) - Int32(pBase[40])).magnitude)
-        sad &+= Int32((Int32(cBase[41]) - Int32(pBase[41])).magnitude)
-        sad &+= Int32((Int32(cBase[42]) - Int32(pBase[42])).magnitude)
-        sad &+= Int32((Int32(cBase[43]) - Int32(pBase[43])).magnitude)
-        sad &+= Int32((Int32(cBase[44]) - Int32(pBase[44])).magnitude)
-        sad &+= Int32((Int32(cBase[45]) - Int32(pBase[45])).magnitude)
-        sad &+= Int32((Int32(cBase[46]) - Int32(pBase[46])).magnitude)
-        sad &+= Int32((Int32(cBase[47]) - Int32(pBase[47])).magnitude)
-        sad &+= Int32((Int32(cBase[48]) - Int32(pBase[48])).magnitude)
-        sad &+= Int32((Int32(cBase[49]) - Int32(pBase[49])).magnitude)
-        sad &+= Int32((Int32(cBase[50]) - Int32(pBase[50])).magnitude)
-        sad &+= Int32((Int32(cBase[51]) - Int32(pBase[51])).magnitude)
-        sad &+= Int32((Int32(cBase[52]) - Int32(pBase[52])).magnitude)
-        sad &+= Int32((Int32(cBase[53]) - Int32(pBase[53])).magnitude)
-        sad &+= Int32((Int32(cBase[54]) - Int32(pBase[54])).magnitude)
-        sad &+= Int32((Int32(cBase[55]) - Int32(pBase[55])).magnitude)
-        sad &+= Int32((Int32(cBase[56]) - Int32(pBase[56])).magnitude)
-        sad &+= Int32((Int32(cBase[57]) - Int32(pBase[57])).magnitude)
-        sad &+= Int32((Int32(cBase[58]) - Int32(pBase[58])).magnitude)
-        sad &+= Int32((Int32(cBase[59]) - Int32(pBase[59])).magnitude)
-        sad &+= Int32((Int32(cBase[60]) - Int32(pBase[60])).magnitude)
-        sad &+= Int32((Int32(cBase[61]) - Int32(pBase[61])).magnitude)
-        sad &+= Int32((Int32(cBase[62]) - Int32(pBase[62])).magnitude)
-        sad &+= Int32((Int32(cBase[63]) - Int32(pBase[63])).magnitude)
-        return Int(sad)
+        let c0 = UnsafeRawPointer(cBase).loadUnaligned(as: SIMD16<Int16>.self)
+        let p0 = UnsafeRawPointer(pBase).loadUnaligned(as: SIMD16<Int16>.self)
+        let d0 = pointwiseMax(c0, p0) &- pointwiseMin(c0, p0)
+
+        let c1 = UnsafeRawPointer(cBase.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p1 = UnsafeRawPointer(pBase.advanced(by: 16)).loadUnaligned(as: SIMD16<Int16>.self)
+        let d1 = pointwiseMax(c1, p1) &- pointwiseMin(c1, p1)
+
+        let c2 = UnsafeRawPointer(cBase.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p2 = UnsafeRawPointer(pBase.advanced(by: 32)).loadUnaligned(as: SIMD16<Int16>.self)
+        let d2 = pointwiseMax(c2, p2) &- pointwiseMin(c2, p2)
+
+        let c3 = UnsafeRawPointer(cBase.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let p3 = UnsafeRawPointer(pBase.advanced(by: 48)).loadUnaligned(as: SIMD16<Int16>.self)
+        let d3 = pointwiseMax(c3, p3) &- pointwiseMin(c3, p3)
+
+        let sum = (d0 &+ d1) &+ (d2 &+ d3)
+        return Int(sum.wrappedSum())
     }
 
     private static let dsLdspX: [Int] = [0, 1, 2, 1, 0, -1, -2, -1]
@@ -595,23 +547,21 @@ struct MotionEstimation {
     
     @inline(__always)
     static func extractContrast8x8(base: UnsafePointer<Int16>, width: Int, height: Int, bx: Int, by: Int) -> Int {
-        var minVal: Int32 = 32767
-        var maxVal: Int32 = -32768
-        
         let isSafeX = (0 <= bx) && (bx + 8 <= width)
         let isSafeY = (0 <= by) && (by + 8 <= height)
         if isSafeX && isSafeY {
+            var vMin = SIMD8<Int16>(repeating: 32767)
+            var vMax = SIMD8<Int16>(repeating: -32768)
             for y in 0..<8 {
-                let row = base.advanced(by: (by + y) * width + bx)
-                for x in 0..<8 {
-                    let val = Int32(row[x])
-                    minVal = min(minVal, val)
-                    maxVal = max(maxVal, val)
-                }
+                let row = UnsafeRawPointer(base.advanced(by: (by + y) * width + bx)).loadUnaligned(as: SIMD8<Int16>.self)
+                vMin = pointwiseMin(vMin, row)
+                vMax = pointwiseMax(vMax, row)
             }
-            return Int(maxVal - minVal)
+            return Int(vMax.max() &- vMin.min())
         }
 
+        var minVal: Int32 = 32767
+        var maxVal: Int32 = -32768
         for y in 0..<8 {
             let sy = max(0, min(by + y, height - 1))
             let row = base.advanced(by: sy * width)
@@ -653,15 +603,20 @@ struct MotionEstimation {
         let isRefSafe = (0 <= crx) && (0 <= cry) && (crx + 13 <= cbw) && (cry + 13 <= cbh)
 
         if isCurrSafe && isRefSafe {
-            var sad: Int32 = 0
+            var sad: Int16 = 0
             for y in 0..<4 {
                 let currOffset = (cy + y * 4) * cbw + cx
                 let refOffset = (cry + y * 4) * cbw + crx
 
-                for x in 0..<4 {
-                    sad &+= Int32((Int32(currCb[currOffset + x * 4]) - Int32(refCb[refOffset + x * 4])).magnitude)
-                    sad &+= Int32((Int32(currCr[currOffset + x * 4]) - Int32(refCr[refOffset + x * 4])).magnitude)
-                }
+                let cCb = SIMD4<Int16>(currCb[currOffset], currCb[currOffset + 4], currCb[currOffset + 8], currCb[currOffset + 12])
+                let rCb = SIMD4<Int16>(refCb[refOffset], refCb[refOffset + 4], refCb[refOffset + 8], refCb[refOffset + 12])
+                let dCb = pointwiseMax(cCb, rCb) &- pointwiseMin(cCb, rCb)
+
+                let cCr = SIMD4<Int16>(currCr[currOffset], currCr[currOffset + 4], currCr[currOffset + 8], currCr[currOffset + 12])
+                let rCr = SIMD4<Int16>(refCr[refOffset], refCr[refOffset + 4], refCr[refOffset + 8], refCr[refOffset + 12])
+                let dCr = pointwiseMax(cCr, rCr) &- pointwiseMin(cCr, rCr)
+
+                sad &+= (dCb &+ dCr).wrappedSum()
             }
             return Int(sad) * 4 // Luma SAD scale matching (16 sample positions × 2 planes vs 64 luma points)
         }
@@ -691,30 +646,43 @@ struct MotionEstimation {
             let rowC = curr.advanced(by: cy * width + bx)
             let py = by + intDy + ry
             let r = prev.advanced(by: py * width + bx + intDx)
-            for rx in stride(from: 0, to: 32, by: 2) {
-                sad &+= Int32((Int32(rowC[rx]) - Int32(r[rx])).magnitude)
-            }
+            let c32 = UnsafeRawPointer(rowC).loadUnaligned(as: SIMD32<Int16>.self)
+            let p32 = UnsafeRawPointer(r).loadUnaligned(as: SIMD32<Int16>.self)
+            let cEven = c32.evenHalf
+            let pEven = p32.evenHalf
+            let d = pointwiseMax(cEven, pEven) &- pointwiseMin(cEven, pEven)
+            sad &+= Int32(d.wrappedSum())
         }
         return Int(sad)
     }
 
-@inline(__always)
+    @inline(__always)
     static func computeQuarterPixelSADSubsampled32_Safe_FIR_Y0(
         curr: UnsafePointer<Int16>, prev: UnsafePointer<Int16>,
         width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
         cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32
     ) -> Int {
-        var sad: Int32 = 0
+        var sad: Int16 = 0
+        let vCX0 = SIMD16<Int32>(repeating: cX0)
+        let vCX1 = SIMD16<Int32>(repeating: cX1)
+        let vCX2 = SIMD16<Int32>(repeating: cX2)
+        let vCX3 = SIMD16<Int32>(repeating: cX3)
         for ry in stride(from: 0, to: 32, by: 8) {
             let cy = by + ry
             let rowC = curr.advanced(by: cy * width + bx)
             let py = by + intDy + ry
             let r0 = prev.advanced(by: py * width + bx + intDx)
-            for rx in stride(from: 0, to: 32, by: 2) {
-                let h0 = cX0 &* Int32(r0[rx - 1]) &+ cX1 &* Int32(r0[rx]) &+ cX2 &* Int32(r0[rx + 1]) &+ cX3 &* Int32(r0[rx + 2])
-                let pVal = (h0 &+ 3) >> 3
-                sad &+= Int32((Int32(rowC[rx]) &- pVal).magnitude)
-            }
+            
+            let cEven = UnsafeRawPointer(rowC).loadUnaligned(as: SIMD32<Int16>.self).evenHalf
+            let m1Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: -1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let r0Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p1Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: 1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p2Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: 2)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            
+            let h0 = (vCX0 &* m1Even &+ vCX1 &* r0Even) &+ (vCX2 &* p1Even &+ vCX3 &* p2Even)
+            let pVal = SIMD16<Int16>(truncatingIfNeeded: (h0 &+ 3) &>> 3)
+            let diff = pointwiseMax(cEven, pVal) &- pointwiseMin(cEven, pVal)
+            sad &+= diff.wrappedSum()
         }
         return Int(sad)
     }
@@ -725,7 +693,11 @@ struct MotionEstimation {
         width: Int, bx: Int, by: Int, intDx: Int, intDy: Int,
         cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
     ) -> Int {
-        var sad: Int32 = 0
+        var sad: Int16 = 0
+        let vCY0 = SIMD16<Int32>(repeating: cY0)
+        let vCY1 = SIMD16<Int32>(repeating: cY1)
+        let vCY2 = SIMD16<Int32>(repeating: cY2)
+        let vCY3 = SIMD16<Int32>(repeating: cY3)
         for ry in stride(from: 0, to: 32, by: 8) {
             let cy = by + ry
             let rowC = curr.advanced(by: cy * width + bx)
@@ -734,11 +706,17 @@ struct MotionEstimation {
             let r0 = prev.advanced(by: py * width + bx + intDx)
             let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
             let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-            for rx in stride(from: 0, to: 32, by: 2) {
-                let vertSum = cY0 &* Int32(rM1[rx]) &+ cY1 &* Int32(r0[rx]) &+ cY2 &* Int32(rP1[rx]) &+ cY3 &* Int32(rP2[rx])
-                let pVal = (vertSum &+ 3) >> 3
-                sad &+= Int32((Int32(rowC[rx]) &- pVal).magnitude)
-            }
+            
+            let cEven = UnsafeRawPointer(rowC).loadUnaligned(as: SIMD32<Int16>.self).evenHalf
+            let m1Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let r0Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p1Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p2Even = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            
+            let vertSum = (vCY0 &* m1Even &+ vCY1 &* r0Even) &+ (vCY2 &* p1Even &+ vCY3 &* p2Even)
+            let pVal = SIMD16<Int16>(truncatingIfNeeded: (vertSum &+ 3) &>> 3)
+            let diff = pointwiseMax(cEven, pVal) &- pointwiseMin(cEven, pVal)
+            sad &+= diff.wrappedSum()
         }
         return Int(sad)
     }
@@ -750,7 +728,16 @@ struct MotionEstimation {
         cX0: Int32, cX1: Int32, cX2: Int32, cX3: Int32,
         cY0: Int32, cY1: Int32, cY2: Int32, cY3: Int32
     ) -> Int {
-        var sad: Int32 = 0
+        var sad: Int16 = 0
+        let vCX0 = SIMD16<Int32>(repeating: cX0)
+        let vCX1 = SIMD16<Int32>(repeating: cX1)
+        let vCX2 = SIMD16<Int32>(repeating: cX2)
+        let vCX3 = SIMD16<Int32>(repeating: cX3)
+        let vCY0 = SIMD16<Int32>(repeating: cY0)
+        let vCY1 = SIMD16<Int32>(repeating: cY1)
+        let vCY2 = SIMD16<Int32>(repeating: cY2)
+        let vCY3 = SIMD16<Int32>(repeating: cY3)
+        
         for ry in stride(from: 0, to: 32, by: 8) {
             let cy = by + ry
             let rowC = curr.advanced(by: cy * width + bx)
@@ -759,17 +746,37 @@ struct MotionEstimation {
             let r0 = prev.advanced(by: py * width + bx + intDx)
             let rP1 = prev.advanced(by: (py + 1) * width + bx + intDx)
             let rP2 = prev.advanced(by: (py + 2) * width + bx + intDx)
-            for rx in stride(from: 0, to: 32, by: 2) {
-                let vM1 = cX0 &* Int32(rM1[rx - 1]) &+ cX1 &* Int32(rM1[rx]) &+ cX2 &* Int32(rM1[rx + 1]) &+ cX3 &* Int32(rM1[rx + 2])
-                let v0  = cX0 &* Int32(r0[rx - 1])  &+ cX1 &* Int32(r0[rx])  &+ cX2 &* Int32(r0[rx + 1])  &+ cX3 &* Int32(r0[rx + 2])
-                let vP1 = cX0 &* Int32(rP1[rx - 1]) &+ cX1 &* Int32(rP1[rx]) &+ cX2 &* Int32(rP1[rx + 1]) &+ cX3 &* Int32(rP1[rx + 2])
-                let vP2 = cX0 &* Int32(rP2[rx - 1]) &+ cX1 &* Int32(rP2[rx]) &+ cX2 &* Int32(rP2[rx + 1]) &+ cX3 &* Int32(rP2[rx + 2])
-                
-                let refVal = cY0 &* vM1 &+ cY1 &* v0 &+ cY2 &* vP1 &+ cY3 &* vP2
-                let pVal = (refVal &+ 31) >> 6
-                
-                sad &+= Int32((Int32(rowC[rx]) &- pVal).magnitude)
-            }
+            
+            let cEven = UnsafeRawPointer(rowC).loadUnaligned(as: SIMD32<Int16>.self).evenHalf
+            
+            let m1_m1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1.advanced(by: -1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let m1_0  = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let m1_p1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1.advanced(by: 1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let m1_p2 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rM1.advanced(by: 2)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let vM1 = (vCX0 &* m1_m1 &+ vCX1 &* m1_0) &+ (vCX2 &* m1_p1 &+ vCX3 &* m1_p2)
+            
+            let r0_m1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: -1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let r0_0  = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let r0_p1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: 1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let r0_p2 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(r0.advanced(by: 2)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let v0 = (vCX0 &* r0_m1 &+ vCX1 &* r0_0) &+ (vCX2 &* r0_p1 &+ vCX3 &* r0_p2)
+
+            let p1_m1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1.advanced(by: -1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p1_0  = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p1_p1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1.advanced(by: 1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p1_p2 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP1.advanced(by: 2)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let vP1 = (vCX0 &* p1_m1 &+ vCX1 &* p1_0) &+ (vCX2 &* p1_p1 &+ vCX3 &* p1_p2)
+
+            let p2_m1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2.advanced(by: -1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p2_0  = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p2_p1 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2.advanced(by: 1)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let p2_p2 = SIMD16<Int32>(truncatingIfNeeded: UnsafeRawPointer(rP2.advanced(by: 2)).loadUnaligned(as: SIMD32<Int16>.self).evenHalf)
+            let vP2 = (vCX0 &* p2_m1 &+ vCX1 &* p2_0) &+ (vCX2 &* p2_p1 &+ vCX3 &* p2_p2)
+
+            let refVal = (vCY0 &* vM1 &+ vCY1 &* v0) &+ (vCY2 &* vP1 &+ vCY3 &* vP2)
+            let pVal = SIMD16<Int16>(truncatingIfNeeded: (refVal &+ 31) &>> 6)
+            let diff = pointwiseMax(cEven, pVal) &- pointwiseMin(cEven, pVal)
+            sad &+= diff.wrappedSum()
         }
         return Int(sad)
     }
@@ -882,72 +889,81 @@ struct MotionEstimation {
 
     @inline(__always)
     static func searchPixelsSubpixelRefinement32(
+        curr: UnsafePointer<Int16>,
+        prev: UnsafePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
+    ) -> (MotionVector, Int) {
+        // pmv is in full units of Luma dx
+        // We convert it to 1/4 units of Luma dx by multiplying by 4
+        let baseQx = Int(pmv.dx) * 4
+        let baseQy = Int(pmv.dy) * 4
+        
+        var bestSAD = computeQuarterPixelSADSubsampled32(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
+        if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
+        
+        // 1. Half-pixel search (step = 2 quarter pixels)
+        var hpBestQx = baseQx
+        var hpBestQy = baseQy
+        for (ox, oy) in searchOffsets {
+            let qx = baseQx + ox * 2
+            let qy = baseQy + oy * 2
+            
+            let intDx = qx >> 2
+            let intDy = qy >> 2
+            if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
+            if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
+            
+            let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 6
+            let maxSAD = bestSAD - penalty
+            if maxSAD <= 0 { continue }
+            
+            let sad = computeQuarterPixelSADSubsampled32(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+            let totalSAD = sad + penalty
+            if totalSAD < bestSAD {
+                bestSAD = totalSAD
+                hpBestQx = qx
+                hpBestQy = qy
+            }
+        }
+        
+        if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
+        
+        // 2. Quarter-pixel search (step = 1 quarter pixel)
+        var qpBestQx = hpBestQx
+        var qpBestQy = hpBestQy
+        for (ox, oy) in searchOffsets {
+            let qx = hpBestQx + ox
+            let qy = hpBestQy + oy
+            
+            let intDx = qx >> 2
+            let intDy = qy >> 2
+            if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
+            if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
+            
+            let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 4
+            let maxSAD = bestSAD - penalty
+            if maxSAD <= 0 { continue }
+            
+            let sad = computeQuarterPixelSADSubsampled32(curr: curr, prev: prev, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
+            let totalSAD = sad + penalty
+            if totalSAD < bestSAD {
+                bestSAD = totalSAD
+                qpBestQx = qx
+                qpBestQy = qy
+            }
+        }
+        
+        return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
+    }
+
+    @inline(__always)
+    static func searchPixelsSubpixelRefinement32(
         currPlane: [Int16],
         prevPlane: [Int16],
         width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
     ) -> (MotionVector, Int) {
         return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
-            // pmv is in full units of Luma dx
-            // We convert it to 1/4 units of Luma dx by multiplying by 4
-            let baseQx = Int(pmv.dx) * 4
-            let baseQy = Int(pmv.dy) * 4
-            
-            var bestSAD = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: baseQx, qDy: baseQy)
-            if bestSAD < 256 { return (MotionVector(dx: Int16(baseQx), dy: Int16(baseQy)), bestSAD) }
-            
-            // 1. Half-pixel search (step = 2 quarter pixels)
-            var hpBestQx = baseQx
-            var hpBestQy = baseQy
-            for (ox, oy) in searchOffsets {
-                let qx = baseQx + ox * 2
-                let qy = baseQy + oy * 2
-                
-                let intDx = qx >> 2
-                let intDy = qy >> 2
-                if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
-                if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
-                
-                let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 6
-                let maxSAD = bestSAD - penalty
-                if maxSAD <= 0 { continue }
-                
-                let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
-                let totalSAD = sad + penalty
-                if totalSAD < bestSAD {
-                    bestSAD = totalSAD
-                    hpBestQx = qx
-                    hpBestQy = qy
-                }
-            }
-            
-            if bestSAD < 384 { return (MotionVector(dx: Int16(hpBestQx), dy: Int16(hpBestQy)), bestSAD) }
-            
-            // 2. Quarter-pixel search (step = 1 quarter pixel)
-            var qpBestQx = hpBestQx
-            var qpBestQy = hpBestQy
-            for (ox, oy) in searchOffsets {
-                let qx = hpBestQx + ox
-                let qy = hpBestQy + oy
-                
-                let intDx = qx >> 2
-                let intDy = qy >> 2
-                if (bx + intDx) < -32 || (width + 32) < (bx + intDx + 32) { continue }
-                if (by + intDy) < -32 || (height + 32) < (by + intDy + 32) { continue }
-                
-                let penalty = (Int((ox).magnitude) + Int((oy).magnitude)) * 4
-                let maxSAD = bestSAD - penalty
-                if maxSAD <= 0 { continue }
-                
-                let sad = computeQuarterPixelSADSubsampled32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, qDx: qx, qDy: qy)
-                let totalSAD = sad + penalty
-                if totalSAD < bestSAD {
-                    bestSAD = totalSAD
-                    qpBestQx = qx
-                    qpBestQy = qy
-                }
-            }
-            
-            return (MotionVector(dx: Int16(qpBestQx), dy: Int16(qpBestQy)), bestSAD)
+            searchPixelsSubpixelRefinement32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, pmv: pmv)
         }
     }
 
@@ -1130,12 +1146,21 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let pS1BaseWrapper = UnsafePointerWrapper(base: pS1.withUnsafeBufferPointer { $0.baseAddress! })
     let nS1BaseWrapper = UnsafePointerWrapper(base: nS1.withUnsafeBufferPointer { $0.baseAddress! })
     
-    let hasSkipMap = skipMap.count > 0
+    let cYWrapper = UnsafePointerWrapper(base: curr.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let pYWrapper = UnsafePointerWrapper(base: prev.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let nYWrapper = UnsafePointerWrapper(base: next.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCbWrapper = UnsafePointerWrapper(base: curr.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCrWrapper = UnsafePointerWrapper(base: curr.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCbWrapper = UnsafePointerWrapper(base: prev.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCrWrapper = UnsafePointerWrapper(base: prev.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCbWrapper = UnsafePointerWrapper(base: next.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCrWrapper = UnsafePointerWrapper(base: next.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let cbw = (curr.width + 1) / 2
+    let cbh = (curr.height + 1) / 2
+    
+    let hasSkipMap = 0 < skipMap.count
     let skipMapConst = skipMap
     let prevMVsConst = prevMVs
-    let currConst = curr
-    let prevConst = prev
-    let nextConst = next
     
     let numSlices = 4
     let rowsPerSlice = (rowCount + numSlices - 1) / numSlices
@@ -1165,6 +1190,16 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 let cBase = cS1BaseWrapper.base
                 let pBase = pS1BaseWrapper.base
                 let nBase = nS1BaseWrapper.base
+                
+                let cY = cYWrapper.base
+                let pY = pYWrapper.base
+                let nY = nYWrapper.base
+                let cCb = cCbWrapper.base
+                let cCr = cCrWrapper.base
+                let pCb = pCbWrapper.base
+                let pCr = pCrWrapper.base
+                let nCb = nCbWrapper.base
+                let nCr = nCrWrapper.base
                 
                 var dx = [Int16](repeating: 0, count: sliceBlocksCount)
                 var dy = [Int16](repeating: 0, count: sliceBlocksCount)
@@ -1263,7 +1298,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
                     )
                     
-                    let prevChromaSad = MotionEstimation.computeChromaSAD(curr: currConst, ref: prevConst, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
+                    let prevChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
                     mutSADPrev += prevChromaSad / 4
                     let prevSAD = mutSADPrev
                     
@@ -1273,6 +1308,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                     let earlyExitThreshold = min(1536, 512 + (gopPosition * 16))
                     let gopPenalty = min(1024, gopPosition * 16)
                     
+                    var cachedNextChromaSad: Int = -1
                     if earlyExitThreshold <= prevSAD {
                         let mvEnergyNext = Int((Int(mvNext.dx)).magnitude) + Int((Int(mvNext.dy)).magnitude)
                         let effectiveGopPenalty = if mutSADNext < 384 { 0 } else { gopPenalty }
@@ -1287,7 +1323,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             
                             let contrastDiff = Int((currContrast - nextContrast).magnitude)
                             let structurePenalty = (contrastDiff * contrastDiff) / 4
-                            let chromaSAD = MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+                            let chromaSAD = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+                            cachedNextChromaSad = chromaSAD
                             let chromaPenalty = chromaSAD / 4
                             
                             let totalNextPenalty = ((mutSADNext + baselinePenalty) + (structurePenalty + chromaPenalty))
@@ -1307,7 +1344,8 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         }
                     }
                     dynamicThreshold = max(1024, currContrast * 48)
-                    let finalSAD = dir ? (mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) / 4)) : prevSAD
+                    let nextChromaSad = if cachedNextChromaSad != -1 { cachedNextChromaSad } else { MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) }
+                    let finalSAD = if dir { mutSADNext + (nextChromaSad / 4) } else { prevSAD }
                     switch true {
                     case dynamicThreshold < finalSAD:
                         dx[i] = 0
@@ -1316,9 +1354,9 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                         dx[i] = bestMV.dx * 4
                         dy[i] = bestMV.dy * 4
                     default:
-                        let refPlane = if dir { nextConst.y } else { prevConst.y }
+                        let refPlaneY = if dir { nY } else { pY }
                         let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                            currPlane: currConst.y, prevPlane: refPlane,
+                            curr: cY, prev: refPlaneY,
                             width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: bestMV
                         )
                         dx[i] = refinedMV.dx
@@ -1341,13 +1379,13 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             pdy[i] = mvPrev.dy * 4
                         default:
                             let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                currPlane: currConst.y, prevPlane: prevConst.y,
+                                curr: cY, prev: pY,
                                 width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvPrev
                             )
                             pdx[i] = rmv.dx
                             pdy[i] = rmv.dy
                         }
-                        let ltrSAD = mutSADNext + (MotionEstimation.computeChromaSAD(curr: currConst, ref: nextConst, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) / 4)
+                        let ltrSAD = mutSADNext + (nextChromaSad / 4)
                         psad[i] = prevSAD
                         lsad[i] = ltrSAD
                         switch true {
@@ -1359,7 +1397,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                             ldy[i] = mvNext.dy * 4
                         default:
                             let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                currPlane: currConst.y, prevPlane: nextConst.y,
+                                curr: cY, prev: nY,
                                 width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvNext
                             )
                             ldx[i] = rmv.dx
