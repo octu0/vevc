@@ -946,10 +946,11 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         smoothL0Flags = flags
     }
 
-    var (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBaseBlocks) = await preparePlaneBase8WithSkipMap(
+    var (base8YBlocks, base8CbBlocks, base8CrBlocks, releaseBaseBlocks) = await preparePlaneBase8WithSkipMapAndActivity(
         pd: base8Input, pool: pool, sads: sads,
         qtY: qtY0, qtC: qtC0,
         skipMap: skipMap, skipMapWidth: skipBw,
+        activity: activityMap,
         smoothFlags: smoothL0Flags
     )
     defer { releaseBaseBlocks() }

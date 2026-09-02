@@ -2204,11 +2204,12 @@ func encodePlaneBase8PFrame(pd: PlaneData420, pool: BlockViewPool, sads: [Int], 
 
 /// Base8 prepare, P-frame profile 0x02: extract, SAD-gated clearing, and quantization.
 @inline(__always)
-func preparePlaneBase8WithSkipMap(
+func preparePlaneBase8WithSkipMapAndActivity(
     pd: PlaneData420, pool: BlockViewPool, sads: [Int],
     qtY: QuantizationTable, qtC: QuantizationTable,
     skipMap: [BlockMode], skipMapWidth: Int,
-    smoothFlags: [Bool]? = nil
+    activity: [BlockActivityClass],
+    smoothFlags: [Bool]?
 ) async -> ([BlockView], [BlockView], [BlockView], @Sendable () -> Void) {
     let dx = pd.width
     let dy = pd.height
@@ -2237,11 +2238,25 @@ func preparePlaneBase8WithSkipMap(
 
     async let taskY = { [ySkip, smoothFlags] () -> ([BlockView], @Sendable () -> Void) in
         let (blocks, relBlocks) = await extractSingleTransformBlocksBase8WithSkipMap(r: pd.rY, width: dx, height: dy, pool: pool, isSkip: ySkip, smoothFlags: smoothFlags)
+        let baseSAD = scaledSADThreshold(150, step: (Int(qtY.step) + 8) >> 4)
         for i in blocks.indices {
             if i < sads.count {
                 let col = i % yColCount8
                 let row = i / yColCount8
-                let threshold = spatialSADThreshold(baseSAD: scaledSADThreshold(150, step: (Int(qtY.step) + 8) >> 4), blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
+                // Stroke-coherent blocks (HUD text, logos, subtitles) are
+                // exempt from the periphery boost: the SAD bound is in
+                // residual units, so at large steps the boosted bound erases
+                // exactly the thin overlays that sit in frame corners. The
+                // #24 stroke-vs-noise discriminator already separates them
+                // from noise-textured content, which keeps the discount.
+                let activityIdx = row * skipMapWidth + col
+                let isStroke = activityIdx < activity.count && activity[activityIdx] == .textured
+                let threshold: Int
+                if isStroke {
+                    threshold = baseSAD
+                } else {
+                    threshold = spatialSADThreshold(baseSAD: baseSAD, blockCol: col, blockRow: row, colCount: yColCount8, rowCount: yRowCount8)
+                }
                 if sads[i] < threshold {
                     let b = blocks[i]
                     clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
