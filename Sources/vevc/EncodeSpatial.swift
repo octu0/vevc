@@ -213,10 +213,13 @@ private func serializeIntraFrame(profile: UInt8, layer0: [UInt8], layer1: [UInt8
 
 /// Profile 0x02 skip decision: skip_ltr for blocks static since the GOP head
 /// that match the LTR input, skip_prev for blocks static for 4+ frames whose
-/// previous reconstruction also matches the current input. Updates
+/// previous reconstruction also matches the current input. Both skip modes
+/// require the reconstruction the decoder would copy to match the current
+/// input — an input-only match would freeze a stale reconstruction (vanished
+/// subtitles, half-repaired blocks) until the next I frame. Updates
 /// staticCounters in place.
 @inline(__always)
-func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, predictedPd: PlaneData420, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int]) async -> [BlockMode] {
+func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput: PlaneData420, predictedPd: PlaneData420, ltrRecon: PlaneData420, gopPosition: Int, ltrAge: Int, skipThreshold: Int, reconThresholdScale: Int, staticCounters: inout [Int]) async -> [BlockMode] {
     let dx = pd.width
     let dy = pd.height
     let bw = (dx + 31) / 32
@@ -242,6 +245,10 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
     let prevReconCbWrapper = UnsafePointerWrapper(base: predictedPd.cb.withUnsafeBufferPointer { $0.baseAddress! })
     let prevReconCrWrapper = UnsafePointerWrapper(base: predictedPd.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
+    let ltrReconYWrapper = UnsafePointerWrapper(base: ltrRecon.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrReconCbWrapper = UnsafePointerWrapper(base: ltrRecon.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrReconCrWrapper = UnsafePointerWrapper(base: ltrRecon.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
     let matchResults = await withTaskGroup(of: [(Int, Bool, Bool, Bool)].self) { group in
         let batchSize = 128
         for batchStart in stride(from: 0, to: blockCount, by: batchSize) {
@@ -254,6 +261,7 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                 let prevInY = prevInYWrapper.base, prevInCb = prevInCbWrapper.base, prevInCr = prevInCrWrapper.base
                 let ltrInY = ltrInYWrapper.base, ltrInCb = ltrInCbWrapper.base, ltrInCr = ltrInCrWrapper.base
                 let prevReconY = prevReconYWrapper.base, prevReconCb = prevReconCbWrapper.base, prevReconCr = prevReconCrWrapper.base
+                let ltrReconY = ltrReconYWrapper.base, ltrReconCb = ltrReconCbWrapper.base, ltrReconCr = ltrReconCrWrapper.base
 
                 for i in batchStart..<batchEnd {
                     let bx = (i % bw) * 32
@@ -317,6 +325,23 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                                 }
 
                                 if blockThreshold < sadLtrIn {
+                                    allSubBlocksMatchLtr = false
+                                    break
+                                }
+
+                                // The decoder copies the LTR *reconstruction*;
+                                // an input-only match would freeze whatever
+                                // stale content it carries (skip_prev has the
+                                // same guard against its own copy source).
+                                let reconBlockThreshold = blockThreshold * reconThresholdScale
+                                let sadLtrRecon: Int
+                                if mw == 16 && mh == 16 && mwc == 8 && mhc == 8 {
+                                    sadLtrRecon = computeZeroSAD16x16(cY: curY, rY: ltrReconY, cCb: curCb, rCb: ltrReconCb, cCr: curCr, rCr: ltrReconCr, bx: subX, by: subY, width: dx, limit: reconBlockThreshold)
+                                } else {
+                                    sadLtrRecon = computeZeroSADSubBlock(cY: curY, rY: ltrReconY, cCb: curCb, rCb: ltrReconCb, cCr: curCr, rCr: ltrReconCr, bx: subX, by: subY, width: dx, height: dy, subWidth: mw, subHeight: mh, subWc: mwc, subHc: mhc, limit: reconBlockThreshold)
+                                }
+
+                                if reconBlockThreshold < sadLtrRecon {
                                     allSubBlocksMatchLtr = false
                                     break
                                 }
@@ -666,7 +691,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let qtY0 = QuantizationTable(baseStep: Int(qtY.step), isChroma: false, layerIndex: 0)
     let qtC0 = QuantizationTable(baseStep: Int(qtC.step), isChroma: true, layerIndex: 0)
 
-    var skipMap = await computeProfile2SkipMap(pd: pd, prevInput: prevInput, ltrInput: ltrInput, predictedPd: predictedPd, gopPosition: gopPosition, ltrAge: ltrAge, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, staticCounters: &staticCounters)
+    var skipMap = await computeProfile2SkipMap(pd: pd, prevInput: prevInput, ltrInput: ltrInput, predictedPd: predictedPd, ltrRecon: nPd, gopPosition: gopPosition, ltrAge: ltrAge, skipThreshold: skipThreshold, reconThresholdScale: reconThresholdScale, staticCounters: &staticCounters)
 
     // The skip model prices both reference directions per block, which the
     // coding path does not keep; ask the search to export them when it runs.
