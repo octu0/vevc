@@ -723,7 +723,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         let variances = computeBlockActivityMap(source: pd.y, width: dx, height: dy)
         let classes: [BlockActivityClass]
         if smooth == 1 {
-            classes = classifyBlockActivityWithCoherence(
+            classes = await classifyBlockActivityWithCoherence(
                 varianceMap: variances,
                 flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
                 texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,
@@ -739,7 +739,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             )
         }
         earlyActivity = classes
-        model.apply(
+        await model.apply(
             skipMap: &skipMap,
             mvs: &mvs,
             refDirs: &refDirs,
@@ -780,11 +780,11 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     // σ-normalized AQ: per-block source-luma activity classes select the
     // dead-zone variants during layer 2/1 luma quantization (SAD.swift,
     // Quant.swift). Computed concurrently with the MC-subtract tasks.
-    async let tAq = { [pdY = pd.y, earlyActivity] () -> [BlockActivityClass] in
+    async let tAq = { [pdY = pd.y, earlyActivity] () async -> [BlockActivityClass] in
         if let a = earlyActivity { return a }
         let variances = computeBlockActivityMap(source: pdY, width: dx, height: dy)
         if smooth == 1 {
-            return classifyBlockActivityWithCoherence(
+            return await classifyBlockActivityWithCoherence(
                 varianceMap: variances,
                 flatVarianceMax: EncoderTuning.shared.aqFlatVarianceMax,
                 texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin,

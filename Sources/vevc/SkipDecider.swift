@@ -214,8 +214,6 @@ final class SkipDecider: @unchecked Sendable {
     private var blockCount = -1
     // blockCount * SkipDeciderFeature.count
     private var feat: [Int32] = []
-    private var q: [Int32]
-    private var hbuf: [Int32]
     /// Column 16/17 carriers: this decider's own answer and column 0 for each
     /// block one frame ago. Written every P-frame, read by the next one.
     private var prevLabel: [Int32] = []
@@ -239,8 +237,6 @@ final class SkipDecider: @unchecked Sendable {
 
     private init(weights: SkipDeciderWeights) {
         self.weights = weights
-        self.q = [Int32](repeating: 0, count: weights.f)
-        self.hbuf = [Int32](repeating: 0, count: weights.h)
     }
 
     @inline(__always)
@@ -257,7 +253,11 @@ final class SkipDecider: @unchecked Sendable {
     /// Converts the blocks the decider calls skip-safe over one P-frame.
     /// `skipMap`, `mvs` and `refDirs` are the rule-based decision on entry and
     /// the final decision on exit.
-    @inline(__always)
+    ///
+    /// Both passes are block-parallel and deterministic: every feature row and
+    /// every decision depends only on the rule-based snapshot taken on entry
+    /// and on that block's own row, so scheduling order cannot change any
+    /// output. All mutations of the shared maps happen in the serial merge.
     func apply(
         skipMap: inout [BlockMode],
         mvs: inout MotionVectors,
@@ -266,52 +266,120 @@ final class SkipDecider: @unchecked Sendable {
         source: PlaneData420,
         prevRef: PlaneData420,
         ltrRef: PlaneData420
-    ) {
+    ) async {
         let width = source.width
         let height = source.height
         let n = skipMap.count
         if n < 1 { return }
         ensure(n)
         let bw = (width + 31) / 32
+        let featCount = SkipDeciderFeature.count
+        let batchSize = 128
 
-        withUnsafePlanePointers(source, prevRef, ltrRef) { src, pRef, lRef in
-            for i in 0..<n {
-                let bx = (i % bw) * 32
-                let by = (i / bw) * 32
-                extract(into: i, inputs: inputs, bw: bw, bx: bx, by: by, width: width, height: height, skipMap: skipMap, refDirs: refDirs, src: src, pRef: pRef, lRef: lRef)
+        // Columns 12-15 read the rule-based map as it stood before any
+        // conversion, exactly as the serial extract-then-classify order did.
+        let ruleMap = skipMap
+        let ruleRefDirs = refDirs
+        let prevLabelConst = prevLabel
+        let prevSad0Const = prevSad0
+
+        let srcYWrapper = UnsafeSendablePointer(ptr: source.y.withUnsafeBufferPointer { $0.baseAddress! })
+        let srcCbWrapper = UnsafeSendablePointer(ptr: source.cb.withUnsafeBufferPointer { $0.baseAddress! })
+        let srcCrWrapper = UnsafeSendablePointer(ptr: source.cr.withUnsafeBufferPointer { $0.baseAddress! })
+        let prevYWrapper = UnsafeSendablePointer(ptr: prevRef.y.withUnsafeBufferPointer { $0.baseAddress! })
+        let prevCbWrapper = UnsafeSendablePointer(ptr: prevRef.cb.withUnsafeBufferPointer { $0.baseAddress! })
+        let prevCrWrapper = UnsafeSendablePointer(ptr: prevRef.cr.withUnsafeBufferPointer { $0.baseAddress! })
+        let ltrYWrapper = UnsafeSendablePointer(ptr: ltrRef.y.withUnsafeBufferPointer { $0.baseAddress! })
+        let ltrCbWrapper = UnsafeSendablePointer(ptr: ltrRef.cb.withUnsafeBufferPointer { $0.baseAddress! })
+        let ltrCrWrapper = UnsafeSendablePointer(ptr: ltrRef.cr.withUnsafeBufferPointer { $0.baseAddress! })
+
+        let rowSlices = await withTaskGroup(of: (Int, [Int32]).self) { group in
+            for batchStart in stride(from: 0, to: n, by: batchSize) {
+                let batchEnd = min(batchStart + batchSize, n)
+                group.addTask { [inputs, ruleMap, ruleRefDirs, prevLabelConst, prevSad0Const] in
+                    let src = PlanePointers(y: srcYWrapper.ptr, cb: srcCbWrapper.ptr, cr: srcCrWrapper.ptr)
+                    let pRef = PlanePointers(y: prevYWrapper.ptr, cb: prevCbWrapper.ptr, cr: prevCrWrapper.ptr)
+                    let lRef = PlanePointers(y: ltrYWrapper.ptr, cb: ltrCbWrapper.ptr, cr: ltrCrWrapper.ptr)
+                    var rows = [Int32](repeating: 0, count: (batchEnd - batchStart) * featCount)
+                    withUnsafePointers(mut: &rows) { rowsBase in
+                        for i in batchStart..<batchEnd {
+                            let bx = (i % bw) * 32
+                            let by = (i / bw) * 32
+                            SkipDecider.extractRow(
+                                into: rowsBase + ((i - batchStart) * featCount),
+                                i: i, inputs: inputs, bw: bw, bx: bx, by: by,
+                                width: width, height: height,
+                                skipMap: ruleMap, refDirs: ruleRefDirs,
+                                prevLabel: prevLabelConst, prevSad0: prevSad0Const,
+                                src: src, pRef: pRef, lRef: lRef
+                            )
+                        }
+                    }
+                    return (batchStart, rows)
+                }
             }
+            var collected: [(Int, [Int32])] = []
+            for await r in group {
+                collected.append(r)
+            }
+            return collected
+        }
+        for (start, rows) in rowSlices {
+            feat.replaceSubrange((start * featCount)..<((start * featCount) + rows.count), with: rows)
         }
 
-        withUnsafePointers(feat, mut: &q, mut: &hbuf) { rows, qb, hb in
-            withUnsafePointers(weights.w1, weights.b1, weights.w2) { w1, b1, w2 in
-                withUnsafePointers(weights.mu, weights.scale) { mu, scale in
-                    let b2 = weights.b2
-                    let f = weights.f
-                    let h = weights.h
-                    let shift1 = weights.shift1
-                    let normShift = weights.normShift
-                    for i in 0..<n {
-                        let row = rows + (i * SkipDeciderFeature.count)
-                        skipDeciderNormalize(row, mu: mu, scale: scale, normShift: normShift, n: f, into: qb)
-                        let decision = skipDeciderClassify(qb, w1: w1, b1: b1, w2: w2, b2: b2, f: f, h: h, shift1: shift1, hbuf: hb)
-                        curSad0[i] = row[0]
-                        curLabel[i] = Int32(decision)
-                        if skipMap[i] != .inter || decision != 1 {
-                            continue
+        let featWrapper = UnsafeSendablePointer(ptr: feat.withUnsafeBufferPointer { $0.baseAddress! })
+        let wt = weights
+        let labelSlices = await withTaskGroup(of: (Int, [Int32]).self) { group in
+            for batchStart in stride(from: 0, to: n, by: batchSize) {
+                let batchEnd = min(batchStart + batchSize, n)
+                group.addTask {
+                    var labels = [Int32](repeating: 0, count: batchEnd - batchStart)
+                    var q = [Int32](repeating: 0, count: wt.f)
+                    var hbuf = [Int32](repeating: 0, count: wt.h)
+                    withUnsafePointers(mut: &labels, mut: &q, mut: &hbuf) { lb, qb, hb in
+                        withUnsafePointers(wt.w1, wt.b1, wt.w2) { w1, b1, w2 in
+                            withUnsafePointers(wt.mu, wt.scale) { mu, scale in
+                                let rows = featWrapper.ptr
+                                for i in batchStart..<batchEnd {
+                                    let row = rows + (i * featCount)
+                                    skipDeciderNormalize(row, mu: mu, scale: scale, normShift: wt.normShift, n: wt.f, into: qb)
+                                    let decision = skipDeciderClassify(qb, w1: w1, b1: b1, w2: w2, b2: wt.b2, f: wt.f, h: wt.h, shift1: wt.shift1, hbuf: hb)
+                                    lb[i - batchStart] = Int32(decision)
+                                }
+                            }
                         }
-                        // Reference choice: whichever straight copy is closer
-                        // to the source.
-                        if row[0] <= row[1] {
-                            skipMap[i] = .skip_prev
-                            refDirs[i] = false
-                        } else {
-                            skipMap[i] = .skip_ltr
-                            refDirs[i] = true
-                        }
-                        mvs.dx[i] = 0
-                        mvs.dy[i] = 0
                     }
+                    return (batchStart, labels)
                 }
+            }
+            var collected: [(Int, [Int32])] = []
+            for await r in group {
+                collected.append(r)
+            }
+            return collected
+        }
+
+        for (start, labels) in labelSlices {
+            for k in 0..<labels.count {
+                let i = start + k
+                let base = i * featCount
+                curSad0[i] = feat[base + 0]
+                curLabel[i] = labels[k]
+                if ruleMap[i] != .inter || labels[k] != 1 {
+                    continue
+                }
+                // Reference choice: whichever straight copy is closer
+                // to the source.
+                if feat[base + 0] <= feat[base + 1] {
+                    skipMap[i] = .skip_prev
+                    refDirs[i] = false
+                } else {
+                    skipMap[i] = .skip_ltr
+                    refDirs[i] = true
+                }
+                mvs.dx[i] = 0
+                mvs.dy[i] = 0
             }
         }
 
@@ -320,9 +388,13 @@ final class SkipDecider: @unchecked Sendable {
     }
 
     /// Fills one feature row. See `SkipDeciderFeature.names` for the columns.
+    /// Reads only its arguments (the rule-based snapshot and the previous
+    /// frame's carriers) and writes only its own row, so rows can be filled
+    /// concurrently.
     @inline(__always)
-    private func extract(
-        into i: Int,
+    private static func extractRow(
+        into out: UnsafeMutablePointer<Int32>,
+        i: Int,
         inputs: SkipDeciderFrameInputs,
         bw: Int,
         bx: Int,
@@ -331,6 +403,8 @@ final class SkipDecider: @unchecked Sendable {
         height: Int,
         skipMap: [BlockMode],
         refDirs: [Bool],
+        prevLabel: [Int32],
+        prevSad0: [Int32],
         src: PlanePointers,
         pRef: PlanePointers,
         lRef: PlanePointers
@@ -350,50 +424,49 @@ final class SkipDecider: @unchecked Sendable {
         case bw <= i: Int32(skipMap[i - bw].rawValue)
         default: -1
         }
-        let base = i * SkipDeciderFeature.count
-        feat[base + 0] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: pRef, bx: bx, by: by, width: width, height: height))
-        feat[base + 1] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: lRef, bx: bx, by: by, width: width, height: height))
+        out[0] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: pRef, bx: bx, by: by, width: width, height: height))
+        out[1] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: lRef, bx: bx, by: by, width: width, height: height))
         let sadPrev: Int = switch true {
         case i < inputs.meSadPrev.count: inputs.meSadPrev[i]
         default: 0
         }
-        feat[base + 2] = Int32(clamping: sadPrev)
+        out[2] = Int32(clamping: sadPrev)
         let sadLtr: Int = switch true {
         case i < inputs.meSadLtr.count: inputs.meSadLtr[i]
         default: 0
         }
-        feat[base + 3] = Int32(clamping: sadLtr)
-        feat[base + 4] = Int32(abs(Int(inputs.mvsPrev.dx[i])) + abs(Int(inputs.mvsPrev.dy[i])))
-        feat[base + 5] = Int32(abs(Int(inputs.mvsLtr.dx[i])) + abs(Int(inputs.mvsLtr.dy[i])))
+        out[3] = Int32(clamping: sadLtr)
+        out[4] = Int32(abs(Int(inputs.mvsPrev.dx[i])) + abs(Int(inputs.mvsPrev.dy[i])))
+        out[5] = Int32(abs(Int(inputs.mvsLtr.dx[i])) + abs(Int(inputs.mvsLtr.dy[i])))
         let variance: Int32 = switch true {
         case i < inputs.variance.count: inputs.variance[i]
         default: 0
         }
-        feat[base + 6] = variance
+        out[6] = variance
         let actClass: Int32 = switch true {
         case i < inputs.activityClass.count: Int32(inputs.activityClass[i].rawValue)
         default: 0
         }
-        feat[base + 7] = actClass
-        feat[base + 8] = Int32(clamping: inputs.adjustedStep)
-        feat[base + 9] = Int32(clamping: inputs.gopPosition)
-        feat[base + 10] = Int32(clamping: inputs.ltrAge)
+        out[7] = actClass
+        out[8] = Int32(clamping: inputs.adjustedStep)
+        out[9] = Int32(clamping: inputs.gopPosition)
+        out[10] = Int32(clamping: inputs.ltrAge)
         let staticCount: Int = switch true {
         case i < inputs.staticCounters.count: inputs.staticCounters[i]
         default: 0
         }
-        feat[base + 11] = Int32(clamping: staticCount)
-        feat[base + 12] = Int32(skipMap[i].rawValue)
+        out[11] = Int32(clamping: staticCount)
+        out[12] = Int32(skipMap[i].rawValue)
         let refDirVal: Int32 = switch true {
         case refDirs[i]: 1
         default: 0
         }
-        feat[base + 13] = refDirVal
-        feat[base + 14] = leftDec
-        feat[base + 15] = upDec
-        feat[base + 16] = prevLabel[i]
-        feat[base + 17] = prevSad0[i]
-        feat[base + 18] = maxG
-        feat[base + 19] = localR
+        out[13] = refDirVal
+        out[14] = leftDec
+        out[15] = upDec
+        out[16] = prevLabel[i]
+        out[17] = prevSad0[i]
+        out[18] = maxG
+        out[19] = localR
     }
 }

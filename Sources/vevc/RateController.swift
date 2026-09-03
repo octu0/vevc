@@ -509,14 +509,28 @@ func lumaMSEInteger(reconstructed: PlaneData420, source: PlaneData420) -> Int {
     let n = width * height
     guard 0 < n else { return 0 }
 
+    // Lane-wise squares are held in Int64: an Int16 difference squared can
+    // exceed Int32, and the integer total must match the scalar sum exactly.
     var acc = 0
     withUnsafePointers(reconstructed.y, source.y) { rBase, sBase in
+        let vecEnd = width - (width % 16)
         for row in 0..<height {
             let rRow = rBase + (row * reconstructed.width)
             let sRow = sBase + (row * source.width)
-            for col in 0..<width {
+            var col = 0
+            while col < vecEnd {
+                let r16 = UnsafeRawPointer(rRow + col).loadUnaligned(as: SIMD16<Int16>.self)
+                let s16 = UnsafeRawPointer(sRow + col).loadUnaligned(as: SIMD16<Int16>.self)
+                let d = SIMD16<Int32>(truncatingIfNeeded: r16) &- SIMD16<Int32>(truncatingIfNeeded: s16)
+                let dLo = SIMD8<Int64>(truncatingIfNeeded: d.lowHalf)
+                let dHi = SIMD8<Int64>(truncatingIfNeeded: d.highHalf)
+                acc += Int((dLo &* dLo).wrappedSum() &+ (dHi &* dHi).wrappedSum())
+                col += 16
+            }
+            while col < width {
                 let d = Int(rRow[col]) - Int(sRow[col])
                 acc += d * d
+                col += 1
             }
         }
     }

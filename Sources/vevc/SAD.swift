@@ -313,11 +313,29 @@ func computeBlockActivityMap(source: [Int16], width: Int, height: Int) -> [Int32
     var sumSqs = [Int](repeating: 0, count: blockCount)
     var counts = [Int](repeating: 0, count: blockCount)
     withUnsafePointers(source, mut: &sums, mut: &sumSqs, mut: &counts) { s, sumsBase, sumSqsBase, countsBase in
+        // A full 32px block row carries exactly 8 stride-4 samples: lanes
+        // 0/4/8/12 of two 16-lane loads. Squares are summed in Int64 lanes so
+        // the total matches the scalar Int accumulation exactly.
+        let fullBlocks = width / 32
         var y = 0
         while y < height {
             let rowBase = y * width
             let blockRowBase = (y / 32) * bw
-            var x = 0
+            for b in 0..<fullBlocks {
+                let p = s + (rowBase + (b * 32))
+                let v0 = UnsafeRawPointer(p).loadUnaligned(as: SIMD16<Int16>.self).evenHalf.evenHalf
+                let v1 = UnsafeRawPointer(p + 16).loadUnaligned(as: SIMD16<Int16>.self).evenHalf.evenHalf
+                var w8 = SIMD8<Int32>()
+                w8.lowHalf = SIMD4<Int32>(truncatingIfNeeded: v0)
+                w8.highHalf = SIMD4<Int32>(truncatingIfNeeded: v1)
+                let sqLo = SIMD4<Int64>(truncatingIfNeeded: w8.lowHalf)
+                let sqHi = SIMD4<Int64>(truncatingIfNeeded: w8.highHalf)
+                let idx = blockRowBase + b
+                sumsBase[idx] += Int(w8.wrappedSum())
+                sumSqsBase[idx] += Int((sqLo &* sqLo).wrappedSum() &+ (sqHi &* sqHi).wrappedSum())
+                countsBase[idx] += 8
+            }
+            var x = fullBlocks * 32
             while x < width {
                 let v = Int(s[rowBase + x])
                 let idx = blockRowBase + (x >> 5)
@@ -447,7 +465,10 @@ func classifyBlockActivity(
 /// Activity classes with the coherence test: textured blocks are split into
 /// .textured / .incoherentTextured (strokes vs noise), which the dead-zone
 /// selection quantizes differently.
-@inline(__always)
+///
+/// Block-parallel and deterministic: each block's class depends only on its
+/// own variance and its own Sobel pass, whose per-block summation order is
+/// unchanged from the serial version.
 func classifyBlockActivityWithCoherence(
     varianceMap: [Int32],
     flatVarianceMax: Int,
@@ -455,28 +476,49 @@ func classifyBlockActivityWithCoherence(
     source: [Int16],
     width: Int,
     height: Int
-) -> [BlockActivityClass] {
+) async -> [BlockActivityClass] {
     var classes = [BlockActivityClass](repeating: .normal, count: varianceMap.count)
     let colCount = (width + 31) / 32
-    withUnsafePointers(source) { ptr in
-        for i in 0..<varianceMap.count {
-            if varianceMap[i] < Int32(flatVarianceMax) {
-                classes[i] = .flat
+    let n = varianceMap.count
+    let sourceWrapper = UnsafeSendablePointer(ptr: source.withUnsafeBufferPointer { $0.baseAddress! })
+    let batchSize = 128
+    let slices = await withTaskGroup(of: (Int, [BlockActivityClass]).self) { group in
+        for batchStart in stride(from: 0, to: n, by: batchSize) {
+            let batchEnd = min(batchStart + batchSize, n)
+            group.addTask { [varianceMap] in
+                var out = [BlockActivityClass](repeating: .normal, count: batchEnd - batchStart)
+                let ptr = sourceWrapper.ptr
+                for i in batchStart..<batchEnd {
+                    if varianceMap[i] < Int32(flatVarianceMax) {
+                        out[i - batchStart] = .flat
+                    }
+                    guard Int32(texturedVarianceMin) <= varianceMap[i] else {
+                        continue
+                    }
+                    let r = i / colCount
+                    let c = i % colCount
+                    let bx = c * 32
+                    let by = r * 32
+                    let blockW = min(32, width - bx)
+                    let blockH = min(32, height - by)
+                    let coherence = computeBlockCoherence(source: ptr, stride: width, width: width, height: height, bx: bx, by: by, bw: blockW, bh: blockH)
+                    out[i - batchStart] = .textured
+                    if coherence < 0.85 {
+                        out[i - batchStart] = .incoherentTextured
+                    }
+                }
+                return (batchStart, out)
             }
-            guard Int32(texturedVarianceMin) <= varianceMap[i] else {
-                continue
-            }
-            let r = i / colCount
-            let c = i % colCount
-            let bx = c * 32
-            let by = r * 32
-            let blockW = min(32, width - bx)
-            let blockH = min(32, height - by)
-            let coherence = computeBlockCoherence(source: ptr, stride: width, width: width, height: height, bx: bx, by: by, bw: blockW, bh: blockH)
-            classes[i] = .textured
-            if coherence < 0.85 {
-                classes[i] = .incoherentTextured
-            }
+        }
+        var collected: [(Int, [BlockActivityClass])] = []
+        for await r in group {
+            collected.append(r)
+        }
+        return collected
+    }
+    for (start, out) in slices {
+        for k in 0..<out.count {
+            classes[start + k] = out[k]
         }
     }
     return classes
