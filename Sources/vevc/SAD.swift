@@ -380,30 +380,56 @@ func computeBlockGradientAndContrast(
     var countG: Int32 = 0
     var maxSubRange: Int32 = 0
 
-    let subBlocksY = (bh + 7) / 8
-    let subBlocksX = (bw + 7) / 8
-
-    for sby in 0..<subBlocksY {
-        let subY = by + sby * 8
-        let subH = min(8, height - subY)
-        for sbx in 0..<subBlocksX {
-            let subX = bx + sbx * 8
-            let subW = min(8, width - subX)
-
-            var minV: Int16 = 32767
-            var maxV: Int16 = -32768
-
-            for y in 0..<subH {
-                let row = source.advanced(by: (subY + y) * stride + subX)
-                for x in 0..<subW {
-                    let v = row[x]
-                    if v < minV { minV = v }
-                    if maxV < v { maxV = v }
+    // Fast path for inner 32x32 blocks (no image boundary clipping)
+    if bw == 32 && bh == 32 && bx + 32 <= width && by + 32 <= height {
+        var sby = 0
+        while sby < 4 {
+            var sbx = 0
+            while sbx < 4 {
+                let subPtr = source.advanced(by: (by + (sby * 8)) * stride + bx + (sbx * 8))
+                var minV = UnsafeRawPointer(subPtr).loadUnaligned(as: SIMD8<Int16>.self)
+                var maxV = minV
+                var r = 1
+                while r < 8 {
+                    let v = UnsafeRawPointer(subPtr.advanced(by: r * stride)).loadUnaligned(as: SIMD8<Int16>.self)
+                    minV = pointwiseMin(minV, v)
+                    maxV = pointwiseMax(maxV, v)
+                    r += 1
                 }
+                let diff = Int32(maxV.max() - minV.min())
+                if maxSubRange < diff {
+                    maxSubRange = diff
+                }
+                sbx += 1
             }
-            let r = Int32(maxV - minV)
-            if maxSubRange < r {
-                maxSubRange = r
+            sby += 1
+        }
+    } else {
+        let subBlocksY = (bh + 7) / 8
+        let subBlocksX = (bw + 7) / 8
+
+        for sby in 0..<subBlocksY {
+            let subY = by + sby * 8
+            let subH = min(8, height - subY)
+            for sbx in 0..<subBlocksX {
+                let subX = bx + sbx * 8
+                let subW = min(8, width - subX)
+
+                var minV: Int16 = 32767
+                var maxV: Int16 = -32768
+
+                for y in 0..<subH {
+                    let row = source.advanced(by: (subY + y) * stride + subX)
+                    for x in 0..<subW {
+                        let v = row[x]
+                        if v < minV { minV = v }
+                        if maxV < v { maxV = v }
+                    }
+                }
+                let r = Int32(maxV - minV)
+                if maxSubRange < r {
+                    maxSubRange = r
+                }
             }
         }
     }

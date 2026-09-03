@@ -12,6 +12,23 @@ struct SkipDeciderWeights: Sendable {
     let b2: [Int32]
     let shift1: Int32
 
+    // BitNet b1.58 precomputed masks and scalers
+    let w1PosMask0: [SIMD16<Int32>]
+    let w1NegMask0: [SIMD16<Int32>]
+    let w1PosMask1: [SIMD4<Int32>]
+    let w1NegMask1: [SIMD4<Int32>]
+    let w1Alpha: [Int32]
+
+    let w2PosMask: [SIMD16<Int32>]
+    let w2NegMask: [SIMD16<Int32>]
+    let w2Alpha: [Int32]
+
+    // Precomputed exact SIMD weights for zero-overhead inference
+    let w1SIMD0: [SIMD16<Int32>]
+    let w1SIMD1: [SIMD4<Int32>]
+    let w2Diff: SIMD16<Int32>
+    let b2Diff: Int32
+
     /// Flat Int32 array: magic, kind, f, h, t, mu[f], scale[f], normShift,
     /// w1[h*f], b1[h], w2[2*h], b2[2], shift1, shift2.
     static func parse(_ a: [Int32]) -> SkipDeciderWeights? {
@@ -47,7 +64,161 @@ struct SkipDeciderWeights: Sendable {
         default:
             break
         }
-        return SkipDeciderWeights(f: f, h: h, mu: mu, scale: scale, normShift: normShift, w1: w1, b1: b1, w2: w2, b2: b2, shift1: shift1)
+
+        var p0Masks = [SIMD16<Int32>]()
+        var n0Masks = [SIMD16<Int32>]()
+        var p1Masks = [SIMD4<Int32>]()
+        var n1Masks = [SIMD4<Int32>]()
+        var a1List = [Int32]()
+        p0Masks.reserveCapacity(h)
+        n0Masks.reserveCapacity(h)
+        p1Masks.reserveCapacity(h)
+        n1Masks.reserveCapacity(h)
+        a1List.reserveCapacity(h)
+
+        var row = 0
+        while row < h {
+            var sumAbs: Int32 = 0
+            var col = 0
+            while col < f {
+                let val = w1[row * f + col]
+                if val < 0 {
+                    sumAbs &+= (0 &- val)
+                } else {
+                    sumAbs &+= val
+                }
+                col += 1
+            }
+            let alpha = max(1, (sumAbs + Int32(f / 2)) / Int32(f))
+            let tau = max(1, alpha / 2)
+            a1List.append(alpha)
+
+            var p0 = SIMD16<Int32>()
+            var n0 = SIMD16<Int32>()
+            var c0 = 0
+            while c0 < 16 {
+                let wVal = w1[row * f + c0]
+                if tau < wVal {
+                    p0[c0] = -1
+                } else {
+                    if wVal < -tau {
+                        n0[c0] = -1
+                    }
+                }
+                c0 += 1
+            }
+            p0Masks.append(p0)
+            n0Masks.append(n0)
+
+            var p1 = SIMD4<Int32>()
+            var n1 = SIMD4<Int32>()
+            var c1 = 0
+            while c1 < 4 {
+                let wVal = w1[row * f + 16 + c1]
+                if tau < wVal {
+                    p1[c1] = -1
+                } else {
+                    if wVal < -tau {
+                        n1[c1] = -1
+                    }
+                }
+                c1 += 1
+            }
+            p1Masks.append(p1)
+            n1Masks.append(n1)
+
+            row += 1
+        }
+
+        var p2Masks = [SIMD16<Int32>]()
+        var n2Masks = [SIMD16<Int32>]()
+        var a2List = [Int32]()
+        p2Masks.reserveCapacity(2)
+        n2Masks.reserveCapacity(2)
+        a2List.reserveCapacity(2)
+
+        var outIdx = 0
+        while outIdx < 2 {
+            var sumAbs: Int32 = 0
+            var col = 0
+            while col < h {
+                let val = w2[outIdx * h + col]
+                if val < 0 {
+                    sumAbs &+= (0 &- val)
+                } else {
+                    sumAbs &+= val
+                }
+                col += 1
+            }
+            let alpha = max(1, (sumAbs + Int32(h / 2)) / Int32(h))
+            let tau = max(1, alpha / 2)
+            a2List.append(alpha)
+
+            var p2 = SIMD16<Int32>()
+            var n2 = SIMD16<Int32>()
+            var c = 0
+            while c < 16 {
+                let wVal = w2[outIdx * h + c]
+                if tau < wVal {
+                    p2[c] = -1
+                } else {
+                    if wVal < -tau {
+                        n2[c] = -1
+                    }
+                }
+                c += 1
+            }
+            p2Masks.append(p2)
+            n2Masks.append(n2)
+
+            outIdx += 1
+        }
+
+        var simdW1_0 = [SIMD16<Int32>]()
+        var simdW1_1 = [SIMD4<Int32>]()
+        simdW1_0.reserveCapacity(h)
+        simdW1_1.reserveCapacity(h)
+        var rowIdx = 0
+        while rowIdx < h {
+            var v0 = SIMD16<Int32>()
+            var c0 = 0
+            while c0 < 16 {
+                v0[c0] = w1[rowIdx * f + c0]
+                c0 += 1
+            }
+            simdW1_0.append(v0)
+
+            var v1 = SIMD4<Int32>()
+            var c1 = 0
+            while c1 < 4 {
+                v1[c1] = w1[rowIdx * f + 16 + c1]
+                c1 += 1
+            }
+            simdW1_1.append(v1)
+            rowIdx += 1
+        }
+
+        var w2DiffVec = SIMD16<Int32>()
+        var hIdx = 0
+        while hIdx < h {
+            w2DiffVec[hIdx] = w2[h + hIdx] - w2[hIdx]
+            hIdx += 1
+        }
+        let b2DiffVal = b2[1] - b2[0]
+
+        return SkipDeciderWeights(
+            f: f, h: h, mu: mu, scale: scale, normShift: normShift,
+            w1: w1, b1: b1, w2: w2, b2: b2, shift1: shift1,
+            w1PosMask0: p0Masks, w1NegMask0: n0Masks,
+            w1PosMask1: p1Masks, w1NegMask1: n1Masks,
+            w1Alpha: a1List,
+            w2PosMask: p2Masks, w2NegMask: n2Masks,
+            w2Alpha: a2List,
+            w1SIMD0: simdW1_0,
+            w1SIMD1: simdW1_1,
+            w2Diff: w2DiffVec,
+            b2Diff: b2DiffVal
+        )
     }
 }
 
