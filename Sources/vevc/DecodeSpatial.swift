@@ -717,7 +717,7 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         let newRef = PlaneData420(img16: l0Cur)
 
         if let tPrev = predictedPd {
-            var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+            var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset, pool: pool)
             if let map = skipMap {
                 applyPredictionOffsetsL2ToPlaneData(pd: &fullP, lumaOffset: p.frameHeader.lumaOffset, chromaOffset: p.frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
             }
@@ -725,8 +725,15 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
             var slot = Image16(width: newRef.width, height: newRef.height, y: newRef.y, cb: newRef.cb, cr: newRef.cr)
             subtractPlanes(&slot, tP)
             current = slot
-            if skipMap != nil {
+            switch true {
+            case skipMap != nil:
                 fullPForL2 = fullP
+            default:
+                // Without a skip map the layer2 fuse never reads this plane,
+                // so analyzeLL2 was its last reader.
+                pool.putInt16(fullP.y)
+                pool.putInt16(fullP.cb)
+                pool.putInt16(fullP.cr)
             }
         }
 
@@ -789,6 +796,11 @@ func decodeSpatialLayersForProfile2Full(r: [UInt8], pool: BlockViewPool, dx: Int
         fusePredictionPlane32(recon: &l2Img.y, p: fullP.y, skipMap: sMap, width: l2dx, height: l2dy)
         fusePredictionPlane16(recon: &l2Img.cb, p: fullP.cb, skipMap: sMap, width: l2cbDx, height: l2cbDy)
         fusePredictionPlane16(recon: &l2Img.cr, p: fullP.cr, skipMap: sMap, width: l2cbDx, height: l2cbDy)
+        // The fuse is the prediction plane's last reader; recycle it for the
+        // next P frame's buildFullResolutionPrediction.
+        pool.putInt16(fullP.y)
+        pool.putInt16(fullP.cb)
+        pool.putInt16(fullP.cr)
     } else if let tPrev = predictedPd, let tMVs = mvs {
         if let tNext = nextPd, let dirs = refDirs {
             if let sMap = skipMap {
@@ -1582,11 +1594,16 @@ func decodeSpatialLayersForProfile2(r: [UInt8], pool: BlockViewPool, maxLayer: I
             if let tPrev = predictedPd {
                 let tP: PlaneData420
                 if hasLayer2 {
-                    var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
+                    var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset, pool: pool)
                     if let map = skipMap {
                         applyPredictionOffsetsL2ToPlaneData(pd: &fullP, lumaOffset: frameHeader.lumaOffset, chromaOffset: frameHeader.chromaOffset, mvs: tMVs, refDirs: refDirs ?? [], skipMap: map)
                     }
                     tP = analyzeLL2(pd: fullP)
+                    // This path never fuses the prediction plane into layer2,
+                    // so analyzeLL2 was its last reader.
+                    pool.putInt16(fullP.y)
+                    pool.putInt16(fullP.cb)
+                    pool.putInt16(fullP.cr)
                 } else {
                     var l1P = await buildL1Prediction(l1dx: l1dx, l1dy: l1dy, prevPd: tPrev, ltrPd: nextPd, mvs: tMVs, refDirs: refDirs, skipMap: skipMap, roundOffset: roundOffset)
                     if let map = skipMap {

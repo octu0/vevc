@@ -265,12 +265,17 @@ func clampPlaneToPixelRange(plane: inout [Int16]) {
 /// layer2 — any divergence here is an enc/dec recon asymmetry that
 /// accumulates over the GOP.
 @inline(__always)
-func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int) async -> PlaneData420 {
+func buildFullResolutionPrediction(dx: Int, dy: Int, prevPd: PlaneData420, ltrPd: PlaneData420?, mvs: MotionVectors, refDirs: [Bool]?, skipMap: [BlockMode]?, roundOffset: Int, pool: BlockViewPool) async -> PlaneData420 {
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
-    var y = [Int16](repeating: 0, count: dx * dy)
-    var cb = [Int16](repeating: 0, count: cbDx * cbDy)
-    var cr = [Int16](repeating: 0, count: cbDx * cbDy)
+    // The MC kernels accumulate into the plane and leave intra blocks
+    // untouched, so the buffers must start all-zero; getInt16 recycles a
+    // pooled buffer zero-filled to the identical state instead of paying a
+    // fresh 6MB allocation every P frame. Callers return the planes with
+    // putInt16 after their last read.
+    var y = pool.getInt16(count: dx * dy)
+    var cb = pool.getInt16(count: cbDx * cbDy)
+    var cr = pool.getInt16(count: cbDx * cbDy)
     if let tNext = ltrPd, let dirs = refDirs {
         if let sMap = skipMap {
             await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: prevPd.y, nextPlane: tNext.y, mvs: mvs, refDirs: dirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)

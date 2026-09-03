@@ -1078,7 +1078,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
 
         // The full loop's LL2 coefficient slot is L0_recon − LL2(P), with P
         // built by the identical MC call sequence the decoder uses.
-        var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: pPd, ltrPd: nPd, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset)
+        var fullP = await buildFullResolutionPrediction(dx: dx, dy: dy, prevPd: pPd, ltrPd: nPd, mvs: mvs, refDirs: refDirs, skipMap: sMap, roundOffset: roundOffset, pool: pool)
         if wpLuma != 0 {
             // Baking the offset into P makes the LL2 slot (analyzeLL2) and
             // the layer2 reconstruction (fusePredictionPlane) both see P′.
@@ -1174,6 +1174,11 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         fusePredictionPlane32(recon: &mutReconL2Y, p: fullP.y, skipMap: sMap, width: dx, height: dy)
         fusePredictionPlane16(recon: &mutReconL2Cb, p: fullP.cb, skipMap: sMap, width: cbDx, height: cbDy)
         fusePredictionPlane16(recon: &mutReconL2Cr, p: fullP.cr, skipMap: sMap, width: cbDx, height: cbDy)
+        // The fuse is the prediction plane's last reader; recycle it for the
+        // next P frame's buildFullResolutionPrediction.
+        pool.putInt16(fullP.y)
+        pool.putInt16(fullP.cb)
+        pool.putInt16(fullP.cr)
     } else {
         await applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &mutReconL2Y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
         await applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &mutReconL2Cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)

@@ -57,6 +57,14 @@ public actor StreamingDecoderActor {
     private(set) var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
     private(set) var mvPredictionState: MVPredictionState?
     private var cachedYCbCrImage: YCbCrImage?
+    // Storage identity of the planes cachedYCbCrImage was last converted
+    // from. Copy frames re-render previousReconstructed verbatim, so when
+    // its storage matches the last render the cached bytes are already the
+    // exact conversion result. 0 marks "no render yet" (plane storage is
+    // never empty, so a real token is never 0).
+    private var lastRenderedYToken = 0
+    private var lastRenderedCbToken = 0
+    private var lastRenderedCrToken = 0
     // Quarter-resolution L0 reference chain (One-Pyramid §4). Only needed
     // when decoding above layer0; the maxLayer==0 pipeline is its own chain.
     // Internal so the L0 bit-exactness gate tests can compare chains.
@@ -135,6 +143,9 @@ public actor StreamingDecoderActor {
     private func renderToYCbCr(pd: PlaneData420) -> YCbCrImage {
         let w = pd.width
         let h = pd.height
+        lastRenderedYToken = storageToken(pd.y)
+        lastRenderedCbToken = storageToken(pd.cb)
+        lastRenderedCrToken = storageToken(pd.cr)
         if var cached = cachedYCbCrImage, cached.width == w && cached.height == h {
             pd.toYCbCr(into: &cached)
             cachedYCbCrImage = cached
@@ -213,6 +224,20 @@ public actor StreamingDecoderActor {
             framesSinceKeyframe += 1
             temporalFrameIndex += 1
             roundOffsetIndex += 1
+            // previousReconstructed is immutable while the actor references
+            // it (pool bookkeeping never recycles a live reference), so a
+            // matching storage identity means the cached image already holds
+            // this exact conversion. Only the copy-frame path may take this
+            // shortcut: a decoded frame can receive pool-recycled storage
+            // whose token collides with the last render while holding
+            // different content.
+            if let cached = cachedYCbCrImage,
+               cached.width == prev.width, cached.height == prev.height,
+               storageToken(prev.y) == lastRenderedYToken,
+               storageToken(prev.cb) == lastRenderedCbToken,
+               storageToken(prev.cr) == lastRenderedCrToken {
+                return cached
+            }
             return renderToYCbCr(pd: prev)
         }
         
