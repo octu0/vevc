@@ -833,63 +833,73 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
             fIdx += 1
         }
 
-        // (b) rANS Symbols in backward order with spatial context wiring
-        var rBlockIdx = nzCount - 1
-        while 0 <= rBlockIdx {
-            let bIdx = nonZeroIndices[rBlockIdx]
-            let blockY = bIdx / colCount
-            let blockX = bIdx % colCount
+        // (b) rANS Symbols in backward order with spatial context wiring.
+        // Workspace buffers and flat weights are borrowed once per plane;
+        // predict/buildCDF take raw pointers only (rule 12'(j)).
+        let flat = ws.flatWeights
+        withUnsafePointers(mut: &ws.feat, mut: &ws.hidden, mut: &ws.rawCum, mut: &ws.freqs, mut: &ws.cumFreqs, flat.w1All, flat.b1All, flat.w2All) { featP, hiddenP, rawP, freqP, cumP, w1P, b1P, w2P in
+            var rBlockIdx = nzCount - 1
+            while 0 <= rBlockIdx {
+                let bIdx = nonZeroIndices[rBlockIdx]
+                let blockY = bIdx / colCount
+                let blockX = bIdx % colCount
 
-            copyLLCoeffs(from: blocks[bIdx], to: cPtr)
+                copyLLCoeffs(from: blocks[bIdx], to: cPtr)
 
-            let topArg: UnsafePointer<Int16>?
-            if 0 < blockY {
-                copyLLCoeffs(from: blocks[bIdx - colCount], to: topPtr)
-                topArg = UnsafePointer(topPtr)
-            } else {
-                topArg = nil
-            }
-
-            let leftArg: UnsafePointer<Int16>?
-            if 0 < blockX {
-                copyLLCoeffs(from: blocks[bIdx - 1], to: leftPtr)
-                leftArg = UnsafePointer(leftPtr)
-            } else {
-                leftArg = nil
-            }
-
-            var rPos = 15
-            while 4 <= rPos {
-                let val = cPtr[rPos]
-                let (mu, invScale) = ws.predict(
-                    pos: rPos,
-                    blockCoeffs: UnsafePointer(cPtr),
-                    topCoeffs: topArg,
-                    leftCoeffs: leftArg,
-                    tempCoeffs: nil,
-                    isPFrame: true,
-                    plane: 0,
-                    qstep: qstep
-                )
-                ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-
-                let sym: Int
-                if val < -64 {
-                    sym = 129
+                let topArg: UnsafePointer<Int16>?
+                if 0 < blockY {
+                    copyLLCoeffs(from: blocks[bIdx - colCount], to: topPtr)
+                    topArg = UnsafePointer(topPtr)
                 } else {
-                    if 64 < val {
-                        sym = 129
-                    } else {
-                        sym = Int(val + 64)
-                    }
+                    topArg = nil
                 }
 
-                let freq = ws.freqs[sym]
-                let cumFreq = ws.cumFreqs[sym]
-                ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
-                rPos -= 1
+                let leftArg: UnsafePointer<Int16>?
+                if 0 < blockX {
+                    copyLLCoeffs(from: blocks[bIdx - 1], to: leftPtr)
+                    leftArg = UnsafePointer(leftPtr)
+                } else {
+                    leftArg = nil
+                }
+
+                var rPos = 15
+                while 4 <= rPos {
+                    let val = cPtr[rPos]
+                    let (mu, invScale) = ws.predict(
+                        pos: rPos,
+                        blockCoeffs: UnsafePointer(cPtr),
+                        topCoeffs: topArg,
+                        leftCoeffs: leftArg,
+                        tempCoeffs: nil,
+                        isPFrame: true,
+                        plane: 0,
+                        qstep: qstep,
+                        featP: featP,
+                        hiddenP: hiddenP,
+                        w1AllP: w1P,
+                        b1AllP: b1P,
+                        w2AllP: w2P
+                    )
+                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale, rawP: rawP, freqP: freqP, cumP: cumP)
+
+                    let sym: Int
+                    if val < -64 {
+                        sym = 129
+                    } else {
+                        if 64 < val {
+                            sym = 129
+                        } else {
+                            sym = Int(val + 64)
+                        }
+                    }
+
+                    let freq = freqP[sym]
+                    let cumFreq = cumP[sym]
+                    ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+                    rPos -= 1
+                }
+                rBlockIdx -= 1
             }
-            rBlockIdx -= 1
         }
     }
     let modelBytes = ws.finalizePlaneEncoder()

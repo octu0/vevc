@@ -36,42 +36,51 @@ final class rANSContextTests: XCTestCase {
             }
         }
 
-        // Backward rANS symbols
-        var rBlock = blockCount - 1
-        while 0 <= rBlock {
-            let b = blocks[rBlock]
-            var rPos = 15
-            while 4 <= rPos {
-                let val = b[rPos]
-                let (mu, invScale) = b.withUnsafeBufferPointer { bufPtr in
-                    ws.predict(
-                        pos: rPos,
-                        blockCoeffs: bufPtr.baseAddress!,
-                        topCoeffs: nil,
-                        leftCoeffs: nil,
-                        tempCoeffs: nil,
-                        isPFrame: false,
-                        plane: 0,
-                        qstep: 4096
-                    )
-                }
-                ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                let sym: Int
-                if val < -64 {
-                    sym = 129
-                } else {
-                    if 64 < val {
+        // Backward rANS symbols (workspace buffers and flat weights borrowed
+        // once outside the block loop, mirroring EncodeTransform)
+        let flat = ws.flatWeights
+        withUnsafePointers(mut: &ws.feat, mut: &ws.hidden, mut: &ws.rawCum, mut: &ws.freqs, mut: &ws.cumFreqs, flat.w1All, flat.b1All, flat.w2All) { featP, hiddenP, rawP, freqP, cumP, w1P, b1P, w2P in
+            var rBlock = blockCount - 1
+            while 0 <= rBlock {
+                let b = blocks[rBlock]
+                var rPos = 15
+                while 4 <= rPos {
+                    let val = b[rPos]
+                    let (mu, invScale) = b.withUnsafeBufferPointer { bufPtr in
+                        ws.predict(
+                            pos: rPos,
+                            blockCoeffs: bufPtr.baseAddress!,
+                            topCoeffs: nil,
+                            leftCoeffs: nil,
+                            tempCoeffs: nil,
+                            isPFrame: false,
+                            plane: 0,
+                            qstep: 4096,
+                            featP: featP,
+                            hiddenP: hiddenP,
+                            w1AllP: w1P,
+                            b1AllP: b1P,
+                            w2AllP: w2P
+                        )
+                    }
+                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale, rawP: rawP, freqP: freqP, cumP: cumP)
+                    let sym: Int
+                    if val < -64 {
                         sym = 129
                     } else {
-                        sym = Int(val + 64)
+                        if 64 < val {
+                            sym = 129
+                        } else {
+                            sym = Int(val + 64)
+                        }
                     }
+                    let freq = freqP[sym]
+                    let cumFreq = cumP[sym]
+                    ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+                    rPos -= 1
                 }
-                let freq = ws.freqs[sym]
-                let cumFreq = ws.cumFreqs[sym]
-                ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
-                rPos -= 1
+                rBlock -= 1
             }
-            rBlock -= 1
         }
 
         let bytes = ws.finalizePlaneEncoder()
@@ -82,33 +91,40 @@ final class rANSContextTests: XCTestCase {
         try bytes.withUnsafeBufferPointer { bufPtr in
             try ws.initPlaneDecoder(inputPtr: bufPtr.baseAddress!, totalBytes: bytes.count)
             
-            for bIdx in 0..<blockCount {
-                var decB = [Int16](repeating: 0, count: 16)
-                for pos in 0..<4 {
-                    decB[pos] = blocks[bIdx][pos]
-                }
-                for pos in 4..<16 {
-                    let (mu, invScale) = decB.withUnsafeBufferPointer { bufPtr in
-                        ws.predict(
-                            pos: pos,
-                            blockCoeffs: bufPtr.baseAddress!,
-                            topCoeffs: nil,
-                            leftCoeffs: nil,
-                            tempCoeffs: nil,
-                            isPFrame: false,
-                            plane: 0,
-                            qstep: 4096
-                        )
+            withUnsafePointers(mut: &ws.feat, mut: &ws.hidden, mut: &ws.rawCum, mut: &ws.freqs, mut: &ws.cumFreqs, ws.flatWeights.w1All, ws.flatWeights.b1All, ws.flatWeights.w2All) { featP, hiddenP, rawP, freqP, cumP, w1P, b1P, w2P in
+                for bIdx in 0..<blockCount {
+                    var decB = [Int16](repeating: 0, count: 16)
+                    for pos in 0..<4 {
+                        decB[pos] = blocks[bIdx][pos]
                     }
-                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                    let sym = ws.planeDecodeSymbol()
-                    if sym == 129 {
-                        decB[pos] = ws.planeDecodeEscape()
-                    } else {
-                        decB[pos] = Int16(sym - 64)
+                    for pos in 4..<16 {
+                        let (mu, invScale) = decB.withUnsafeBufferPointer { bufPtr in
+                            ws.predict(
+                                pos: pos,
+                                blockCoeffs: bufPtr.baseAddress!,
+                                topCoeffs: nil,
+                                leftCoeffs: nil,
+                                tempCoeffs: nil,
+                                isPFrame: false,
+                                plane: 0,
+                                qstep: 4096,
+                                featP: featP,
+                                hiddenP: hiddenP,
+                                w1AllP: w1P,
+                                b1AllP: b1P,
+                                w2AllP: w2P
+                            )
+                        }
+                        ws.buildCDF(muQ12: mu, invScaleQ12: invScale, rawP: rawP, freqP: freqP, cumP: cumP)
+                        let sym = ws.planeDecodeSymbol(freqP: UnsafePointer(freqP), cumP: UnsafePointer(cumP))
+                        if sym == 129 {
+                            decB[pos] = ws.planeDecodeEscape()
+                        } else {
+                            decB[pos] = Int16(sym - 64)
+                        }
                     }
+                    decodedBlocks.append(decB)
                 }
-                decodedBlocks.append(decB)
             }
         }
 
@@ -159,42 +175,51 @@ final class rANSContextTests: XCTestCase {
         }
         XCTAssertLessThan(0, escapeCount, "Escape test must encode at least one escape symbol")
 
-        // Backward rANS symbols
-        var rBlock = blockCount - 1
-        while 0 <= rBlock {
-            let b = blocks[rBlock]
-            var rPos = 15
-            while 4 <= rPos {
-                let val = b[rPos]
-                let (mu, invScale) = b.withUnsafeBufferPointer { bufPtr in
-                    ws.predict(
-                        pos: rPos,
-                        blockCoeffs: bufPtr.baseAddress!,
-                        topCoeffs: nil,
-                        leftCoeffs: nil,
-                        tempCoeffs: nil,
-                        isPFrame: false,
-                        plane: 0,
-                        qstep: 4096
-                    )
-                }
-                ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                let sym: Int
-                if val < -64 {
-                    sym = 129
-                } else {
-                    if 64 < val {
+        // Backward rANS symbols (workspace buffers and flat weights borrowed
+        // once outside the block loop, mirroring EncodeTransform)
+        let flat = ws.flatWeights
+        withUnsafePointers(mut: &ws.feat, mut: &ws.hidden, mut: &ws.rawCum, mut: &ws.freqs, mut: &ws.cumFreqs, flat.w1All, flat.b1All, flat.w2All) { featP, hiddenP, rawP, freqP, cumP, w1P, b1P, w2P in
+            var rBlock = blockCount - 1
+            while 0 <= rBlock {
+                let b = blocks[rBlock]
+                var rPos = 15
+                while 4 <= rPos {
+                    let val = b[rPos]
+                    let (mu, invScale) = b.withUnsafeBufferPointer { bufPtr in
+                        ws.predict(
+                            pos: rPos,
+                            blockCoeffs: bufPtr.baseAddress!,
+                            topCoeffs: nil,
+                            leftCoeffs: nil,
+                            tempCoeffs: nil,
+                            isPFrame: false,
+                            plane: 0,
+                            qstep: 4096,
+                            featP: featP,
+                            hiddenP: hiddenP,
+                            w1AllP: w1P,
+                            b1AllP: b1P,
+                            w2AllP: w2P
+                        )
+                    }
+                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale, rawP: rawP, freqP: freqP, cumP: cumP)
+                    let sym: Int
+                    if val < -64 {
                         sym = 129
                     } else {
-                        sym = Int(val + 64)
+                        if 64 < val {
+                            sym = 129
+                        } else {
+                            sym = Int(val + 64)
+                        }
                     }
+                    let freq = freqP[sym]
+                    let cumFreq = cumP[sym]
+                    ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
+                    rPos -= 1
                 }
-                let freq = ws.freqs[sym]
-                let cumFreq = ws.cumFreqs[sym]
-                ws.planeEncodeSymbol(sym: sym, freq: freq, cumFreq: cumFreq)
-                rPos -= 1
+                rBlock -= 1
             }
-            rBlock -= 1
         }
 
         let bytes = ws.finalizePlaneEncoder()
@@ -205,33 +230,40 @@ final class rANSContextTests: XCTestCase {
         try bytes.withUnsafeBufferPointer { bufPtr in
             try ws.initPlaneDecoder(inputPtr: bufPtr.baseAddress!, totalBytes: bytes.count)
             
-            for bIdx in 0..<blockCount {
-                var decB = [Int16](repeating: 0, count: 16)
-                for pos in 0..<4 {
-                    decB[pos] = blocks[bIdx][pos]
-                }
-                for pos in 4..<16 {
-                    let (mu, invScale) = decB.withUnsafeBufferPointer { bufPtr in
-                        ws.predict(
-                            pos: pos,
-                            blockCoeffs: bufPtr.baseAddress!,
-                            topCoeffs: nil,
-                            leftCoeffs: nil,
-                            tempCoeffs: nil,
-                            isPFrame: false,
-                            plane: 0,
-                            qstep: 4096
-                        )
+            withUnsafePointers(mut: &ws.feat, mut: &ws.hidden, mut: &ws.rawCum, mut: &ws.freqs, mut: &ws.cumFreqs, ws.flatWeights.w1All, ws.flatWeights.b1All, ws.flatWeights.w2All) { featP, hiddenP, rawP, freqP, cumP, w1P, b1P, w2P in
+                for bIdx in 0..<blockCount {
+                    var decB = [Int16](repeating: 0, count: 16)
+                    for pos in 0..<4 {
+                        decB[pos] = blocks[bIdx][pos]
                     }
-                    ws.buildCDF(muQ12: mu, invScaleQ12: invScale)
-                    let sym = ws.planeDecodeSymbol()
-                    if sym == 129 {
-                        decB[pos] = ws.planeDecodeEscape()
-                    } else {
-                        decB[pos] = Int16(sym - 64)
+                    for pos in 4..<16 {
+                        let (mu, invScale) = decB.withUnsafeBufferPointer { bufPtr in
+                            ws.predict(
+                                pos: pos,
+                                blockCoeffs: bufPtr.baseAddress!,
+                                topCoeffs: nil,
+                                leftCoeffs: nil,
+                                tempCoeffs: nil,
+                                isPFrame: false,
+                                plane: 0,
+                                qstep: 4096,
+                                featP: featP,
+                                hiddenP: hiddenP,
+                                w1AllP: w1P,
+                                b1AllP: b1P,
+                                w2AllP: w2P
+                            )
+                        }
+                        ws.buildCDF(muQ12: mu, invScaleQ12: invScale, rawP: rawP, freqP: freqP, cumP: cumP)
+                        let sym = ws.planeDecodeSymbol(freqP: UnsafePointer(freqP), cumP: UnsafePointer(cumP))
+                        if sym == 129 {
+                            decB[pos] = ws.planeDecodeEscape()
+                        } else {
+                            decB[pos] = Int16(sym - 64)
+                        }
                     }
+                    decodedBlocks.append(decB)
                 }
-                decodedBlocks.append(decB)
             }
         }
 

@@ -65,10 +65,52 @@ final class rANSContextTables: @unchecked Sendable {
     }
 }
 
+// MARK: - Flattened Weights (single-array layout for one plane-level borrow)
+
+/// Per-pos weight rows of rANSContextWeights concatenated into single arrays,
+/// so callers can borrow w1/b1/w2 once per plane instead of extracting a
+/// per-pos array on every predict call. Values are copied unchanged.
+final class rANSContextFlatWeights: @unchecked Sendable {
+    static let shared = rANSContextFlatWeights()
+
+    let w1Offsets: [Int]
+    let w1All: [Int32]
+    let b1All: [Int32]
+    let w2All: [Int32]
+    let b2Q: [Int32]
+    let invScalesQ: [Int32]
+
+    private init() {
+        let w = rANSContextWeights.shared
+        var offs = [Int](repeating: 0, count: 16)
+        var w1 = [Int32]()
+        var b1 = [Int32](repeating: 0, count: 16 * 32)
+        var w2 = [Int32](repeating: 0, count: 16 * 32)
+        var pos = 4
+        while pos < 16 {
+            offs[pos] = w1.count
+            w1.append(contentsOf: w.w1FlatQ[pos])
+            var h = 0
+            while h < 32 {
+                b1[(pos * 32) + h] = w.b1Q[pos][h]
+                w2[(pos * 32) + h] = w.w2Q[pos][h]
+                h += 1
+            }
+            pos += 1
+        }
+        self.w1Offsets = offs
+        self.w1All = w1
+        self.b1All = b1
+        self.w2All = w2
+        self.b2Q = w.b2Q
+        self.invScalesQ = w.invScalesQ
+    }
+}
+
 // MARK: - rANSContext Workspace (Zero-Allocation per-block Buffer)
 
 final class rANSContextWorkspace: @unchecked Sendable {
-    let weights = rANSContextWeights.shared
+    let flatWeights = rANSContextFlatWeights.shared
     let tables = rANSContextTables.shared
 
     // Buffers for rANS encoding/decoding
@@ -215,21 +257,21 @@ final class rANSContextWorkspace: @unchecked Sendable {
     }
 
     @inline(__always)
-    func planeDecodeSymbol() -> Int {
+    func planeDecodeSymbol(freqP: UnsafePointer<UInt32>, cumP: UnsafePointer<UInt32>) -> Int {
         let cum = decodePlaneState & (rANSContextScale - 1)
         var low = 0
         var high = 130
         while low + 1 < high {
             let mid = (low + high) >> 1
-            if cumFreqs[mid] <= cum {
+            if cumP[mid] <= cum {
                 low = mid
             } else {
                 high = mid
             }
         }
         let sym = low
-        let freq = freqs[sym]
-        let cumFreq = cumFreqs[sym]
+        let freq = freqP[sym]
+        let cumFreq = cumP[sym]
 
         let mask = rANSContextScale - 1
         decodePlaneState = (freq * (decodePlaneState >> rANSContextScaleBits)) + (decodePlaneState & mask) - cumFreq
@@ -256,7 +298,9 @@ final class rANSContextWorkspace: @unchecked Sendable {
         return 0
     }
 
-    /// Estimate model bits for tail coefficients of a block (pos 4..15)
+    /// Estimate model bits for tail coefficients of a block (pos 4..15).
+    /// The caller borrows the workspace buffers and flat weights once outside
+    /// its block loop and passes raw pointers down (rule 12'(j)).
     @inline(__always)
     func estimateModelTailBits(
         blockCoeffs: UnsafePointer<Int16>,
@@ -265,7 +309,15 @@ final class rANSContextWorkspace: @unchecked Sendable {
         tempCoeffs: UnsafePointer<Int16>?,
         isPFrame: Bool,
         plane: Int,
-        qstep: Int32
+        qstep: Int32,
+        featP: UnsafeMutablePointer<Int32>,
+        hiddenP: UnsafeMutablePointer<Int32>,
+        rawP: UnsafeMutablePointer<Int32>,
+        freqP: UnsafeMutablePointer<UInt32>,
+        cumP: UnsafeMutablePointer<UInt32>,
+        w1AllP: UnsafePointer<Int32>,
+        b1AllP: UnsafePointer<Int32>,
+        w2AllP: UnsafePointer<Int32>
     ) -> Int {
         var bitCost = 0
         var pos = 4
@@ -279,9 +331,14 @@ final class rANSContextWorkspace: @unchecked Sendable {
                 tempCoeffs: tempCoeffs,
                 isPFrame: isPFrame,
                 plane: plane,
-                qstep: qstep
+                qstep: qstep,
+                featP: featP,
+                hiddenP: hiddenP,
+                w1AllP: w1AllP,
+                b1AllP: b1AllP,
+                w2AllP: w2AllP
             )
-            buildCDF(muQ12: mu, invScaleQ12: invScale)
+            buildCDF(muQ12: mu, invScaleQ12: invScale, rawP: rawP, freqP: freqP, cumP: cumP)
             let sym: Int
             if val < -64 {
                 sym = 129
@@ -294,7 +351,7 @@ final class rANSContextWorkspace: @unchecked Sendable {
                     sym = Int(val + 64)
                 }
             }
-            let freq = freqs[sym]
+            let freq = freqP[sym]
             if freq <= 1 {
                 bitCost += 12
             } else {
@@ -324,39 +381,82 @@ final class rANSContextWorkspace: @unchecked Sendable {
 
     /// Build cumulative frequency table for logistic distribution with Q12 mu and invScale.
     @inline(__always)
-    func buildCDF(muQ12: Int32, invScaleQ12: Int32) {
+    func buildCDF(
+        muQ12: Int32,
+        invScaleQ12: Int32,
+        rawP: UnsafeMutablePointer<Int32>,
+        freqP: UnsafeMutablePointer<UInt32>,
+        cumP: UnsafeMutablePointer<UInt32>
+    ) {
         let totalSyms = 130
         let M: Int32 = 64
-        rawCum[0] = 0
+        rawP[0] = 0
 
+        // Each sigmoid argument is element-independent: the Q12 arithmetic
+        // runs 8 lanes at a time, the table lookup stays scalar (no NEON
+        // gather). |valQ12 - mu| < 2^31 + 2^18 and |invScale| <= 6300
+        // (< 2^13), so the Int64 lane product stays < 2^45 -- no wrap.
+        // Clamping to Int32 first and then to +/-32768 equals the direct
+        // 64-bit clamp because [-32768, 32767] lies inside the Int32 range.
+        let lane = SIMD8<Int64>(0, 1, 2, 3, 4, 5, 6, 7)
+        let muVec = SIMD8<Int64>(repeating: Int64(muQ12))
+        let invVec = SIMD8<Int64>(repeating: Int64(invScaleQ12))
+        let loBound = SIMD8<Int32>(repeating: -32768)
+        let hiBound = SIMD8<Int32>(repeating: 32767)
         var s = 0
+        while s + 8 <= 129 {
+            let valQ12 = ((SIMD8<Int64>(repeating: Int64(s) - 64) &+ lane) &* 4096) &+ 2048
+            let z64 = ((valQ12 &- muVec) &* invVec) &>> 12
+            let zClamped = pointwiseMin(hiBound, pointwiseMax(loBound, SIMD8<Int32>(clamping: z64)))
+            var k = 0
+            while k < 8 {
+                rawP[s + k + 1] = tables.fastSigmoidQ12(zClamped[k])
+                k += 1
+            }
+            s += 8
+        }
         while s < 129 {
             let val = Int32(s) - M
             let valQ12 = (Int64(val) * 4096) + 2048
             let diff64 = valQ12 - Int64(muQ12)
             let z64 = (diff64 * Int64(invScaleQ12)) >> 12
             let zClamped = Int32(max(-32768, min(32767, z64)))
-            rawCum[s + 1] = tables.fastSigmoidQ12(zClamped)
+            rawP[s + 1] = tables.fastSigmoidQ12(zClamped)
             s += 1
         }
-        rawCum[129] = 4096
-        rawCum[130] = 4096
+        rawP[129] = 4096
+        rawP[130] = 4096
 
+        // freq entries are element-independent diffs; the sum of 130
+        // frequencies is <= 130 * 4096 < 2^20, so lane totals cannot wrap.
         var totalFreq: UInt32 = 0
+        var accT = SIMD8<UInt32>()
+        let one = SIMD8<Int32>(repeating: 1)
         var sIdx = 0
+        while sIdx + 8 <= totalSyms {
+            let lo = UnsafeRawPointer(rawP + sIdx).loadUnaligned(as: SIMD8<Int32>.self)
+            let hi = UnsafeRawPointer(rawP + sIdx + 1).loadUnaligned(as: SIMD8<Int32>.self)
+            let f = SIMD8<UInt32>(truncatingIfNeeded: pointwiseMax(one, hi &- lo))
+            UnsafeMutableRawPointer(freqP + sIdx).storeBytes(of: f, as: SIMD8<UInt32>.self)
+            accT &+= f
+            sIdx += 8
+        }
+        totalFreq = accT.wrappedSum()
         while sIdx < totalSyms {
-            let f = UInt32(max(1, rawCum[sIdx + 1] - rawCum[sIdx]))
-            freqs[sIdx] = f
+            let f = UInt32(max(1, rawP[sIdx + 1] - rawP[sIdx]))
+            freqP[sIdx] = f
             totalFreq += f
             sIdx += 1
         }
 
-        // Normalize sum of frequencies to exactly 4096
+        // Normalize sum of frequencies to exactly 4096.
+        // The over-total branch is a data-dependent argmax loop (each pass
+        // reads the previous subtraction), so it stays scalar.
         if totalFreq != rANSContextScale {
             if totalFreq < rANSContextScale {
                 let diff = rANSContextScale - totalFreq
                 let centerSym = Int(max(0, min(128, (muQ12 >> 12) + M)))
-                freqs[centerSym] += diff
+                freqP[centerSym] += diff
             } else {
                 var diff = totalFreq - rANSContextScale
                 while 0 < diff {
@@ -364,8 +464,8 @@ final class rANSContextWorkspace: @unchecked Sendable {
                     var maxVal: UInt32 = 0
                     var i = 0
                     while i < totalSyms {
-                        if maxVal < freqs[i] {
-                            maxVal = freqs[i]
+                        if maxVal < freqP[i] {
+                            maxVal = freqP[i]
                             maxIdx = i
                         }
                         i += 1
@@ -374,23 +474,27 @@ final class rANSContextWorkspace: @unchecked Sendable {
                         break
                     }
                     let sub = min(diff, maxVal - 1)
-                    freqs[maxIdx] -= sub
+                    freqP[maxIdx] -= sub
                     diff -= sub
                 }
             }
         }
 
+        // Cumulative CDF is a sequential prefix sum: stays scalar.
         var cum: UInt32 = 0
-        cumFreqs[0] = 0
+        cumP[0] = 0
         var cIdx = 0
         while cIdx < totalSyms {
-            cum += freqs[cIdx]
-            cumFreqs[cIdx + 1] = cum
+            cum += freqP[cIdx]
+            cumP[cIdx + 1] = cum
             cIdx += 1
         }
     }
 
     /// Neural Predictor: extracts features and runs MLP in Q12 fixed-point.
+    /// featP/hiddenP are the workspace feat/hidden buffers and w1AllP/b1AllP/
+    /// w2AllP the rANSContextFlatWeights arrays, all borrowed once by the
+    /// caller outside its plane loop (rule 12'(j)).
     @inline(__always)
     func predict(
         pos: Int,
@@ -400,18 +504,23 @@ final class rANSContextWorkspace: @unchecked Sendable {
         tempCoeffs: UnsafePointer<Int16>?,
         isPFrame: Bool,
         plane: Int,
-        qstep: Int32
+        qstep: Int32,
+        featP: UnsafeMutablePointer<Int32>,
+        hiddenP: UnsafeMutablePointer<Int32>,
+        w1AllP: UnsafePointer<Int32>,
+        b1AllP: UnsafePointer<Int32>,
+        w2AllP: UnsafePointer<Int32>
     ) -> (mu: Int32, invScale: Int32) {
         var fCount = 0
 
         // 1. Bias
-        feat[fCount] = 4096
+        featP[fCount] = 4096
         fCount += 1
 
         // 2. Causal intra-block coefficients (pos 0..pos-1) scaled by 1/16 (Q12 * 1/16 = * 256)
         var i = 0
         while i < pos {
-            feat[fCount] = Int32(blockCoeffs[i]) << 8
+            featP[fCount] = Int32(blockCoeffs[i]) << 8
             fCount += 1
             i += 1
         }
@@ -421,14 +530,14 @@ final class rANSContextWorkspace: @unchecked Sendable {
         if let top = topCoeffs {
             var k = 0
             while k < 16 {
-                feat[fCount] = Int32(top[k]) << 8
+                featP[fCount] = Int32(top[k]) << 8
                 fCount += 1
                 k += 1
             }
         } else {
             var k = 0
             while k < 16 {
-                feat[fCount] = 0
+                featP[fCount] = 0
                 fCount += 1
                 k += 1
             }
@@ -439,14 +548,14 @@ final class rANSContextWorkspace: @unchecked Sendable {
         if let left = leftCoeffs {
             var k = 0
             while k < 16 {
-                feat[fCount] = Int32(left[k]) << 8
+                featP[fCount] = Int32(left[k]) << 8
                 fCount += 1
                 k += 1
             }
         } else {
             var k = 0
             while k < 16 {
-                feat[fCount] = 0
+                featP[fCount] = 0
                 fCount += 1
                 k += 1
             }
@@ -457,14 +566,14 @@ final class rANSContextWorkspace: @unchecked Sendable {
         if let temp = tempCoeffs {
             var k = 0
             while k < 16 {
-                feat[fCount] = Int32(temp[k]) << 8
+                featP[fCount] = Int32(temp[k]) << 8
                 fCount += 1
                 k += 1
             }
         } else {
             var k = 0
             while k < 16 {
-                feat[fCount] = 0
+                featP[fCount] = 0
                 fCount += 1
                 k += 1
             }
@@ -472,77 +581,99 @@ final class rANSContextWorkspace: @unchecked Sendable {
 
         // 6. isP
         if isPFrame {
-            feat[fCount] = 4096
+            featP[fCount] = 4096
         } else {
-            feat[fCount] = 0
+            featP[fCount] = 0
         }
         fCount += 1
 
         // 7. plane
-        feat[fCount] = Int32(plane) * 2048
+        featP[fCount] = Int32(plane) * 2048
         fCount += 1
 
         // 8. logQ
         let logQDouble = log2(max(1.0, Double(qstep)))
         let logQQ12 = Int32(round(((logQDouble - 12.0) / 4.0) * 4096.0))
-        feat[fCount] = logQQ12
+        featP[fCount] = logQQ12
         fCount += 1
 
         // 9. Flags
         if topAvail {
-            feat[fCount] = 4096
+            featP[fCount] = 4096
         } else {
-            feat[fCount] = 0
+            featP[fCount] = 0
         }
         fCount += 1
 
         if leftAvail {
-            feat[fCount] = 4096
+            featP[fCount] = 4096
         } else {
-            feat[fCount] = 0
+            featP[fCount] = 0
         }
         fCount += 1
 
         if tempAvail {
-            feat[fCount] = 4096
+            featP[fCount] = 4096
         } else {
-            feat[fCount] = 0
+            featP[fCount] = 0
         }
         fCount += 1
 
         // 10. Position embeddings
-        feat[fCount] = (Int32(pos / 4) * 4096) / 3
+        featP[fCount] = (Int32(pos / 4) * 4096) / 3
         fCount += 1
-        feat[fCount] = (Int32(pos % 4) * 4096) / 3
+        featP[fCount] = (Int32(pos % 4) * 4096) / 3
         fCount += 1
 
         let inDim = fCount
-        let w1Flat = weights.w1FlatQ[pos]
-        let b1 = weights.b1Q[pos]
-        let w2 = weights.w2Q[pos]
-        let b2 = weights.b2Q[pos]
-        let invScale = weights.invScalesQ[pos]
+        let w1P = w1AllP + flatWeights.w1Offsets[pos]
+        let b1P = b1AllP + (pos * 32)
+        let w2P = w2AllP + (pos * 32)
+        let b2 = flatWeights.b2Q[pos]
+        let invScale = flatWeights.invScalesQ[pos]
 
+        // Int64 lane accumulators cannot wrap: |w1|,|w2| <= 6300 (< 2^13) and
+        // |feat| <= 32767 << 8 (< 2^23), so a layer-1 product is < 2^36 and any
+        // partial sum of <= 96 products stays < 2^43; |hidden| < 2^31, so a
+        // layer-2 partial sum of 32 products stays < 2^49. The dot-product sum
+        // is therefore order-independent and matches the scalar loop exactly.
         var h = 0
         while h < 32 {
-            var sum: Int64 = Int64(b1[h]) << 12
-            let offset = h * inDim
+            let rowP = w1P + (h * inDim)
+            var acc = SIMD8<Int64>()
             var d = 0
+            while d + 16 <= inDim {
+                let wv = UnsafeRawPointer(rowP + d).loadUnaligned(as: SIMD16<Int32>.self)
+                let fv = UnsafeRawPointer(featP + d).loadUnaligned(as: SIMD16<Int32>.self)
+                acc &+= SIMD8<Int64>(truncatingIfNeeded: wv.lowHalf) &* SIMD8<Int64>(truncatingIfNeeded: fv.lowHalf)
+                acc &+= SIMD8<Int64>(truncatingIfNeeded: wv.highHalf) &* SIMD8<Int64>(truncatingIfNeeded: fv.highHalf)
+                d += 16
+            }
+            if d + 8 <= inDim {
+                let wv = UnsafeRawPointer(rowP + d).loadUnaligned(as: SIMD8<Int32>.self)
+                let fv = UnsafeRawPointer(featP + d).loadUnaligned(as: SIMD8<Int32>.self)
+                acc &+= SIMD8<Int64>(truncatingIfNeeded: wv) &* SIMD8<Int64>(truncatingIfNeeded: fv)
+                d += 8
+            }
+            var sum: Int64 = (Int64(b1P[h]) << 12) + acc.wrappedSum()
             while d < inDim {
-                sum += Int64(w1Flat[offset + d]) * Int64(feat[d])
+                sum += Int64(rowP[d]) * Int64(featP[d])
                 d += 1
             }
             let zQ = Int32(sum >> 12)
-            hidden[h] = tables.fastGELUQ12(zQ)
+            hiddenP[h] = tables.fastGELUQ12(zQ)
             h += 1
         }
 
-        var muAcc: Int64 = Int64(b2) << 12
-        var h2 = 0
-        while h2 < 32 {
-            muAcc += Int64(w2[h2]) * Int64(hidden[h2])
-            h2 += 1
-        }
+        let hLo = UnsafeRawPointer(hiddenP).loadUnaligned(as: SIMD16<Int32>.self)
+        let hHi = UnsafeRawPointer(hiddenP + 16).loadUnaligned(as: SIMD16<Int32>.self)
+        let wLo = UnsafeRawPointer(w2P).loadUnaligned(as: SIMD16<Int32>.self)
+        let wHi = UnsafeRawPointer(w2P + 16).loadUnaligned(as: SIMD16<Int32>.self)
+        var acc2 = SIMD8<Int64>(truncatingIfNeeded: hLo.lowHalf) &* SIMD8<Int64>(truncatingIfNeeded: wLo.lowHalf)
+        acc2 &+= SIMD8<Int64>(truncatingIfNeeded: hLo.highHalf) &* SIMD8<Int64>(truncatingIfNeeded: wLo.highHalf)
+        acc2 &+= SIMD8<Int64>(truncatingIfNeeded: hHi.lowHalf) &* SIMD8<Int64>(truncatingIfNeeded: wHi.lowHalf)
+        acc2 &+= SIMD8<Int64>(truncatingIfNeeded: hHi.highHalf) &* SIMD8<Int64>(truncatingIfNeeded: wHi.highHalf)
+        let muAcc = (Int64(b2) << 12) + acc2.wrappedSum()
         let mu = Int32(muAcc >> 12)
 
         return (mu, invScale)

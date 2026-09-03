@@ -344,16 +344,27 @@ final class Profile0x02Tests: XCTestCase {
         let ws = rANSContextWorkspace()
         let coeffs: [Int16] = [10, 0, 0, 0,  2, 1, 0, 0,  1, 0, 0, 0,  0, 0, 0, 0]
         let c4h = coeffs.withUnsafeBufferPointer { estimate4HTailBits(blockCoeffs: $0.baseAddress!) }
-        let cModel = coeffs.withUnsafeBufferPointer {
-            ws.estimateModelTailBits(
-                blockCoeffs: $0.baseAddress!,
-                topCoeffs: nil,
-                leftCoeffs: nil,
-                tempCoeffs: nil,
-                isPFrame: true,
-                plane: 0,
-                qstep: 4096
-            )
+        let flat = ws.flatWeights
+        let cModel = coeffs.withUnsafeBufferPointer { cP in
+            withUnsafePointers(mut: &ws.feat, mut: &ws.hidden, mut: &ws.rawCum, mut: &ws.freqs, mut: &ws.cumFreqs, flat.w1All, flat.b1All, flat.w2All) { featP, hiddenP, rawP, freqP, cumP, w1P, b1P, w2P in
+                ws.estimateModelTailBits(
+                    blockCoeffs: cP.baseAddress!,
+                    topCoeffs: nil,
+                    leftCoeffs: nil,
+                    tempCoeffs: nil,
+                    isPFrame: true,
+                    plane: 0,
+                    qstep: 4096,
+                    featP: featP,
+                    hiddenP: hiddenP,
+                    rawP: rawP,
+                    freqP: freqP,
+                    cumP: cumP,
+                    w1AllP: w1P,
+                    b1AllP: b1P,
+                    w2AllP: w2P
+                )
+            }
         }
         print("=== Diagnostic: 4H=\(c4h) bits, Model=\(cModel) bits ===")
         XCTAssertLessThan(0, c4h)

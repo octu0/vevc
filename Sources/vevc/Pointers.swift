@@ -664,6 +664,32 @@ internal func withUnsafePointers<T1, T2, T3, T4, T5, T6, R>(
     }
 }
 
+@inline(__always)
+internal func withUnsafePointers<T1, T2, R>(
+    mut a: inout [T1], mut b: inout [T1], mut c: inout [T1],
+    mut d: inout [T2], mut e: inout [T2],
+    _ f: [T1], _ g: [T1], _ h: [T1],
+    _ body: (UnsafeMutablePointer<T1>, UnsafeMutablePointer<T1>, UnsafeMutablePointer<T1>, UnsafeMutablePointer<T2>, UnsafeMutablePointer<T2>, UnsafePointer<T1>, UnsafePointer<T1>, UnsafePointer<T1>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeMutableBufferPointer { pA in
+        try b.withUnsafeMutableBufferPointer { pB in
+            try c.withUnsafeMutableBufferPointer { pC in
+                try d.withUnsafeMutableBufferPointer { pD in
+                    try e.withUnsafeMutableBufferPointer { pE in
+                        try f.withUnsafeBufferPointer { pF in
+                            try g.withUnsafeBufferPointer { pG in
+                                try h.withUnsafeBufferPointer { pH in
+                                    try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!, pE.baseAddress!, pF.baseAddress!, pG.baseAddress!, pH.baseAddress!)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Copies the three Y/Cb/Cr plane buffers in a single borrow.
 @inline(__always)
 internal func copyPlaneBuffers<T>(
