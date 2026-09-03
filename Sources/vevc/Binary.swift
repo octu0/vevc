@@ -47,6 +47,20 @@ public func readUInt32BEFromBytes(_ r: [UInt8], offset: inout Int) throws -> UIn
     return val
 }
 
+/// Unchecked big-endian load for hot decode loops. No bounds check: the
+/// caller must guarantee 2 readable bytes at `p`.
+@inline(__always)
+internal func loadUInt16BE(_ p: UnsafePointer<UInt8>) -> UInt16 {
+    return (UInt16(p[0]) << 8) | UInt16(p[1])
+}
+
+/// Unchecked big-endian load for hot decode loops. No bounds check: the
+/// caller must guarantee 4 readable bytes at `p`.
+@inline(__always)
+internal func loadUInt32BE(_ p: UnsafePointer<UInt8>) -> UInt32 {
+    return (UInt32(p[0]) << 24) | (UInt32(p[1]) << 16) | (UInt32(p[2]) << 8) | UInt32(p[3])
+}
+
 @inline(__always)
 internal func readUInt16BEFromPtr(_ base: UnsafePointer<UInt8>, offset: inout Int, count: Int) throws -> UInt16 {
     guard offset + 2 <= count else { throw BinaryError.insufficientData(message: "readUInt16BEFromPtr") }

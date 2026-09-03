@@ -233,17 +233,8 @@ final class rANSContextWorkspace: @unchecked Sendable {
         if totalBytes < 8 {
             throw DecodeError.insufficientData
         }
-        let e0 = UInt32(inputPtr[0])
-        let e1 = UInt32(inputPtr[1])
-        let e2 = UInt32(inputPtr[2])
-        let e3 = UInt32(inputPtr[3])
-        let escCount = Int((e0 << 24) | (e1 << 16) | (e2 << 8) | e3)
-
-        let s0 = UInt32(inputPtr[4])
-        let s1 = UInt32(inputPtr[5])
-        let s2 = UInt32(inputPtr[6])
-        let s3 = UInt32(inputPtr[7])
-        decodePlaneState = (s0 << 24) | (s1 << 16) | (s2 << 8) | s3
+        let escCount = Int(loadUInt32BE(inputPtr))
+        decodePlaneState = loadUInt32BE(inputPtr + 4)
 
         let wordsStart = inputPtr + 8
         let wordsBytes = totalBytes - 8 - escCount
@@ -277,7 +268,7 @@ final class rANSContextWorkspace: @unchecked Sendable {
         decodePlaneState = (freq * (decodePlaneState >> rANSContextScaleBits)) + (decodePlaneState & mask) - cumFreq
         while decodePlaneState < rANSContextLBound {
             if decodeWordPtr + 1 < decodeWordEndPtr {
-                let w = (UInt32(decodeWordPtr[0]) << 8) | UInt32(decodeWordPtr[1])
+                let w = UInt32(loadUInt16BE(decodeWordPtr))
                 decodeWordPtr = decodeWordPtr + 2
                 decodePlaneState = (decodePlaneState << 16) | w
             } else {
@@ -291,7 +282,7 @@ final class rANSContextWorkspace: @unchecked Sendable {
     @inline(__always)
     func planeDecodeEscape() -> Int16 {
         if decodeEscapePtr + 1 < decodeEscapeEndPtr {
-            let w = (UInt16(decodeEscapePtr[0]) << 8) | UInt16(decodeEscapePtr[1])
+            let w = loadUInt16BE(decodeEscapePtr)
             decodeEscapePtr = decodeEscapePtr + 2
             return Int16(bitPattern: w)
         }

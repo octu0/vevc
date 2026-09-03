@@ -938,11 +938,7 @@ func decodePlaneBaseSubbands8WithSkipMap(
             throw DecodeError.insufficientData
         }
 
-        let m0 = UInt32(base[consumed])
-        let m1 = UInt32(base[consumed + 1])
-        let m2 = UInt32(base[consumed + 2])
-        let m3 = UInt32(base[consumed + 3])
-        let modelSize = Int((m0 << 24) | (m1 << 16) | (m2 << 8) | m3)
+        let modelSize = Int(loadUInt32BE(base + consumed))
         let modelStart = consumed + 4
         let entropyStart = modelStart + modelSize
 

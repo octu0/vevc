@@ -215,18 +215,11 @@ class PlayerViewModel: ObservableObject {
         }
     }
     
-    private func readUInt16BE(_ bytes: [UInt8], offset: inout Int) throws -> UInt16 {
-        guard offset + 1 < bytes.count else { throw NSError(domain: "Player", code: 2, userInfo: nil) }
-        let val = (UInt16(bytes[offset]) << 8) | UInt16(bytes[offset+1])
-        offset += 2
-        return val
-    }
-    
     private func splitFrameChunk(_ chunk: [UInt8], maxLayer: Int, profile: UInt8) throws -> [UInt8] {
         var offset = 0
         if offset + 4 <= chunk.count && chunk[offset] == 0x56 && chunk[offset+1] == 0x45 && chunk[offset+2] == 0x56 && chunk[offset+3] == 0x43 {
             offset += 4
-            let metadataSize = Int(try readUInt16BE(chunk, offset: &offset))
+            let metadataSize = Int(try readUInt16BEFromBytes(chunk, offset: &offset))
             offset += metadataSize
         }
         
@@ -306,7 +299,7 @@ class PlayerViewModel: ObservableObject {
         if offset + 4 <= vevcData.count && vevcData[offset] == 0x56 && vevcData[offset+1] == 0x45 && vevcData[offset+2] == 0x56 && vevcData[offset+3] == 0x43 {
             let headerStart = offset
             offset += 4
-            let metadataSize = Int(try readUInt16BE(vevcData, offset: &offset))
+            let metadataSize = Int(try readUInt16BEFromBytes(vevcData, offset: &offset))
             offset += metadataSize
             if offset <= vevcData.count {
                 headerChunk = Array(vevcData[headerStart..<offset])

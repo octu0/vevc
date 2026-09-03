@@ -368,13 +368,7 @@ struct rANSDecoder {
         self.state = 0
         
         if 4 <= count {
-            let b0 = UInt32(base[0])
-            let b1 = UInt32(base[1])
-            let b2 = UInt32(base[2])
-            let b3 = UInt32(base[3])
-            let w1 = (b0 << 8) | b1
-            let w0 = (b2 << 8) | b3
-            self.state = (w1 << 16) | w0
+            self.state = loadUInt32BE(base)
             self.offset = 4
         }
     }
@@ -391,9 +385,7 @@ struct rANSDecoder {
         
         while state < rANSL {
             if offset + 1 < count {
-                let b0 = UInt32(base[offset])
-                let b1 = UInt32(base[offset + 1])
-                let word = (b0 << 8) | b1
+                let word = UInt32(loadUInt16BE(base + offset))
                 offset += 2
                 state = (state << 16) | word
             } else {
@@ -497,20 +489,11 @@ struct Interleaved4rANSDecoder {
         self.states = (rANSL, rANSL, rANSL, rANSL)
         
         guard 16 <= count else { return }
-        
-        @inline(__always)
-        func readState(_ off: Int) -> UInt32 {
-            let b0 = UInt32(base[off])
-            let b1 = UInt32(base[off + 1])
-            let b2 = UInt32(base[off + 2])
-            let b3 = UInt32(base[off + 3])
-            return (b0 << 24) | (b1 << 16) | (b2 << 8) | b3
-        }
-        
-        self.states.0 = readState(0)
-        self.states.1 = readState(4)
-        self.states.2 = readState(8)
-        self.states.3 = readState(12)
+
+        self.states.0 = loadUInt32BE(base)
+        self.states.1 = loadUInt32BE(base + 4)
+        self.states.2 = loadUInt32BE(base + 8)
+        self.states.3 = loadUInt32BE(base + 12)
         self.offset = 16
     }
     
@@ -529,10 +512,8 @@ struct Interleaved4rANSDecoder {
     @inline(__always)
     private mutating func readWord() -> UInt32 {
         if offset + 1 < count {
-            let b0 = UInt32(base[offset])
-            let b1 = UInt32(base[offset + 1])
             offset += 2
-            return (b0 << 8) | b1
+            return UInt32(loadUInt16BE(base + offset - 2))
         }
         return 0
     }
