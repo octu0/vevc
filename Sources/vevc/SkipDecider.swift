@@ -79,42 +79,6 @@ func skipDeciderNormalizeWithWeights(_ x: UnsafePointer<Int32>, _ w: SkipDecider
     }
 }
 
-/// One forward pass. int8-range weights, Int32 accumulation, ReLU, arithmetic
-/// shift requantization. Returns 1 for "skip is safe here", 0 for "code it".
-@inline(__always)
-func skipDeciderClassify(
-    _ q: UnsafePointer<Int32>,
-    w1: UnsafePointer<Int32>,
-    b1: UnsafePointer<Int32>,
-    w2: UnsafePointer<Int32>,
-    b2: [Int32],
-    f: Int,
-    h: Int,
-    shift1: Int32,
-    hbuf: UnsafeMutablePointer<Int32>
-) -> Int {
-    let q0 = UnsafeRawPointer(q).loadUnaligned(as: SIMD16<Int32>.self)
-    let q1 = UnsafeRawPointer(q.advanced(by: 16)).loadUnaligned(as: SIMD4<Int32>.self)
-    var hVec = SIMD16<Int32>()
-    for i in 0..<h {
-        let rowPtr = w1 + (i * f)
-        let wRow0 = UnsafeRawPointer(rowPtr).loadUnaligned(as: SIMD16<Int32>.self)
-        let wRow1 = UnsafeRawPointer(rowPtr.advanced(by: 16)).loadUnaligned(as: SIMD4<Int32>.self)
-        let dot = (wRow0 &* q0).wrappedSum() &+ (wRow1 &* q1).wrappedSum()
-        let acc = (b1[i] &+ dot) >> shift1
-        let relu = max(0, acc)
-        hbuf[i] = relu
-        hVec[i] = relu
-    }
-    let w2_0 = UnsafeRawPointer(w2).loadUnaligned(as: SIMD16<Int32>.self)
-    let w2_1 = UnsafeRawPointer(w2.advanced(by: h)).loadUnaligned(as: SIMD16<Int32>.self)
-    let o0 = b2[0] &+ (w2_0 &* hVec).wrappedSum()
-    let o1 = b2[1] &+ (w2_1 &* hVec).wrappedSum()
-    if o0 < o1 {
-        return 1
-    }
-    return 0
-}
 
 /// BitNet b1.58 ternary-weight forward pass (multiplication-free in hidden inner product).
 @inline(__always)
@@ -156,7 +120,7 @@ func skipDeciderClassifyBitNet(
 }
 
 /// Fast exact SIMD forward pass. Precomputed weight vectors and single-pass output difference.
-/// Guaranteed bit-identical to skipDeciderClassify with zero heap/buffer allocations.
+/// Guaranteed bit-identical with zero heap/buffer allocations.
 @inline(__always)
 func skipDeciderClassifyFast(
     _ q: UnsafePointer<Int32>,
@@ -177,13 +141,6 @@ func skipDeciderClassifyFast(
         return 1
     }
     return 0
-}
-
-@inline(__always)
-func skipDeciderClassifyWithWeights(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
-    return withUnsafePointers(w.w1, w.b1, w.w2) { w1, b1, w2 in
-        skipDeciderClassify(q, w1: w1, b1: b1, w2: w2, b2: w.b2, f: w.f, h: w.h, shift1: w.shift1, hbuf: hbuf)
-    }
 }
 
 /// Zero-motion SAD of one 32x32 luma block plus its two 16x16 chroma blocks
@@ -281,8 +238,6 @@ final class SkipDecider: @unchecked Sendable {
     let weights: SkipDeciderWeights
 
     private var blockCount = -1
-    // blockCount * SkipDeciderFeature.count
-    private var feat: [Int32] = []
     /// Column 16/17 carriers: this decider's own answer and column 0 for each
     /// block one frame ago. Written every P-frame, read by the next one.
     private var prevLabel: [Int32] = []
@@ -301,7 +256,7 @@ final class SkipDecider: @unchecked Sendable {
     static func make() -> SkipDecider? {
         guard let w = SkipDeciderWeights.parse(SkipDeciderWeightsData.blob) else { return nil }
         if w.f != SkipDeciderFeature.count { return nil }
-        // The SIMD forward pass in skipDeciderClassify hardcodes a 16-lane
+        // The SIMD forward pass in skipDeciderClassifyFast hardcodes a 16-lane
         // hidden layer: a wider one traps on the lane store and a narrower
         // one reads past the end of w2. Reject any retrained weights whose
         // hidden width no longer matches instead of running them.
@@ -317,7 +272,6 @@ final class SkipDecider: @unchecked Sendable {
     private func ensure(_ n: Int) {
         if blockCount == n { return }
         blockCount = n
-        feat = [Int32](repeating: 0, count: n * SkipDeciderFeature.count)
         prevLabel = [Int32](repeating: -1, count: n)
         prevSad0 = [Int32](repeating: -1, count: n)
         curLabel = [Int32](repeating: -1, count: n)
@@ -382,29 +336,25 @@ final class SkipDecider: @unchecked Sendable {
                     results.reserveCapacity(batchEnd - batchStart)
                     var rowBuf = [Int32](repeating: 0, count: featCount)
                     var q = [Int32](repeating: 0, count: wt.f)
-                    withUnsafeMutablePointer(to: &rowBuf[0]) { rowBase in
-                        withUnsafeMutablePointer(to: &q[0]) { qBase in
-                            withUnsafePointers(wt.mu, wt.scale) { mu, scale in
-                                var i = batchStart
-                                while i < batchEnd {
-                                    let bx = (i % bw) * 32
-                                    let by = (i / bw) * 32
-                                    SkipDecider.extractRow(
-                                        into: rowBase,
-                                        i: i, inputs: inputs, bw: bw, bx: bx, by: by,
-                                        width: width, height: height,
-                                        skipMap: ruleMap, refDirs: ruleRefDirs,
-                                        prevLabel: prevLabelConst, prevSad0: prevSad0Const,
-                                        src: src, pRef: pRef, lRef: lRef
-                                    )
-                                    let s0 = rowBase[0]
-                                    let s1 = rowBase[1]
-                                    skipDeciderNormalize(rowBase, mu: mu, scale: scale, normShift: wt.normShift, n: wt.f, into: qBase)
-                                    let decision = skipDeciderClassifyFast(qBase, weights: wt)
-                                    results.append(SkipDeciderBlockResult(sad0: s0, sad1: s1, label: Int32(decision)))
-                                    i += 1
-                                }
-                            }
+                    withUnsafePointers(mut: &rowBuf, mut: &q, wt.mu, wt.scale) { rowBase, qBase, mu, scale in
+                        var i = batchStart
+                        while i < batchEnd {
+                            let bx = (i % bw) * 32
+                            let by = (i / bw) * 32
+                            SkipDecider.extractRow(
+                                into: rowBase,
+                                i: i, inputs: inputs, bw: bw, bx: bx, by: by,
+                                width: width, height: height,
+                                skipMap: ruleMap, refDirs: ruleRefDirs,
+                                prevLabel: prevLabelConst, prevSad0: prevSad0Const,
+                                src: src, pRef: pRef, lRef: lRef
+                            )
+                            let s0 = rowBase[0]
+                            let s1 = rowBase[1]
+                            skipDeciderNormalize(rowBase, mu: mu, scale: scale, normShift: wt.normShift, n: wt.f, into: qBase)
+                            let decision = skipDeciderClassifyFast(qBase, weights: wt)
+                            results.append(SkipDeciderBlockResult(sad0: s0, sad1: s1, label: Int32(decision)))
+                            i += 1
                         }
                     }
                     return (batchStart, results)

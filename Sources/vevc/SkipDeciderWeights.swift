@@ -37,8 +37,8 @@ struct SkipDeciderWeights: Sendable {
         if a[1] != 1 { return nil }        // int8 MLP is the only kind adopted
         let f = Int(a[2])
         let h = Int(a[3])
-        if f < 1 { return nil }
-        if h < 1 { return nil }
+        if f != 20 { return nil }
+        if h != 16 { return nil }
         var p = 5
         func take(_ n: Int) -> [Int32] {
             if a.count < p + n { return [] }
