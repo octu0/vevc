@@ -280,6 +280,7 @@ actor LayersEncodeActor {
     private var firstInputPlane: PlaneData420?
     private var releaseFirstInput: (@Sendable () -> Void)?
     private var staticCounters: [Int] = []
+    private let meMembrane: MEMembraneState
     private var cachedNextSub2: [Int16]?
     private var cachedNextSub1: [Int16]?
     var entropyHistories: FrameEntropyHistories? // internal for history-consistency gate tests
@@ -343,6 +344,7 @@ actor LayersEncodeActor {
         let bw = (width + 31) / 32
         let bh = (height + 31) / 32
         self.staticCounters = [Int](repeating: 0, count: bw * bh)
+        self.meMembrane = MEMembraneState(count: bw * bh)
     }
 
     deinit {
@@ -478,6 +480,7 @@ actor LayersEncodeActor {
                 if syntaxContext == nil { syntaxContext = SyntaxContextModels() }
                 syntaxContext?.reset()
             }
+            meMembrane.reset()
 
             let qtY = QuantizationTable(baseStep: max(16, baseStep), isChroma: false, layerIndex: 0)
             let qtC = QuantizationTable(baseStep: max(16, baseStep), isChroma: true, layerIndex: 0)
@@ -741,7 +744,8 @@ actor LayersEncodeActor {
                 updateL0Prev: updateL0,
                 skipModel: self.skipDecider,
                 ransContextWorkspace: self.ransContextWorkspace,
-                dumpWriter: self.dumpWriter
+                dumpWriter: self.dumpWriter,
+                membrane: self.meMembrane
             )
             self.staticCounters = localCounters
             encoded = (bytes, recon, mvs, sads, releaseRecon, nSub2, nSub1)
@@ -761,14 +765,16 @@ actor LayersEncodeActor {
                     maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                     roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
                     cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
-                    dumpWriter: dw
+                    dumpWriter: dw,
+                    membrane: self.meMembrane
                 )
             } else {
                 encoded = try await encodeSpatialLayers(
                     pd: plane, pool: pool, predictedPd: refPrevRecon, nextPd: firstRecon, prevInput: refPrevIn, ltrInput: firstIn, prevMVs: refPrevMVs,
                     maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                     roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
-                    cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
+                    cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
+                    membrane: self.meMembrane
                 )
             }
             interRatioQ8 = 0
@@ -847,6 +853,7 @@ actor LayersEncodeActor {
             for i in 0..<self.staticCounters.count {
                 self.staticCounters[i] = 0
             }
+            self.meMembrane.reset()
             framesSinceLtrUpdate = 0
             cachedNextSub2 = nil
             cachedNextSub1 = nil
