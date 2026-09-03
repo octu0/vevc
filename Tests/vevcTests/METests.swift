@@ -45,4 +45,36 @@ struct METests {
         // penalty = 150
         #expect(penalty == 150)
     }
+
+    @Test("MEMembraneState accumulates and resets potentials correctly")
+    func testMEMembraneStateUpdateAndReset() {
+        let mem = MEMembraneState(count: 4)
+        #expect(mem.potentials.count == 4)
+        for p in mem.potentials {
+            #expect(p == 0)
+        }
+
+        let mvs = MotionVectors(dx: [0, 0, 4, 0], dy: [0, 0, 0, 0])
+        let refDirs = [true, false, false, false]
+        let skipMap: [BlockMode] = [.inter, .inter, .inter, .skip_ltr]
+
+        mem.update(mvs: mvs, refDirs: refDirs, skipMap: skipMap)
+        #expect(mem.potentials[0] == 3)
+        #expect(mem.potentials[1] == 1)
+        #expect(mem.potentials[2] == -2)
+        #expect(mem.potentials[3] == 3)
+
+        for _ in 0..<5 {
+            mem.update(mvs: mvs, refDirs: refDirs, skipMap: skipMap)
+        }
+        #expect(mem.potentials[0] == 8)
+        #expect(mem.potentials[1] == 6)
+        #expect(mem.potentials[2] == -8)
+        #expect(mem.potentials[3] == 8)
+
+        mem.reset()
+        for p in mem.potentials {
+            #expect(p == 0)
+        }
+    }
 }
