@@ -116,6 +116,69 @@ func skipDeciderClassify(
     return 0
 }
 
+/// BitNet b1.58 ternary-weight forward pass (multiplication-free in hidden inner product).
+@inline(__always)
+func skipDeciderClassifyBitNet(
+    _ q: UnsafePointer<Int32>,
+    weights w: SkipDeciderWeights,
+    hbuf: UnsafeMutablePointer<Int32>
+) -> Int {
+    let q0 = UnsafeRawPointer(q).loadUnaligned(as: SIMD16<Int32>.self)
+    let q1 = UnsafeRawPointer(q.advanced(by: 16)).loadUnaligned(as: SIMD4<Int32>.self)
+    var hVec = SIMD16<Int32>()
+    var i = 0
+    while i < w.h {
+        let p0 = w.w1PosMask0[i]
+        let n0 = w.w1NegMask0[i]
+        let p1 = w.w1PosMask1[i]
+        let n1 = w.w1NegMask1[i]
+        let posSum = (p0 & q0).wrappedSum() &+ (p1 & q1).wrappedSum()
+        let negSum = (n0 & q0).wrappedSum() &+ (n1 & q1).wrappedSum()
+        let dot = (posSum &- negSum) &* w.w1Alpha[i]
+        let acc = (w.b1[i] &+ dot) >> w.shift1
+        let relu = max(0, acc)
+        hbuf[i] = relu
+        hVec[i] = relu
+        i += 1
+    }
+    let p2_0 = w.w2PosMask[0]
+    let n2_0 = w.w2NegMask[0]
+    let p2_1 = w.w2PosMask[1]
+    let n2_1 = w.w2NegMask[1]
+    let sum2_0 = ((p2_0 & hVec).wrappedSum() &- (n2_0 & hVec).wrappedSum()) &* w.w2Alpha[0]
+    let sum2_1 = ((p2_1 & hVec).wrappedSum() &- (n2_1 & hVec).wrappedSum()) &* w.w2Alpha[1]
+    let o0 = w.b2[0] &+ sum2_0
+    let o1 = w.b2[1] &+ sum2_1
+    if o0 < o1 {
+        return 1
+    }
+    return 0
+}
+
+/// Fast exact SIMD forward pass. Precomputed weight vectors and single-pass output difference.
+/// Guaranteed bit-identical to skipDeciderClassify with zero heap/buffer allocations.
+@inline(__always)
+func skipDeciderClassifyFast(
+    _ q: UnsafePointer<Int32>,
+    weights w: SkipDeciderWeights
+) -> Int {
+    let q0 = UnsafeRawPointer(q).loadUnaligned(as: SIMD16<Int32>.self)
+    let q1 = UnsafeRawPointer(q.advanced(by: 16)).loadUnaligned(as: SIMD4<Int32>.self)
+    var hVec = SIMD16<Int32>()
+    var i = 0
+    while i < 16 {
+        let dot = (w.w1SIMD0[i] &* q0).wrappedSum() &+ (w.w1SIMD1[i] &* q1).wrappedSum()
+        let acc = (w.b1[i] &+ dot) >> w.shift1
+        hVec[i] = max(0, acc)
+        i += 1
+    }
+    let diff = w.b2Diff &+ (w.w2Diff &* hVec).wrappedSum()
+    if 0 < diff {
+        return 1
+    }
+    return 0
+}
+
 @inline(__always)
 func skipDeciderClassifyWithWeights(_ q: UnsafePointer<Int32>, _ w: SkipDeciderWeights, hbuf: UnsafeMutablePointer<Int32>) -> Int {
     return withUnsafePointers(w.w1, w.b1, w.w2) { w1, b1, w2 in
@@ -206,6 +269,12 @@ struct SkipDeciderFrameInputs {
     let ltrAge: Int
 }
 
+struct SkipDeciderBlockResult: Sendable {
+    let sad0: Int32
+    let sad1: Int32
+    let label: Int32
+}
+
 /// Per-encoder decider state. Owns every buffer inference touches, sized once
 /// per resolution, so a steady-state frame allocates nothing here.
 final class SkipDecider: @unchecked Sendable {
@@ -220,6 +289,11 @@ final class SkipDecider: @unchecked Sendable {
     private var prevSad0: [Int32] = []
     private var curLabel: [Int32] = []
     private var curSad0: [Int32] = []
+    /// SR-SkipDecider membrane potentials:
+    /// vStatic: static persistence potential [0, 8]
+    /// vDiv: divergence accumulation potential [0, 8]
+    private var vStatic: [Int32] = []
+    private var vDiv: [Int32] = []
 
     /// nil when the compiled-in table fails to parse, which leaves the encoder
     /// on its pre-model path rather than guessing.
@@ -248,6 +322,8 @@ final class SkipDecider: @unchecked Sendable {
         prevSad0 = [Int32](repeating: -1, count: n)
         curLabel = [Int32](repeating: -1, count: n)
         curSad0 = [Int32](repeating: -1, count: n)
+        vStatic = [Int32](repeating: 0, count: n)
+        vDiv = [Int32](repeating: 0, count: n)
     }
 
     /// Converts the blocks the decider calls skip-safe over one P-frame.
@@ -293,85 +369,68 @@ final class SkipDecider: @unchecked Sendable {
         let ltrCbWrapper = UnsafeSendablePointer(ptr: ltrRef.cb.withUnsafeBufferPointer { $0.baseAddress! })
         let ltrCrWrapper = UnsafeSendablePointer(ptr: ltrRef.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
-        let rowSlices = await withTaskGroup(of: (Int, [Int32]).self) { group in
+        let wt = weights
+        let fusedSlices = await withTaskGroup(of: (Int, [SkipDeciderBlockResult]).self) { group in
             for batchStart in stride(from: 0, to: n, by: batchSize) {
                 let batchEnd = min(batchStart + batchSize, n)
                 group.addTask { [inputs, ruleMap, ruleRefDirs, prevLabelConst, prevSad0Const] in
                     let src = PlanePointers(y: srcYWrapper.ptr, cb: srcCbWrapper.ptr, cr: srcCrWrapper.ptr)
                     let pRef = PlanePointers(y: prevYWrapper.ptr, cb: prevCbWrapper.ptr, cr: prevCrWrapper.ptr)
                     let lRef = PlanePointers(y: ltrYWrapper.ptr, cb: ltrCbWrapper.ptr, cr: ltrCrWrapper.ptr)
-                    var rows = [Int32](repeating: 0, count: (batchEnd - batchStart) * featCount)
-                    withUnsafePointers(mut: &rows) { rowsBase in
-                        for i in batchStart..<batchEnd {
-                            let bx = (i % bw) * 32
-                            let by = (i / bw) * 32
-                            SkipDecider.extractRow(
-                                into: rowsBase + ((i - batchStart) * featCount),
-                                i: i, inputs: inputs, bw: bw, bx: bx, by: by,
-                                width: width, height: height,
-                                skipMap: ruleMap, refDirs: ruleRefDirs,
-                                prevLabel: prevLabelConst, prevSad0: prevSad0Const,
-                                src: src, pRef: pRef, lRef: lRef
-                            )
-                        }
-                    }
-                    return (batchStart, rows)
-                }
-            }
-            var collected: [(Int, [Int32])] = []
-            for await r in group {
-                collected.append(r)
-            }
-            return collected
-        }
-        for (start, rows) in rowSlices {
-            feat.replaceSubrange((start * featCount)..<((start * featCount) + rows.count), with: rows)
-        }
 
-        let featWrapper = UnsafeSendablePointer(ptr: feat.withUnsafeBufferPointer { $0.baseAddress! })
-        let wt = weights
-        let labelSlices = await withTaskGroup(of: (Int, [Int32]).self) { group in
-            for batchStart in stride(from: 0, to: n, by: batchSize) {
-                let batchEnd = min(batchStart + batchSize, n)
-                group.addTask {
-                    var labels = [Int32](repeating: 0, count: batchEnd - batchStart)
+                    var results = [SkipDeciderBlockResult]()
+                    results.reserveCapacity(batchEnd - batchStart)
+                    var rowBuf = [Int32](repeating: 0, count: featCount)
                     var q = [Int32](repeating: 0, count: wt.f)
-                    var hbuf = [Int32](repeating: 0, count: wt.h)
-                    withUnsafePointers(mut: &labels, mut: &q, mut: &hbuf) { lb, qb, hb in
-                        withUnsafePointers(wt.w1, wt.b1, wt.w2) { w1, b1, w2 in
+                    withUnsafeMutablePointer(to: &rowBuf[0]) { rowBase in
+                        withUnsafeMutablePointer(to: &q[0]) { qBase in
                             withUnsafePointers(wt.mu, wt.scale) { mu, scale in
-                                let rows = featWrapper.ptr
-                                for i in batchStart..<batchEnd {
-                                    let row = rows + (i * featCount)
-                                    skipDeciderNormalize(row, mu: mu, scale: scale, normShift: wt.normShift, n: wt.f, into: qb)
-                                    let decision = skipDeciderClassify(qb, w1: w1, b1: b1, w2: w2, b2: wt.b2, f: wt.f, h: wt.h, shift1: wt.shift1, hbuf: hb)
-                                    lb[i - batchStart] = Int32(decision)
+                                var i = batchStart
+                                while i < batchEnd {
+                                    let bx = (i % bw) * 32
+                                    let by = (i / bw) * 32
+                                    SkipDecider.extractRow(
+                                        into: rowBase,
+                                        i: i, inputs: inputs, bw: bw, bx: bx, by: by,
+                                        width: width, height: height,
+                                        skipMap: ruleMap, refDirs: ruleRefDirs,
+                                        prevLabel: prevLabelConst, prevSad0: prevSad0Const,
+                                        src: src, pRef: pRef, lRef: lRef
+                                    )
+                                    let s0 = rowBase[0]
+                                    let s1 = rowBase[1]
+                                    skipDeciderNormalize(rowBase, mu: mu, scale: scale, normShift: wt.normShift, n: wt.f, into: qBase)
+                                    let decision = skipDeciderClassifyFast(qBase, weights: wt)
+                                    results.append(SkipDeciderBlockResult(sad0: s0, sad1: s1, label: Int32(decision)))
+                                    i += 1
                                 }
                             }
                         }
                     }
-                    return (batchStart, labels)
+                    return (batchStart, results)
                 }
             }
-            var collected: [(Int, [Int32])] = []
+            var collected: [(Int, [SkipDeciderBlockResult])] = []
             for await r in group {
                 collected.append(r)
             }
             return collected
         }
 
-        for (start, labels) in labelSlices {
-            for k in 0..<labels.count {
+        for (start, batchResults) in fusedSlices {
+            var k = 0
+            while k < batchResults.count {
                 let i = start + k
-                let base = i * featCount
-                curSad0[i] = feat[base + 0]
-                curLabel[i] = labels[k]
-                if ruleMap[i] != .inter || labels[k] != 1 {
+                let res = batchResults[k]
+                curSad0[i] = res.sad0
+                curLabel[i] = res.label
+                if ruleMap[i] != .inter || res.label != 1 {
+                    k += 1
                     continue
                 }
                 // Reference choice: whichever straight copy is closer
                 // to the source.
-                if feat[base + 0] <= feat[base + 1] {
+                if res.sad0 <= res.sad1 {
                     skipMap[i] = .skip_prev
                     refDirs[i] = false
                 } else {
@@ -380,6 +439,7 @@ final class SkipDecider: @unchecked Sendable {
                 }
                 mvs.dx[i] = 0
                 mvs.dy[i] = 0
+                k += 1
             }
         }
 
