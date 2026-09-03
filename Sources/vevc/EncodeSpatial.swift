@@ -229,25 +229,25 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
     let skipThresholdPerPixel = skipThreshold
     let prevStaticCounters = staticCounters
 
-    let curYWrapper = UnsafePointerWrapper(base: pd.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let curCbWrapper = UnsafePointerWrapper(base: pd.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let curCrWrapper = UnsafePointerWrapper(base: pd.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let curYWrapper = UnsafeSendablePointer(ptr: pd.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let curCbWrapper = UnsafeSendablePointer(ptr: pd.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let curCrWrapper = UnsafeSendablePointer(ptr: pd.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
-    let prevInYWrapper = UnsafePointerWrapper(base: prevInput.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let prevInCbWrapper = UnsafePointerWrapper(base: prevInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let prevInCrWrapper = UnsafePointerWrapper(base: prevInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInYWrapper = UnsafeSendablePointer(ptr: prevInput.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInCbWrapper = UnsafeSendablePointer(ptr: prevInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevInCrWrapper = UnsafeSendablePointer(ptr: prevInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
-    let ltrInYWrapper = UnsafePointerWrapper(base: ltrInput.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let ltrInCbWrapper = UnsafePointerWrapper(base: ltrInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let ltrInCrWrapper = UnsafePointerWrapper(base: ltrInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInYWrapper = UnsafeSendablePointer(ptr: ltrInput.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInCbWrapper = UnsafeSendablePointer(ptr: ltrInput.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrInCrWrapper = UnsafeSendablePointer(ptr: ltrInput.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
-    let prevReconYWrapper = UnsafePointerWrapper(base: predictedPd.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let prevReconCbWrapper = UnsafePointerWrapper(base: predictedPd.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let prevReconCrWrapper = UnsafePointerWrapper(base: predictedPd.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconYWrapper = UnsafeSendablePointer(ptr: predictedPd.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconCbWrapper = UnsafeSendablePointer(ptr: predictedPd.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let prevReconCrWrapper = UnsafeSendablePointer(ptr: predictedPd.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
-    let ltrReconYWrapper = UnsafePointerWrapper(base: ltrRecon.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let ltrReconCbWrapper = UnsafePointerWrapper(base: ltrRecon.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let ltrReconCrWrapper = UnsafePointerWrapper(base: ltrRecon.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrReconYWrapper = UnsafeSendablePointer(ptr: ltrRecon.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrReconCbWrapper = UnsafeSendablePointer(ptr: ltrRecon.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let ltrReconCrWrapper = UnsafeSendablePointer(ptr: ltrRecon.cr.withUnsafeBufferPointer { $0.baseAddress! })
 
     let matchResults = await withTaskGroup(of: [(Int, Bool, Bool, Bool)].self) { group in
         let batchSize = 128
@@ -257,11 +257,11 @@ func computeProfile2SkipMap(pd: PlaneData420, prevInput: PlaneData420, ltrInput:
                 var results = [(Int, Bool, Bool, Bool)]()
                 results.reserveCapacity(batchEnd - batchStart)
 
-                let curY = curYWrapper.base, curCb = curCbWrapper.base, curCr = curCrWrapper.base
-                let prevInY = prevInYWrapper.base, prevInCb = prevInCbWrapper.base, prevInCr = prevInCrWrapper.base
-                let ltrInY = ltrInYWrapper.base, ltrInCb = ltrInCbWrapper.base, ltrInCr = ltrInCrWrapper.base
-                let prevReconY = prevReconYWrapper.base, prevReconCb = prevReconCbWrapper.base, prevReconCr = prevReconCrWrapper.base
-                let ltrReconY = ltrReconYWrapper.base, ltrReconCb = ltrReconCbWrapper.base, ltrReconCr = ltrReconCrWrapper.base
+                let curY = curYWrapper.ptr, curCb = curCbWrapper.ptr, curCr = curCrWrapper.ptr
+                let prevInY = prevInYWrapper.ptr, prevInCb = prevInCbWrapper.ptr, prevInCr = prevInCrWrapper.ptr
+                let ltrInY = ltrInYWrapper.ptr, ltrInCb = ltrInCbWrapper.ptr, ltrInCr = ltrInCrWrapper.ptr
+                let prevReconY = prevReconYWrapper.ptr, prevReconCb = prevReconCbWrapper.ptr, prevReconCr = prevReconCrWrapper.ptr
+                let ltrReconY = ltrReconYWrapper.ptr, ltrReconCb = ltrReconCbWrapper.ptr, ltrReconCr = ltrReconCrWrapper.ptr
 
                 for i in batchStart..<batchEnd {
                     let bx = (i % bw) * 32

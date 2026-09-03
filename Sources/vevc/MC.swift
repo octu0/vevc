@@ -1030,10 +1030,6 @@ func scaledMV(_ mv: MotionVector, rightShift: Int) -> MotionVector {
     )
 }
 
-fileprivate struct SendableInt16Ptr: @unchecked Sendable {
-    let ptr: UnsafePointer<Int16>
-}
-
 @inline(__always)
 func applyScaledMotionCompensationLumaWithSkipMap(plane: inout [Int16], prevPlane: [Int16], mvs: MotionVectors, skipMap: [BlockMode], width: Int, height: Int, lumaBlockSize: Int, mvShift: Int, roundOffset: Int) async {
     let colCount = (width + lumaBlockSize - 1) / lumaBlockSize
@@ -1041,51 +1037,48 @@ func applyScaledMotionCompensationLumaWithSkipMap(plane: inout [Int16], prevPlan
     let maxMvIndex = mvs.count - 1
     let skipCount = skipMap.count
     
-    skipMap.withUnsafeBufferPointer { mapBuf in
-        let mapBase = mapBuf.baseAddress!
-        withUnsafePointers(mut: &plane, prevPlane, mvs.dx, mvs.dy) { dstBase, prevBase, dxBase, dyBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, maxMvIndex)
-                    let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
-                    if isSkip {
-                        let blockX = col * lumaBlockSize
-                        let blockY = row * lumaBlockSize
-                        let bw = min(lumaBlockSize, width - blockX)
-                        let bh = min(lumaBlockSize, height - blockY)
-                        switch bw {
-                        case 32:
+    withUnsafePointers(mut: &plane, prevPlane, mvs.dx, mvs.dy, skipMap) { dstBase, prevBase, dxBase, dyBase, mapBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, maxMvIndex)
+                let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
+                if isSkip {
+                    let blockX = col * lumaBlockSize
+                    let blockY = row * lumaBlockSize
+                    let bw = min(lumaBlockSize, width - blockX)
+                    let bh = min(lumaBlockSize, height - blockY)
+                    switch bw {
+                    case 32:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 16:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 8:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+                        }
+                    default:
+                        if 0 < bw && 0 < bh {
                             for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                                dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 16:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 8:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
-                            }
-                        default:
-                            if 0 < bw && 0 < bh {
-                                for y in 0..<bh {
-                                    let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                                    let srcPtr = prevBase.advanced(by: (blockY + y) * width + blockX)
-                                    dstPtr.update(from: srcPtr, count: bw)
-                                }
+                                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+                                let srcPtr = prevBase.advanced(by: (blockY + y) * width + blockX)
+                                dstPtr.update(from: srcPtr, count: bw)
                             }
                         }
-                    } else {
-                        let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
-                        addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                     }
+                } else {
+                    let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
+                    addMCBlockLuma32(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                 }
             }
         }
@@ -1116,51 +1109,48 @@ func applyScaledMotionCompensationChromaWithSkipMap(plane: inout [Int16], prevPl
     let maxMvIndex = mvs.count - 1
     let skipCount = skipMap.count
     
-    skipMap.withUnsafeBufferPointer { mapBuf in
-        let mapBase = mapBuf.baseAddress!
-        withUnsafePointers(mut: &plane, prevPlane, mvs.dx, mvs.dy) { dstBase, prevBase, dxBase, dyBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, maxMvIndex)
-                    let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
-                    if isSkip {
-                        let blockX = col * chromaBlockSize
-                        let blockY = row * chromaBlockSize
-                        let bw = min(chromaBlockSize, width - blockX)
-                        let bh = min(chromaBlockSize, height - blockY)
-                        switch bw {
-                        case 32:
+    withUnsafePointers(mut: &plane, prevPlane, mvs.dx, mvs.dy, skipMap) { dstBase, prevBase, dxBase, dyBase, mapBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, maxMvIndex)
+                let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
+                if isSkip {
+                    let blockX = col * chromaBlockSize
+                    let blockY = row * chromaBlockSize
+                    let bw = min(chromaBlockSize, width - blockX)
+                    let bh = min(chromaBlockSize, height - blockY)
+                    switch bw {
+                    case 32:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 16:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 8:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+                        }
+                    default:
+                        if 0 < bw && 0 < bh {
                             for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                                dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 16:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 8:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(prevBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
-                            }
-                        default:
-                            if 0 < bw && 0 < bh {
-                                for y in 0..<bh {
-                                    let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                                    let srcPtr = prevBase.advanced(by: (blockY + y) * width + blockX)
-                                    dstPtr.update(from: srcPtr, count: bw)
-                                }
+                                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+                                let srcPtr = prevBase.advanced(by: (blockY + y) * width + blockX)
+                                dstPtr.update(from: srcPtr, count: bw)
                             }
                         }
-                    } else {
-                        let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
-                        addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                     }
+                } else {
+                    let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
+                    addMCBlockChroma16(dstBase: dstBase, srcBase: prevBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                 }
             }
         }
@@ -1193,57 +1183,54 @@ func applyScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: inout [Int
     let dirCount = refDirs.count
     let skipCount = skipMap.count
     
-    skipMap.withUnsafeBufferPointer { mapBuf in
-        let mapBase = mapBuf.baseAddress!
-        withUnsafePointers(mut: &plane, prevPlane, nextPlane, mvs.dx, mvs.dy, refDirs) { dstBase, prevBase, nextBase, dxBase, dyBase, dirBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, maxMvIndex)
-                    let isBackward = mvIndex < dirCount && dirBase[mvIndex]
-                    let srcBase = switch true {
-                    case isBackward: nextBase
-                    default: prevBase
-                    }
-                    
-                    let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
-                    if isSkip {
-                        let blockX = col * lumaBlockSize
-                        let blockY = row * lumaBlockSize
-                        let bw = min(lumaBlockSize, width - blockX)
-                        let bh = min(lumaBlockSize, height - blockY)
-                        switch bw {
-                        case 32:
+    withUnsafePointers(mut: &plane, prevPlane, nextPlane, mvs.dx, mvs.dy, refDirs, skipMap) { dstBase, prevBase, nextBase, dxBase, dyBase, dirBase, mapBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, maxMvIndex)
+                let isBackward = mvIndex < dirCount && dirBase[mvIndex]
+                let srcBase = switch true {
+                case isBackward: nextBase
+                default: prevBase
+                }
+
+                let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
+                if isSkip {
+                    let blockX = col * lumaBlockSize
+                    let blockY = row * lumaBlockSize
+                    let bw = min(lumaBlockSize, width - blockX)
+                    let bh = min(lumaBlockSize, height - blockY)
+                    switch bw {
+                    case 32:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 16:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 8:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+                        }
+                    default:
+                        if 0 < bw && 0 < bh {
                             for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                                dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 16:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 8:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
-                            }
-                        default:
-                            if 0 < bw && 0 < bh {
-                                for y in 0..<bh {
-                                    let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                                    let srcPtr = srcBase.advanced(by: (blockY + y) * width + blockX)
-                                    dstPtr.update(from: srcPtr, count: bw)
-                                }
+                                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+                                let srcPtr = srcBase.advanced(by: (blockY + y) * width + blockX)
+                                dstPtr.update(from: srcPtr, count: bw)
                             }
                         }
-                    } else {
-                        let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
-                        addMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                     }
+                } else {
+                    let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
+                    addMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                 }
             }
         }
@@ -1281,57 +1268,54 @@ func applyScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: inout [I
     let dirCount = refDirs.count
     let skipCount = skipMap.count
     
-    skipMap.withUnsafeBufferPointer { mapBuf in
-        let mapBase = mapBuf.baseAddress!
-        withUnsafePointers(mut: &plane, prevPlane, nextPlane, mvs.dx, mvs.dy, refDirs) { dstBase, prevBase, nextBase, dxBase, dyBase, dirBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, maxMvIndex)
-                    let isBackward = mvIndex < dirCount && dirBase[mvIndex]
-                    let srcBase = switch true {
-                    case isBackward: nextBase
-                    default: prevBase
-                    }
-                    
-                    let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
-                    if isSkip {
-                        let blockX = col * chromaBlockSize
-                        let blockY = row * chromaBlockSize
-                        let bw = min(chromaBlockSize, width - blockX)
-                        let bh = min(chromaBlockSize, height - blockY)
-                        switch bw {
-                        case 32:
+    withUnsafePointers(mut: &plane, prevPlane, nextPlane, mvs.dx, mvs.dy, refDirs, skipMap) { dstBase, prevBase, nextBase, dxBase, dyBase, dirBase, mapBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, maxMvIndex)
+                let isBackward = mvIndex < dirCount && dirBase[mvIndex]
+                let srcBase = switch true {
+                case isBackward: nextBase
+                default: prevBase
+                }
+
+                let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
+                if isSkip {
+                    let blockX = col * chromaBlockSize
+                    let blockY = row * chromaBlockSize
+                    let bw = min(chromaBlockSize, width - blockX)
+                    let bh = min(chromaBlockSize, height - blockY)
+                    switch bw {
+                    case 32:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                            dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 16:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
+                        }
+                    case 8:
+                        for y in 0..<bh {
+                            let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
+                            let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
+                            dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
+                        }
+                    default:
+                        if 0 < bw && 0 < bh {
                             for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                                dstPtr.advanced(by: 32).storeBytes(of: srcPtr.advanced(by: 32).loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 16:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD16<Int16>.self), as: SIMD16<Int16>.self)
-                            }
-                        case 8:
-                            for y in 0..<bh {
-                                let dstPtr = UnsafeMutableRawPointer(dstBase.advanced(by: (blockY + y) * width + blockX))
-                                let srcPtr = UnsafeRawPointer(srcBase.advanced(by: (blockY + y) * width + blockX))
-                                dstPtr.storeBytes(of: srcPtr.loadUnaligned(as: SIMD8<Int16>.self), as: SIMD8<Int16>.self)
-                            }
-                        default:
-                            if 0 < bw && 0 < bh {
-                                for y in 0..<bh {
-                                    let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
-                                    let srcPtr = srcBase.advanced(by: (blockY + y) * width + blockX)
-                                    dstPtr.update(from: srcPtr, count: bw)
-                                }
+                                let dstPtr = dstBase.advanced(by: (blockY + y) * width + blockX)
+                                let srcPtr = srcBase.advanced(by: (blockY + y) * width + blockX)
+                                dstPtr.update(from: srcPtr, count: bw)
                             }
                         }
-                    } else {
-                        let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
-                        addMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                     }
+                } else {
+                    let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
+                    addMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                 }
             }
         }
@@ -1368,31 +1352,28 @@ func subtractScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: inout [
     let maxMvIndex = mvs.count - 1
     let skipCount = skipMap.count
     
-    skipMap.withUnsafeBufferPointer { mapBuf in
-        let mapBase = mapBuf.baseAddress!
-        withUnsafePointers(prevPlane, nextPlane, mut: &plane, mvs.dx, mvs.dy, refDirs) { prevBase, nextBase, dstBase, dxBase, dyBase, refDirsBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, maxMvIndex)
-                    let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
-                    if isSkip {
-                        for y in 0..<lumaBlockSize {
-                            if height <= row * lumaBlockSize + y { break }
-                            let dstPtr = dstBase.advanced(by: (row * lumaBlockSize + y) * width + col * lumaBlockSize)
-                            let limit = min(lumaBlockSize, width - col * lumaBlockSize)
-                            if 0 < limit {
-                                dstPtr.initialize(repeating: 0, count: limit)
-                            }
+    withUnsafePointers(prevPlane, nextPlane, mut: &plane, mvs.dx, mvs.dy, refDirs, skipMap) { prevBase, nextBase, dstBase, dxBase, dyBase, refDirsBase, mapBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, maxMvIndex)
+                let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
+                if isSkip {
+                    for y in 0..<lumaBlockSize {
+                        if height <= row * lumaBlockSize + y { break }
+                        let dstPtr = dstBase.advanced(by: (row * lumaBlockSize + y) * width + col * lumaBlockSize)
+                        let limit = min(lumaBlockSize, width - col * lumaBlockSize)
+                        if 0 < limit {
+                            dstPtr.initialize(repeating: 0, count: limit)
                         }
-                    } else {
-                        let isBackward = refDirsBase[mvIndex]
-                        let srcBase = switch true {
-                        case isBackward: nextBase
-                        default: prevBase
-                        }
-                        let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
-                        subMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                     }
+                } else {
+                    let isBackward = refDirsBase[mvIndex]
+                    let srcBase = switch true {
+                    case isBackward: nextBase
+                    default: prevBase
+                    }
+                    let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
+                    subMCBlockLuma32(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * lumaBlockSize, blockY: row * lumaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: lumaBlockSize)
                 }
             }
         }
@@ -1428,31 +1409,28 @@ func subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: inout
     let maxMvIndex = mvs.count - 1
     let skipCount = skipMap.count
     
-    skipMap.withUnsafeBufferPointer { mapBuf in
-        let mapBase = mapBuf.baseAddress!
-        withUnsafePointers(prevPlane, nextPlane, mut: &plane, mvs.dx, mvs.dy, refDirs) { prevBase, nextBase, dstBase, dxBase, dyBase, refDirsBase in
-            for row in 0..<rowCount {
-                for col in 0..<colCount {
-                    let mvIndex = min(row * colCount + col, maxMvIndex)
-                    let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
-                    if isSkip {
-                        for y in 0..<chromaBlockSize {
-                            if height <= row * chromaBlockSize + y { break }
-                            let dstPtr = dstBase.advanced(by: (row * chromaBlockSize + y) * width + col * chromaBlockSize)
-                            let limit = min(chromaBlockSize, width - col * chromaBlockSize)
-                            if 0 < limit {
-                                dstPtr.initialize(repeating: 0, count: limit)
-                            }
+    withUnsafePointers(prevPlane, nextPlane, mut: &plane, mvs.dx, mvs.dy, refDirs, skipMap) { prevBase, nextBase, dstBase, dxBase, dyBase, refDirsBase, mapBase in
+        for row in 0..<rowCount {
+            for col in 0..<colCount {
+                let mvIndex = min(row * colCount + col, maxMvIndex)
+                let isSkip = mvIndex < skipCount && mapBase[mvIndex] != .inter
+                if isSkip {
+                    for y in 0..<chromaBlockSize {
+                        if height <= row * chromaBlockSize + y { break }
+                        let dstPtr = dstBase.advanced(by: (row * chromaBlockSize + y) * width + col * chromaBlockSize)
+                        let limit = min(chromaBlockSize, width - col * chromaBlockSize)
+                        if 0 < limit {
+                            dstPtr.initialize(repeating: 0, count: limit)
                         }
-                    } else {
-                        let isBackward = refDirsBase[mvIndex]
-                        let srcBase = switch true {
-                        case isBackward: nextBase
-                        default: prevBase
-                        }
-                        let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
-                        subMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                     }
+                } else {
+                    let isBackward = refDirsBase[mvIndex]
+                    let srcBase = switch true {
+                    case isBackward: nextBase
+                    default: prevBase
+                    }
+                    let smv = scaledMV(MotionVector(dx: dxBase[mvIndex], dy: dyBase[mvIndex]), rightShift: mvShift)
+                    subMCBlockChroma16(dstBase: dstBase, srcBase: srcBase, width: width, height: height, blockX: col * chromaBlockSize, blockY: row * chromaBlockSize, mv: smv, roundOffset: roundOffset, blockSize: chromaBlockSize)
                 }
             }
         }

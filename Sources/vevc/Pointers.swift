@@ -512,6 +512,24 @@ internal func withUnsafePointers<T1, T2, T3, T4, R>(
 }
 
 @inline(__always)
+internal func withUnsafePointers<T1, T2, T3, T4, T5, R>(
+    mut a: inout [T1], _ b: [T2], _ c: [T3], _ d: [T4], _ e: [T5],
+    _ body: (UnsafeMutablePointer<T1>, UnsafePointer<T2>, UnsafePointer<T3>, UnsafePointer<T4>, UnsafePointer<T5>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeMutableBufferPointer { pA in
+        try b.withUnsafeBufferPointer { pB in
+            try c.withUnsafeBufferPointer { pC in
+                try d.withUnsafeBufferPointer { pD in
+                    try e.withUnsafeBufferPointer { pE in
+                        try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!, pE.baseAddress!)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
 internal func withUnsafePointers<T1, T2, T3, T4, R>(
     _ a: [T1], mut b: inout [T2], _ c: [T3], _ d: [T4],
     _ body: (UnsafePointer<T1>, UnsafeMutablePointer<T2>, UnsafePointer<T3>, UnsafePointer<T4>) throws -> R
@@ -574,6 +592,50 @@ internal func withUnsafePointers<T1, T2, T3, T4, T5, T6, R>(
                     try e.withUnsafeBufferPointer { pE in
                         try f.withUnsafeBufferPointer { pF in
                             try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!, pE.baseAddress!, pF.baseAddress!)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+internal func withUnsafePointers<T1, T2, T3, T4, T5, T6, T7, R>(
+    mut a: inout [T1], _ b: [T2], _ c: [T3], _ d: [T4], _ e: [T5], _ f: [T6], _ g: [T7],
+    _ body: (UnsafeMutablePointer<T1>, UnsafePointer<T2>, UnsafePointer<T3>, UnsafePointer<T4>, UnsafePointer<T5>, UnsafePointer<T6>, UnsafePointer<T7>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeMutableBufferPointer { pA in
+        try b.withUnsafeBufferPointer { pB in
+            try c.withUnsafeBufferPointer { pC in
+                try d.withUnsafeBufferPointer { pD in
+                    try e.withUnsafeBufferPointer { pE in
+                        try f.withUnsafeBufferPointer { pF in
+                            try g.withUnsafeBufferPointer { pG in
+                                try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!, pE.baseAddress!, pF.baseAddress!, pG.baseAddress!)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@inline(__always)
+internal func withUnsafePointers<T1, T2, T3, T4, T5, T6, T7, R>(
+    _ a: [T1], _ b: [T2], mut c: inout [T3], _ d: [T4], _ e: [T5], _ f: [T6], _ g: [T7],
+    _ body: (UnsafePointer<T1>, UnsafePointer<T2>, UnsafeMutablePointer<T3>, UnsafePointer<T4>, UnsafePointer<T5>, UnsafePointer<T6>, UnsafePointer<T7>) throws -> R
+) rethrows -> R {
+    try a.withUnsafeBufferPointer { pA in
+        try b.withUnsafeBufferPointer { pB in
+            try c.withUnsafeMutableBufferPointer { pC in
+                try d.withUnsafeBufferPointer { pD in
+                    try e.withUnsafeBufferPointer { pE in
+                        try f.withUnsafeBufferPointer { pF in
+                            try g.withUnsafeBufferPointer { pG in
+                                try body(pA.baseAddress!, pB.baseAddress!, pC.baseAddress!, pD.baseAddress!, pE.baseAddress!, pF.baseAddress!, pG.baseAddress!)
+                            }
                         }
                     }
                 }

@@ -39,7 +39,7 @@ final class BlockDataCompareTests: XCTestCase {
             dx: pd.width, dy: pd.height, qtY: qtY, qtC: qtC, zeroThreshold: 3, yBlocks: &encYBlocks, cbBlocks: &encCbBlocks, crBlocks: &encCrBlocks)
 
         // デコーダ: 同じバイトからblocks をデコード
-        // decodePlaneSubbands32 は decodePlaneSubbands32(data:blockCount:) で直接呼べる
+        // decodePlaneSubbands32WithHistory(data:pool:blockCount:history:parentFreeStatics:updateHistory:) で直接呼べる
         // ただしLayer32ヘッダを解析してdataを取り出す必要がある
         var offset = 0
         let _ = Int(try readUInt16BEFromBytes(Array(layer2Bytes), offset: &offset))  // qtY step
@@ -50,7 +50,7 @@ final class BlockDataCompareTests: XCTestCase {
 
         let rowCountY = (height + 32 - 1) / 32
         let colCountY = (width + 32 - 1) / 32
-        let decYBlocks = try decodePlaneSubbands32(data: bufY[...], pool: pool, blockCount: rowCountY * colCountY)
+        let decYBlocks = try decodePlaneSubbands32WithHistory(data: bufY[...], pool: pool, blockCount: rowCountY * colCountY, history: nil, parentFreeStatics: false, updateHistory: true)
 
         // encYBlocks vs decYBlocks のHL/LH/HHサブバンドを比較
         XCTAssertEqual(encYBlocks.count, decYBlocks.count, "blocks count mismatch: enc=\(encYBlocks.count) dec=\(decYBlocks.count)")

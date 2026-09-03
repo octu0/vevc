@@ -1,10 +1,5 @@
 import Foundation
 
-fileprivate struct SendableInt16Ptr: @unchecked Sendable {
-    let ptr: UnsafeMutablePointer<Int16>
-    init(_ ptr: UnsafeMutablePointer<Int16>) { self.ptr = ptr }
-}
-
 // MARK: - Spatial Adaptive Weight
 
 @inline(__always)
@@ -533,7 +528,7 @@ func extractSingleTransformSubband32(r: Int16Reader, width: Int, height: Int, po
     let subWidth = ((width + 1) / 2)
     let subHeight = ((height + 1) / 2)
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
+    let safeDst = withUnsafePointers(mut: &subband) { UnsafeSendableMutablePointer(ptr: $0) }
     
     let rowCount = ((height + 32 - 1) / 32)
     let colCount = ((width + 32 - 1) / 32)
@@ -859,7 +854,7 @@ func extractSingleTransformSubband16(r: Int16Reader, width: Int, height: Int, po
     let subWidth = (width + 1) / 2
     let subHeight = (height + 1) / 2
     var subband = pool.getInt16(count: subWidth * subHeight)
-    let safeDst = withUnsafePointers(mut: &subband) { SendableInt16Ptr($0) }
+    let safeDst = withUnsafePointers(mut: &subband) { UnsafeSendableMutablePointer(ptr: $0) }
     
     let rowCount = (height + (16 - 1)) / 16
     let colCount = (width + (16 - 1)) / 16

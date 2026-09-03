@@ -69,7 +69,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         }
 
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: 3)
+        let decBlocks = try decodePlaneSubbands32WithHistory(data: data[...], pool: pool, blockCount: 3, history: nil, parentFreeStatics: false, updateHistory: true)
 
         // デコード後のHL
         var decHL: [[Int16]] = []
@@ -162,7 +162,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: 3, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: 3)
+        let decBlocks = try decodePlaneSubbands32WithHistory(data: data[...], pool: pool, blockCount: 3, history: nil, parentFreeStatics: false, updateHistory: true)
 
         // 各ブロックのHL/LH/HH比較
         for bi in 0..<3 {
@@ -221,7 +221,7 @@ final class SubbandsRoundtripTests: XCTestCase {
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
 
         // decodePlaneSubbands32
-        let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
+        let decBlocks = try decodePlaneSubbands32WithHistory(data: data[...], pool: pool, blockCount: blocks.count, history: nil, parentFreeStatics: false, updateHistory: true)
 
         // 比較
         XCTAssertEqual(blocks.count, decBlocks.count, "blocks count mismatch")
@@ -283,7 +283,7 @@ final class SubbandsRoundtripTests: XCTestCase {
 
         let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
         let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
-        let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
+        let decBlocks = try decodePlaneSubbands32WithHistory(data: data[...], pool: pool, blockCount: blocks.count, history: nil, parentFreeStatics: false, updateHistory: true)
 
         var totalDiff = 0
         var firstDiffBlock = -1
@@ -349,7 +349,7 @@ final class SubbandsRoundtripTests: XCTestCase {
 
             let safeThreshold = max(0, 3 - (Int(qtY.step) / 2))
             let data = encodePlaneSubbands32(blocks: &blocks, zeroThreshold: safeThreshold, parentBlocks: nil, colCount: 0, rowCount: 0, history: nil, selectModel: unifiedSelectModel, updateHistory: true)
-            let decBlocks = try decodePlaneSubbands32(data: data[...], pool: pool, blockCount: blocks.count)
+            let decBlocks = try decodePlaneSubbands32WithHistory(data: data[...], pool: pool, blockCount: blocks.count, history: nil, parentFreeStatics: false, updateHistory: true)
 
             var totalDiff = 0
             var firstDiffBlock = -1

@@ -96,11 +96,6 @@ func decodePlaneSubbands32WithHistory(data: ArraySlice<UInt8>, pool: BlockViewPo
 }
 
 @inline(__always)
-func decodePlaneSubbands32(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
-    return try decodePlaneSubbands32WithHistory(data: data, pool: pool, blockCount: blockCount, history: nil, parentFreeStatics: false, updateHistory: true)
-}
-
-@inline(__always)
 func decodePlaneSubbands32WithParentBlocksAndHistory(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
@@ -490,11 +485,6 @@ func decodePlaneSubbands16WithHistory(data: ArraySlice<UInt8>, pool: BlockViewPo
 }
 
 @inline(__always)
-func decodePlaneSubbands16(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int) throws -> [BlockView] {
-    return try decodePlaneSubbands16WithHistory(data: data, pool: pool, blockCount: blockCount, history: nil, parentFreeStatics: false, updateHistory: true)
-}
-
-@inline(__always)
 func decodePlaneSubbands16WithParentBlocksAndHistory(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, parentBlocks: [BlockView], history: EntropyHistoryState?, parentFreeStatics: Bool, updateHistory: Bool) throws -> [BlockView] {
     return try data.withUnsafeBufferPointer { buf -> [BlockView] in
         guard let base = buf.baseAddress else { return [] }
@@ -832,11 +822,6 @@ func decodePlaneBaseSubbands8WithHistory(data: ArraySlice<UInt8>, pool: BlockVie
         decoder.finalizeHistory()
         return blocks
     }
-}
-
-@inline(__always)
-func decodePlaneBaseSubbands8(data: ArraySlice<UInt8>, pool: BlockViewPool, blockCount: Int, isIFrame: Bool) throws -> [BlockView] {
-    return try decodePlaneBaseSubbands8WithHistory(data: data, pool: pool, blockCount: blockCount, isIFrame: isIFrame, history: nil, parentFreeStatics: false, updateHistory: true)
 }
 
 @inline(__always)

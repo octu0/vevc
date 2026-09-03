@@ -573,15 +573,15 @@ func decodeLayer32WithoutParentBlocks(r: [UInt8], pool: BlockViewPool, layer: UI
     var sub = Image16(width: dx, height: dy, pool: pool)
     let rowCountY = (dy + 32 - 1) / 32
     let colCountY = (dx + 32 - 1) / 32
-    let yBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
+    let yBlocks = try decodePlaneSubbands32WithHistory(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: nil, parentFreeStatics: false, updateHistory: true)
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 32 - 1) / 32
     let colCountCb = (cbDx + 32 - 1) / 32
-    let cbBlocks = try decodePlaneSubbands32(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb)
+    let cbBlocks = try decodePlaneSubbands32WithHistory(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: nil, parentFreeStatics: false, updateHistory: true)
     let rowCountCr = (cbDy + 32 - 1) / 32
     let colCountCr = (cbDx + 32 - 1) / 32
-    let crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
+    let crBlocks = try decodePlaneSubbands32WithHistory(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: nil, parentFreeStatics: false, updateHistory: true)
     defer {
         pool.putBlockViewArray1024(yBlocks)
         pool.putBlockViewArray1024(cbBlocks)
@@ -677,15 +677,15 @@ func decodeLayer32WithSkipMap(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx:
     var sub = Image16(width: dx, height: dy, pool: pool)
     let rowCountY = (dy + 32 - 1) / 32
     let colCountY = (dx + 32 - 1) / 32
-    let yBlocks = try decodePlaneSubbands32(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
+    let yBlocks = try decodePlaneSubbands32WithHistory(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: nil, parentFreeStatics: false, updateHistory: true)
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 32 - 1) / 32
     let colCountCb = (cbDx + 32 - 1) / 32
-    let cbBlocks = try decodePlaneSubbands32(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb)
+    let cbBlocks = try decodePlaneSubbands32WithHistory(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: nil, parentFreeStatics: false, updateHistory: true)
     let rowCountCr = (cbDy + 32 - 1) / 32
     let colCountCr = (cbDx + 32 - 1) / 32
-    let crBlocks = try decodePlaneSubbands32(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
+    let crBlocks = try decodePlaneSubbands32WithHistory(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: nil, parentFreeStatics: false, updateHistory: true)
     defer {
         pool.putBlockViewArray1024(yBlocks)
         pool.putBlockViewArray1024(cbBlocks)
@@ -755,15 +755,15 @@ func decodeLayer16WithoutParentBlocks(r: [UInt8], pool: BlockViewPool, layer: UI
     var sub = Image16(uninitializedWidth: dx, height: dy, pool: pool)
     let rowCountY = (dy + 16 - 1) / 16
     let colCountY = (dx + 16 - 1) / 16
-    let yBlocks = try decodePlaneSubbands16(data: bufY, pool: pool, blockCount: rowCountY * colCountY)
+    let yBlocks = try decodePlaneSubbands16WithHistory(data: bufY, pool: pool, blockCount: rowCountY * colCountY, history: nil, parentFreeStatics: false, updateHistory: true)
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 16 - 1) / 16
     let colCountCb = (cbDx + 16 - 1) / 16
-    let cbBlocks = try decodePlaneSubbands16(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb)
+    let cbBlocks = try decodePlaneSubbands16WithHistory(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, history: nil, parentFreeStatics: false, updateHistory: true)
     let rowCountCr = (cbDy + 16 - 1) / 16
     let colCountCr = (cbDx + 16 - 1) / 16
-    let crBlocks = try decodePlaneSubbands16(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr)
+    let crBlocks = try decodePlaneSubbands16WithHistory(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, history: nil, parentFreeStatics: false, updateHistory: true)
     await decodeLayer16ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, prev: prev, qt: qtY, sub: &sub)
     await decodeLayer16ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, prev: prev, qt: qtC, sub: &sub)
     await decodeLayer16ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, prev: prev, qt: qtC, sub: &sub)
@@ -839,15 +839,15 @@ func decodeBase8(r: [UInt8], pool: BlockViewPool, layer: UInt8, dx: Int, dy: Int
     var sub = Image16(uninitializedWidth: dx, height: dy, pool: pool)
     let rowCountY = (dy + 8 - 1) / 8
     let colCountY = (dx + 8 - 1) / 8
-    let yBlocks = try decodePlaneBaseSubbands8(data: bufY, pool: pool, blockCount: rowCountY * colCountY, isIFrame: isIFrame)
+    let yBlocks = try decodePlaneBaseSubbands8WithHistory(data: bufY, pool: pool, blockCount: rowCountY * colCountY, isIFrame: isIFrame, history: nil, parentFreeStatics: false, updateHistory: true)
     let cbDx = (dx + 1) / 2
     let cbDy = (dy + 1) / 2
     let rowCountCb = (cbDy + 8 - 1) / 8
     let colCountCb = (cbDx + 8 - 1) / 8
-    let cbBlocks = try decodePlaneBaseSubbands8(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, isIFrame: isIFrame)
+    let cbBlocks = try decodePlaneBaseSubbands8WithHistory(data: bufCb, pool: pool, blockCount: rowCountCb * colCountCb, isIFrame: isIFrame, history: nil, parentFreeStatics: false, updateHistory: true)
     let rowCountCr = (cbDy + 8 - 1) / 8
     let colCountCr = (cbDx + 8 - 1) / 8
-    let crBlocks = try decodePlaneBaseSubbands8(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, isIFrame: isIFrame)
+    let crBlocks = try decodePlaneBaseSubbands8WithHistory(data: bufCr, pool: pool, blockCount: rowCountCr * colCountCr, isIFrame: isIFrame, history: nil, parentFreeStatics: false, updateHistory: true)
     await decodeBase8ProcessY(pool: pool, taskIdx: 0, chunkSize: rowCountY, rowCount: rowCountY, dx: dx, colCount: colCountY, blocks: yBlocks, qt: qtY, sub: &sub)
     await decodeBase8ProcessCb(pool: pool, taskIdx: 0, chunkSize: rowCountCb, rowCount: rowCountCb, dx: cbDx, colCount: colCountCb, blocks: cbBlocks, qt: qtC, sub: &sub)
     await decodeBase8ProcessCr(pool: pool, taskIdx: 0, chunkSize: rowCountCr, rowCount: rowCountCr, dx: cbDx, colCount: colCountCr, blocks: crBlocks, qt: qtC, sub: &sub)

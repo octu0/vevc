@@ -1056,11 +1056,7 @@ struct MotionEstimation {
 
 
 
-/// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames, 
-struct UnsafePointerWrapper<T>: @unchecked Sendable {
-    let base: UnsafePointer<T>
-}
-
+/// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames,
 @inline(__always)
 func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dualOut: DualMVSink?) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
     let dx = curr.width
@@ -1144,19 +1140,19 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     }
     let wantDual = (dualOut != nil)
 
-    let cS1BaseWrapper = UnsafePointerWrapper(base: cS1.withUnsafeBufferPointer { $0.baseAddress! })
-    let pS1BaseWrapper = UnsafePointerWrapper(base: pS1.withUnsafeBufferPointer { $0.baseAddress! })
-    let nS1BaseWrapper = UnsafePointerWrapper(base: nS1.withUnsafeBufferPointer { $0.baseAddress! })
+    let cS1BaseWrapper = UnsafeSendablePointer(ptr: cS1.withUnsafeBufferPointer { $0.baseAddress! })
+    let pS1BaseWrapper = UnsafeSendablePointer(ptr: pS1.withUnsafeBufferPointer { $0.baseAddress! })
+    let nS1BaseWrapper = UnsafeSendablePointer(ptr: nS1.withUnsafeBufferPointer { $0.baseAddress! })
     
-    let cYWrapper = UnsafePointerWrapper(base: curr.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let pYWrapper = UnsafePointerWrapper(base: prev.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let nYWrapper = UnsafePointerWrapper(base: next.y.withUnsafeBufferPointer { $0.baseAddress! })
-    let cCbWrapper = UnsafePointerWrapper(base: curr.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let cCrWrapper = UnsafePointerWrapper(base: curr.cr.withUnsafeBufferPointer { $0.baseAddress! })
-    let pCbWrapper = UnsafePointerWrapper(base: prev.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let pCrWrapper = UnsafePointerWrapper(base: prev.cr.withUnsafeBufferPointer { $0.baseAddress! })
-    let nCbWrapper = UnsafePointerWrapper(base: next.cb.withUnsafeBufferPointer { $0.baseAddress! })
-    let nCrWrapper = UnsafePointerWrapper(base: next.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let cYWrapper = UnsafeSendablePointer(ptr: curr.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let pYWrapper = UnsafeSendablePointer(ptr: prev.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let nYWrapper = UnsafeSendablePointer(ptr: next.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCbWrapper = UnsafeSendablePointer(ptr: curr.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCrWrapper = UnsafeSendablePointer(ptr: curr.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCbWrapper = UnsafeSendablePointer(ptr: prev.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCrWrapper = UnsafeSendablePointer(ptr: prev.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCbWrapper = UnsafeSendablePointer(ptr: next.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCrWrapper = UnsafeSendablePointer(ptr: next.cr.withUnsafeBufferPointer { $0.baseAddress! })
     let cbw = (curr.width + 1) / 2
     let cbh = (curr.height + 1) / 2
     
@@ -1189,19 +1185,19 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
                 let oPtr = tmpO.base
                 let tPtr = tmpT.base
                 
-                let cBase = cS1BaseWrapper.base
-                let pBase = pS1BaseWrapper.base
-                let nBase = nS1BaseWrapper.base
+                let cBase = cS1BaseWrapper.ptr
+                let pBase = pS1BaseWrapper.ptr
+                let nBase = nS1BaseWrapper.ptr
                 
-                let cY = cYWrapper.base
-                let pY = pYWrapper.base
-                let nY = nYWrapper.base
-                let cCb = cCbWrapper.base
-                let cCr = cCrWrapper.base
-                let pCb = pCbWrapper.base
-                let pCr = pCrWrapper.base
-                let nCb = nCbWrapper.base
-                let nCr = nCrWrapper.base
+                let cY = cYWrapper.ptr
+                let pY = pYWrapper.ptr
+                let nY = nYWrapper.ptr
+                let cCb = cCbWrapper.ptr
+                let cCr = cCrWrapper.ptr
+                let pCb = pCbWrapper.ptr
+                let pCr = pCrWrapper.ptr
+                let nCb = nCbWrapper.ptr
+                let nCr = nCrWrapper.ptr
                 
                 var dx = [Int16](repeating: 0, count: sliceBlocksCount)
                 var dy = [Int16](repeating: 0, count: sliceBlocksCount)
