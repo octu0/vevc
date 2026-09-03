@@ -717,13 +717,6 @@ struct MotionEstimation {
     /// Extract approximate structure contrast (max - min) from 8x8 block
     /// Zero-cost feature extraction without additional SIMD loop overheads.
     @inline(__always)
-    static func extractContrast8x8FromArray(plane: [Int16], width: Int, height: Int, bx: Int, by: Int) -> Int {
-        return plane.withUnsafeBufferPointer { base in
-            extractContrast8x8(base: base.baseAddress!, width: width, height: height, bx: bx, by: by)
-        }
-    }
-    
-    @inline(__always)
     static func extractContrast8x8(base: UnsafePointer<Int16>, width: Int, height: Int, bx: Int, by: Int) -> Int {
         let isSafeX = (0 <= bx) && (bx + 8 <= width)
         let isSafeY = (0 <= by) && (by + 8 <= height)
@@ -755,7 +748,7 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func computeChromaSADFromPointers(
+    static func computeChromaSAD(
         currCb: UnsafePointer<Int16>, currCr: UnsafePointer<Int16>,
         refCb: UnsafePointer<Int16>, refCr: UnsafePointer<Int16>,
         cbw: Int, cbh: Int,
@@ -799,18 +792,6 @@ struct MotionEstimation {
             return Int(sad) * 4 // Luma SAD scale matching (16 sample positions × 2 planes vs 64 luma points)
         }
         return 1000
-    }
-    
-    @inline(__always)
-    static func computeChromaSAD(
-        curr: PlaneData420, ref: PlaneData420,
-        bx: Int, by: Int, refDx: Int, refDy: Int
-    ) -> Int {
-        let cbw = (curr.width + 1) / 2
-        let cbh = (curr.height + 1) / 2
-        return withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
-            computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: rCb, refCr: rCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: refDx, refDy: refDy)
-        }
     }
 
     @inline(__always)
@@ -1233,6 +1214,365 @@ struct MotionEstimation {
     }
 }
 
+private struct SliceResult: Sendable {
+    let startIdx: Int
+    let dx: [Int16]
+    let dy: [Int16]
+    let sads: [Int]
+    let refDirs: [Bool]
+    let pdx: [Int16]
+    let pdy: [Int16]
+    let ldx: [Int16]
+    let ldy: [Int16]
+    let psad: [Int]
+    let lsad: [Int]
+}
+
+private struct BidirSliceContext: Sendable {
+    let targetWidth: Int
+    let targetHeight: Int
+    let colCount: Int
+    let cbw: Int
+    let cbh: Int
+    let roundOffset: Int
+    let gopPosition: Int
+    let wantDual: Bool
+    let hasSkipMap: Bool
+    let skipMap: [BlockMode]
+    let prevMVs: MotionVectors
+    let cBase: UnsafeSendablePointer<Int16>
+    let pBase: UnsafeSendablePointer<Int16>
+    let nBase: UnsafeSendablePointer<Int16>
+    let cY: UnsafeSendablePointer<Int16>
+    let pY: UnsafeSendablePointer<Int16>
+    let nY: UnsafeSendablePointer<Int16>
+    let cCb: UnsafeSendablePointer<Int16>
+    let cCr: UnsafeSendablePointer<Int16>
+    let pCb: UnsafeSendablePointer<Int16>
+    let pCr: UnsafeSendablePointer<Int16>
+    let nCb: UnsafeSendablePointer<Int16>
+    let nCr: UnsafeSendablePointer<Int16>
+    let memWrapper: UnsafeSendablePointer<Int8>?
+    let memCount: Int
+    let pool: BlockViewPool
+}
+
+@inline(__always)
+private func executeBidirSlice(
+    ctx: BidirSliceContext,
+    startIdx: Int,
+    sliceBlocksCount: Int
+) -> SliceResult {
+    let tmpC = ctx.pool.get64()
+    let tmpO = ctx.pool.get64()
+    let tmpT = ctx.pool.get64()
+    defer {
+        ctx.pool.put(tmpC)
+        ctx.pool.put(tmpO)
+        ctx.pool.put(tmpT)
+    }
+    let cPtr = tmpC.base
+    let oPtr = tmpO.base
+    let tPtr = tmpT.base
+    
+    let cBase = ctx.cBase.ptr
+    let pBase = ctx.pBase.ptr
+    let nBase = ctx.nBase.ptr
+    
+    let cY = ctx.cY.ptr
+    let pY = ctx.pY.ptr
+    let nY = ctx.nY.ptr
+    let cCb = ctx.cCb.ptr
+    let cCr = ctx.cCr.ptr
+    let pCb = ctx.pCb.ptr
+    let pCr = ctx.pCr.ptr
+    let nCb = ctx.nCb.ptr
+    let nCr = ctx.nCr.ptr
+
+    let targetWidth = ctx.targetWidth
+    let targetHeight = ctx.targetHeight
+    let colCount = ctx.colCount
+    let cbw = ctx.cbw
+    let cbh = ctx.cbh
+    let roundOffset = ctx.roundOffset
+    let gopPosition = ctx.gopPosition
+    let wantDual = ctx.wantDual
+    let hasSkipMap = ctx.hasSkipMap
+    let skipMapConst = ctx.skipMap
+    let prevMVsConst = ctx.prevMVs
+    let memPtr = ctx.memWrapper?.ptr
+    let memCount = ctx.memCount
+
+    var dx = [Int16](repeating: 0, count: sliceBlocksCount)
+    var dy = [Int16](repeating: 0, count: sliceBlocksCount)
+    var sads = [Int](repeating: 0, count: sliceBlocksCount)
+    var refDirs = [Bool](repeating: false, count: sliceBlocksCount)
+    let dualSliceCount: Int
+    if wantDual {
+        dualSliceCount = sliceBlocksCount
+    } else {
+        dualSliceCount = 0
+    }
+    var pdx = [Int16](repeating: 0, count: dualSliceCount)
+    var pdy = [Int16](repeating: 0, count: dualSliceCount)
+    var ldx = [Int16](repeating: 0, count: dualSliceCount)
+    var ldy = [Int16](repeating: 0, count: dualSliceCount)
+    var psad = [Int](repeating: 0, count: dualSliceCount)
+    var lsad = [Int](repeating: 0, count: dualSliceCount)
+
+    for i in 0..<sliceBlocksCount {
+        let idx = startIdx + i
+        let col = idx % colCount
+        let row = idx / colCount
+        let bx = col * 8
+        let by = row * 8
+
+        let isSkipBlock = hasSkipMap && skipMapConst[idx] != .inter
+        if isSkipBlock {
+            if wantDual != true {
+                dx[i] = 0
+                dy[i] = 0
+                sads[i] = 0
+                refDirs[i] = false
+                continue
+            }
+        }
+
+        MotionEstimation.fetchPixelsBlock8(plane: cBase, width: targetWidth, height: targetHeight, x: bx, y: by, dest: cPtr)
+
+        let mvADx = if 0 < col { dx[i - 1] } else { Int16(0) }
+        let mvADy = if 0 < col { dy[i - 1] } else { Int16(0) }
+        let mvBDx = if colCount <= i { dx[i - colCount] } else { Int16(0) }
+        let mvBDy = if colCount <= i { dy[i - colCount] } else { Int16(0) }
+        let mvCDx = if colCount <= (i - 1) && col < (colCount - 1) { dx[i - colCount + 1] } else { Int16(0) }
+        let mvCDy = if colCount <= (i - 1) && col < (colCount - 1) { dy[i - colCount + 1] } else { Int16(0) }
+
+        let sADx = Int(mvADx) >> 2
+        let sADy = Int(mvADy) >> 2
+        let sBDx = Int(mvBDx) >> 2
+        let sBDy = Int(mvBDy) >> 2
+        let sCDx = Int(mvCDx) >> 2
+        let sCDy = Int(mvCDy) >> 2
+
+        let mvA = MotionVector(dx: Int16(sADx), dy: Int16(sADy))
+        let mvB = MotionVector(dx: Int16(sBDx), dy: Int16(sBDy))
+        let mvC = MotionVector(dx: Int16(sCDx), dy: Int16(sCDy))
+
+        let pmvDx = MotionEstimation.median(sADx, sBDx, sCDx)
+        let pmvDy = MotionEstimation.median(sADy, sBDy, sCDy)
+        let pmv = MotionVector(dx: Int16(pmvDx), dy: Int16(pmvDy))
+
+        let tmv: MotionVector
+        if idx < prevMVsConst.count {
+            tmv = MotionVector(dx: Int16(Int(prevMVsConst.dx[idx]) >> 2), dy: Int16(Int(prevMVsConst.dy[idx]) >> 2))
+        } else {
+            tmv = MotionVector(dx: 0, dy: 0)
+        }
+
+        let currContrast = MotionEstimation.extractContrast8x8(base: cBase, width: targetWidth, height: targetHeight, bx: bx, by: by)
+
+        let hasLtrAffinity: Bool
+        if let mem = memPtr, idx < memCount {
+            hasLtrAffinity = 2 < mem[idx]
+        } else {
+            hasLtrAffinity = false
+        }
+
+        var mvPrev = MotionVector(dx: 0, dy: 0)
+        var mutSADPrev = 0
+        var prevSAD = 0
+        var mvNext = MotionVector(dx: 0, dy: 0)
+        var mutSADNext = 0
+        var bestMV = MotionVector(dx: 0, dy: 0)
+        var dir = false
+        var cachedNextChromaSad: Int = -1
+        // Evaluate Prev direction
+        let (pMV, pSAD) = MotionEstimation.searchPixels(
+            cBase: cBase, pBase: pBase,
+            cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
+            pmv: pmv, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
+            roundOffset: roundOffset
+        )
+        mvPrev = pMV
+        mutSADPrev = pSAD
+        let prevChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
+        mutSADPrev += prevChromaSad / 4
+        prevSAD = mutSADPrev
+
+        if 1024 < mutSADPrev {
+            let dynT = max(1024, currContrast * 48)
+            if dynT < mutSADPrev {
+                var mvVariance = 0
+                if 0 < col && colCount <= i {
+                    let dxDiff = Int((Int(dx[i - 1]) - Int(dx[i - colCount])).magnitude)
+                    let dyDiff = Int((Int(dy[i - 1]) - Int(dy[i - colCount])).magnitude)
+                    mvVariance = dxDiff + dyDiff
+                }
+                if 32 < mvVariance && (dynT * 2) < mutSADPrev {
+                    let (expMv, expSad) = MotionEstimation.searchPixels(
+                        cBase: cBase, pBase: pBase,
+                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12,
+                        pmv: mvPrev, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
+                        roundOffset: roundOffset
+                    )
+                    if expSad < mutSADPrev {
+                        mvPrev = expMv
+                        mutSADPrev = expSad
+                        prevSAD = mutSADPrev
+                    }
+                }
+            }
+        }
+
+        bestMV = mvPrev
+        dir = false
+
+        // Evaluate Next (LTR) direction
+        let (nMV, nSAD) = MotionEstimation.searchPixels(
+            cBase: cBase, pBase: nBase,
+            cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
+            pmv: pmv, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
+            roundOffset: roundOffset
+        )
+        mvNext = nMV
+        mutSADNext = nSAD
+
+        let nextChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+        cachedNextChromaSad = nextChromaSad
+
+        let earlyExitThreshold = min(1536, 512 + (gopPosition * 16))
+        let gopPenalty = min(1024, gopPosition * 16)
+
+        if earlyExitThreshold <= prevSAD {
+            let mvEnergyNext = Int((Int(mvNext.dx)).magnitude) + Int((Int(mvNext.dy)).magnitude)
+            let effectiveGopPenalty: Int
+            if mutSADNext < 384 || hasLtrAffinity {
+                effectiveGopPenalty = 0
+            } else {
+                effectiveGopPenalty = gopPenalty
+            }
+            let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
+
+            if mutSADNext + baselinePenalty < prevSAD {
+                let nextContrast = MotionEstimation.extractContrast8x8(base: nBase, width: targetWidth, height: targetHeight, bx: bx + (Int(mvNext.dx) >> 2), by: by + (Int(mvNext.dy) >> 2))
+                let contrastDiff = Int((currContrast - nextContrast).magnitude)
+                let structurePenalty = (contrastDiff * contrastDiff) / 4
+                let chromaPenalty = nextChromaSad / 4
+
+                let totalNextPenalty = ((mutSADNext + baselinePenalty) + (structurePenalty + chromaPenalty))
+                let energyNext = (mvNext.dy * mvNext.dy) + (mvNext.dx * mvNext.dx)
+                let energyPrev = (mvPrev.dy * mvPrev.dy) + (mvPrev.dx * mvPrev.dx)
+
+                switch true {
+                case totalNextPenalty < prevSAD:
+                    bestMV = mvNext
+                    dir = true
+                case (totalNextPenalty == prevSAD) && (energyNext < energyPrev):
+                    bestMV = mvNext
+                    dir = true
+                default:
+                    break
+                }
+            }
+        }
+
+        let dynamicThreshold = max(1024, currContrast * 48)
+        let resolvedNextChromaSad: Int
+        if cachedNextChromaSad != -1 {
+            resolvedNextChromaSad = cachedNextChromaSad
+        } else {
+            resolvedNextChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+        }
+        let finalSAD: Int
+        if dir {
+            finalSAD = mutSADNext + (resolvedNextChromaSad / 4)
+        } else {
+            finalSAD = prevSAD
+        }
+        switch true {
+        case dynamicThreshold < finalSAD:
+            dx[i] = 0
+            dy[i] = 0
+        case finalSAD < 256:
+            dx[i] = bestMV.dx * 4
+            dy[i] = bestMV.dy * 4
+        default:
+            let refPlaneY: UnsafePointer<Int16>
+            if dir {
+                refPlaneY = nY
+            } else {
+                refPlaneY = pY
+            }
+            let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                curr: cY, prev: refPlaneY,
+                width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: bestMV
+            )
+            dx[i] = refinedMV.dx
+            dy[i] = refinedMV.dy
+        }
+        sads[i] = finalSAD
+        refDirs[i] = dir
+
+        if wantDual {
+            let ltrSAD = mutSADNext + (resolvedNextChromaSad / 4)
+            psad[i] = prevSAD
+            lsad[i] = ltrSAD
+
+            if dir != true {
+                pdx[i] = dx[i]
+                pdy[i] = dy[i]
+            } else {
+                switch true {
+                case dynamicThreshold < prevSAD:
+                    pdx[i] = 0
+                    pdy[i] = 0
+                case prevSAD < 256:
+                    pdx[i] = mvPrev.dx * 4
+                    pdy[i] = mvPrev.dy * 4
+                default:
+                    let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                        curr: cY, prev: pY,
+                        width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvPrev
+                    )
+                    pdx[i] = rmv.dx
+                    pdy[i] = rmv.dy
+                }
+            }
+
+            if dir {
+                ldx[i] = dx[i]
+                ldy[i] = dy[i]
+            } else {
+                switch true {
+                case dynamicThreshold < ltrSAD:
+                    ldx[i] = 0
+                    ldy[i] = 0
+                case ltrSAD < 256:
+                    ldx[i] = mvNext.dx * 4
+                    ldy[i] = mvNext.dy * 4
+                default:
+                    let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                        curr: cY, prev: nY,
+                        width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvNext
+                    )
+                    ldx[i] = rmv.dx
+                    ldy[i] = rmv.dy
+                }
+            }
+        }
+        if isSkipBlock {
+            dx[i] = 0
+            dy[i] = 0
+            sads[i] = 0
+            refDirs[i] = false
+        }
+    }
+    return SliceResult(startIdx: startIdx, dx: dx, dy: dy, sads: sads, refDirs: refDirs, pdx: pdx, pdy: pdy, ldx: ldx, ldy: ldy, psad: psad, lsad: lsad)
+}
+
 /// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames,
 @inline(__always)
 func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dualOut: DualMVSink?, membrane: MEMembraneState? = nil) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
@@ -1302,19 +1642,6 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     var sads = [Int](repeating: 0, count: blocks8Count)
     var refDirs = [Bool](repeating: false, count: blocks8Count)
     
-    struct SliceResult {
-        let startIdx: Int
-        let dx: [Int16]
-        let dy: [Int16]
-        let sads: [Int]
-        let refDirs: [Bool]
-        let pdx: [Int16]
-        let pdy: [Int16]
-        let ldx: [Int16]
-        let ldy: [Int16]
-        let psad: [Int]
-        let lsad: [Int]
-    }
     let wantDual = (dualOut != nil)
 
     let cS1BaseWrapper = UnsafeSendablePointer(ptr: cS1.withUnsafeBufferPointer { $0.baseAddress! })
@@ -1334,8 +1661,6 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
     let cbh = (curr.height + 1) / 2
     
     let hasSkipMap = 0 < skipMap.count
-    let skipMapConst = skipMap
-    let prevMVsConst = prevMVs
     let memWrapper: UnsafeSendablePointer<Int8>?
     let memCount: Int
     if let mem = membrane, 0 < mem.potentials.count {
@@ -1345,6 +1670,35 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
         memWrapper = nil
         memCount = 0
     }
+    
+    let ctx = BidirSliceContext(
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
+        colCount: colCount,
+        cbw: cbw,
+        cbh: cbh,
+        roundOffset: roundOffset,
+        gopPosition: gopPosition,
+        wantDual: wantDual,
+        hasSkipMap: hasSkipMap,
+        skipMap: skipMap,
+        prevMVs: prevMVs,
+        cBase: cS1BaseWrapper,
+        pBase: pS1BaseWrapper,
+        nBase: nS1BaseWrapper,
+        cY: cYWrapper,
+        pY: pYWrapper,
+        nY: nYWrapper,
+        cCb: cCbWrapper,
+        cCr: cCrWrapper,
+        pCb: pCbWrapper,
+        pCr: pCrWrapper,
+        nCb: nCbWrapper,
+        nCr: nCrWrapper,
+        memWrapper: memWrapper,
+        memCount: memCount,
+        pool: pool
+    )
     
     let numSlices = 4
     let rowsPerSlice = (rowCount + numSlices - 1) / numSlices
@@ -1358,297 +1712,12 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let startIdx = startRow * colCount
             let sliceBlocksCount = (endRow - startRow) * colCount
             
-            group.addTask {
-                let tmpC = pool.get64()
-                let tmpO = pool.get64()
-                let tmpT = pool.get64()
-                defer {
-                    pool.put(tmpC)
-                    pool.put(tmpO)
-                    pool.put(tmpT)
-                }
-                let cPtr = tmpC.base
-                let oPtr = tmpO.base
-                let tPtr = tmpT.base
-                
-                let cBase = cS1BaseWrapper.ptr
-                let pBase = pS1BaseWrapper.ptr
-                let nBase = nS1BaseWrapper.ptr
-                
-                let cY = cYWrapper.ptr
-                let pY = pYWrapper.ptr
-                let nY = nYWrapper.ptr
-                let cCb = cCbWrapper.ptr
-                let cCr = cCrWrapper.ptr
-                let pCb = pCbWrapper.ptr
-                let pCr = pCrWrapper.ptr
-                let nCb = nCbWrapper.ptr
-                let nCr = nCrWrapper.ptr
-                
-                var dx = [Int16](repeating: 0, count: sliceBlocksCount)
-                var dy = [Int16](repeating: 0, count: sliceBlocksCount)
-                var sads = [Int](repeating: 0, count: sliceBlocksCount)
-                var refDirs = [Bool](repeating: false, count: sliceBlocksCount)
-                let dualSliceCount = if wantDual { sliceBlocksCount } else { 0 }
-                var pdx = [Int16](repeating: 0, count: dualSliceCount)
-                var pdy = [Int16](repeating: 0, count: dualSliceCount)
-                var ldx = [Int16](repeating: 0, count: dualSliceCount)
-                var ldy = [Int16](repeating: 0, count: dualSliceCount)
-                var psad = [Int](repeating: 0, count: dualSliceCount)
-                var lsad = [Int](repeating: 0, count: dualSliceCount)
-                let memPtr = memWrapper?.ptr
-
-                for i in 0..<sliceBlocksCount {
-                    let idx = startIdx + i
-                    let col = idx % colCount
-                    let row = idx / colCount
-                    let bx = col * 8
-                    let by = row * 8
-
-                    let isSkipBlock = hasSkipMap && skipMapConst[idx] != .inter
-                    if isSkipBlock {
-                        if wantDual != true {
-                            dx[i] = 0
-                            dy[i] = 0
-                            sads[i] = 0
-                            refDirs[i] = false
-                            continue
-                        }
-                    }
-
-                    MotionEstimation.fetchPixelsBlock8(plane: cBase, width: targetWidth, height: targetHeight, x: bx, y: by, dest: cPtr)
-
-                    let mvADx = if 0 < col { dx[i - 1] } else { Int16(0) }
-                    let mvADy = if 0 < col { dy[i - 1] } else { Int16(0) }
-                    let mvBDx = if colCount <= i { dx[i - colCount] } else { Int16(0) }
-                    let mvBDy = if colCount <= i { dy[i - colCount] } else { Int16(0) }
-                    let mvCDx = if colCount <= (i - 1) && col < (colCount - 1) { dx[i - colCount + 1] } else { Int16(0) }
-                    let mvCDy = if colCount <= (i - 1) && col < (colCount - 1) { dy[i - colCount + 1] } else { Int16(0) }
-
-                    let sADx = Int(mvADx) >> 2
-                    let sADy = Int(mvADy) >> 2
-                    let sBDx = Int(mvBDx) >> 2
-                    let sBDy = Int(mvBDy) >> 2
-                    let sCDx = Int(mvCDx) >> 2
-                    let sCDy = Int(mvCDy) >> 2
-
-                    let mvA = MotionVector(dx: Int16(sADx), dy: Int16(sADy))
-                    let mvB = MotionVector(dx: Int16(sBDx), dy: Int16(sBDy))
-                    let mvC = MotionVector(dx: Int16(sCDx), dy: Int16(sCDy))
-
-                    let pmvDx = MotionEstimation.median(sADx, sBDx, sCDx)
-                    let pmvDy = MotionEstimation.median(sADy, sBDy, sCDy)
-                    let pmv = MotionVector(dx: Int16(pmvDx), dy: Int16(pmvDy))
-
-                    let tmv: MotionVector
-                    if idx < prevMVsConst.count {
-                        tmv = MotionVector(dx: Int16(Int(prevMVsConst.dx[idx]) >> 2), dy: Int16(Int(prevMVsConst.dy[idx]) >> 2))
-                    } else {
-                        tmv = MotionVector(dx: 0, dy: 0)
-                    }
-
-                    let currContrast = MotionEstimation.extractContrast8x8(base: cBase, width: targetWidth, height: targetHeight, bx: bx, by: by)
-
-                    let hasLtrAffinity: Bool
-                    if let mem = memPtr, idx < memCount {
-                        hasLtrAffinity = 2 < mem[idx]
-                    } else {
-                        hasLtrAffinity = false
-                    }
-
-                    var mvPrev = MotionVector(dx: 0, dy: 0)
-                    var mutSADPrev = 0
-                    var prevSAD = 0
-                    var mvNext = MotionVector(dx: 0, dy: 0)
-                    var mutSADNext = 0
-                    var bestMV = MotionVector(dx: 0, dy: 0)
-                    var dir = false
-                    var cachedNextChromaSad: Int = -1
-                    // Evaluate Prev direction
-                    let (pMV, pSAD) = MotionEstimation.searchPixels(
-                        cBase: cBase, pBase: pBase,
-                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
-                        pmv: pmv, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
-                        roundOffset: roundOffset
-                    )
-                    mvPrev = pMV
-                    mutSADPrev = pSAD
-                    let prevChromaSad = MotionEstimation.computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
-                    mutSADPrev += prevChromaSad / 4
-                    prevSAD = mutSADPrev
-
-                    if 1024 < mutSADPrev {
-                        let dynT = max(1024, currContrast * 48)
-                        if dynT < mutSADPrev {
-                            var mvVariance = 0
-                            if 0 < col && colCount <= i {
-                                let dxDiff = Int((Int(dx[i - 1]) - Int(dx[i - colCount])).magnitude)
-                                let dyDiff = Int((Int(dy[i - 1]) - Int(dy[i - colCount])).magnitude)
-                                mvVariance = dxDiff + dyDiff
-                            }
-                            if 32 < mvVariance && (dynT * 2) < mutSADPrev {
-                                let (expMv, expSad) = MotionEstimation.searchPixels(
-                                    cBase: cBase, pBase: pBase,
-                                    cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12,
-                                    pmv: mvPrev, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
-                                    roundOffset: roundOffset
-                                )
-                                if expSad < mutSADPrev {
-                                    mvPrev = expMv
-                                    mutSADPrev = expSad
-                                    prevSAD = mutSADPrev
-                                }
-                            }
-                        }
-                    }
-
-                    bestMV = mvPrev
-                    dir = false
-
-                    // Evaluate Next (LTR) direction
-                    let (nMV, nSAD) = MotionEstimation.searchPixels(
-                        cBase: cBase, pBase: nBase,
-                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
-                        pmv: pmv, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
-                        roundOffset: roundOffset
-                    )
-                    mvNext = nMV
-                    mutSADNext = nSAD
-
-                    let nextChromaSad = MotionEstimation.computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
-                    cachedNextChromaSad = nextChromaSad
-
-                    let earlyExitThreshold = min(1536, 512 + (gopPosition * 16))
-                    let gopPenalty = min(1024, gopPosition * 16)
-
-                    if earlyExitThreshold <= prevSAD {
-                        let mvEnergyNext = Int((Int(mvNext.dx)).magnitude) + Int((Int(mvNext.dy)).magnitude)
-                        let effectiveGopPenalty: Int
-                        if mutSADNext < 384 || hasLtrAffinity {
-                            effectiveGopPenalty = 0
-                        } else {
-                            effectiveGopPenalty = gopPenalty
-                        }
-                        let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
-
-                        if mutSADNext + baselinePenalty < prevSAD {
-                            let nextContrast = MotionEstimation.extractContrast8x8(base: nBase, width: targetWidth, height: targetHeight, bx: bx + (Int(mvNext.dx) >> 2), by: by + (Int(mvNext.dy) >> 2))
-                            let contrastDiff = Int((currContrast - nextContrast).magnitude)
-                            let structurePenalty = (contrastDiff * contrastDiff) / 4
-                            let chromaPenalty = nextChromaSad / 4
-
-                            let totalNextPenalty = ((mutSADNext + baselinePenalty) + (structurePenalty + chromaPenalty))
-                            let energyNext = (mvNext.dy * mvNext.dy) + (mvNext.dx * mvNext.dx)
-                            let energyPrev = (mvPrev.dy * mvPrev.dy) + (mvPrev.dx * mvPrev.dx)
-
-                            switch true {
-                            case totalNextPenalty < prevSAD:
-                                bestMV = mvNext
-                                dir = true
-                            case (totalNextPenalty == prevSAD) && (energyNext < energyPrev):
-                                bestMV = mvNext
-                                dir = true
-                            default:
-                                break
-                            }
-                        }
-                    }
-
-                    let dynamicThreshold = max(1024, currContrast * 48)
-                    let resolvedNextChromaSad: Int
-                    if cachedNextChromaSad != -1 {
-                        resolvedNextChromaSad = cachedNextChromaSad
-                    } else {
-                        resolvedNextChromaSad = MotionEstimation.computeChromaSADFromPointers(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
-                    }
-                    let finalSAD: Int
-                    if dir {
-                        finalSAD = mutSADNext + (resolvedNextChromaSad / 4)
-                    } else {
-                        finalSAD = prevSAD
-                    }
-                    switch true {
-                    case dynamicThreshold < finalSAD:
-                        dx[i] = 0
-                        dy[i] = 0
-                    case finalSAD < 256:
-                        dx[i] = bestMV.dx * 4
-                        dy[i] = bestMV.dy * 4
-                    default:
-                        let refPlaneY: UnsafePointer<Int16>
-                        if dir {
-                            refPlaneY = nY
-                        } else {
-                            refPlaneY = pY
-                        }
-                        let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                            curr: cY, prev: refPlaneY,
-                            width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: bestMV
-                        )
-                        dx[i] = refinedMV.dx
-                        dy[i] = refinedMV.dy
-                    }
-                    sads[i] = finalSAD
-                    refDirs[i] = dir
-
-                    if wantDual {
-                        let ltrSAD = mutSADNext + (resolvedNextChromaSad / 4)
-                        psad[i] = prevSAD
-                        lsad[i] = ltrSAD
-
-                        if dir != true {
-                            pdx[i] = dx[i]
-                            pdy[i] = dy[i]
-                        } else {
-                            switch true {
-                            case dynamicThreshold < prevSAD:
-                                pdx[i] = 0
-                                pdy[i] = 0
-                            case prevSAD < 256:
-                                pdx[i] = mvPrev.dx * 4
-                                pdy[i] = mvPrev.dy * 4
-                            default:
-                                let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                    curr: cY, prev: pY,
-                                    width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvPrev
-                                )
-                                pdx[i] = rmv.dx
-                                pdy[i] = rmv.dy
-                            }
-                        }
-
-                        if dir {
-                            ldx[i] = dx[i]
-                            ldy[i] = dy[i]
-                        } else {
-                            switch true {
-                            case dynamicThreshold < ltrSAD:
-                                ldx[i] = 0
-                                ldy[i] = 0
-                            case ltrSAD < 256:
-                                ldx[i] = mvNext.dx * 4
-                                ldy[i] = mvNext.dy * 4
-                            default:
-                                let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
-                                    curr: cY, prev: nY,
-                                    width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvNext
-                                )
-                                ldx[i] = rmv.dx
-                                ldy[i] = rmv.dy
-                            }
-                        }
-                    }
-                    if isSkipBlock {
-                        dx[i] = 0
-                        dy[i] = 0
-                        sads[i] = 0
-                        refDirs[i] = false
-                    }
-                }
-                return SliceResult(startIdx: startIdx, dx: dx, dy: dy, sads: sads, refDirs: refDirs, pdx: pdx, pdy: pdy, ldx: ldx, ldy: ldy, psad: psad, lsad: lsad)
+            group.addTask { [ctx] in
+                executeBidirSlice(
+                    ctx: ctx,
+                    startIdx: startIdx,
+                    sliceBlocksCount: sliceBlocksCount
+                )
             }
         }
         

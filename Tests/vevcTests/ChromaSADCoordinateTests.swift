@@ -42,7 +42,11 @@ final class ChromaSADCoordinateTests: XCTestCase {
         // Full-res MV (-3,-3) → chroma displacement (-3 >> 1) = -2 → the
         // matching reference region sits at (0,0).
         let (curr, ref) = makePlanes(fillCurrAt: (2, 2), fillRefAt: (0, 0))
-        let sad = MotionEstimation.computeChromaSAD(curr: curr, ref: ref, bx: 1, by: 1, refDx: -3, refDy: -3)
+        let cbw = (curr.width + 1) / 2
+        let cbh = (curr.height + 1) / 2
+        let sad = withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
+            MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: rCb, refCr: rCr, cbw: cbw, cbh: cbh, bx: 1, by: 1, refDx: -3, refDy: -3)
+        }
         XCTAssertEqual(sad, 0, "Chroma SAD rounding should use >> 1 to match Luma negative vector accurately")
     }
 
@@ -51,7 +55,11 @@ final class ChromaSADCoordinateTests: XCTestCase {
         // Full-res MV (3,3) → chroma displacement (3 >> 1) = 1 → the matching
         // reference region sits at (3,3).
         let (curr, ref) = makePlanes(fillCurrAt: (2, 2), fillRefAt: (3, 3))
-        let sad = MotionEstimation.computeChromaSAD(curr: curr, ref: ref, bx: 1, by: 1, refDx: 3, refDy: 3)
+        let cbw = (curr.width + 1) / 2
+        let cbh = (curr.height + 1) / 2
+        let sad = withUnsafePointers(curr.cb, curr.cr, ref.cb, ref.cr) { cCb, cCr, rCb, rCr in
+            MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: rCb, refCr: rCr, cbw: cbw, cbh: cbh, bx: 1, by: 1, refDx: 3, refDy: 3)
+        }
         XCTAssertEqual(sad, 0, "Chroma SAD rounding should use >> 1 to match Luma positive vector accurately")
     }
 
@@ -67,7 +75,11 @@ final class ChromaSADCoordinateTests: XCTestCase {
             }
         }
         let broken = PlaneData420(width: ref.width, height: ref.height, y: ref.y, cb: refCb, cr: ref.cr)
-        let sad = MotionEstimation.computeChromaSAD(curr: curr, ref: broken, bx: 1, by: 1, refDx: 0, refDy: 0)
+        let cbw = (curr.width + 1) / 2
+        let cbh = (curr.height + 1) / 2
+        let sad = withUnsafePointers(curr.cb, curr.cr, broken.cb, broken.cr) { cCb, cCr, rCb, rCr in
+            MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: rCb, refCr: rCr, cbw: cbw, cbh: cbh, bx: 1, by: 1, refDx: 0, refDy: 0)
+        }
         XCTAssertGreaterThan(sad, 0, "strided sampling must see mismatches outside the top-left corner")
     }
 }
