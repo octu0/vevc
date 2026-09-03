@@ -426,51 +426,27 @@ final class SkipDecider: @unchecked Sendable {
             bx: bx, by: by, bw: blockW, bh: blockH
         )
         let col = i % bw
-        let leftDec: Int32 = switch true {
-        case 0 < col: Int32(skipMap[i - 1].rawValue)
-        default: -1
-        }
-        let upDec: Int32 = switch true {
-        case bw <= i: Int32(skipMap[i - bw].rawValue)
-        default: -1
-        }
+        let leftDec: Int32 = if 0 < col { Int32(skipMap[i - 1].rawValue) } else { -1 }
+        let upDec: Int32 = if bw <= i { Int32(skipMap[i - bw].rawValue) } else { -1 }
         out[0] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: pRef, bx: bx, by: by, width: width, height: height))
         out[1] = Int32(clamping: skipDeciderZeroSAD32(cur: src, ref: lRef, bx: bx, by: by, width: width, height: height))
-        let sadPrev: Int = switch true {
-        case i < inputs.meSadPrev.count: inputs.meSadPrev[i]
-        default: 0
-        }
+        let sadPrev: Int = if i < inputs.meSadPrev.count { inputs.meSadPrev[i] } else { 0 }
         out[2] = Int32(clamping: sadPrev)
-        let sadLtr: Int = switch true {
-        case i < inputs.meSadLtr.count: inputs.meSadLtr[i]
-        default: 0
-        }
+        let sadLtr: Int = if i < inputs.meSadLtr.count { inputs.meSadLtr[i] } else { 0 }
         out[3] = Int32(clamping: sadLtr)
         out[4] = Int32(abs(Int(inputs.mvsPrev.dx[i])) + abs(Int(inputs.mvsPrev.dy[i])))
         out[5] = Int32(abs(Int(inputs.mvsLtr.dx[i])) + abs(Int(inputs.mvsLtr.dy[i])))
-        let variance: Int32 = switch true {
-        case i < inputs.variance.count: inputs.variance[i]
-        default: 0
-        }
+        let variance: Int32 = if i < inputs.variance.count { inputs.variance[i] } else { 0 }
         out[6] = variance
-        let actClass: Int32 = switch true {
-        case i < inputs.activityClass.count: Int32(inputs.activityClass[i].rawValue)
-        default: 0
-        }
+        let actClass: Int32 = if i < inputs.activityClass.count { Int32(inputs.activityClass[i].rawValue) } else { 0 }
         out[7] = actClass
         out[8] = Int32(clamping: inputs.adjustedStep)
         out[9] = Int32(clamping: inputs.gopPosition)
         out[10] = Int32(clamping: inputs.ltrAge)
-        let staticCount: Int = switch true {
-        case i < inputs.staticCounters.count: inputs.staticCounters[i]
-        default: 0
-        }
+        let staticCount: Int = if i < inputs.staticCounters.count { inputs.staticCounters[i] } else { 0 }
         out[11] = Int32(clamping: staticCount)
         out[12] = Int32(skipMap[i].rawValue)
-        let refDirVal: Int32 = switch true {
-        case refDirs[i]: 1
-        default: 0
-        }
+        let refDirVal: Int32 = if refDirs[i] { 1 } else { 0 }
         out[13] = refDirVal
         out[14] = leftDec
         out[15] = upDec
