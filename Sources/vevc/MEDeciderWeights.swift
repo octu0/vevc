@@ -1,33 +1,27 @@
 // MARK: - Learned Motion Estimation Decider (Profile 2 P-frames)
 //
-// An 8-8-4 integer SIMD neural decider that classifies motion search mode and
-// reference affinity per 8x8 block into three search regimes and one LTR affinity:
+// An 8-8-3 integer SIMD neural decider that classifies motion search mode
+// per 8x8 block into two search regimes:
 //
 // 1. .earlyCandidate (0): Candidate or zero vector is dominant; skip ±2 near-refinement
 //    and skip LDSP diamond search, eliminating 24-40 SAD evaluations per block.
-// 2. .refineNear (1): Candidate is in the basin of attraction; run ±2 integer search
-//    (24 offsets) with hoisted boundary checks, skip LDSP.
-// 3. .wideDiamond (2): Poor match or dynamic scene motion; run ±2 refinement and LDSP
-//    large diamond pattern search.
-// 4. ltrScore (output 3): Directional affinity score tracking LTR background persistence.
+// 2. .search (1): Basin of attraction or dynamic scene motion; run ±2 integer search
+//    (24 offsets) and conditional LDSP diamond search.
 //
 // Inference is 100% integer SIMD (Int32 accumulators, ReLU, arithmetic shifts),
 // zero dynamic heap allocations, and branch-deterministic.
 
 public enum MESearchMode: Int32, Sendable {
     case earlyCandidate = 0
-    case refineNear = 1
-    case wideDiamond = 2
+    case search = 1
 }
 
 public struct MEDecision: Sendable {
     public let mode: MESearchMode
-    public let ltrScore: Int32
 
     @inline(__always)
-    public init(mode: MESearchMode, ltrScore: Int32) {
+    public init(mode: MESearchMode) {
         self.mode = mode
-        self.ltrScore = ltrScore
     }
 }
 
@@ -74,7 +68,6 @@ public struct MEDeciderWeights: Sendable {
     public let w2_0: SIMD8<Int32>
     public let w2_1: SIMD8<Int32>
     public let w2_2: SIMD8<Int32>
-    public let w2_3: SIMD8<Int32>
     public let w1SIMD: [SIMD8<Int32>]
     public let w2SIMD: [SIMD8<Int32>]
 
@@ -93,7 +86,7 @@ public struct MEDeciderWeights: Sendable {
         let f = Int(a[2])
         let h = Int(a[3])
         let o = Int(a[4])
-        if f != 8 || h != 8 || o != 4 { return nil }
+        if f != 8 || h != 8 || o != 3 { return nil }
 
         var p = 5
         func take(_ n: Int) -> [Int32] {
@@ -233,7 +226,7 @@ public struct MEDeciderWeights: Sendable {
             b1Vec[i] = b1[i]
         }
         var b2Vec = SIMD4<Int32>()
-        for i in 0..<4 {
+        for i in 0..<3 {
             b2Vec[i] = b2[i]
         }
 
@@ -246,7 +239,7 @@ public struct MEDeciderWeights: Sendable {
             b1SIMD: b1Vec, b2SIMD: b2Vec,
             w1_0: simdW1[0], w1_1: simdW1[1], w1_2: simdW1[2], w1_3: simdW1[3],
             w1_4: simdW1[4], w1_5: simdW1[5], w1_6: simdW1[6], w1_7: simdW1[7],
-            w2_0: simdW2[0], w2_1: simdW2[1], w2_2: simdW2[2], w2_3: simdW2[3],
+            w2_0: simdW2[0], w2_1: simdW2[1], w2_2: simdW2[2],
             w1SIMD: simdW1, w2SIMD: simdW2,
             w1PosMask: p1Masks, w1NegMask: n1Masks, w1Alpha: a1List,
             w2PosMask: p2Masks, w2NegMask: n2Masks, w2Alpha: a2List
@@ -263,17 +256,17 @@ public struct MEDeciderWeights: Sendable {
 
 public enum MEDeciderWeightsData {
     // Serialization layout:
-    // [0..4]: magic(0x4D454431), kind(1), f(8), h(8), o(4)
+    // [0..4]: magic(0x4D454431), kind(1), f(8), h(8), o(3)
     // [5..12]: mu[8]
     // [13..20]: scale[8]
     // [21]: normShift(8)
     // [22..85]: w1[64]
     // [86..93]: b1[8]
-    // [94..125]: w2[32]
-    // [126..129]: b2[4]
-    // [130]: shift1(6)
+    // [94..117]: w2[24]
+    // [118..120]: b2[3]
+    // [121]: shift1(6)
     public static let blob: [Int32] = [
-        0x4D454431, 1, 8, 8, 4,
+        0x4D454431, 1, 8, 8, 3,
         // mu[8]
         48, 48, 48, 0, 0, 32, 0, 8,
         // scale[8]
@@ -291,13 +284,12 @@ public enum MEDeciderWeightsData {
           0,  16,   0,   0,   0,  32,   0,   0,
         // b1[8]
         0, 32, 48, 0, -5376, -1200, 32, 0,
-        // w2[32] (4x8)
+        // w2[24] (3x8)
          64,  32,  32, -32,  -32, -32,   0,   0,
         -32, -16, -16,  32, -128, -16,   0,   8,
         -64, -32, -32, -16,  160,  48,   0,   0,
-          8,  24,   0,   0,  -16,  -8,  48,   0,
-        // b2[4]
-        0, 32, 0, -64,
+        // b2[3]
+        0, 32, 0,
         // shift1
         6
     ]
@@ -345,19 +337,20 @@ public func meDeciderClassify(
     let s0 = weights.b2SIMD[0] &+ (weights.w2_0 &* hVec).wrappedSum()
     let s1 = weights.b2SIMD[1] &+ (weights.w2_1 &* hVec).wrappedSum()
     let s2 = weights.b2SIMD[2] &+ (weights.w2_2 &* hVec).wrappedSum()
-    let s3 = weights.b2SIMD[3] &+ (weights.w2_3 &* hVec).wrappedSum()
 
+    // Three score rows collapse into a binary outcome; retraining will replace this with a proper gate model.
     let mode: MESearchMode
-    switch true {
-    case s1 <= s0 && s2 <= s0:
-        mode = .earlyCandidate
-    case s2 <= s1:
-        mode = .refineNear
-    default:
-        mode = .wideDiamond
+    if s1 <= s0 {
+        if s2 <= s0 {
+            mode = .earlyCandidate
+        } else {
+            mode = .search
+        }
+    } else {
+        mode = .search
     }
 
-    return MEDecision(mode: mode, ltrScore: s3)
+    return MEDecision(mode: mode)
 }
 
 /// BitNet b1.58 ternary-weight forward pass (multiplication-free inner product).
@@ -388,7 +381,7 @@ public func meDeciderClassifyBitNet(
 
     var s = SIMD4<Int32>()
     var k = 0
-    while k < 4 {
+    while k < 3 {
         let p = weights.w2PosMask[k]
         let n = weights.w2NegMask[k]
         let posSum = (p & hVec).wrappedSum()
@@ -398,15 +391,17 @@ public func meDeciderClassifyBitNet(
         k += 1
     }
 
+    // Three score rows collapse into a binary outcome; retraining will replace this with a proper gate model.
     let mode: MESearchMode
-    switch true {
-    case s[1] <= s[0] && s[2] <= s[0]:
-        mode = .earlyCandidate
-    case s[2] <= s[1]:
-        mode = .refineNear
-    default:
-        mode = .wideDiamond
+    if s[1] <= s[0] {
+        if s[2] <= s[0] {
+            mode = .earlyCandidate
+        } else {
+            mode = .search
+        }
+    } else {
+        mode = .search
     }
 
-    return MEDecision(mode: mode, ltrScore: s[3])
+    return MEDecision(mode: mode)
 }

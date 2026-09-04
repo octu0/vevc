@@ -628,32 +628,7 @@ struct MotionEstimation {
         switch decision.mode {
         case .earlyCandidate:
             break
-        case .refineNear:
-            let (rx, ry, rcost, rsad) = refineNear2(
-                candCenterDx: bestCoarseDx, candCenterDy: bestCoarseDy,
-                candCost: bestCoarseCost, candSAD: bestCoarseSAD,
-                minDx: minDx, maxDx: maxDx, minDy: minDy, maxDy: maxDy,
-                pmvBaseX: pmvBaseX, pmvBaseY: pmvBaseY,
-                pBase: pBase, cPtr: cPtr, width: width, bx: bx, by: by
-            )
-            bestCoarseDx = rx
-            bestCoarseDy = ry
-            bestCoarseCost = rcost
-            bestCoarseSAD = rsad
-            if 384 <= rsad {
-                let (lx, ly, lcost, lsad) = searchLdsp(
-                    centerX: rx, centerY: ry,
-                    startCost: rcost, startSAD: rsad,
-                    minDx: minDx, maxDx: maxDx, minDy: minDy, maxDy: maxDy,
-                    pmvBaseX: pmvBaseX, pmvBaseY: pmvBaseY,
-                    pBase: pBase, cPtr: cPtr, width: width, bx: bx, by: by
-                )
-                bestCoarseDx = lx
-                bestCoarseDy = ly
-                bestCoarseCost = lcost
-                bestCoarseSAD = lsad
-            }
-        case .wideDiamond:
+        case .search:
             let (rx, ry, rcost, rsad) = refineNear2(
                 candCenterDx: bestCoarseDx, candCenterDy: bestCoarseDy,
                 candCost: bestCoarseCost, candSAD: bestCoarseSAD,

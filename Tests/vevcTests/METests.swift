@@ -85,13 +85,13 @@ struct METests {
         if let w = weights {
             #expect(w.f == 8)
             #expect(w.h == 8)
-            #expect(w.o == 4)
+            #expect(w.o == 3)
             #expect(w.w1SIMD.count == 8)
-            #expect(w.w2SIMD.count == 4)
+            #expect(w.w2SIMD.count == 3)
             #expect(w.w1PosMask.count == 8)
             #expect(w.w1NegMask.count == 8)
-            #expect(w.w2PosMask.count == 4)
-            #expect(w.w2NegMask.count == 4)
+            #expect(w.w2PosMask.count == 3)
+            #expect(w.w2NegMask.count == 3)
         }
     }
 
@@ -104,22 +104,22 @@ struct METests {
         #expect(dec.mode == .earlyCandidate)
     }
 
-    @Test("MEDecider classifies moderate motion as refineNear")
-    func testMEDeciderClassifyRefineNear() {
+    @Test("MEDecider classifies moderate motion as search")
+    func testMEDeciderClassifyModerateMotion() {
         let weights = MEDeciderWeights.shared
         // Moderate candidate SAD (120), small MV (4)
         let q = SIMD8<Int32>(180, 120, 150, 40, 4, 32, 0, 4)
         let dec = meDeciderClassify(q: q, weights: weights)
-        #expect(dec.mode == .refineNear)
+        #expect(dec.mode == .search)
     }
 
-    @Test("MEDecider classifies large mismatch as wideDiamond")
-    func testMEDeciderClassifyWideDiamond() {
+    @Test("MEDecider classifies large mismatch as search")
+    func testMEDeciderClassifyLargeMismatch() {
         let weights = MEDeciderWeights.shared
         // Large SAD (480), dynamic motion, negative membrane
         let q = SIMD8<Int32>(520, 480, 500, 30, 12, 48, -4, 8)
         let dec = meDeciderClassify(q: q, weights: weights)
-        #expect(dec.mode == .wideDiamond)
+        #expect(dec.mode == .search)
     }
 
     @Test("MEDecider BitNet inference is functional")
@@ -130,12 +130,12 @@ struct METests {
         #expect(decBitNet.mode == .earlyCandidate)
     }
 
-    @Test("MEDecider elevates LTR score for persistent static background")
-    func testMEDeciderLtrScore() {
+    @Test("MEDecider classifies persistent static background as earlyCandidate")
+    func testMEDeciderPersistentStaticBackground() {
         let weights = MEDeciderWeights.shared
         let qLtr = SIMD8<Int32>(30, 30, 30, 0, 0, 16, 6, 16)
         let dec = meDeciderClassify(q: qLtr, weights: weights)
-        #expect(0 < dec.ltrScore)
+        #expect(dec.mode == .earlyCandidate)
     }
 
     @Test("meRefine2Offsets covers all 24 points without duplicates or omissions")
@@ -168,14 +168,14 @@ struct METests {
             r += 1
         }
         var k = 0
-        while k < 4 {
+        while k < 3 {
             #expect(w.b2SIMD[k] == w.b2[k])
             k += 1
         }
         #expect(w.w1_0 == w.w1SIMD[0])
         #expect(w.w1_7 == w.w1SIMD[7])
         #expect(w.w2_0 == w.w2SIMD[0])
-        #expect(w.w2_3 == w.w2SIMD[3])
+        #expect(w.w2_2 == w.w2SIMD[2])
 
         // Clamping edge check
         let hugeVec = SIMD8<Int32>(repeating: 100000)
