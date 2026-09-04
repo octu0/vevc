@@ -497,9 +497,9 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    private static func evaluateSearch(
-        cPtr: UnsafePointer<Int16>, 
-        pBase: UnsafePointer<Int16>, 
+    private static func evaluateSearchForProfile2(
+        cPtr: UnsafePointer<Int16>,
+        pBase: UnsafePointer<Int16>,
         oPtr: UnsafeMutablePointer<Int16>,
         tPtr: UnsafeMutablePointer<Int16>,
         width: Int, height: Int, bx: Int, by: Int, range: Int,
@@ -798,9 +798,9 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func searchPixelsFromArrays(
-        currPlane: [Int16], 
-        prevPlane: [Int16], 
+    static func searchPixelsForProfile2(
+        cBase: UnsafePointer<Int16>,
+        pBase: UnsafePointer<Int16>,
         cPtr: UnsafeMutablePointer<Int16>,
         oPtr: UnsafeMutablePointer<Int16>,
         tPtr: UnsafeMutablePointer<Int16>,
@@ -816,41 +816,7 @@ struct MotionEstimation {
         gopPosition: Int = 0,
         weights: MEDeciderWeights = MEDeciderWeights.shared
     ) -> (MotionVector, Int) {
-        return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
-            fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
-            return searchPixels(
-                cBase: cBase, pBase: pBase, cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
-                width: width, height: height, bx: bx, by: by, range: range,
-                pmv: pmv, tmv: tmv, spatialA: spatialA, spatialB: spatialB, spatialC: spatialC,
-                roundOffset: roundOffset,
-                contrast: contrast,
-                membrane: membrane,
-                gopPosition: gopPosition,
-                weights: weights
-            )
-        }
-    }
-    
-    @inline(__always)
-    static func searchPixels(
-        cBase: UnsafePointer<Int16>, 
-        pBase: UnsafePointer<Int16>, 
-        cPtr: UnsafeMutablePointer<Int16>,
-        oPtr: UnsafeMutablePointer<Int16>,
-        tPtr: UnsafeMutablePointer<Int16>,
-        width: Int, height: Int, bx: Int, by: Int, range: Int = 8,
-        pmv: MotionVector,
-        tmv: MotionVector = MotionVector(dx: 0, dy: 0),
-        spatialA: MotionVector = MotionVector(dx: 0, dy: 0),
-        spatialB: MotionVector = MotionVector(dx: 0, dy: 0),
-        spatialC: MotionVector = MotionVector(dx: 0, dy: 0),
-        roundOffset: Int,
-        contrast: Int = 0,
-        membrane: Int = 0,
-        gopPosition: Int = 0,
-        weights: MEDeciderWeights = MEDeciderWeights.shared
-    ) -> (MotionVector, Int) {
-        let (dx, dy, sad) = evaluateSearch(
+        let (dx, dy, sad) = evaluateSearchForProfile2(
             cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr,
             width: width, height: height, bx: bx, by: by, range: range,
             pmv: pmv, tmv: tmv, spatialA: spatialA, spatialB: spatialB, spatialC: spatialC,
@@ -860,6 +826,270 @@ struct MotionEstimation {
             gopPosition: gopPosition,
             weights: weights
         )
+        return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
+    }
+
+    @inline(__always)
+    private static func evaluateSearch(
+        cPtr: UnsafePointer<Int16>,
+        pBase: UnsafePointer<Int16>,
+        oPtr: UnsafeMutablePointer<Int16>,
+        tPtr: UnsafeMutablePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, range: Int, pmv: MotionVector, roundOffset: Int
+    ) -> (Int, Int, Int) {
+        fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
+        let zeroSAD: Int = compute64PointSADBlocks(cBase: cPtr, pBase: oPtr)
+
+        if zeroSAD < 32 {
+            return (0, 0, zeroSAD)
+        }
+
+        let pmvDx4 = Int(pmv.dx) / 4
+        let pmvDy4 = Int(pmv.dy) / 4
+        let zeroPenalty = getMVDPenalty(dx: 0, dy: 0, pmvDx: pmvDx4, pmvDy: pmvDy4)
+        var bestCoarseSAD = zeroSAD + zeroPenalty
+        var bestCoarseDx = 0
+        var bestCoarseDy = 0
+
+        let minDy = max(-1 * range, -1 * by)
+        let maxDy = min(range, height - by - 8)
+        let minDx = max(-1 * range, -1 * bx)
+        let maxDx = min(range, width - bx - 8)
+
+        if minDy <= maxDy && minDx <= maxDx {
+            var centerX = Int(pmv.dx) / 4
+            var centerY = Int(pmv.dy) / 4
+            centerX = max(minDx, min(maxDx, centerX))
+            centerY = max(minDy, min(maxDy, centerY))
+
+            let pPtr = pBase.advanced(by: (by + centerY) * width + (bx + centerX))
+            let pmvSAD = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+            let pmvPenalty = getMVDPenalty(dx: centerX, dy: centerY, pmvDx: pmvDx4, pmvDy: pmvDy4)
+
+            if pmvSAD + pmvPenalty < bestCoarseSAD {
+                bestCoarseSAD = pmvSAD + pmvPenalty
+                bestCoarseDx = centerX
+                bestCoarseDy = centerY
+            } else {
+                centerX = 0
+                centerY = 0
+            }
+
+            // Limit LDSP iterations to 2 to avoid excessive search in difficult blocks
+            var ldspIter = 0
+            while ldspIter < 2 {
+                ldspIter += 1
+                var minSAD = bestCoarseSAD
+                var minDxPos = centerX
+                var minDyPos = centerY
+                var foundSmaller = false
+
+                for i in 0..<8 {
+                    let dx = centerX + dsLdspX[i]
+                    let dy = centerY + dsLdspY[i]
+
+                    if dx < minDx { continue }
+                    if maxDx < dx { continue }
+                    if dy < minDy { continue }
+                    if maxDy < dy { continue }
+
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: pmvDx4, pmvDy: pmvDy4)
+                    let maxSAD = bestCoarseSAD - penalty
+                    if maxSAD < 0 { continue }
+
+                    let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
+                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+
+                    let totalSAD = sad + penalty
+                    if totalSAD < minSAD {
+                        minSAD = totalSAD
+                        minDxPos = dx
+                        minDyPos = dy
+                        foundSmaller = true
+                    }
+                }
+
+                if foundSmaller != true {
+                    break
+                }
+
+                bestCoarseSAD = minSAD
+                bestCoarseDx = minDxPos
+                bestCoarseDy = minDyPos
+                centerX = minDxPos
+                centerY = minDyPos
+
+                if bestCoarseSAD < 64 {
+                    break
+                }
+            }
+
+            var finalMinSAD = bestCoarseSAD
+            var finalMinDx = centerX
+            var finalMinDy = centerY
+
+            if 64 <= finalMinSAD {
+                for i in 0..<4 {
+                    let dx = centerX + dsSdspX[i]
+                    let dy = centerY + dsSdspY[i]
+
+                    if dx < minDx { continue }
+                    if maxDx < dx { continue }
+                    if dy < minDy { continue }
+                    if maxDy < dy { continue }
+
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: pmvDx4, pmvDy: pmvDy4)
+                    let maxSAD = bestCoarseSAD - penalty
+                    if maxSAD < 0 { continue }
+
+                    let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
+                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+
+                    let totalSAD = sad + penalty
+                    if totalSAD < finalMinSAD {
+                        finalMinSAD = totalSAD
+                        finalMinDx = dx
+                        finalMinDy = dy
+                    }
+                }
+            }
+
+            bestCoarseSAD = finalMinSAD
+            bestCoarseDx = finalMinDx
+            bestCoarseDy = finalMinDy
+        }
+
+        var bestFineSAD: Int = bestCoarseSAD
+        var bestFineDx: Int = bestCoarseDx
+        var bestFineDy: Int = bestCoarseDy
+
+        // Early exit: skip fine search when coarse SAD is already good enough
+        if 128 <= bestCoarseSAD {
+            let fineOffsets = meFineOffsets
+
+            for offset in fineOffsets {
+                let fx: Int = offset.0
+                let fy: Int = offset.1
+                let fineDx: Int = bestCoarseDx + fx
+                let fineDy: Int = bestCoarseDy + fy
+
+                if fineDx < -4 || 4 < fineDx || fineDy < -4 || 4 < fineDy { continue }
+
+                let penalty = getMVDPenalty(dx: fineDx, dy: fineDy, pmvDx: pmvDx4, pmvDy: pmvDy4)
+                let maxSAD = bestFineSAD - penalty
+                if maxSAD < 0 { continue }
+
+                fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx + fineDx, y: by + fineDy, dest: tPtr)
+                let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+
+                let totalSAD = sad + penalty
+                if totalSAD < bestFineSAD {
+                    bestFineSAD = totalSAD
+                    bestFineDx = fineDx
+                    bestFineDy = fineDy
+                }
+            }
+        } // end early exit guard
+
+        var bestHpDx: Int = bestFineDx * 2
+        var bestHpDy: Int = bestFineDy * 2
+        var bestHpSAD: Int = bestFineSAD
+
+        // Half-pixel refinement: threshold lowered 224→160 for more aggressive early exit
+        if 160 < bestFineSAD {
+            for oi in 0..<8 {
+                let hx = meSearchOffsetX[oi]
+                let hy = meSearchOffsetY[oi]
+                let hpDx: Int = bestFineDx * 2 + hx
+                let hpDy: Int = bestFineDy * 2 + hy
+
+                let intDx: Int = hpDx >> 1
+                let intDy: Int = hpDy >> 1
+                let fractX: Int = hpDx & 1
+                let fractY: Int = hpDy & 1
+
+                let blurPenalty = (fractX + fractY) * 16
+                let penalty = getMVDPenalty(dx: hpDx, dy: hpDy, pmvDx: Int(pmv.dx) / 2, pmvDy: Int(pmv.dy) / 2) + blurPenalty
+                let maxSAD = bestHpSAD - penalty
+                if maxSAD < 0 { continue }
+
+                fetchHalfPixelBlock8(
+                    plane: pBase, width: width, height: height,
+                    intX: bx + intDx, intY: by + intDy,
+                    fractX: fractX, fractY: fractY, dest: tPtr, roundOffset: roundOffset
+                )
+                let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+
+                let totalSAD = sad + penalty
+                if totalSAD < bestHpSAD {
+                    bestHpSAD = totalSAD
+                    bestHpDx = hpDx
+                    bestHpDy = hpDy
+                }
+            }
+        }
+
+        // Quarter-pixel refinement around best half-pixel position
+        // bestHpDx is in half-pixel units -> multiply by 2 to convert to quarter-pixel units
+        // This search yields odd-valued MVs, ensuring non-zero fractX/Y values even after Layer2 scaling,
+        // which makes FIR interpolation effective.
+        var bestQpDx: Int = bestHpDx * 2
+        var bestQpDy: Int = bestHpDy * 2
+        var bestQpSAD: Int = bestHpSAD
+
+        // Quarter-pixel refinement: threshold lowered 96→64 for more aggressive early exit
+        if 64 < bestHpSAD {
+            for oi in 0..<8 {
+                let qpDx: Int = bestHpDx * 2 + meSearchOffsetX[oi]
+                let qpDy: Int = bestHpDy * 2 + meSearchOffsetY[oi]
+
+                let intDx: Int = qpDx >> 2
+                let intDy: Int = qpDy >> 2
+                let remX: Int = qpDx & 3
+                let remY: Int = qpDy & 3
+
+                // Quarter-pixel blur penalty is lighter than half-pixel
+                let blurPenalty = (remX + remY) * 4
+                let penalty = getMVDPenalty(dx: qpDx, dy: qpDy, pmvDx: Int(pmv.dx), pmvDy: Int(pmv.dy)) + blurPenalty
+                let maxSAD = bestQpSAD - penalty
+                if maxSAD < 0 { continue }
+
+                fetchQuarterPixelBlock8(
+                    plane: pBase, width: width, height: height,
+                    intX: bx + intDx, intY: by + intDy,
+                    remX: remX, remY: remY, dest: tPtr, roundOffset: roundOffset
+                )
+                let sad = compute64PointSADBlocks(cBase: cPtr, pBase: tPtr)
+
+                let totalSAD = sad + penalty
+                if totalSAD < bestQpSAD {
+                    bestQpSAD = totalSAD
+                    bestQpDx = qpDx
+                    bestQpDy = qpDy
+                }
+            }
+        }
+
+        let bestMVIsZero = (bestQpDx == 0 && bestQpDy == 0)
+        if bestMVIsZero != true {
+            if zeroSAD < 32 && zeroSAD < bestQpSAD + 2 {
+                return (0, 0, zeroSAD)
+            }
+        }
+
+        return (bestQpDx, bestQpDy, bestQpSAD)
+    }
+
+    @inline(__always)
+    static func searchPixels(
+        cBase: UnsafePointer<Int16>,
+        pBase: UnsafePointer<Int16>,
+        cPtr: UnsafeMutablePointer<Int16>,
+        oPtr: UnsafeMutablePointer<Int16>,
+        tPtr: UnsafeMutablePointer<Int16>,
+        width: Int, height: Int, bx: Int, by: Int, range: Int = 4, pmv: MotionVector, roundOffset: Int
+    ) -> (MotionVector, Int) {
+        let (dx, dy, sad) = evaluateSearch(cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr, width: width, height: height, bx: bx, by: by, range: range, pmv: pmv, roundOffset: roundOffset)
         return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
     }
 
@@ -1268,17 +1498,6 @@ struct MotionEstimation {
     }
 
     @inline(__always)
-    static func searchPixelsSubpixelRefinement32FromArrays(
-        currPlane: [Int16],
-        prevPlane: [Int16],
-        width: Int, height: Int, bx: Int, by: Int, pmv: MotionVector
-    ) -> (MotionVector, Int) {
-        return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
-            searchPixelsSubpixelRefinement32(curr: cBase, prev: pBase, width: width, height: height, bx: bx, by: by, pmv: pmv)
-        }
-    }
-
-    @inline(__always)
     static func computeOcclusionScores(
         currPlane: [Int16],
         prevPlane: [Int16],
@@ -1363,6 +1582,399 @@ struct MotionEstimation {
     }
 }
 
+/// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames,
+@inline(__always)
+func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dualOut: DualMVSink?) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
+    let dx = curr.width
+    let dy = curr.height
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l0dx = (l1dx + 1) / 2
+    let l0dy = (l1dy + 1) / 2
+
+    // Compute DWT LL band (Base8 resolution) for current frame
+    async let (currSub2, rCurrSub2) = extractSingleTransformSubband32(r: curr.rY, width: dx, height: dy, pool: pool)
+
+    // Forward reference DWT LL band
+    async let (prevSub2, rPrevSub2) = extractSingleTransformSubband32(r: prev.rY, width: dx, height: dy, pool: pool)
+
+    let cS2 = await currSub2
+    let pS2 = await prevSub2
+
+    let nS2: [Int16]
+    let nR2: @Sendable () -> Void
+    if let cached = cachedNextSub2 {
+        nS2 = cached
+        nR2 = {}
+    } else {
+        let (sub2, releaseFn) = await extractSingleTransformSubband32(r: next.rY, width: dx, height: dy, pool: pool)
+        nS2 = sub2
+        nR2 = releaseFn
+    }
+
+    async let (currSub1, rCurrSub1) = extractSingleTransformSubband16(r: Int16Reader(data: cS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+    async let (prevSub1, rPrevSub1) = extractSingleTransformSubband16(r: Int16Reader(data: pS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+
+    let (cS1, cR1) = await (currSub1, rCurrSub1)
+    let (pS1, pR1) = await (prevSub1, rPrevSub1)
+
+    let nS1: [Int16]
+    let nR1: @Sendable () -> Void
+    if let cached = cachedNextSub1 {
+        nS1 = cached
+        nR1 = {}
+    } else {
+        let (sub1, releaseFn) = await extractSingleTransformSubband16(r: Int16Reader(data: nS2, width: l1dx, height: l1dy), width: l1dx, height: l1dy, pool: pool)
+        nS1 = sub1
+        nR1 = releaseFn
+    }
+
+    let cR2 = await rCurrSub2
+    let pR2 = await rPrevSub2
+
+    defer {
+        cR2()
+        cR1()
+        pR2()
+        pR1()
+        nR2()
+        nR1()
+    }
+
+    let targetWidth = l0dx
+    let targetHeight = l0dy
+    let colCount = (targetWidth + 7) / 8
+    let rowCount = (targetHeight + 7) / 8
+    let blocks8Count = colCount * rowCount
+
+    var mvs = MotionVectors(count: blocks8Count)
+    var sads = [Int](repeating: 0, count: blocks8Count)
+    var refDirs = [Bool](repeating: false, count: blocks8Count)
+
+    let wantDual = (dualOut != nil)
+
+    let cS1BaseWrapper = UnsafeSendablePointer(ptr: cS1.withUnsafeBufferPointer { $0.baseAddress! })
+    let pS1BaseWrapper = UnsafeSendablePointer(ptr: pS1.withUnsafeBufferPointer { $0.baseAddress! })
+    let nS1BaseWrapper = UnsafeSendablePointer(ptr: nS1.withUnsafeBufferPointer { $0.baseAddress! })
+
+    let cYWrapper = UnsafeSendablePointer(ptr: curr.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let pYWrapper = UnsafeSendablePointer(ptr: prev.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let nYWrapper = UnsafeSendablePointer(ptr: next.y.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCbWrapper = UnsafeSendablePointer(ptr: curr.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let cCrWrapper = UnsafeSendablePointer(ptr: curr.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCbWrapper = UnsafeSendablePointer(ptr: prev.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let pCrWrapper = UnsafeSendablePointer(ptr: prev.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCbWrapper = UnsafeSendablePointer(ptr: next.cb.withUnsafeBufferPointer { $0.baseAddress! })
+    let nCrWrapper = UnsafeSendablePointer(ptr: next.cr.withUnsafeBufferPointer { $0.baseAddress! })
+    let cbw = (curr.width + 1) / 2
+    let cbh = (curr.height + 1) / 2
+
+    let hasSkipMap = 0 < skipMap.count
+    let skipMapConst = skipMap
+    let prevMVsConst = prevMVs
+
+    let numSlices = 4
+    let rowsPerSlice = (rowCount + numSlices - 1) / numSlices
+
+    let results: [SliceResult] = await withTaskGroup(of: SliceResult.self) { group in
+        for sliceIdx in 0..<numSlices {
+            let startRow = sliceIdx * rowsPerSlice
+            let endRow = min(rowCount, startRow + rowsPerSlice)
+            if endRow <= startRow { continue }
+
+            let startIdx = startRow * colCount
+            let sliceBlocksCount = (endRow - startRow) * colCount
+
+            group.addTask {
+                let tmpC = pool.get64()
+                let tmpO = pool.get64()
+                let tmpT = pool.get64()
+                defer {
+                    pool.put(tmpC)
+                    pool.put(tmpO)
+                    pool.put(tmpT)
+                }
+                let cPtr = tmpC.base
+                let oPtr = tmpO.base
+                let tPtr = tmpT.base
+
+                let cBase = cS1BaseWrapper.ptr
+                let pBase = pS1BaseWrapper.ptr
+                let nBase = nS1BaseWrapper.ptr
+
+                let cY = cYWrapper.ptr
+                let pY = pYWrapper.ptr
+                let nY = nYWrapper.ptr
+                let cCb = cCbWrapper.ptr
+                let cCr = cCrWrapper.ptr
+                let pCb = pCbWrapper.ptr
+                let pCr = pCrWrapper.ptr
+                let nCb = nCbWrapper.ptr
+                let nCr = nCrWrapper.ptr
+
+                var dx = [Int16](repeating: 0, count: sliceBlocksCount)
+                var dy = [Int16](repeating: 0, count: sliceBlocksCount)
+                var sads = [Int](repeating: 0, count: sliceBlocksCount)
+                var refDirs = [Bool](repeating: false, count: sliceBlocksCount)
+                let dualSliceCount: Int
+                if wantDual {
+                    dualSliceCount = sliceBlocksCount
+                } else {
+                    dualSliceCount = 0
+                }
+                var pdx = [Int16](repeating: 0, count: dualSliceCount)
+                var pdy = [Int16](repeating: 0, count: dualSliceCount)
+                var ldx = [Int16](repeating: 0, count: dualSliceCount)
+                var ldy = [Int16](repeating: 0, count: dualSliceCount)
+                var psad = [Int](repeating: 0, count: dualSliceCount)
+                var lsad = [Int](repeating: 0, count: dualSliceCount)
+
+                for i in 0..<sliceBlocksCount {
+                    let idx = startIdx + i
+                    let col = idx % colCount
+                    let row = idx / colCount
+                    let bx = col * 8
+                    let by = row * 8
+
+                    // A skip block needs no vector for coding, but the skip
+                    // model prices both reference directions on every block, so
+                    // with `wantDual` the search runs here too and the coded
+                    // entries are zeroed at the end of the iteration instead.
+                    let isSkipBlock = hasSkipMap && skipMapConst[idx] != .inter
+                    if isSkipBlock {
+                        if wantDual != true {
+                            dx[i] = 0
+                            dy[i] = 0
+                            sads[i] = 0
+                            refDirs[i] = false
+                            continue
+                        }
+                    }
+
+                    MotionEstimation.fetchPixelsBlock8(plane: cBase, width: targetWidth, height: targetHeight, x: bx, y: by, dest: cPtr)
+
+                    let mvADx = if 0 < col { dx[i - 1] } else { Int16(0) }
+                    let mvADy = if 0 < col { dy[i - 1] } else { Int16(0) }
+                    let mvBDx = if colCount <= i { dx[i - colCount] } else { Int16(0) }
+                    let mvBDy = if colCount <= i { dy[i - colCount] } else { Int16(0) }
+                    let mvCDx = if colCount <= (i - 1) && col < (colCount - 1) { dx[i - colCount + 1] } else { Int16(0) }
+                    let mvCDy = if colCount <= (i - 1) && col < (colCount - 1) { dy[i - colCount + 1] } else { Int16(0) }
+
+                    let pmvDx = MotionEstimation.median(Int(mvADx) >> 2, Int(mvBDx) >> 2, Int(mvCDx) >> 2)
+                    let pmvDy = MotionEstimation.median(Int(mvADy) >> 2, Int(mvBDy) >> 2, Int(mvCDy) >> 2)
+                    let pmv = MotionVector(dx: Int16(pmvDx), dy: Int16(pmvDy))
+
+                    var (mvPrev, mutSADPrev) = MotionEstimation.searchPixels(
+                        cBase: cBase, pBase: pBase,
+                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
+                    )
+
+                    if 512 < mutSADPrev && idx < prevMVsConst.count {
+                        let tmv = MotionVector(dx: Int16(Int(prevMVsConst.dx[idx]) >> 2), dy: Int16(Int(prevMVsConst.dy[idx]) >> 2))
+                        let (tmvMv, tmvSad) = MotionEstimation.searchPixels(
+                            cBase: cBase, pBase: pBase,
+                            cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                            width: targetWidth, height: targetHeight, bx: bx, by: by, range: 4, pmv: tmv, roundOffset: roundOffset
+                        )
+                        if tmvSad < mutSADPrev {
+                            mvPrev = tmvMv
+                            mutSADPrev = tmvSad
+                        }
+                    }
+
+                    let currContrast = MotionEstimation.extractContrast8x8(base: cBase, width: targetWidth, height: targetHeight, bx: bx, by: by)
+
+                    var dynamicThreshold = 1024
+                    if 1024 < mutSADPrev {
+                        let dynT = max(1024, currContrast * 48)
+                        if dynT < mutSADPrev {
+                            var mvVariance = 0
+                            if 0 < col && colCount <= i {
+                                let dxDiff = Int((Int(dx[i - 1]) - Int(dx[i - colCount])).magnitude)
+                                let dyDiff = Int((Int(dy[i - 1]) - Int(dy[i - colCount])).magnitude)
+                                mvVariance = dxDiff + dyDiff
+                            }
+                            if 32 < mvVariance && (dynT * 2) < mutSADPrev {
+                                let (expMv, expSad) = MotionEstimation.searchPixels(
+                                    cBase: cBase, pBase: pBase,
+                                    cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                                    width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12, pmv: mvPrev, roundOffset: roundOffset
+                                )
+                                if expSad < mutSADPrev {
+                                    mvPrev = expMv
+                                    mutSADPrev = expSad
+                                }
+                            }
+                        }
+                    }
+
+                    let (mvNext, mutSADNext) = MotionEstimation.searchPixels(
+                        cBase: cBase, pBase: nBase,
+                        cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
+                        width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8, pmv: pmv, roundOffset: roundOffset
+                    )
+
+                    let prevChromaSad = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: pCb, refCr: pCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvPrev.dx), refDy: Int(mvPrev.dy))
+                    mutSADPrev += prevChromaSad / 4
+                    let prevSAD = mutSADPrev
+
+                    var bestMV = mvPrev
+                    var dir = false
+
+                    let earlyExitThreshold = min(1536, 512 + (gopPosition * 16))
+                    let gopPenalty = min(1024, gopPosition * 16)
+
+                    var cachedNextChromaSad: Int = -1
+                    if earlyExitThreshold <= prevSAD {
+                        let mvEnergyNext = Int((Int(mvNext.dx)).magnitude) + Int((Int(mvNext.dy)).magnitude)
+                        let effectiveGopPenalty = if mutSADNext < 384 { 0 } else { gopPenalty }
+                        let baselinePenalty = (mvEnergyNext * 8) + 32 + effectiveGopPenalty
+
+                        if mutSADNext + baselinePenalty < prevSAD {
+                            // Quarter-resolution displacement is mv/4 (the mv
+                            // is in full-resolution pixels; the previous
+                            // intNextDx>>2 = mv/2 probed double the true
+                            // displacement).
+                            let nextContrast = MotionEstimation.extractContrast8x8(base: nBase, width: targetWidth, height: targetHeight, bx: bx + (Int(mvNext.dx) >> 2), by: by + (Int(mvNext.dy) >> 2))
+
+                            let contrastDiff = Int((currContrast - nextContrast).magnitude)
+                            let structurePenalty = (contrastDiff * contrastDiff) / 4
+                            let chromaSAD = MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy))
+                            cachedNextChromaSad = chromaSAD
+                            let chromaPenalty = chromaSAD / 4
+
+                            let totalNextPenalty = ((mutSADNext + baselinePenalty) + (structurePenalty + chromaPenalty))
+                            let energyNext = (mvNext.dy * mvNext.dy) + (mvNext.dx * mvNext.dx)
+                            let energyPrev = (mvPrev.dy * mvPrev.dy) + (mvPrev.dx * mvPrev.dx)
+
+                            switch true {
+                            case totalNextPenalty < prevSAD:
+                                bestMV = mvNext
+                                dir = true
+                            case (totalNextPenalty == prevSAD) && (energyNext < energyPrev):
+                                bestMV = mvNext
+                                dir = true
+                            default:
+                                break
+                            }
+                        }
+                    }
+                    dynamicThreshold = max(1024, currContrast * 48)
+                    let nextChromaSad = if cachedNextChromaSad != -1 { cachedNextChromaSad } else { MotionEstimation.computeChromaSAD(currCb: cCb, currCr: cCr, refCb: nCb, refCr: nCr, cbw: cbw, cbh: cbh, bx: bx, by: by, refDx: Int(mvNext.dx), refDy: Int(mvNext.dy)) }
+                    let finalSAD = if dir { mutSADNext + (nextChromaSad / 4) } else { prevSAD }
+                    switch true {
+                    case dynamicThreshold < finalSAD:
+                        dx[i] = 0
+                        dy[i] = 0
+                    case finalSAD < 256:
+                        dx[i] = bestMV.dx * 4
+                        dy[i] = bestMV.dy * 4
+                    default:
+                        let refPlaneY = if dir { nY } else { pY }
+                        let (refinedMV, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                            curr: cY, prev: refPlaneY,
+                            width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: bestMV
+                        )
+                        dx[i] = refinedMV.dx
+                        dy[i] = refinedMV.dy
+                    }
+                    sads[i] = finalSAD
+                    refDirs[i] = dir
+
+                    if wantDual {
+                        // The same acceptance / refinement rule the coding path
+                        // applies to the winning direction, applied to each
+                        // direction on its own so the two candidates are
+                        // genuinely distinct.
+                        switch true {
+                        case dynamicThreshold < prevSAD:
+                            pdx[i] = 0
+                            pdy[i] = 0
+                        case prevSAD < 256:
+                            pdx[i] = mvPrev.dx * 4
+                            pdy[i] = mvPrev.dy * 4
+                        default:
+                            let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                                curr: cY, prev: pY,
+                                width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvPrev
+                            )
+                            pdx[i] = rmv.dx
+                            pdy[i] = rmv.dy
+                        }
+                        let ltrSAD = mutSADNext + (nextChromaSad / 4)
+                        psad[i] = prevSAD
+                        lsad[i] = ltrSAD
+                        switch true {
+                        case dynamicThreshold < ltrSAD:
+                            ldx[i] = 0
+                            ldy[i] = 0
+                        case ltrSAD < 256:
+                            ldx[i] = mvNext.dx * 4
+                            ldy[i] = mvNext.dy * 4
+                        default:
+                            let (rmv, _) = MotionEstimation.searchPixelsSubpixelRefinement32(
+                                curr: cY, prev: nY,
+                                width: targetWidth, height: targetHeight, bx: col * 32, by: row * 32, pmv: mvNext
+                            )
+                            ldx[i] = rmv.dx
+                            ldy[i] = rmv.dy
+                        }
+                        if isSkipBlock {
+                            dx[i] = 0
+                            dy[i] = 0
+                            sads[i] = 0
+                            refDirs[i] = false
+                        }
+                    }
+                }
+                return SliceResult(startIdx: startIdx, dx: dx, dy: dy, sads: sads, refDirs: refDirs, pdx: pdx, pdy: pdy, ldx: ldx, ldy: ldy, psad: psad, lsad: lsad)
+            }
+        }
+
+        var collected = [SliceResult]()
+        for await res in group {
+            collected.append(res)
+        }
+        return collected
+    }
+
+    let dualCount: Int
+    if wantDual {
+        dualCount = blocks8Count
+    } else {
+        dualCount = 0
+    }
+    var dualPrev = MotionVectors(count: dualCount)
+    var dualLtr = MotionVectors(count: dualCount)
+    var dualPrevSAD = [Int](repeating: 0, count: dualCount)
+    var dualLtrSAD = [Int](repeating: 0, count: dualCount)
+    for res in results {
+        let endIdx = res.startIdx + res.dx.count
+        mvs.dx.replaceSubrange(res.startIdx..<endIdx, with: res.dx)
+        mvs.dy.replaceSubrange(res.startIdx..<endIdx, with: res.dy)
+        sads.replaceSubrange(res.startIdx..<endIdx, with: res.sads)
+        refDirs.replaceSubrange(res.startIdx..<endIdx, with: res.refDirs)
+        if wantDual {
+            dualPrev.dx.replaceSubrange(res.startIdx..<endIdx, with: res.pdx)
+            dualPrev.dy.replaceSubrange(res.startIdx..<endIdx, with: res.pdy)
+            dualLtr.dx.replaceSubrange(res.startIdx..<endIdx, with: res.ldx)
+            dualLtr.dy.replaceSubrange(res.startIdx..<endIdx, with: res.ldy)
+            dualPrevSAD.replaceSubrange(res.startIdx..<endIdx, with: res.psad)
+            dualLtrSAD.replaceSubrange(res.startIdx..<endIdx, with: res.lsad)
+        }
+    }
+    if let sink = dualOut {
+        sink.prevMVs = dualPrev
+        sink.ltrMVs = dualLtr
+        sink.prevSADs = dualPrevSAD
+        sink.ltrSADs = dualLtrSAD
+    }
+
+    let occlusionScores = MotionEstimation.computeOcclusionScores(currPlane: cS1, prevPlane: pS1, width: targetWidth, height: targetHeight, globalPrior: MotionVector(dx: 0, dy: 0))
+    return (mvs, sads, refDirs, occlusionScores, nS2, nS1)
+}
+
 private struct SliceResult: Sendable {
     let startIdx: Int
     let dx: [Int16]
@@ -1407,7 +2019,7 @@ private struct BidirSliceContext: Sendable {
 }
 
 @inline(__always)
-private func executeBidirSlice(
+private func executeBidirSliceForProfile2(
     ctx: BidirSliceContext,
     startIdx: Int,
     sliceBlocksCount: Int
@@ -1538,7 +2150,7 @@ private func executeBidirSlice(
         var dir = false
         var cachedNextChromaSad: Int = -1
         // Evaluate Prev direction
-        let (pMV, pSAD) = MotionEstimation.searchPixels(
+        let (pMV, pSAD) = MotionEstimation.searchPixelsForProfile2(
             cBase: cBase, pBase: pBase,
             cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
             width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
@@ -1565,7 +2177,7 @@ private func executeBidirSlice(
                     mvVariance = dxDiff + dyDiff
                 }
                 if 32 < mvVariance && (dynT * 2) < mutSADPrev {
-                    let (expMv, expSad) = MotionEstimation.searchPixels(
+                    let (expMv, expSad) = MotionEstimation.searchPixelsForProfile2(
                         cBase: cBase, pBase: pBase,
                         cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
                         width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12,
@@ -1589,7 +2201,7 @@ private func executeBidirSlice(
         dir = false
 
         // Evaluate Next (LTR) direction
-        let (nMV, nSAD) = MotionEstimation.searchPixels(
+        let (nMV, nSAD) = MotionEstimation.searchPixelsForProfile2(
             cBase: cBase, pBase: nBase,
             cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
             width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
@@ -1738,7 +2350,7 @@ private func executeBidirSlice(
 
 /// Bidirectional MV calculation: searches MV in both forward (prev) and backward (next) frames,
 @inline(__always)
-func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dualOut: DualMVSink?, membrane: MEMembraneState? = nil) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
+func computeBidirectionalMotionVectorsForProfile2(curr: PlaneData420, prev: PlaneData420, next: PlaneData420, prevMVs: MotionVectors, pool: BlockViewPool, roundOffset: Int, gopPosition: Int, skipMap: [BlockMode], cachedNextSub2: [Int16]?, cachedNextSub1: [Int16]?, dualOut: DualMVSink?, membrane: MEMembraneState?) async -> (MotionVectors, [Int], [Bool], [Int], [Int16], [Int16]) {
     let dx = curr.width
     let dy = curr.height
     let l1dx = (dx + 1) / 2
@@ -1876,7 +2488,7 @@ func computeBidirectionalMotionVectors(curr: PlaneData420, prev: PlaneData420, n
             let sliceBlocksCount = (endRow - startRow) * colCount
             
             group.addTask { [ctx] in
-                executeBidirSlice(
+                executeBidirSliceForProfile2(
                     ctx: ctx,
                     startIdx: startIdx,
                     sliceBlocksCount: sliceBlocksCount

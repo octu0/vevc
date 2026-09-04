@@ -765,16 +765,14 @@ actor LayersEncodeActor {
                     maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                     roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
                     cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
-                    dumpWriter: dw,
-                    membrane: self.meMembrane
+                    dumpWriter: dw
                 )
             } else {
                 encoded = try await encodeSpatialLayers(
                     pd: plane, pool: pool, predictedPd: refPrevRecon, nextPd: firstRecon, prevInput: refPrevIn, ltrInput: firstIn, prevMVs: refPrevMVs,
                     maxbitrate: maxbitrate, qtY: qtY, qtC: qtC, zeroThreshold: zeroThreshold,
                     roundOffset: framesSinceKeyframe % 2, gopPosition: framesSinceKeyframe,
-                    cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1,
-                    membrane: self.meMembrane
+                    cachedNextSub2: self.cachedNextSub2, cachedNextSub1: self.cachedNextSub1
                 )
             }
             interRatioQ8 = 0
