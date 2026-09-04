@@ -133,12 +133,16 @@ private let meFineOffsets: [(Int, Int)] = [
 private let meSearchOffsetX: [Int] = [-1, 0, 1, -1, 1, -1, 0, 1]
 private let meSearchOffsetY: [Int] = [-1, -1, -1, 0, 0, 1, 1, 1]
 
-private let meRefine2OffsetsX: [Int] = [
+let meRefine2OffsetsX: [Int] = [
+    // r=1 (8 points)
     -1,  0,  1, -1,  1, -1,  0,  1,
-    -2, -1,  0,  1,  2, -2,  2, -2,  2, -2, -1,  0,  1,  2, -2,  2
+    // r=2 (16 points: y=-2 (5), y=-1 (2), y=0 (2), y=1 (2), y=2 (5))
+    -2, -1,  0,  1,  2, -2,  2, -2,  2, -2,  2, -2, -1,  0,  1,  2
 ]
-private let meRefine2OffsetsY: [Int] = [
+let meRefine2OffsetsY: [Int] = [
+    // r=1 (8 points)
     -1, -1, -1,  0,  0,  1,  1,  1,
+    // r=2 (16 points)
     -2, -2, -2, -2, -2, -1, -1,  0,  0,  1,  1,  2,  2,  2,  2,  2
 ]
 
@@ -337,6 +341,162 @@ struct MotionEstimation {
     private static let dsSdspY: [Int] = [-1, 0, 1, 0]
 
     @inline(__always)
+    private static func refineNear2(
+        candCenterDx: Int, candCenterDy: Int,
+        candCost: Int, candSAD: Int,
+        minDx: Int, maxDx: Int, minDy: Int, maxDy: Int,
+        pmvBaseX: Int, pmvBaseY: Int,
+        pBase: UnsafePointer<Int16>, cPtr: UnsafePointer<Int16>,
+        width: Int, bx: Int, by: Int
+    ) -> (Int, Int, Int, Int) {
+        let candidateBias: Int
+        if candSAD < 128 {
+            candidateBias = 33
+        } else {
+            candidateBias = 32
+        }
+        var bestRefineDx = candCenterDx
+        var bestRefineDy = candCenterDy
+        var bestRefineCost = candCost - candidateBias
+        var bestRefineSAD = candSAD
+
+        let isSafeInner = (minDx <= candCenterDx - 2) && (candCenterDx + 2 <= maxDx) && (minDy <= candCenterDy - 2) && (candCenterDy + 2 <= maxDy)
+        if isSafeInner {
+            let centerBase = pBase.advanced(by: (by + candCenterDy) * width + (bx + candCenterDx))
+
+            for i in 0..<24 {
+                let rx = candCenterDx + meRefine2OffsetsX[i]
+                let ry = candCenterDy + meRefine2OffsetsY[i]
+                let penalty = getMVDPenalty(dx: rx, dy: ry, pmvDx: pmvBaseX, pmvDy: pmvBaseY) * 4
+                let maxAllowed = bestRefineCost - penalty
+                if maxAllowed <= 0 { continue }
+
+                let pPtr = centerBase.advanced(by: meRefine2OffsetsY[i] * width + meRefine2OffsetsX[i])
+                let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+                let totalCost = sad + penalty
+                if totalCost < bestRefineCost {
+                    bestRefineCost = totalCost
+                    bestRefineSAD = sad
+                    bestRefineDx = rx
+                    bestRefineDy = ry
+                }
+            }
+        } else {
+            for i in 0..<24 {
+                let rx = candCenterDx + meRefine2OffsetsX[i]
+                let ry = candCenterDy + meRefine2OffsetsY[i]
+                if rx < minDx { continue }
+                if maxDx < rx { continue }
+                if ry < minDy { continue }
+                if maxDy < ry { continue }
+
+                let penalty = getMVDPenalty(dx: rx, dy: ry, pmvDx: pmvBaseX, pmvDy: pmvBaseY) * 4
+                let maxAllowed = bestRefineCost - penalty
+                if maxAllowed <= 0 { continue }
+
+                let pPtr = pBase.advanced(by: (by + ry) * width + (bx + rx))
+                let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+                let totalCost = sad + penalty
+                if totalCost < bestRefineCost {
+                    bestRefineCost = totalCost
+                    bestRefineSAD = sad
+                    bestRefineDx = rx
+                    bestRefineDy = ry
+                }
+            }
+        }
+
+        if bestRefineDx != candCenterDx || bestRefineDy != candCenterDy {
+            return (bestRefineDx, bestRefineDy, bestRefineCost, bestRefineSAD)
+        }
+        return (candCenterDx, candCenterDy, candCost, candSAD)
+    }
+
+    @inline(__always)
+    private static func searchLdsp(
+        centerX: Int, centerY: Int,
+        startCost: Int, startSAD: Int,
+        minDx: Int, maxDx: Int, minDy: Int, maxDy: Int,
+        pmvBaseX: Int, pmvBaseY: Int,
+        pBase: UnsafePointer<Int16>, cPtr: UnsafePointer<Int16>,
+        width: Int, bx: Int, by: Int
+    ) -> (Int, Int, Int, Int) {
+        var curCenterX = centerX
+        var curCenterDy = centerY
+        var bestCost = startCost
+        var bestSAD = startSAD
+        var ldspIter = 0
+        while ldspIter < 2 {
+            ldspIter += 1
+            let stepThresholdCost = bestCost - 32
+            var minCost = stepThresholdCost
+            var minSAD = bestSAD
+            var minDxPos = curCenterX
+            var minDyPos = curCenterDy
+            var foundSmaller = false
+
+            let isSafeInner = (minDx <= curCenterX - 2) && (curCenterX + 2 <= maxDx) && (minDy <= curCenterDy - 2) && (curCenterDy + 2 <= maxDy)
+            if isSafeInner {
+                let centerBase = pBase.advanced(by: (by + curCenterDy) * width + (bx + curCenterX))
+
+                for i in 0..<8 {
+                    let dx = curCenterX + dsLdspX[i]
+                    let dy = curCenterDy + dsLdspY[i]
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: pmvBaseX, pmvDy: pmvBaseY) * 4
+                    let maxAllowed = minCost - penalty
+                    if maxAllowed <= 0 { continue }
+
+                    let pPtr = centerBase.advanced(by: dsLdspY[i] * width + dsLdspX[i])
+                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+                    let total = sad + penalty
+                    if total < minCost {
+                        minCost = total
+                        minSAD = sad
+                        minDxPos = dx
+                        minDyPos = dy
+                        foundSmaller = true
+                    }
+                }
+            } else {
+                for i in 0..<8 {
+                    let dx = curCenterX + dsLdspX[i]
+                    let dy = curCenterDy + dsLdspY[i]
+                    if dx < minDx { continue }
+                    if maxDx < dx { continue }
+                    if dy < minDy { continue }
+                    if maxDy < dy { continue }
+
+                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: pmvBaseX, pmvDy: pmvBaseY) * 4
+                    let maxAllowed = minCost - penalty
+                    if maxAllowed <= 0 { continue }
+
+                    let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
+                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
+                    let total = sad + penalty
+                    if total < minCost {
+                        minCost = total
+                        minSAD = sad
+                        minDxPos = dx
+                        minDyPos = dy
+                        foundSmaller = true
+                    }
+                }
+            }
+            if foundSmaller != true {
+                break
+            }
+            bestCost = minCost
+            bestSAD = minSAD
+            curCenterX = minDxPos
+            curCenterDy = minDyPos
+            if bestSAD < 128 {
+                break
+            }
+        }
+        return (curCenterX, curCenterDy, bestCost, bestSAD)
+    }
+
+    @inline(__always)
     private static func evaluateSearch(
         cPtr: UnsafePointer<Int16>, 
         pBase: UnsafePointer<Int16>, 
@@ -348,7 +508,11 @@ struct MotionEstimation {
         spatialA: MotionVector = MotionVector(dx: 0, dy: 0),
         spatialB: MotionVector = MotionVector(dx: 0, dy: 0),
         spatialC: MotionVector = MotionVector(dx: 0, dy: 0),
-        roundOffset: Int
+        roundOffset: Int,
+        contrast: Int = 0,
+        membrane: Int = 0,
+        gopPosition: Int = 0,
+        weights: MEDeciderWeights = MEDeciderWeights.shared
     ) -> (Int, Int, Int) {
         fetchPixelsBlock8(plane: pBase, width: width, height: height, x: bx, y: by, dest: oPtr)
         let zeroSAD: Int = compute64PointSADBlocks(cBase: cPtr, pBase: oPtr)
@@ -447,107 +611,76 @@ struct MotionEstimation {
             }
         }
         
-        // 2. Near-constraint refinement: ±2 integer pixels around the best candidate
-        // If candidate match is already very good (< 48), prune refinement to prevent noise drift
-        if 48 <= bestCoarseSAD {
-            let candCenterDx = bestCoarseDx
-            let candCenterDy = bestCoarseDy
-            let candCost = bestCoarseCost
-            let candidateBias: Int
-            if bestCoarseSAD < 128 {
-                candidateBias = 33
-            } else {
-                candidateBias = 32
+        // 2. Classification-guided integer motion search regime
+        let candMvMag = Int((Int(bestCoarseDx)).magnitude) + Int((Int(bestCoarseDy)).magnitude)
+        let q = SIMD8<Int32>(
+            Int32(zeroSAD),
+            Int32(bestCoarseSAD),
+            Int32(clamping: pmvSAD),
+            Int32(zeroCost - bestCoarseCost),
+            Int32(candMvMag),
+            Int32(contrast),
+            Int32(membrane),
+            Int32(gopPosition)
+        )
+        let decision = meDeciderClassify(q: q, weights: weights)
+
+        switch decision.mode {
+        case .earlyCandidate:
+            break
+        case .refineNear:
+            let (rx, ry, rcost, rsad) = refineNear2(
+                candCenterDx: bestCoarseDx, candCenterDy: bestCoarseDy,
+                candCost: bestCoarseCost, candSAD: bestCoarseSAD,
+                minDx: minDx, maxDx: maxDx, minDy: minDy, maxDy: maxDy,
+                pmvBaseX: pmvBaseX, pmvBaseY: pmvBaseY,
+                pBase: pBase, cPtr: cPtr, width: width, bx: bx, by: by
+            )
+            bestCoarseDx = rx
+            bestCoarseDy = ry
+            bestCoarseCost = rcost
+            bestCoarseSAD = rsad
+            if 384 <= rsad {
+                let (lx, ly, lcost, lsad) = searchLdsp(
+                    centerX: rx, centerY: ry,
+                    startCost: rcost, startSAD: rsad,
+                    minDx: minDx, maxDx: maxDx, minDy: minDy, maxDy: maxDy,
+                    pmvBaseX: pmvBaseX, pmvBaseY: pmvBaseY,
+                    pBase: pBase, cPtr: cPtr, width: width, bx: bx, by: by
+                )
+                bestCoarseDx = lx
+                bestCoarseDy = ly
+                bestCoarseCost = lcost
+                bestCoarseSAD = lsad
             }
-            var bestRefineDx = candCenterDx
-            var bestRefineDy = candCenterDy
-            var bestRefineCost = candCost - candidateBias
-            var bestRefineSAD = bestCoarseSAD
-            
-            for i in 0..<24 {
-                let rx = candCenterDx + meRefine2OffsetsX[i]
-                let ry = candCenterDy + meRefine2OffsetsY[i]
-                if rx < minDx { continue }
-                if maxDx < rx { continue }
-                if ry < minDy { continue }
-                if maxDy < ry { continue }
-                
-                let penalty = getMVDPenalty(dx: rx, dy: ry, pmvDx: pmvBaseX, pmvDy: pmvBaseY) * 4
-                let maxAllowed = bestRefineCost - penalty
-                if maxAllowed <= 0 { continue }
-                
-                let pPtr = pBase.advanced(by: (by + ry) * width + (bx + rx))
-                let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
-                let totalCost = sad + penalty
-                if totalCost < bestRefineCost {
-                    bestRefineCost = totalCost
-                    bestRefineSAD = sad
-                    bestRefineDx = rx
-                    bestRefineDy = ry
-                }
-            }
-            
-            if bestRefineDx != candCenterDx || bestRefineDy != candCenterDy {
-                bestCoarseDx = bestRefineDx
-                bestCoarseDy = bestRefineDy
-                bestCoarseCost = bestRefineCost
-                bestCoarseSAD = bestRefineSAD
-            }
-        }
-        
-        // 3. Fallback LDSP search: only when candidate match is very poor (>= 384)
-        if 384 <= bestCoarseSAD {
-            var centerX = bestCoarseDx
-            var centerY = bestCoarseDy
-            var ldspIter = 0
-            while ldspIter < 2 {
-                ldspIter += 1
-                let stepThresholdCost = bestCoarseCost - 32
-                var minCost = stepThresholdCost
-                var minSAD = bestCoarseSAD
-                var minDxPos = centerX
-                var minDyPos = centerY
-                var foundSmaller = false
-                
-                for i in 0..<8 {
-                    let dx = centerX + dsLdspX[i]
-                    let dy = centerY + dsLdspY[i]
-                    if dx < minDx { continue }
-                    if maxDx < dx { continue }
-                    if dy < minDy { continue }
-                    if maxDy < dy { continue }
-                    
-                    let penalty = getMVDPenalty(dx: dx, dy: dy, pmvDx: pmvBaseX, pmvDy: pmvBaseY) * 4
-                    let maxAllowed = minCost - penalty
-                    if maxAllowed <= 0 { continue }
-                    
-                    let pPtr = pBase.advanced(by: (by + dy) * width + (bx + dx))
-                    let sad = compute64PointSADBlocksWithStride(cBase: cPtr, pBase: pPtr, pStride: width)
-                    let total = sad + penalty
-                    if total < minCost {
-                        minCost = total
-                        minSAD = sad
-                        minDxPos = dx
-                        minDyPos = dy
-                        foundSmaller = true
-                    }
-                }
-                if foundSmaller != true {
-                    break
-                }
-                bestCoarseCost = minCost
-                bestCoarseSAD = minSAD
-                bestCoarseDx = minDxPos
-                bestCoarseDy = minDyPos
-                centerX = minDxPos
-                centerY = minDyPos
-                if bestCoarseSAD < 128 {
-                    break
-                }
+        case .wideDiamond:
+            let (rx, ry, rcost, rsad) = refineNear2(
+                candCenterDx: bestCoarseDx, candCenterDy: bestCoarseDy,
+                candCost: bestCoarseCost, candSAD: bestCoarseSAD,
+                minDx: minDx, maxDx: maxDx, minDy: minDy, maxDy: maxDy,
+                pmvBaseX: pmvBaseX, pmvBaseY: pmvBaseY,
+                pBase: pBase, cPtr: cPtr, width: width, bx: bx, by: by
+            )
+            bestCoarseDx = rx
+            bestCoarseDy = ry
+            bestCoarseCost = rcost
+            bestCoarseSAD = rsad
+            if 384 <= rsad {
+                let (lx, ly, lcost, lsad) = searchLdsp(
+                    centerX: rx, centerY: ry,
+                    startCost: rcost, startSAD: rsad,
+                    minDx: minDx, maxDx: maxDx, minDy: minDy, maxDy: maxDy,
+                    pmvBaseX: pmvBaseX, pmvBaseY: pmvBaseY,
+                    pBase: pBase, cPtr: cPtr, width: width, bx: bx, by: by
+                )
+                bestCoarseDx = lx
+                bestCoarseDy = ly
+                bestCoarseCost = lcost
+                bestCoarseSAD = lsad
             }
         }
         
-        // 4. Candidate consistency bias: snap to (0, 0) or PMV if cost is nearly identical
+        // 3. Candidate consistency bias: snap to (0, 0) or PMV if cost is nearly identical
         if bestCoarseDx != 0 || bestCoarseDy != 0 {
             if zeroSAD < 48 || zeroCost <= (bestCoarseCost + 32) {
                 bestCoarseDx = 0
@@ -567,7 +700,7 @@ struct MotionEstimation {
             }
         }
         
-        // 5. Subpixel refinement: Half-pixel search around best integer position
+        // 4. Subpixel refinement: Half-pixel search around best integer position
         var bestHpDx: Int = bestCoarseDx * 2
         var bestHpDy: Int = bestCoarseDy * 2
         var bestHpSAD: Int = bestCoarseSAD
@@ -607,7 +740,7 @@ struct MotionEstimation {
             }
         }
         
-        // 6. Subpixel refinement: Quarter-pixel search around best half-pixel position
+        // 5. Subpixel refinement: Quarter-pixel search around best half-pixel position
         var bestQpDx: Int = bestHpDx * 2
         var bestQpDy: Int = bestHpDy * 2
         var bestQpSAD: Int = bestHpSAD
@@ -677,7 +810,11 @@ struct MotionEstimation {
         spatialA: MotionVector = MotionVector(dx: 0, dy: 0),
         spatialB: MotionVector = MotionVector(dx: 0, dy: 0),
         spatialC: MotionVector = MotionVector(dx: 0, dy: 0),
-        roundOffset: Int
+        roundOffset: Int,
+        contrast: Int = 0,
+        membrane: Int = 0,
+        gopPosition: Int = 0,
+        weights: MEDeciderWeights = MEDeciderWeights.shared
     ) -> (MotionVector, Int) {
         return withUnsafePointers(currPlane, prevPlane) { cBase, pBase in
             fetchPixelsBlock8(plane: cBase, width: width, height: height, x: bx, y: by, dest: cPtr)
@@ -685,7 +822,11 @@ struct MotionEstimation {
                 cBase: cBase, pBase: pBase, cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
                 width: width, height: height, bx: bx, by: by, range: range,
                 pmv: pmv, tmv: tmv, spatialA: spatialA, spatialB: spatialB, spatialC: spatialC,
-                roundOffset: roundOffset
+                roundOffset: roundOffset,
+                contrast: contrast,
+                membrane: membrane,
+                gopPosition: gopPosition,
+                weights: weights
             )
         }
     }
@@ -703,13 +844,21 @@ struct MotionEstimation {
         spatialA: MotionVector = MotionVector(dx: 0, dy: 0),
         spatialB: MotionVector = MotionVector(dx: 0, dy: 0),
         spatialC: MotionVector = MotionVector(dx: 0, dy: 0),
-        roundOffset: Int
+        roundOffset: Int,
+        contrast: Int = 0,
+        membrane: Int = 0,
+        gopPosition: Int = 0,
+        weights: MEDeciderWeights = MEDeciderWeights.shared
     ) -> (MotionVector, Int) {
         let (dx, dy, sad) = evaluateSearch(
             cPtr: cPtr, pBase: pBase, oPtr: oPtr, tPtr: tPtr,
             width: width, height: height, bx: bx, by: by, range: range,
             pmv: pmv, tmv: tmv, spatialA: spatialA, spatialB: spatialB, spatialC: spatialC,
-            roundOffset: roundOffset
+            roundOffset: roundOffset,
+            contrast: contrast,
+            membrane: membrane,
+            gopPosition: gopPosition,
+            weights: weights
         )
         return (MotionVector(dx: Int16(dx), dy: Int16(dy)), sad)
     }
@@ -1319,6 +1468,7 @@ private func executeBidirSlice(
     var ldy = [Int16](repeating: 0, count: dualSliceCount)
     var psad = [Int](repeating: 0, count: dualSliceCount)
     var lsad = [Int](repeating: 0, count: dualSliceCount)
+    let meWeights = MEDeciderWeights.shared
 
     for i in 0..<sliceBlocksCount {
         let idx = startIdx + i
@@ -1371,12 +1521,13 @@ private func executeBidirSlice(
 
         let currContrast = MotionEstimation.extractContrast8x8(base: cBase, width: targetWidth, height: targetHeight, bx: bx, by: by)
 
-        let hasLtrAffinity: Bool
+        let memVal: Int
         if let mem = memPtr, idx < memCount {
-            hasLtrAffinity = 2 < mem[idx]
+            memVal = Int(mem[idx])
         } else {
-            hasLtrAffinity = false
+            memVal = 0
         }
+        let hasLtrAffinity = 2 < memVal
 
         var mvPrev = MotionVector(dx: 0, dy: 0)
         var mutSADPrev = 0
@@ -1392,7 +1543,11 @@ private func executeBidirSlice(
             cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
             width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
             pmv: pmv, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
-            roundOffset: roundOffset
+            roundOffset: roundOffset,
+            contrast: currContrast,
+            membrane: memVal,
+            gopPosition: gopPosition,
+            weights: meWeights
         )
         mvPrev = pMV
         mutSADPrev = pSAD
@@ -1415,7 +1570,11 @@ private func executeBidirSlice(
                         cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
                         width: targetWidth, height: targetHeight, bx: bx, by: by, range: 12,
                         pmv: mvPrev, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
-                        roundOffset: roundOffset
+                        roundOffset: roundOffset,
+                        contrast: currContrast,
+                        membrane: memVal,
+                        gopPosition: gopPosition,
+                        weights: meWeights
                     )
                     if expSad < mutSADPrev {
                         mvPrev = expMv
@@ -1435,7 +1594,11 @@ private func executeBidirSlice(
             cPtr: cPtr, oPtr: oPtr, tPtr: tPtr,
             width: targetWidth, height: targetHeight, bx: bx, by: by, range: 8,
             pmv: pmv, tmv: tmv, spatialA: mvA, spatialB: mvB, spatialC: mvC,
-            roundOffset: roundOffset
+            roundOffset: roundOffset,
+            contrast: currContrast,
+            membrane: memVal,
+            gopPosition: gopPosition,
+            weights: meWeights
         )
         mvNext = nMV
         mutSADNext = nSAD
