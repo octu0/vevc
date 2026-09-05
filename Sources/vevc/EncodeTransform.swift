@@ -212,15 +212,12 @@ func encodePlaneSubbands32(blocks: inout [BlockView], zeroThreshold: Int, parent
 }
 
 @inline(__always)
-func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]?, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool]) {
+func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], zeroFlags: [Bool], isTreez: [Bool]?, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask32)] = []
     tasks.reserveCapacity(blocks.count)
-    
-    let useSpatialWeight = 1 < colCount && 1 < rowCount
-    
+
     var zeroCount = 0
-    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
     for i in blocks.indices {
         if isSkip[i] {
             let view = blocks[i]
@@ -230,7 +227,6 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             clearBlockRegion(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
             clearBlockRegion(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
             zeroCount += 1
-            isZeroFlags[i] = true
             continue
         }
         if let tz = isTreez, tz[i] {
@@ -241,24 +237,9 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             clearBlockRegion(base: base.advanced(by: half * 32), width: half, height: half, stride: 32)
             clearBlockRegion(base: base.advanced(by: half * 32 + half), width: half, height: half, stride: 32)
             zeroCount += 1
-            isZeroFlags[i] = true
             continue
         }
-        let blockThreshold: Int
-        if useSpatialWeight {
-            let col = i % colCount
-            let row = i / colCount
-            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
-            if zeroThreshold == 0 {
-                blockThreshold = 0
-            } else {
-                blockThreshold = (zeroThreshold * weight) / 1024
-            }
-        } else {
-            blockThreshold = zeroThreshold
-        }
-        let isZero = isEffectivelyZero32(data: blocks[i].base, threshold: blockThreshold)
-        isZeroFlags[i] = isZero
+        let isZero = zeroFlags[i]
         if isZero {
             bwFlags.writeBit(true)
             let view = blocks[i]
@@ -322,7 +303,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         encoder.flush()
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
-        return (out, isZeroFlags)
+        return out
     }
     
     for (i, task) in tasks {
@@ -333,7 +314,7 @@ func encodePlaneSubbands32WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
-    return (out, isZeroFlags)
+    return out
 }
 
 enum EncodeTask16 {
@@ -439,15 +420,12 @@ func encodePlaneSubbands16(blocks: inout [BlockView], zeroThreshold: Int, parent
 }
 
 @inline(__always)
-func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: Int, parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], isTreez: [Bool]?, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool]) {
+func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], parentBlocks: [BlockView]?, colCount: Int, rowCount: Int, isSkip: [Bool], zeroFlags: [Bool], isTreez: [Bool]?, history: EntropyHistoryState?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     var bwFlags = BypassWriter()
     var tasks: [(Int, EncodeTask16)] = []
     tasks.reserveCapacity(blocks.count)
 
-    let useSpatialWeight = 1 < colCount && 1 < rowCount
-
     var zeroCount = 0
-    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
     for i in blocks.indices {
         if isSkip[i] {
             let view = blocks[i]
@@ -457,7 +435,6 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             clearBlockRegion(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
             clearBlockRegion(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
             zeroCount += 1
-            isZeroFlags[i] = true
             continue
         }
         if let tz = isTreez, tz[i] {
@@ -468,24 +445,9 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
             clearBlockRegion(base: base.advanced(by: half * 16), width: half, height: half, stride: 16)
             clearBlockRegion(base: base.advanced(by: half * 16 + half), width: half, height: half, stride: 16)
             zeroCount += 1
-            isZeroFlags[i] = true
             continue
         }
-        let blockThreshold: Int
-        if useSpatialWeight {
-            let col = i % colCount
-            let row = i / colCount
-            let weight = spatialWeight(blockCol: col, blockRow: row, colCount: colCount, rowCount: rowCount, edgeScale: 1536)
-            if zeroThreshold == 0 {
-                blockThreshold = 0
-            } else {
-                blockThreshold = (zeroThreshold * weight) / 1024
-            }
-        } else {
-            blockThreshold = zeroThreshold
-        }
-        let isZero = isEffectivelyZero16(data: blocks[i].base, threshold: blockThreshold)
-        isZeroFlags[i] = isZero
+        let isZero = zeroFlags[i]
         if isZero {
             bwFlags.writeBit(true)
             let view = blocks[i]
@@ -547,7 +509,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
         encoder.flush()
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
-        return (out, isZeroFlags)
+        return out
     }
     
     for (i, task) in tasks {
@@ -558,7 +520,7 @@ func encodePlaneSubbands16WithSkipMap(blocks: inout [BlockView], zeroThreshold: 
     encoder.flush()
     var out = bwFlags.bytes
     out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
-    return (out, isZeroFlags)
+    return out
 }
 
 @inline(__always)
@@ -688,8 +650,8 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
     blocks: inout [BlockView],
     colCount: Int,
     qstep: Int32,
-    zeroThreshold: Int,
     isSkip: [Bool],
+    zeroFlags: [Bool],
     isTreez: [Bool]?,
     isLuma: Bool,
     history: EntropyHistoryState?,
@@ -699,16 +661,14 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
     // every frame. nil for planes that can never take the model path (chroma),
     // which is what keeps the non-model path allocation-free.
     workspace ws: rANSContextWorkspace?
-) -> (data: [UInt8], isZeroFlags: [Bool], hasRANSContext: Bool) {
+) -> (data: [UInt8], hasRANSContext: Bool) {
     var nonZeroIndices: [Int] = []
     nonZeroIndices.reserveCapacity(blocks.count)
-    var isZeroFlags = [Bool](repeating: true, count: blocks.count)
 
     for i in blocks.indices {
         if isSkip[i] {
             let b = blocks[i]
             clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
-            isZeroFlags[i] = true
             continue
         }
         if let tz = isTreez {
@@ -716,13 +676,11 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
                 if tz[i] {
                     let b = blocks[i]
                     clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
-                    isZeroFlags[i] = true
                     continue
                 }
             }
         }
-        let isZero = isEffectivelyZeroBase4PFrame(data: blocks[i].base, threshold: zeroThreshold)
-        isZeroFlags[i] = isZero
+        let isZero = zeroFlags[i]
         if isZero {
             let b = blocks[i]
             clearBlockRegion(base: b.base, width: b.width, height: b.height, stride: b.stride)
@@ -749,7 +707,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
                     if tz[i] { continue }
                 }
             }
-            let isZ = isZeroFlags[i]
+            let isZ = zeroFlags[i]
             bwFlags.writeBit(isZ)
         }
         bwFlags.flush()
@@ -772,7 +730,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
 
         var out = bwFlags.bytes
         out.append(contentsOf: encoder.getData(selectModel: selectModel, history: history, updateHistory: updateHistory))
-        return (out, isZeroFlags, false)
+        return (out, false)
     }
 
     // 1. Candidate A: Base Encoding
@@ -800,7 +758,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
                 if tz[i] { continue }
             }
         }
-        let isZ = isZeroFlags[i]
+        let isZ = zeroFlags[i]
         bwFlagsBase.writeBit(isZ)
     }
     bwFlagsBase.flush()
@@ -912,7 +870,7 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
                 if tz[i] { continue }
             }
         }
-        let isZ = isZeroFlags[i]
+        let isZ = zeroFlags[i]
         bwFlagsModel.writeBit(isZ)
     }
     bwFlagsModel.flush()
@@ -953,14 +911,14 @@ func encodePlaneBaseSubbands8PFrameWithSkipMap(
         if updateHistory {
             encoderModel.commitDeferredHistory(to: history)
         }
-        return (bufModel, isZeroFlags, true)
+        return (bufModel, true)
     } else {
         var bufBase = bwFlagsBase.bytes
         bufBase.append(contentsOf: baseData)
         if updateHistory {
             encoderBase.commitDeferredHistory(to: history)
         }
-        return (bufBase, isZeroFlags, false)
+        return (bufBase, false)
     }
 }
 

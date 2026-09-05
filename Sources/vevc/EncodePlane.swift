@@ -133,8 +133,20 @@ func chromaSkipFlags(skipMap: [BlockMode], mapWidth: Int, rowCount: Int, colCoun
 func isZeroBlock(view: BlockView) -> Bool {
     let ptr = view.base
     let w = view.width
+    let h = view.height
     let s = view.stride
-    for y in 0..<view.height {
+    let total = w * h
+    if s == w && 16 <= total && (total % 16 == 0) {
+        let zero = SIMD16<Int16>(repeating: 0)
+        var i = 0
+        while i < total {
+            let vec = UnsafeRawPointer(ptr + i).loadUnaligned(as: SIMD16<Int16>.self)
+            if any(vec .!= zero) { return false }
+            i += 16
+        }
+        return true
+    }
+    for y in 0..<h {
         let row = ptr.advanced(by: y * s)
         for x in 0..<w {
             if row[x] != 0 { return false }
@@ -339,20 +351,25 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    var nonZeroPreDWT = [UInt8](repeating: 0, count: totalBlocks)
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    let safeFlags = nonZeroPreDWT.withUnsafeMutableBufferPointer { UnsafeSendableMutablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, safeSrc] in
+            group.addTask { [blocks, qt, safeSrc, safeFlags] in
                 let srcBase = safeSrc.ptr
+                let nonZeroFlags = safeFlags.ptr
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     for j in 0..<colCount {
                         let w = (j * 32)
                         if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
                         r.readBlockFromBase(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            nonZeroFlags[blockIdx] = 1
                             dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32(view: view, qt: qt)
                         }
@@ -365,8 +382,9 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
     withUnsafePointers(mut: &subband) { dstBase in
         for i in 0..<rowCount {
             for j in 0..<colCount {
-                let view = blocks[(i * colCount) + j]
-                if isZeroBlock(view: view) { continue }
+                let blockIdx = (i * colCount) + j
+                if nonZeroPreDWT[blockIdx] == 0 { continue }
+                let view = blocks[blockIdx]
 
                 let w = (j * 32)
                 let h = (i * 32)
@@ -376,6 +394,7 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
         }
     }
 
+    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -404,12 +423,15 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    var nonZeroPreDWT = [UInt8](repeating: 0, count: totalBlocks)
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    let safeFlags = nonZeroPreDWT.withUnsafeMutableBufferPointer { UnsafeSendableMutablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, isSkip, safeSrc] in
+            group.addTask { [blocks, qt, isSkip, safeSrc, safeFlags] in
                 let srcBase = safeSrc.ptr
+                let nonZeroFlags = safeFlags.ptr
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     for j in 0..<colCount {
@@ -424,6 +446,7 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
                         }
                         r.readBlockFromBase(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            nonZeroFlags[blockIdx] = 1
                             dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32(view: view, qt: qt)
                         }
@@ -437,8 +460,8 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
         for i in 0..<rowCount {
             for j in 0..<colCount {
                 let blockIdx = (i * colCount) + j
+                if isSkip[blockIdx] || nonZeroPreDWT[blockIdx] == 0 { continue }
                 let view = blocks[blockIdx]
-                if isSkip[blockIdx] || isZeroBlock(view: view) { continue }
 
                 let w = (j * 32)
                 let h = (i * 32)
@@ -448,6 +471,7 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
         }
     }
 
+    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -475,12 +499,15 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    var nonZeroPreDWT = [UInt8](repeating: 0, count: totalBlocks)
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    let safeFlags = nonZeroPreDWT.withUnsafeMutableBufferPointer { UnsafeSendableMutablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, isSkip, activity, safeSrc] in
+            group.addTask { [blocks, qt, isSkip, activity, safeSrc, safeFlags] in
                 let srcBase = safeSrc.ptr
+                let nonZeroFlags = safeFlags.ptr
                 for i in sRow..<endRow {
                     let h = (i * 32)
                     for j in 0..<colCount {
@@ -495,6 +522,7 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
                         }
                         r.readBlockFromBase(x: w, y: h, width: 32, height: 32, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            nonZeroFlags[blockIdx] = 1
                             dwt2DBlock32(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer32WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
@@ -508,8 +536,8 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
         for i in 0..<rowCount {
             for j in 0..<colCount {
                 let blockIdx = (i * colCount) + j
+                if isSkip[blockIdx] || nonZeroPreDWT[blockIdx] == 0 { continue }
                 let view = blocks[blockIdx]
-                if isSkip[blockIdx] || isZeroBlock(view: view) { continue }
 
                 let w = (j * 32)
                 let h = (i * 32)
@@ -519,6 +547,7 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
         }
     }
 
+    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -665,20 +694,25 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    var nonZeroPreDWT = [UInt8](repeating: 0, count: totalBlocks)
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    let safeFlags = nonZeroPreDWT.withUnsafeMutableBufferPointer { UnsafeSendableMutablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, safeSrc] in
+            group.addTask { [blocks, qt, safeSrc, safeFlags] in
                 let srcBase = safeSrc.ptr
+                let nonZeroFlags = safeFlags.ptr
                 for i in sRow..<endRow {
                     let h = (i * 16)
                     for j in 0..<colCount {
                         let w = (j * 16)
                         if width <= w || height <= h { continue }
-                        let view = blocks[(i * colCount) + j]
+                        let blockIdx = (i * colCount) + j
+                        let view = blocks[blockIdx]
                         r.readBlockFromBase(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            nonZeroFlags[blockIdx] = 1
                             dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16(view: view, qt: qt)
                         }
@@ -691,8 +725,9 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
     withUnsafePointers(mut: &subband) { dstBase in
         for i in 0..<rowCount {
             for j in 0..<colCount {
-                let view = blocks[(i * colCount) + j]
-                if isZeroBlock(view: view) { continue }
+                let blockIdx = (i * colCount) + j
+                if nonZeroPreDWT[blockIdx] == 0 { continue }
+                let view = blocks[blockIdx]
 
                 let w = (j * 16)
                 let h = (i * 16)
@@ -702,6 +737,7 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
         }
     }
 
+    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -730,12 +766,15 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    var nonZeroPreDWT = [UInt8](repeating: 0, count: totalBlocks)
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    let safeFlags = nonZeroPreDWT.withUnsafeMutableBufferPointer { UnsafeSendableMutablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, isSkip, safeSrc] in
+            group.addTask { [blocks, qt, isSkip, safeSrc, safeFlags] in
                 let srcBase = safeSrc.ptr
+                let nonZeroFlags = safeFlags.ptr
                 for i in sRow..<endRow {
                     let h = (i * 16)
                     for j in 0..<colCount {
@@ -750,6 +789,7 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
                         }
                         r.readBlockFromBase(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            nonZeroFlags[blockIdx] = 1
                             dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16(view: view, qt: qt)
                         }
@@ -763,8 +803,8 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
         for i in 0..<rowCount {
             for j in 0..<colCount {
                 let blockIdx = (i * colCount) + j
+                if isSkip[blockIdx] || nonZeroPreDWT[blockIdx] == 0 { continue }
                 let view = blocks[blockIdx]
-                if isSkip[blockIdx] || isZeroBlock(view: view) { continue }
 
                 let w = (j * 16)
                 let h = (i * 16)
@@ -774,6 +814,7 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
         }
     }
 
+    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -801,12 +842,15 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
     let blocks = tmpBlocks
     let chunkSize = 4
 
+    var nonZeroPreDWT = [UInt8](repeating: 0, count: totalBlocks)
     let safeSrc = r.data.withUnsafeBufferPointer { UnsafeSendablePointer(ptr: $0.baseAddress!) }
+    let safeFlags = nonZeroPreDWT.withUnsafeMutableBufferPointer { UnsafeSendableMutablePointer(ptr: $0.baseAddress!) }
     await withTaskGroup(of: Void.self) { group in
         for sRow in stride(from: 0, to: rowCount, by: chunkSize) {
             let endRow = min(sRow + chunkSize, rowCount)
-            group.addTask { [blocks, qt, isSkip, activity, safeSrc] in
+            group.addTask { [blocks, qt, isSkip, activity, safeSrc, safeFlags] in
                 let srcBase = safeSrc.ptr
+                let nonZeroFlags = safeFlags.ptr
                 for i in sRow..<endRow {
                     let h = (i * 16)
                     for j in 0..<colCount {
@@ -821,6 +865,7 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
                         }
                         r.readBlockFromBase(x: w, y: h, width: 16, height: 16, into: view, srcBase: srcBase)
                         if isZeroBlock(view: view) != true {
+                            nonZeroFlags[blockIdx] = 1
                             dwt2DBlock16(ptr: view.base, stride: view.stride)
                             evaluateQuantizeLayer16WithActivity(view: view, qt: qt, activity: activity[blockIdx])
                         }
@@ -834,8 +879,8 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
         for i in 0..<rowCount {
             for j in 0..<colCount {
                 let blockIdx = (i * colCount) + j
+                if isSkip[blockIdx] || nonZeroPreDWT[blockIdx] == 0 { continue }
                 let view = blocks[blockIdx]
-                if isSkip[blockIdx] || isZeroBlock(view: view) { continue }
 
                 let w = (j * 16)
                 let h = (i * 16)
@@ -845,6 +890,7 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
         }
     }
 
+    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -1289,10 +1335,7 @@ func encodeLayer32Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: Quantiz
 }
 
 @inline(__always)
-func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], isTreezY: [Bool]?, isTreezCb: [Bool]?, isTreezCr: [Bool]?, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool], [Bool], [Bool]) {
-    let safeThresholdY = min(3, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
-
+func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], yZeros: [Bool], cbZeros: [Bool], crZeros: [Bool], isTreezY: [Bool]?, isTreezCb: [Bool]?, isTreezCr: [Bool]?, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     let colCountY = (dx + 31) / 32
     let rowCountY = (dy + 31) / 32
     let cbDx = (dx + 1) / 2
@@ -1300,9 +1343,9 @@ func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, q
     let colCountC = (cbDx + 31) / 32
     let rowCountC = (cbDy + 31) / 32
 
-    let (bufY, yZeros) = encodePlaneSubbands32WithSkipMap(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, isSkip: ySkip, isTreez: isTreezY, history: histories?[0], selectModel: selectModel, updateHistory: updateHistory)
-    let (bufCb, cbZeros) = encodePlaneSubbands32WithSkipMap(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, isTreez: isTreezCb, history: histories?[1], selectModel: selectModel, updateHistory: updateHistory)
-    let (bufCr, crZeros) = encodePlaneSubbands32WithSkipMap(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, isTreez: isTreezCr, history: histories?[2], selectModel: selectModel, updateHistory: updateHistory)
+    let bufY = encodePlaneSubbands32WithSkipMap(blocks: &yBlocks, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, isSkip: ySkip, zeroFlags: yZeros, isTreez: isTreezY, history: histories?[0], selectModel: selectModel, updateHistory: updateHistory)
+    let bufCb = encodePlaneSubbands32WithSkipMap(blocks: &cbBlocks, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, zeroFlags: cbZeros, isTreez: isTreezCb, history: histories?[1], selectModel: selectModel, updateHistory: updateHistory)
+    let bufCr = encodePlaneSubbands32WithSkipMap(blocks: &crBlocks, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, zeroFlags: crZeros, isTreez: isTreezCr, history: histories?[2], selectModel: selectModel, updateHistory: updateHistory)
 
     debugLog({
         return "  [Layer 2] qtY=\(qtY.step), qtC=\(qtC.step) Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
@@ -1312,7 +1355,7 @@ func encodeLayer32PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, q
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
         bufY: bufY, bufCb: bufCb, bufCr: bufCr
     )
-    return (layerData, yZeros, cbZeros, crZeros)
+    return layerData
 }
 
 /// Assemble the layer1 payload: derive the per-plane zero thresholds, entropy
@@ -1345,10 +1388,7 @@ func encodeLayer16Payload(dx: Int, dy: Int, qtY: QuantizationTable, qtC: Quantiz
 }
 
 @inline(__always)
-func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], isTreezY: [Bool]?, isTreezCb: [Bool]?, isTreezCr: [Bool]?, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> ([UInt8], [Bool], [Bool], [Bool]) {
-    let safeThresholdY = min(2, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-    let safeThresholdC = min(8, min(zeroThreshold, max(0, Int(qtC.step) / 64)))
-
+func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, qtC: QuantizationTable, yBlocks: inout [BlockView], cbBlocks: inout [BlockView], crBlocks: inout [BlockView], parentYBlocks: [BlockView], parentCbBlocks: [BlockView], parentCrBlocks: [BlockView], ySkip: [Bool], cSkip: [Bool], yZeros: [Bool], cbZeros: [Bool], crZeros: [Bool], isTreezY: [Bool]?, isTreezCb: [Bool]?, isTreezCr: [Bool]?, histories: [EntropyHistoryState]?, selectModel: ModelSelectorFn, updateHistory: Bool) -> [UInt8] {
     let colCountY = (dx + 15) / 16
     let rowCountY = (dy + 15) / 16
     let cbDx = (dx + 1) / 2
@@ -1356,9 +1396,9 @@ func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, q
     let colCountC = (cbDx + 15) / 16
     let rowCountC = (cbDy + 15) / 16
 
-    let (bufY, yZeros) = encodePlaneSubbands16WithSkipMap(blocks: &yBlocks, zeroThreshold: safeThresholdY, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, isSkip: ySkip, isTreez: isTreezY, history: histories?[0], selectModel: selectModel, updateHistory: updateHistory)
-    let (bufCb, cbZeros) = encodePlaneSubbands16WithSkipMap(blocks: &cbBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, isTreez: isTreezCb, history: histories?[1], selectModel: selectModel, updateHistory: updateHistory)
-    let (bufCr, crZeros) = encodePlaneSubbands16WithSkipMap(blocks: &crBlocks, zeroThreshold: safeThresholdC, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, isTreez: isTreezCr, history: histories?[2], selectModel: selectModel, updateHistory: updateHistory)
+    let bufY = encodePlaneSubbands16WithSkipMap(blocks: &yBlocks, parentBlocks: parentYBlocks, colCount: colCountY, rowCount: rowCountY, isSkip: ySkip, zeroFlags: yZeros, isTreez: isTreezY, history: histories?[0], selectModel: selectModel, updateHistory: updateHistory)
+    let bufCb = encodePlaneSubbands16WithSkipMap(blocks: &cbBlocks, parentBlocks: parentCbBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, zeroFlags: cbZeros, isTreez: isTreezCb, history: histories?[1], selectModel: selectModel, updateHistory: updateHistory)
+    let bufCr = encodePlaneSubbands16WithSkipMap(blocks: &crBlocks, parentBlocks: parentCrBlocks, colCount: colCountC, rowCount: rowCountC, isSkip: cSkip, zeroFlags: crZeros, isTreez: isTreezCr, history: histories?[2], selectModel: selectModel, updateHistory: updateHistory)
 
     debugLog({
         return "  [Layer 1] qtY=\(qtY.step), qtC=\(qtC.step) Y=\(bufY.count) Cb=\(bufCb.count) Cr=\(bufCr.count) bytes"
@@ -1368,7 +1408,7 @@ func encodeLayer16PayloadWithSkipMap(dx: Int, dy: Int, qtY: QuantizationTable, q
         qtYStep: UInt16(qtY.step), qtCStep: UInt16(qtC.step),
         bufY: bufY, bufCb: bufCb, bufCr: bufCr
     )
-    return (layerData, yZeros, cbZeros, crZeros)
+    return layerData
 }
 
 @inline(__always)
@@ -2293,14 +2333,15 @@ func preparePlaneBase8WithSkipMapAndActivity(
 @inline(__always)
 func serializePlaneBase8PFrameWithSkipMap(
     pd: PlaneData420, pool: BlockViewPool,
-    qtY: QuantizationTable, qtC: QuantizationTable, zeroThreshold: Int,
+    qtY: QuantizationTable, qtC: QuantizationTable,
     base8YBlocks: inout [BlockView], base8CbBlocks: inout [BlockView], base8CrBlocks: inout [BlockView],
     skipMap: [BlockMode], skipMapWidth: Int,
+    yZeros: [Bool], cbZeros: [Bool], crZeros: [Bool],
     isTreezY: [Bool]? = nil, isTreezCb: [Bool]? = nil, isTreezCr: [Bool]? = nil,
     histories: [EntropyHistoryState]?,
     updateHistory: Bool = true,
     ransContextWorkspace: rANSContextWorkspace? = nil
-) -> ([UInt8], PlaneData420, @Sendable () -> Void, [Bool], [Bool], [Bool], Bool) {
+) -> ([UInt8], PlaneData420, @Sendable () -> Void, Bool) {
     let dx = pd.width
     let dy = pd.height
     let cbDx = ((dx + 1) / 2)
@@ -2313,13 +2354,12 @@ func serializePlaneBase8PFrameWithSkipMap(
     let ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: yRowCount8, colCount: yColCount8)
     let cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipMapWidth, rowCount: (cbDy + 7) / 8, colCount: cbColCount8)
 
-    let safeThresholdY = min(1, min(zeroThreshold, max(0, Int(qtY.step) / 64)))
-    let (bufY, yZeros, hasRANSContext) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+    let (bufY, hasRANSContext) = encodePlaneBaseSubbands8PFrameWithSkipMap(
         blocks: &base8YBlocks,
         colCount: yColCount8,
         qstep: Int32(qtY.step),
-        zeroThreshold: safeThresholdY,
         isSkip: ySkip,
+        zeroFlags: yZeros,
         isTreez: isTreezY,
         isLuma: true,
         history: histories?[0],
@@ -2329,13 +2369,12 @@ func serializePlaneBase8PFrameWithSkipMap(
     )
     let (reconY, r0Y) = reconstructPlaneBase8(blocks: base8YBlocks, width: dx, height: dy, qt: qtY, pool: pool)
 
-    let safeThresholdC = min(8, max(0, (zeroThreshold / 8) - (Int(qtC.step) / 32)))
-    let (bufCb, cbZeros, _) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+    let (bufCb, _) = encodePlaneBaseSubbands8PFrameWithSkipMap(
         blocks: &base8CbBlocks,
         colCount: cbColCount8,
         qstep: Int32(qtC.step),
-        zeroThreshold: safeThresholdC,
         isSkip: cSkip,
+        zeroFlags: cbZeros,
         isTreez: isTreezCb,
         isLuma: false,
         history: histories?[1],
@@ -2345,12 +2384,12 @@ func serializePlaneBase8PFrameWithSkipMap(
     )
     let (reconCb, r0Cb) = reconstructPlaneBase8(blocks: base8CbBlocks, width: cbDx, height: cbDy, qt: qtC, pool: pool)
 
-    let (bufCr, crZeros, _) = encodePlaneBaseSubbands8PFrameWithSkipMap(
+    let (bufCr, _) = encodePlaneBaseSubbands8PFrameWithSkipMap(
         blocks: &base8CrBlocks,
         colCount: cbColCount8,
         qstep: Int32(qtC.step),
-        zeroThreshold: safeThresholdC,
         isSkip: cSkip,
+        zeroFlags: crZeros,
         isTreez: isTreezCr,
         isLuma: false,
         history: histories?[2],
@@ -2375,5 +2414,5 @@ func serializePlaneBase8PFrameWithSkipMap(
         r0Y()
         r0Cb()
         r0Cr()
-    }, yZeros, cbZeros, crZeros, hasRANSContext)
+    }, hasRANSContext)
 }

@@ -1053,11 +1053,12 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         isTreezCr: isTreezCr, crSkip: l2cSkip, colsC: (cbDx + 31) / 32
     )
 
-    let (layer0, baseRecon, releaseBaseRecon, _, _, _, hasRANSContext) = serializePlaneBase8PFrameWithSkipMap(
+    let (layer0, baseRecon, releaseBaseRecon, hasRANSContext) = serializePlaneBase8PFrameWithSkipMap(
         pd: base8Input, pool: pool,
-        qtY: qtY0, qtC: qtC0, zeroThreshold: zeroThreshold,
+        qtY: qtY0, qtC: qtC0,
         base8YBlocks: &base8YBlocks, base8CbBlocks: &base8CbBlocks, base8CrBlocks: &base8CrBlocks,
         skipMap: skipMap, skipMapWidth: skipBw,
+        yZeros: l0yZeros, cbZeros: l0cbZeros, crZeros: l0crZeros,
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
         histories: entropyHistories?.streams[0],
         updateHistory: updateL0Prev,
@@ -1099,14 +1100,15 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         }
     }
 
-    let (layer1, _, _, _) = encodeLayer16PayloadWithSkipMap(
+    let layer1 = encodeLayer16PayloadWithSkipMap(
         dx: sub2.width, dy: sub2.height,
-        qtY: qtY1, qtC: qtC1, zeroThreshold: zeroThreshold,
+        qtY: qtY1, qtC: qtC1,
         yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks,
         parentYBlocks: parentFreeParents8(count: base8YBlocks.count),
         parentCbBlocks: parentFreeParents8(count: base8CbBlocks.count),
         parentCrBlocks: parentFreeParents8(count: base8CbBlocks.count),
         ySkip: l1ySkip, cSkip: l1cSkip,
+        yZeros: l1yZeros, cbZeros: l1cbZeros, crZeros: l1crZeros,
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
         histories: entropyHistories?.streams[1],
         selectModel: unifiedSelectModelParentFree,
@@ -1119,14 +1121,15 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     defer { r1Y(); r1Cb(); r1Cr() }
 
     let l1Img = Image16(width: l1dx, height: l1dy, y: mutReconL1Y, cb: mutReconL1Cb, cr: mutReconL1Cr)
-    let (layer2, _, _, _) = encodeLayer32PayloadWithSkipMap(
+    let layer2 = encodeLayer32PayloadWithSkipMap(
         dx: pd.width, dy: pd.height,
-        qtY: qtY2, qtC: qtC2, zeroThreshold: zeroThreshold,
+        qtY: qtY2, qtC: qtC2,
         yBlocks: &l2yBlocks, cbBlocks: &l2cbBlocks, crBlocks: &l2crBlocks,
         parentYBlocks: parentFreeParents16(count: l1yBlocks.count),
         parentCbBlocks: parentFreeParents16(count: l1cbBlocks.count),
         parentCrBlocks: parentFreeParents16(count: l1cbBlocks.count),
         ySkip: l2ySkip, cSkip: l2cSkip,
+        yZeros: l2yZeros, cbZeros: l2cbZeros, crZeros: l2crZeros,
         isTreezY: isTreezY, isTreezCb: isTreezCb, isTreezCr: isTreezCr,
         histories: entropyHistories?.streams[2],
         selectModel: unifiedSelectModelParentFree,
