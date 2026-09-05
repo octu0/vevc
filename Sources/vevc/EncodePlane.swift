@@ -394,7 +394,6 @@ func extractSingleTransformBlocks32(r: Int16Reader, width: Int, height: Int, poo
         }
     }
 
-    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -471,7 +470,6 @@ func extractSingleTransformBlocks32WithSkipMap(r: Int16Reader, width: Int, heigh
         }
     }
 
-    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -547,7 +545,6 @@ func extractSingleTransformBlocks32WithSkipMapAndActivity(r: Int16Reader, width:
         }
     }
 
-    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -737,7 +734,6 @@ func extractSingleTransformBlocks16(r: Int16Reader, width: Int, height: Int, poo
         }
     }
 
-    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -814,7 +810,6 @@ func extractSingleTransformBlocks16WithSkipMap(r: Int16Reader, width: Int, heigh
         }
     }
 
-    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }
@@ -890,7 +885,6 @@ func extractSingleTransformBlocks16WithSkipMapAndActivity(r: Int16Reader, width:
         }
     }
 
-    withExtendedLifetime(nonZeroPreDWT) {}
     withExtendedLifetime(subband) {}
     return (tmpBlocks, subband, { [tmpBlocks, subband] in pool.putBlockViewArray(tmpBlocks); pool.putInt16(subband) })
 }

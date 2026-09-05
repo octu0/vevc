@@ -58,6 +58,19 @@ func shouldZeroCadence(cadence: Int, gopPosition: Int) -> Bool {
     }
 }
 
+/// `get1024` / `get256` already return cleared tiles. Cadence-0 P-frames that
+/// skip the residual DWT still need a unique tile per block: encode and
+/// reconstruct write in place.
+@inline(__always)
+private func takeZeroedBlocks(pool: BlockViewPool, count: Int, get: () -> BlockView) -> [BlockView] {
+    var blocks = pool.getBlockViewArray(capacity: count)
+    blocks.reserveCapacity(count)
+    for _ in 0..<count {
+        blocks.append(get())
+    }
+    return blocks
+}
+
 /// I-frame encode, profile 0x01: parent-conditioned entropy contexts with
 /// the shipped static tables.
 @inline(__always)
@@ -765,25 +778,43 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         mem.update(mvs: mvs, refDirs: refDirs, skipMap: skipMap)
     }
 
-    var mutPdY = pool.getInt16(count: pd.y.count)
-    var mutPdCb = pool.getInt16(count: pd.cb.count)
-    var mutPdCr = pool.getInt16(count: pd.cr.count)
-
-    copyPlaneBuffers(y: pd.y, cb: pd.cb, cr: pd.cr, intoY: &mutPdY, cb: &mutPdCb, cr: &mutPdCr)
-
     let sMap = skipMap
-    // Weighted prediction (#21): global luma offset of this frame against
-    // the prediction reference, signaled in the frame header and applied as
-    // P′ = P + offset on inter blocks at every prediction site (full
-    // resolution, LL2 slot, L0 chain). The chroma offset is signaled for
-    // symmetry but not yet estimated. Estimated concurrently with the
-    // MC-subtract tasks; the value is first needed after tY resolves.
+    let skipBw = (dx + 31) / 32
+    let skipBh = (dy + 31) / 32
+
+    let l1dx = (dx + 1) / 2
+    let l1dy = (dy + 1) / 2
+    let l1cbDx = ((l1dx + 1) / 2)
+    let l1cbDy = ((l1dy + 1) / 2)
+
+    let l2ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
+    let l2cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
+    let l1ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
+    let l1cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
+
+    // Cadence-0 L1/L2 drop residual HF, and parent-free encode writes only
+    // HL/LH/HH. With an L0 reference the residual pyramid LL is unused
+    // (r0 = LL2(source) − MC_L0), so skip residual MC/DWT and feed pooled
+    // zero tiles into the existing reconstruct path.
+    let skipDetailDWT = shouldZeroCadence(cadence: l2Cadence, gopPosition: gopPosition) && shouldZeroCadence(cadence: l1Cadence, gopPosition: gopPosition) && l0State.prev != nil
+
+    var l2yBlocks: [BlockView]
+    var l2cbBlocks: [BlockView]
+    var l2crBlocks: [BlockView]
+    var releaseL2: @Sendable () -> Void = {}
+    defer { releaseL2() }
+
+    var l1yBlocks: [BlockView]
+    var l1cbBlocks: [BlockView]
+    var l1crBlocks: [BlockView]
+    var releaseL1: @Sendable () -> Void = {}
+    defer { releaseL1() }
+
+    // Weighted prediction and σ-normalized AQ: needed on both paths (L0
+    // offset / Base8 AQ). Run them beside residual MC or zero-tile alloc.
     async let tWp = { [pdY = pd.y, pPdY = pPd.y] () -> Int in
         estimateLumaOffset(source: pdY, reference: pPdY, width: dx, height: dy)
     }()
-    // σ-normalized AQ: per-block source-luma activity classes select the
-    // dead-zone variants during layer 2/1 luma quantization (SAD.swift,
-    // Quant.swift). Computed concurrently with the MC-subtract tasks.
     async let tAq = { [pdY = pd.y, earlyActivity] () async -> [BlockActivityClass] in
         if let a = earlyActivity { return a }
         let variances = computeBlockActivityMap(source: pdY, width: dx, height: dy)
@@ -803,112 +834,151 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             texturedVarianceMin: EncoderTuning.shared.aqTexturedVarianceMin
         )
     }()
-    let mvsConst = mvs
-    let refDirsConst = refDirs
-    async let tY = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
-        var y = mutPdY
-        subtractScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
-        return y
-    }()
-    async let tCb = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
-        var cb = mutPdCb
-        subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-        return cb
-    }()
-    async let tCr = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
-        var cr = mutPdCr
-        subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
-        return cr
-    }()
 
-    var resY = await tY
-    let resCb = await tCb
-    let resCr = await tCr
-    let wpLuma = await tWp
+    let wpLuma: Int
+    let activityMap: [BlockActivityClass]
+    var pyramidLL: PlaneData420?
 
-    if wpLuma != 0 {
-        applyPredictionOffset32(plane: &resY, offset: -wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
-    }
-
-    let activityMap = await tAq
-
-    if smooth == 1 {
-        if motionMaskingMinQStep <= adjustedStep {
-            var tempY = pool.getInt16(count: resY.count)
-            var smoothedY = pool.getInt16(count: resY.count)
-            withUnsafePointers(resY, mut: &smoothedY, mut: &tempY) { srcPtr, dstPtr, tmpPtr in
-                smoothResidualPlaneContinuous(
-                    src: srcPtr, dst: dstPtr, temp: tmpPtr,
-                    width: dx, height: dy, activityMap: activityMap, stride: dx,
-                    mvs: mvs, skipMap: skipMap, framerate: framerate
-                )
-            }
-            pool.putInt16(tempY)
-            pool.putInt16(resY)
-            resY = smoothedY
+    if skipDetailDWT {
+        let l2y = takeZeroedBlocks(pool: pool, count: ((dy + 31) / 32) * ((dx + 31) / 32), get: pool.get1024)
+        let l2cb = takeZeroedBlocks(pool: pool, count: ((cbDy + 31) / 32) * ((cbDx + 31) / 32), get: pool.get1024)
+        let l2cr = takeZeroedBlocks(pool: pool, count: ((cbDy + 31) / 32) * ((cbDx + 31) / 32), get: pool.get1024)
+        l2yBlocks = l2y
+        l2cbBlocks = l2cb
+        l2crBlocks = l2cr
+        releaseL2 = { [l2y, l2cb, l2cr] in
+            pool.putBlockViewArray(l2y)
+            pool.putBlockViewArray(l2cb)
+            pool.putBlockViewArray(l2cr)
         }
-    }
 
-    let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
+        let l1y = takeZeroedBlocks(pool: pool, count: ((l1dy + 15) / 16) * ((l1dx + 15) / 16), get: pool.get256)
+        let l1cb = takeZeroedBlocks(pool: pool, count: ((l1cbDy + 15) / 16) * ((l1cbDx + 15) / 16), get: pool.get256)
+        let l1cr = takeZeroedBlocks(pool: pool, count: ((l1cbDy + 15) / 16) * ((l1cbDx + 15) / 16), get: pool.get256)
+        l1yBlocks = l1y
+        l1cbBlocks = l1cb
+        l1crBlocks = l1cr
+        releaseL1 = { [l1y, l1cb, l1cr] in
+            pool.putBlockViewArray(l1y)
+            pool.putBlockViewArray(l1cb)
+            pool.putBlockViewArray(l1cr)
+        }
 
-    // Skip blocks bypass read/DWT/quant in the extracts (One-Pyramid §5) —
-    // their residual is already zero, so the coded streams are unchanged.
-    let skipBw = (dx + 31) / 32
-    let skipBh = (dy + 31) / 32
-
-    var (sub2, l2yBlocks, l2cbBlocks, l2crBlocks, releaseL2) = await preparePlaneLayer32WithSkipMapAndActivity(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
-    defer { releaseL2() }
-    var (sub1, l1yBlocks, l1cbBlocks, l1crBlocks, releaseL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
-    defer { releaseL1() }
-
-    var effectiveMvtQ = 0
-    if 0 < motionMaskingPx {
-        effectiveMvtQ = (motionMaskingPx * 4 * 60) / max(1, framerate)
-    }
-
-    if shouldZeroCadence(cadence: l2Cadence, gopPosition: gopPosition) {
-        zeroBlocksSubbands32(blocks: &l2yBlocks)
-        zeroBlocksSubbands32(blocks: &l2cbBlocks)
-        zeroBlocksSubbands32(blocks: &l2crBlocks)
+        wpLuma = await tWp
+        activityMap = await tAq
     } else {
-        if 0 < motionMaskingPx {
+        var mutPdY = pool.getInt16(count: pd.y.count)
+        var mutPdCb = pool.getInt16(count: pd.cb.count)
+        var mutPdCr = pool.getInt16(count: pd.cr.count)
+
+        copyPlaneBuffers(y: pd.y, cb: pd.cb, cr: pd.cr, intoY: &mutPdY, cb: &mutPdCb, cr: &mutPdCr)
+
+        let mvsConst = mvs
+        let refDirsConst = refDirs
+        async let tY = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
+            var y = mutPdY
+            subtractScaledBidirectionalMotionCompensationLumaWithSkipMap(plane: &y, prevPlane: pPd.y, nextPlane: nPd.y, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: dx, height: dy, lumaBlockSize: 32, mvShift: 0, roundOffset: roundOffset)
+            return y
+        }()
+        async let tCb = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
+            var cb = mutPdCb
+            subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cb, prevPlane: pPd.cb, nextPlane: nPd.cb, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            return cb
+        }()
+        async let tCr = { [mvsConst, refDirsConst, sMap] () -> [Int16] in
+            var cr = mutPdCr
+            subtractScaledBidirectionalMotionCompensationChromaWithSkipMap(plane: &cr, prevPlane: pPd.cr, nextPlane: nPd.cr, mvs: mvsConst, refDirs: refDirsConst, skipMap: sMap, width: cbDx, height: cbDy, chromaBlockSize: 16, mvShift: 0, roundOffset: roundOffset)
+            return cr
+        }()
+
+        var resY = await tY
+        let resCb = await tCb
+        let resCr = await tCr
+        wpLuma = await tWp
+
+        if wpLuma != 0 {
+            applyPredictionOffset32(plane: &resY, offset: -wpLuma, mvs: mvs, refDirs: refDirs, skipMap: sMap, width: dx, height: dy)
+        }
+
+        activityMap = await tAq
+
+        if smooth == 1 {
             if motionMaskingMinQStep <= adjustedStep {
-                let blockCount = min(l2yBlocks.count, min(skipMap.count, min(activityMap.count, min(mvs.dx.count, mvs.dy.count))))
-                for i in 0..<blockCount {
-                    switch skipMap[i] {
-                    case .inter:
-                        if activityMap[i] != .textured {
-                            let currDx = abs(Int(mvs.dx[i]))
-                            let currDy = abs(Int(mvs.dy[i]))
-                            let currMvMag = max(currDx, currDy)
-                            if effectiveMvtQ <= currMvMag {
-                                zeroBlockSubbands32(view: l2yBlocks[i])
+                var tempY = pool.getInt16(count: resY.count)
+                var smoothedY = pool.getInt16(count: resY.count)
+                withUnsafePointers(resY, mut: &smoothedY, mut: &tempY) { srcPtr, dstPtr, tmpPtr in
+                    smoothResidualPlaneContinuous(
+                        src: srcPtr, dst: dstPtr, temp: tmpPtr,
+                        width: dx, height: dy, activityMap: activityMap, stride: dx,
+                        mvs: mvs, skipMap: skipMap, framerate: framerate
+                    )
+                }
+                pool.putInt16(tempY)
+                pool.putInt16(resY)
+                resY = smoothedY
+            }
+        }
+
+        let resPd = PlaneData420(width: dx, height: dy, y: resY, cb: resCb, cr: resCr)
+
+        let (sub2, l2y, l2cb, l2cr, relL2) = await preparePlaneLayer32WithSkipMapAndActivity(pd: resPd, pool: pool, qtY: qtY2, qtC: qtC2, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
+        l2yBlocks = l2y
+        l2cbBlocks = l2cb
+        l2crBlocks = l2cr
+        releaseL2 = relL2
+
+        let (sub1, l1y, l1cb, l1cr, relL1) = await preparePlaneLayer16WithSkipMapAndActivity(pd: sub2, pool: pool, qtY: qtY1, qtC: qtC1, skipMap: skipMap, skipMapWidth: skipBw, activity: activityMap)
+        l1yBlocks = l1y
+        l1cbBlocks = l1cb
+        l1crBlocks = l1cr
+        releaseL1 = relL1
+
+        var effectiveMvtQ = 0
+        if 0 < motionMaskingPx {
+            effectiveMvtQ = (motionMaskingPx * 4 * 60) / max(1, framerate)
+        }
+
+        if shouldZeroCadence(cadence: l2Cadence, gopPosition: gopPosition) {
+            zeroBlocksSubbands32(blocks: &l2yBlocks)
+            zeroBlocksSubbands32(blocks: &l2cbBlocks)
+            zeroBlocksSubbands32(blocks: &l2crBlocks)
+        } else {
+            if 0 < motionMaskingPx {
+                if motionMaskingMinQStep <= adjustedStep {
+                    let blockCount = min(l2yBlocks.count, min(skipMap.count, min(activityMap.count, min(mvs.dx.count, mvs.dy.count))))
+                    for i in 0..<blockCount {
+                        switch skipMap[i] {
+                        case .inter:
+                            if activityMap[i] != .textured {
+                                let currDx = abs(Int(mvs.dx[i]))
+                                let currDy = abs(Int(mvs.dy[i]))
+                                let currMvMag = max(currDx, currDy)
+                                if effectiveMvtQ <= currMvMag {
+                                    zeroBlockSubbands32(view: l2yBlocks[i])
+                                }
                             }
+                        default:
+                            break
                         }
-                    default:
-                        break
                     }
                 }
             }
         }
-    }
 
-    if shouldZeroCadence(cadence: l1Cadence, gopPosition: gopPosition) {
-        zeroBlocksSubbands16(blocks: &l1yBlocks)
-        zeroBlocksSubbands16(blocks: &l1cbBlocks)
-        zeroBlocksSubbands16(blocks: &l1crBlocks)
+        if shouldZeroCadence(cadence: l1Cadence, gopPosition: gopPosition) {
+            zeroBlocksSubbands16(blocks: &l1yBlocks)
+            zeroBlocksSubbands16(blocks: &l1cbBlocks)
+            zeroBlocksSubbands16(blocks: &l1crBlocks)
+        }
+
+        pyramidLL = sub1
     }
 
     // L0 closed loop (One-Pyramid §4): Base8 codes r0 = LL2(source) −
-    // MC_L0(L0_ref) instead of LL2(residual), so the quarter-resolution
-    // reconstruction closes over the bitstream alone (bit-exact with the
-    // decoder's layer0 chain). Requires an L0 reference from a preceding
-    // I-frame; without one the legacy LL2(residual) semantics apply.
-    var base8Input = sub1
-    // The full-resolution prediction built for the LL2 slot, reused for the
-    // layer2 reconstruction (fusePredictionPlane* is bit-identical to a
-    // second MC apply pass).
-    var fullPForRecon: PlaneData420? = nil
+    // MC_L0(L0_ref) instead of LL2(residual). Without an L0 reference the
+    // residual-pyramid LL is the Base8 input. Cadence-0 skip is gated on
+    // prev != nil, so that path never reads the pyramid.
+    let base8Input: PlaneData420
     if let l0Prev = l0State.prev {
         let tSrc = analyzeLL2(pd: pd)
         var r0 = Image16(width: tSrc.width, height: tSrc.height, y: tSrc.y, cb: tSrc.cb, cr: tSrc.cr)
@@ -925,6 +995,8 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         subtractPlanes(&r0, PlaneData420(img16: pred0))
         clearL0SkipResidual(img: &r0, skipMap: sMap, fullDx: dx)
         base8Input = PlaneData420(img16: r0)
+    } else {
+        base8Input = pyramidLL!
     }
 
     var smoothL0Flags: [Bool]? = nil
@@ -969,38 +1041,6 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
         zeroBlocksSubbandsBase8(blocks: &base8CbBlocks)
         zeroBlocksSubbandsBase8(blocks: &base8CrBlocks)
     }
-    let l1dx = sub2.width
-    let l1dy = sub2.height
-    let l1cbDx = ((l1dx + 1) / 2)
-    let l1cbDy = ((l1dy + 1) / 2)
-
-    let l2ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (dy + 31) / 32, colCount: (dx + 31) / 32)
-    let l2cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (cbDy + 31) / 32, colCount: (cbDx + 31) / 32)
-    let l1ySkip = lumaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1dy + 15) / 16, colCount: (l1dx + 15) / 16)
-    let l1cSkip = chromaSkipFlags(skipMap: skipMap, mapWidth: skipBw, rowCount: (l1cbDy + 15) / 16, colCount: (l1cbDx + 15) / 16)
-
-    // Compute zero flags for each plane and layer to identify zero trees (treez)
-    let safeThresholdY2 = min(3, min(zeroThreshold, max(0, Int(qtY2.step) / 64)))
-    let colCountY2 = (dx + 31) / 32
-    let rowCountY2 = (dy + 31) / 32
-    let l2yZeros = computeZeroFlags32(blocks: &l2yBlocks, zeroThreshold: safeThresholdY2, colCount: colCountY2, rowCount: rowCountY2, isSkip: l2ySkip)
-
-    let safeThresholdC2 = min(8, min(zeroThreshold, max(0, Int(qtC2.step) / 64)))
-    let colCountC2 = (cbDx + 31) / 32
-    let rowCountC2 = (cbDy + 31) / 32
-    let l2cbZeros = computeZeroFlags32(blocks: &l2cbBlocks, zeroThreshold: safeThresholdC2, colCount: colCountC2, rowCount: rowCountC2, isSkip: l2cSkip)
-    let l2crZeros = computeZeroFlags32(blocks: &l2crBlocks, zeroThreshold: safeThresholdC2, colCount: colCountC2, rowCount: rowCountC2, isSkip: l2cSkip)
-
-    let safeThresholdY1 = min(2, min(zeroThreshold, max(0, Int(qtY1.step) / 64)))
-    let colCountY1 = (l1dx + 15) / 16
-    let rowCountY1 = (l1dy + 15) / 16
-    let l1yZeros = computeZeroFlags16(blocks: &l1yBlocks, zeroThreshold: safeThresholdY1, colCount: colCountY1, rowCount: rowCountY1, isSkip: l1ySkip)
-
-    let safeThresholdC1 = min(8, min(zeroThreshold, max(0, Int(qtC1.step) / 64)))
-    let colCountC1 = (l1cbDx + 15) / 16
-    let rowCountC1 = (l1cbDy + 15) / 16
-    let l1cbZeros = computeZeroFlags16(blocks: &l1cbBlocks, zeroThreshold: safeThresholdC1, colCount: colCountC1, rowCount: rowCountC1, isSkip: l1cSkip)
-    let l1crZeros = computeZeroFlags16(blocks: &l1crBlocks, zeroThreshold: safeThresholdC1, colCount: colCountC1, rowCount: rowCountC1, isSkip: l1cSkip)
 
     let safeThresholdY0 = min(1, min(zeroThreshold, max(0, Int(qtY0.step) / 64)))
     let l0yZeros = computeZeroFlagsBase8(blocks: base8YBlocks, zeroThreshold: safeThresholdY0, isSkip: l2ySkip)
@@ -1009,40 +1049,65 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     let l0cbZeros = computeZeroFlagsBase8(blocks: base8CbBlocks, zeroThreshold: safeThresholdC0, isSkip: l2cSkip)
     let l0crZeros = computeZeroFlagsBase8(blocks: base8CrBlocks, zeroThreshold: safeThresholdC0, isSkip: l2cSkip)
 
+    let l2yZeros: [Bool]
+    let l2cbZeros: [Bool]
+    let l2crZeros: [Bool]
+    let l1yZeros: [Bool]
+    let l1cbZeros: [Bool]
+    let l1crZeros: [Bool]
     var isTreezY = [Bool](repeating: false, count: l2yBlocks.count)
-    for i in 0..<l2yBlocks.count {
-        if l2ySkip[i] != true {
-            if l0yZeros[i] {
-                if l1yZeros[i] {
-                    if l2yZeros[i] {
-                        isTreezY[i] = true
-                    }
-                }
-            }
-        }
-    }
     var isTreezCb = [Bool](repeating: false, count: l2cbBlocks.count)
-    for i in 0..<l2cbBlocks.count {
-        if l2cSkip[i] != true {
-            if l0cbZeros[i] {
-                if l1cbZeros[i] {
-                    if l2cbZeros[i] {
-                        isTreezCb[i] = true
-                    }
-                }
-            }
-        }
+    var isTreezCr = [Bool](repeating: false, count: l2crBlocks.count)
+
+    if skipDetailDWT {
+        l2yZeros = [Bool](repeating: true, count: l2yBlocks.count)
+        l2cbZeros = [Bool](repeating: true, count: l2cbBlocks.count)
+        l2crZeros = [Bool](repeating: true, count: l2crBlocks.count)
+        l1yZeros = [Bool](repeating: true, count: l1yBlocks.count)
+        l1cbZeros = [Bool](repeating: true, count: l1cbBlocks.count)
+        l1crZeros = [Bool](repeating: true, count: l1crBlocks.count)
+    } else {
+        let safeThresholdY2 = min(3, min(zeroThreshold, max(0, Int(qtY2.step) / 64)))
+        let colCountY2 = (dx + 31) / 32
+        let rowCountY2 = (dy + 31) / 32
+        l2yZeros = computeZeroFlags32(blocks: &l2yBlocks, zeroThreshold: safeThresholdY2, colCount: colCountY2, rowCount: rowCountY2, isSkip: l2ySkip)
+
+        let safeThresholdC2 = min(8, min(zeroThreshold, max(0, Int(qtC2.step) / 64)))
+        let colCountC2 = (cbDx + 31) / 32
+        let rowCountC2 = (cbDy + 31) / 32
+        l2cbZeros = computeZeroFlags32(blocks: &l2cbBlocks, zeroThreshold: safeThresholdC2, colCount: colCountC2, rowCount: rowCountC2, isSkip: l2cSkip)
+        l2crZeros = computeZeroFlags32(blocks: &l2crBlocks, zeroThreshold: safeThresholdC2, colCount: colCountC2, rowCount: rowCountC2, isSkip: l2cSkip)
+
+        let safeThresholdY1 = min(2, min(zeroThreshold, max(0, Int(qtY1.step) / 64)))
+        let colCountY1 = (l1dx + 15) / 16
+        let rowCountY1 = (l1dy + 15) / 16
+        l1yZeros = computeZeroFlags16(blocks: &l1yBlocks, zeroThreshold: safeThresholdY1, colCount: colCountY1, rowCount: rowCountY1, isSkip: l1ySkip)
+
+        let safeThresholdC1 = min(8, min(zeroThreshold, max(0, Int(qtC1.step) / 64)))
+        let colCountC1 = (l1cbDx + 15) / 16
+        let rowCountC1 = (l1cbDy + 15) / 16
+        l1cbZeros = computeZeroFlags16(blocks: &l1cbBlocks, zeroThreshold: safeThresholdC1, colCount: colCountC1, rowCount: rowCountC1, isSkip: l1cSkip)
+        l1crZeros = computeZeroFlags16(blocks: &l1crBlocks, zeroThreshold: safeThresholdC1, colCount: colCountC1, rowCount: rowCountC1, isSkip: l1cSkip)
     }
 
-    var isTreezCr = [Bool](repeating: false, count: l2crBlocks.count)
+    for i in 0..<l2yBlocks.count {
+        if l2ySkip[i] != true {
+            if l0yZeros[i] && l1yZeros[i] && l2yZeros[i] {
+                isTreezY[i] = true
+            }
+        }
+    }
+    for i in 0..<l2cbBlocks.count {
+        if l2cSkip[i] != true {
+            if l0cbZeros[i] && l1cbZeros[i] && l2cbZeros[i] {
+                isTreezCb[i] = true
+            }
+        }
+    }
     for i in 0..<l2crBlocks.count {
         if l2cSkip[i] != true {
-            if l0crZeros[i] {
-                if l1crZeros[i] {
-                    if l2crZeros[i] {
-                        isTreezCr[i] = true
-                    }
-                }
+            if l0crZeros[i] && l1crZeros[i] && l2crZeros[i] {
+                isTreezCr[i] = true
             }
         }
     }
@@ -1068,6 +1133,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
 
     var baseImg = Image16(width: baseRecon.width, height: baseRecon.height, y: baseRecon.y, cb: baseRecon.cb, cr: baseRecon.cr)
 
+    var fullPForRecon: PlaneData420? = nil
     if let l0Prev = l0State.prev {
         // L0 reconstruction — the decoder's exact layer0 pipeline:
         // deq(r0) + MC_L0, clamp, deblock, skip copy.
@@ -1101,7 +1167,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     }
 
     let layer1 = encodeLayer16PayloadWithSkipMap(
-        dx: sub2.width, dy: sub2.height,
+        dx: l1dx, dy: l1dy,
         qtY: qtY1, qtC: qtC1,
         yBlocks: &l1yBlocks, cbBlocks: &l1cbBlocks, crBlocks: &l1crBlocks,
         parentYBlocks: parentFreeParents8(count: base8YBlocks.count),
@@ -1137,11 +1203,11 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
     )
 
     if let dumper = dumpWriter {
-        dumper.stash("L0Y", blocks: base8YBlocks, planeW: sub1.width, planeH: sub1.height, blockSize: 8, includeLL: true)
-        dumper.stash("L0Cb", blocks: base8CbBlocks, planeW: (sub1.width + 1) / 2, planeH: (sub1.height + 1) / 2, blockSize: 8, includeLL: true)
-        dumper.stash("L0Cr", blocks: base8CrBlocks, planeW: (sub1.width + 1) / 2, planeH: (sub1.height + 1) / 2, blockSize: 8, includeLL: true)
+        dumper.stash("L0Y", blocks: base8YBlocks, planeW: (l1dx + 1) / 2, planeH: (l1dy + 1) / 2, blockSize: 8, includeLL: true)
+        dumper.stash("L0Cb", blocks: base8CbBlocks, planeW: (((l1dx + 1) / 2) + 1) / 2, planeH: (((l1dy + 1) / 2) + 1) / 2, blockSize: 8, includeLL: true)
+        dumper.stash("L0Cr", blocks: base8CrBlocks, planeW: (((l1dx + 1) / 2) + 1) / 2, planeH: (((l1dy + 1) / 2) + 1) / 2, blockSize: 8, includeLL: true)
 
-        dumper.stash("L1Y", blocks: l1yBlocks, planeW: sub2.width, planeH: sub2.height, blockSize: 16, includeLL: false)
+        dumper.stash("L1Y", blocks: l1yBlocks, planeW: l1dx, planeH: l1dy, blockSize: 16, includeLL: false)
         dumper.stash("L1Cb", blocks: l1cbBlocks, planeW: l1cbDx, planeH: l1cbDy, blockSize: 16, includeLL: false)
         dumper.stash("L1Cr", blocks: l1crBlocks, planeW: l1cbDx, planeH: l1cbDy, blockSize: 16, includeLL: false)
 
@@ -1153,7 +1219,7 @@ func encodeSpatialLayersForProfile2(pd: PlaneData420, pool: BlockViewPool, predi
             gopPosition: gopPosition, width: dx, height: dy, predictedPd: pPd,
             l1yBlocks: l1yBlocks, l1cbBlocks: l1cbBlocks, l1crBlocks: l1crBlocks,
             b8yBlocks: base8YBlocks, b8cbBlocks: base8CbBlocks, b8crBlocks: base8CrBlocks,
-            sub2W: sub2.width, sub2H: sub2.height, sub1W: sub1.width, sub1H: sub1.height,
+            sub2W: l1dx, sub2H: l1dy, sub1W: (l1dx + 1) / 2, sub1H: (l1dy + 1) / 2,
             qtY2: qtY2, qtC2: qtC2, qtY1: qtY1, qtC1: qtC1, qtY0: qtY0, qtC0: qtC0,
             layer0Bytes: layer0.count, layer1Bytes: layer1.count, layer2Bytes: layer2.count
         )
